@@ -1,0 +1,28 @@
+evaluation:
+  seat_swap: true
+  eval_device: cpu
+  eval_inference_mode: true
+  eval_sampling_algorithm: pinned_cdf_pcg_v1
+  eval_assert_sorted_legal_ids: true
+  periodic_dev_eval_interval_updates: 50000
+  periodic_dev_eval_paired_seeds: 64
+  final_policy_set_size: 10
+  final_matrix_stage1_paired_seeds: 64
+  final_matrix_stage2_adaptive_max_paired_seeds: 256
+  stop_rules:
+    stop_delta_ci_half_width: 0.03
+    stop_confidence: 0.95
+  replay_capture_rate_eval: 0.001
+  regression_capture_count: 50
+  final_policy_set_selection:
+    version: deterministic_v1
+    include_random_legal_baseline_b0: true
+    include_no_league_baseline_b1: true
+    include_heuristic_public_b2_if_exists: true
+    include_final_champion_snapshot: true
+    include_spaced_snapshots_near_percent_updates: [25, 50, 75]
+    remaining_slots_strategy: top_dev_performers_vs_fixed_anchor
+    seed_file: dev_eval_seeds.txt
+    folding: S0
+    seat_swap: true
+    tie_break: lowest_policy_id

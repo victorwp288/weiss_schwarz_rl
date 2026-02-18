@@ -1,0 +1,8 @@
+model:
+  gru_hidden_size: 256
+  encoder_mlp_width: 256
+  encoder_mlp_layers: 2
+  layer_norm: true
+  dropout:
+    family_a: 0.0
+    ablation: 0.1

@@ -1,0 +1,11 @@
+environment:
+  visibility: Public
+  truncate_on_max_steps: true
+  max_raw_decisions_per_episode: 4000
+  max_learner_steps_per_episode: 2000
+  truncation_reward: 0.0
+  deck_set_size:
+    bring_up: 2
+    paper: 8
+  truncation_bootstrap_value: true
+  truncation_bootstrap_rule: "if truncated and not terminated, bootstrap from V(next_state); if terminated, no bootstrap"

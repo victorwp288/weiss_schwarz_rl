@@ -1,0 +1,18 @@
+sensitivity:
+  S0:
+    draw_score: 0.5
+    truncation_score: 0.5
+    description: paper_default
+  S1:
+    draw_score: 0.5
+    truncation_score: 0.5
+    description: truncation_draw_like_reported_explicitly
+  S2:
+    draw_score: 0.5
+    truncation_handling: exclude_from_payoff_aggregation
+    description: truncation_rate_still_reported
+  report:
+    required_outputs:
+      - nash_sensitivity_delta_vs_s0
+      - alpharank_sensitivity_delta_vs_s0
+      - largest_matchup_pij_shifts

@@ -1,0 +1,5 @@
+family_b_discount_ablation:
+  enabled_by_default: false
+  gamma_default: 0.99
+  requires_k_raw_decisions_tracking: true
+  gamma_step_formula: "gamma ** k_raw_decisions"

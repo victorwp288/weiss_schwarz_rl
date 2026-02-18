@@ -1,0 +1,8 @@
+minimal_loop:
+  num_envs: 2
+  num_steps: 1500
+  seed: 7
+  max_decisions: 480
+  max_ticks: 100000
+  action_policy: uniform_legal
+  log_every: 30

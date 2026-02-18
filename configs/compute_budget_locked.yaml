@@ -1,0 +1,16 @@
+compute_budget:
+  baseline_credits: 250
+  allocation:
+    bring_up_correctness: 30
+    main_training_3_seeds: 120
+    ablations: 60
+    baseline_extra_run: 20
+    reserve: 20
+  calibration_required: true
+  calibration_metrics:
+    - credits_per_hour
+    - updates_per_credit
+    - learner_steps_per_credit
+    - raw_decisions_per_credit
+  update_targets_from_calibration: true
+  drift_alert_threshold_percent: 15

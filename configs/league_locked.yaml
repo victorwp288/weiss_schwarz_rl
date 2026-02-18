@@ -1,0 +1,17 @@
+league:
+  enabled: true
+  snapshot_pool_recent_size: 24
+  snapshot_pool_champion_size: 4
+  opponent_sampling: PFSP
+  pfsp_power: 2.0
+  pfsp_epsilon_uniform: 0.2
+  pfsp_stats_source: online_outcomes
+  pfsp_window_episodes: 50000
+  warmup:
+    first_updates: 200000
+    initial_window_episodes: 10000
+    ramp_target_updates: 1000000
+    ramp_target_window_episodes: 50000
+  promotion_gate_enabled: true
+  promotion_gate_paired_seeds: 64
+  promotion_threshold: "P(winrate > 0.55) > 0.95 vs anchor set"
