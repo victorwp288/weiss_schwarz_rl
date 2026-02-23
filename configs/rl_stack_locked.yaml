@@ -1,0 +1,26 @@
+rl_stack_locked:
+  schema_version: 1
+  description: >
+    Consolidated index for the thesis RL configuration stack.
+    All file paths are repo-root relative.
+  components:
+    system: configs/system_locked.yaml
+    model: configs/model_locked.yaml
+    training_family_a: configs/training_family_a_locked.yaml
+    environment: configs/environment_locked.yaml
+    league: configs/league_locked.yaml
+    evaluation: configs/evaluation_locked.yaml
+    reproducibility: configs/reproducibility_locked.yaml
+    metagame: configs/metagame_locked.yaml
+    sensitivity: configs/sensitivity_locked.yaml
+    compute_budget: configs/compute_budget_locked.yaml
+    family_b_discount_ablation: configs/family_b_discount_ablation_locked.yaml
+    family_c_shaping_ablation: configs/family_c_shaping_ablation_locked.yaml
+  seed_sets:
+    dev_eval: configs/seeds/dev_eval_seeds.txt
+    promotion_gate: configs/seeds/promotion_eval_seeds.txt
+    report_eval: configs/seeds/report_eval_seeds.txt
+  lock_intent:
+    change_policy: >
+      Treat locked configs as paper-grade pinned defaults. Update with migration notes
+      when semantics change.

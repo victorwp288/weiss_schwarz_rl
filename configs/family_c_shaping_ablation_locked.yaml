@@ -3,7 +3,7 @@ family_c_shaping_ablation:
   stall_trigger:
     after_updates: 500000
     eval_opponent: RandomLegal
-    eval_seed_file: dev_eval_seeds.txt
+    eval_seed_file: configs/seeds/dev_eval_seeds.txt
     seat_swap: true
     probability_metric: "P(p_champ_vs_random > 0.55)"
     trigger_if_below: 0.60

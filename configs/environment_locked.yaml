@@ -1,9 +1,14 @@
 environment:
-  visibility: Public
+  observation_visibility: public
+  visibility: public
   truncate_on_max_steps: true
   max_raw_decisions_per_episode: 4000
+  max_decisions: 2000
+  max_decisions_per_episode: 2000
   max_learner_steps_per_episode: 2000
+  max_ticks: 100000
   truncation_reward: 0.0
+  shaping_enabled_family_a: false
   deck_set_size:
     bring_up: 2
     paper: 8

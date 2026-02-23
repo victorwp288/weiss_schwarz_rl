@@ -232,6 +232,10 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+# RL run artifacts (keep placeholder docs tracked)
+runs/*
+!runs/README.md
+
 ### Windows ###
 # Windows thumbnail cache files
 Thumbs.db
@@ -258,7 +262,5 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
-plan.md
-specsheet.md
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,linux,windows,python,jupyternotebooks

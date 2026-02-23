@@ -14,4 +14,20 @@ league:
     ramp_target_window_episodes: 50000
   promotion_gate_enabled: true
   promotion_gate_paired_seeds: 64
-  promotion_threshold: "P(winrate > 0.55) > 0.95 vs anchor set"
+  promotion_threshold: "P(p_anchor > 0.55) > 0.95 using AnchorSet_v1"
+  promotion_anchor_set_v1:
+    required:
+      - B0 RandomLegal
+      - B1 NoLeague baseline
+    optional_if_available:
+      - B2 HeuristicPublic
+  promotion_seed_file: configs/seeds/promotion_eval_seeds.txt
+  promotion_gate:
+    uncertainty_method: bayesian_bootstrap_seedlevel_v1
+    weighting: uniform_across_anchors
+    seat_swap: true
+    folding: S0
+    guardrails:
+      max_prob_anchor_loss_below_0_45: 0.05
+      max_truncation_rate: 0.05
+    record_file: promotion_gate.json
