@@ -274,11 +274,11 @@ This is the default interface for:
 
 We keep explicit profiles to align performance vs debuggability. Profiles configure *both* simulator settings and our RL pipeline checks.
 
-| Profile | Primary use | Simulator legal repr | Simulator obs dtype | RL legality storage | Contract enforcement |
-|---|---|---|---|---|---|
-| `debug` | bring-up, invariants | `both` or `mask_u8` | `i32` | keep masks + ids | assert-every-step, hard fail |
-| `balanced` | dev training | `mask_u8` or `both` | `i16` or `i32` | keep masks | assert with sampling, fail |
-| `fast` | main-scale training | `ids_u16` | `i16` | packed ids+offsets | spot-check, fail on violation |
+| Profile    | Primary use          | Simulator legal repr | Simulator obs dtype | RL legality storage | Contract enforcement          |
+| ---------- | -------------------- | -------------------- | ------------------- | ------------------- | ----------------------------- |
+| `debug`    | bring-up, invariants | `both` or `mask_u8`  | `i32`               | keep masks + ids    | assert-every-step, hard fail  |
+| `balanced` | dev training         | `mask_u8` or `both`  | `i16` or `i32`      | keep masks          | assert with sampling, fail    |
+| `fast`     | main-scale training  | `ids_u16`            | `i16`               | packed ids+offsets  | spot-check, fail on violation |
 
 Notes:
 
@@ -1047,15 +1047,15 @@ The simulator does **not** provide a legality fingerprint. We compute it in the 
 
 #### `legal_fingerprint_v1` (normative)
 
-**Inputs**
+##### Inputs
 
 - `spec_hash256` (32 bytes)
 - `decision_id` (uint32)
 - `legal_ids` for that env at that step (must be **strictly increasing**; no silent sorting)
 
-**Canonical bytes**
+##### Canonical bytes
 
-```
+```text
 b"legal_fp_v1" ||
 spec_hash256 ||
 u32_le(decision_id) ||
@@ -1063,16 +1063,16 @@ u32_le(len(legal_ids)) ||
 for id in legal_ids: u32_le(id)
 ```
 
-**Output**
+##### Output
 
 - `legal_fingerprint64 = stable_hash64(canonical_bytes)` (see §13.1)
 
-**Validation rules**
+##### Validation rules
 
 - If `legal_ids` are not strictly increasing, hard fail (paper-grade) *before* fingerprinting.
 - On replay and evaluation, recompute the fingerprint from simulator outputs and compare to the stored fingerprint. Any mismatch is a determinism or serialization bug and must fail paper-grade runs.
 
-**Where we store it**
+##### Where we store it
 
 - evaluation episode logs: per step
 - replay bundles: per step
@@ -1086,7 +1086,7 @@ Everything needed to reproduce figures must exist inside the run directory.
 
 ### 17.1 Recommended layout
 
-```
+```text
 runs/
   run_{run_id64}/
     manifest.json
@@ -1328,7 +1328,7 @@ We standardize the RL repo structure as **`python/weiss_rl/`** (not `python/ml/`
 
 ### 22.2 Required module map (must exist)
 
-```
+```text
 python/weiss_rl/
   config.py
   spec.py
