@@ -15,9 +15,33 @@ Thesis RL pipeline scaffold for Weiss Schwarz.
 - `tests/`: top-level test entrypoint notes.
 - `runs/`: generated run artifacts (kept out of git except placeholders).
 
+## Setup
+
+### uv (recommended)
+
+```bash
+uv sync --extra dev
+```
+
+### Editable install with pip extras
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+### Torch / CUDA note
+
+This project depends on `torch` without forcing CPU-only builds.
+If you want a CUDA wheel, install the matching PyTorch build for your platform after syncing, for example:
+
+```bash
+uv pip install --upgrade torch --index-url https://download.pytorch.org/whl/cu124
+```
+
 ## Quick checks
 
 ```bash
-PYTHONPATH=python python3 -m pytest -q python/weiss_rl/tests
-python3 -m py_compile $(find python -name '*.py')
+python -c "import weiss_rl; print(weiss_rl.__all__)"
+uv run --extra dev pytest -q python/weiss_rl/tests
+python -m py_compile $(find python -name '*.py')
 ```
