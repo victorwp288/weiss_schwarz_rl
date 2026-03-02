@@ -9,7 +9,6 @@ from dataclasses import dataclass
 class ImpalaLearner:
     learning_rate: float = 2e-4
 
-
     def update(self, batch) -> dict[str, float]:
         """Placeholder learner update hook."""
         # TODO: connect v-trace loss and optimizer update.

@@ -12,10 +12,8 @@ class LearnerTurnEnv:
     base_env: object
     learning_seat: int = 0
 
-
     def reset(self, seed: int | None = None):
         return self.base_env.reset(seed=seed)
-
 
     def step(self, actions):
         # TODO: fold opponent-internal decisions per masterplan §5.2.

@@ -38,6 +38,13 @@ If you want a CUDA wheel, install the matching PyTorch build for your platform a
 uv pip install --upgrade torch --index-url https://download.pytorch.org/whl/cu124
 ```
 
+### Pre-commit
+
+```bash
+uv run --extra dev pre-commit install
+uv run --extra dev pre-commit run -a
+```
+
 ## Quick checks
 
 ```bash

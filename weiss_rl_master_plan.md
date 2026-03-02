@@ -1,40 +1,40 @@
 # Weiss Schwarz RL — Single Source of Truth (Master Plan)
 
-**Version:** 2.0 (consolidated + aligned)  
-**Date:** 2026-02-23  
-**Owners:** thesis authors (RL pipeline)  
+**Version:** 2.0 (consolidated + aligned)
+**Date:** 2026-02-23
+**Owners:** thesis authors (RL pipeline)
 **Scope:** Python RL training + evaluation system. The simulator is prerequisite infrastructure, not the thesis contribution.
 
-> It is the **only** authoritative plan going forward.  
+> It is the **only** authoritative plan going forward.
 > If this plan conflicts with the simulator contract, **the simulator contract wins** and this plan must be updated accordingly.
 
 ---
 
 ## Table of contents
 
-1. [Purpose & thesis alignment](#1-purpose--thesis-alignment)  
-2. [What the simulator already guarantees (contract + constants)](#2-what-the-simulator-already-guarantees-contract--constants)  
-3. [Non-negotiables (paper-grade invariants)](#3-non-negotiables-paper-grade-invariants)  
-4. [End-to-end architecture](#4-end-to-end-architecture)  
-5. [Environment interfaces](#5-environment-interfaces)  
-6. [Observation, action, legality, masking](#6-observation-action-legality-masking)  
-7. [Trajectory schema (storage contract)](#7-trajectory-schema-storage-contract)  
-8. [Model architecture (recurrent actor-critic)](#8-model-architecture-recurrent-actor-critic)  
-9. [Learning algorithm (IMPALA + V-trace)](#9-learning-algorithm-impala--v-trace)  
-10. [Actor–learner system design](#10-actorlearner-system-design)  
-11. [Experiment families (A/B/C) + defaults](#11-experiment-families-abc--defaults)  
-12. [League self-play](#12-league-self-play)  
-13. [Reproducibility: identities, hashing, seeds](#13-reproducibility-identities-hashing-seeds)  
-14. [Evaluation protocol (reviewer-proof)](#14-evaluation-protocol-reviewer-proof)  
-15. [Metagame analysis (Nash mixture + AlphaRank)](#15-metagame-analysis-nash-mixture--alpharank)  
-16. [Diagnostics & anti-footguns](#16-diagnostics--anti-footguns)  
-17. [Artifacts: run directory + file contracts](#17-artifacts-run-directory--file-contracts)  
-18. [Replay debugging workflow](#18-replay-debugging-workflow)  
-19. [Baselines](#19-baselines)  
-20. [Compute budget + calibration](#20-compute-budget--calibration)  
-21. [Milestones, done criteria, and risks](#21-milestones-done-criteria-and-risks)  
-22. [Repository layout (canonical) + module map](#22-repository-layout-canonical--module-map)  
-23. [Appendix: default configs (L40-ish node)](#23-appendix-default-configs-l40-ish-node)  
+1. [Purpose & thesis alignment](#1-purpose--thesis-alignment)
+2. [What the simulator already guarantees (contract + constants)](#2-what-the-simulator-already-guarantees-contract--constants)
+3. [Non-negotiables (paper-grade invariants)](#3-non-negotiables-paper-grade-invariants)
+4. [End-to-end architecture](#4-end-to-end-architecture)
+5. [Environment interfaces](#5-environment-interfaces)
+6. [Observation, action, legality, masking](#6-observation-action-legality-masking)
+7. [Trajectory schema (storage contract)](#7-trajectory-schema-storage-contract)
+8. [Model architecture (recurrent actor-critic)](#8-model-architecture-recurrent-actor-critic)
+9. [Learning algorithm (IMPALA + V-trace)](#9-learning-algorithm-impala--v-trace)
+10. [Actor–learner system design](#10-actorlearner-system-design)
+11. [Experiment families (A/B/C) + defaults](#11-experiment-families-abc--defaults)
+12. [League self-play](#12-league-self-play)
+13. [Reproducibility: identities, hashing, seeds](#13-reproducibility-identities-hashing-seeds)
+14. [Evaluation protocol (reviewer-proof)](#14-evaluation-protocol-reviewer-proof)
+15. [Metagame analysis (Nash mixture + AlphaRank)](#15-metagame-analysis-nash-mixture--alpharank)
+16. [Diagnostics & anti-footguns](#16-diagnostics--anti-footguns)
+17. [Artifacts: run directory + file contracts](#17-artifacts-run-directory--file-contracts)
+18. [Replay debugging workflow](#18-replay-debugging-workflow)
+19. [Baselines](#19-baselines)
+20. [Compute budget + calibration](#20-compute-budget--calibration)
+21. [Milestones, done criteria, and risks](#21-milestones-done-criteria-and-risks)
+22. [Repository layout (canonical) + module map](#22-repository-layout-canonical--module-map)
+23. [Appendix: default configs (L40-ish node)](#23-appendix-default-configs-l40-ish-node)
 
 ---
 
@@ -951,8 +951,8 @@ Because strategies can be non-transitive, we report metagame summaries in additi
 
 From payoff probability matrix `p_ij` (i beats j, folded with seat swap):
 
-`U_ij = 2*p_ij - 1`  
-`U_ji = -U_ij`  
+`U_ij = 2*p_ij - 1`
+`U_ji = -U_ij`
 `U_ii = 0`
 
 Record `utility_transform_id = "u_from_p_v1"`.
@@ -1273,13 +1273,13 @@ System is “done” when artifacts alone can reproduce:
 
 ### 21.3 Top risks & mitigations
 
-1. Hidden info leakage  
+1. Hidden info leakage
    - mitigation: leakage detector suite + public/full parity tests
-2. Incorrect masked logp / importance ratios  
+2. Incorrect masked logp / importance ratios
    - mitigation: single masking implementation + unit tests with synthetic cases
-3. League instability / cyclic forgetting  
+3. League instability / cyclic forgetting
    - mitigation: PFSP + snapshot pool + promotion gate + anchor eval
-4. GPU nondeterminism  
+4. GPU nondeterminism
    - mitigation: eval on CPU, pinned sampler, deterministic seeds, log versions
 
 ### 21.4 Release / IP-safe plan (paper-grade)

@@ -135,8 +135,7 @@ def load_example_config(
         raise ValueError(f"Unsupported mode: {config.mode}. Expected 'fast' or 'inspect'.")
     if config.action_policy not in {"first_legal", "uniform_legal"}:
         raise ValueError(
-            f"Unsupported action_policy: {config.action_policy}. "
-            "Expected 'first_legal' or 'uniform_legal'."
+            f"Unsupported action_policy: {config.action_policy}. Expected 'first_legal' or 'uniform_legal'."
         )
 
     # Surface one evaluator setting as a sanity check that we read the new stack.

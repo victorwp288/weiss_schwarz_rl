@@ -13,10 +13,8 @@ class TrajectoryBuffer:
 
     steps: list[TrajectoryStep] = field(default_factory=list)
 
-
     def append(self, step: TrajectoryStep) -> None:
         self.steps.append(step)
-
 
     def clear(self) -> None:
         self.steps.clear()

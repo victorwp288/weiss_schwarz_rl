@@ -14,20 +14,16 @@ class DecisionBoundaryEnv:
 
     sim: Any
 
-
     @classmethod
     def create(cls, **kwargs: Any) -> "DecisionBoundaryEnv":
         sim = weiss_sim.make(**kwargs)
         return cls(sim=sim)
 
-
     def reset(self, seed: int | None = None):
         return self.sim.reset(seed=seed)
 
-
     def step(self, actions):
         return self.sim.step(actions)
-
 
     def close(self) -> None:
         close_fn = getattr(self.sim, "close", None)
