@@ -37,3 +37,15 @@ All file paths in YAML configs are **repo-root relative**.
 
 Seed files contain one unsigned 64-bit integer per line with no comments.
 This keeps parsing simple and deterministic across tooling.
+
+## Smoke test (minimal_loop)
+
+Quick sanity check (<2 minutes on CPU). Loads `configs/minimal_loop.yaml` via the train entrypoint and writes a run manifest.
+
+```bash
+python python/scripts/train.py --stack-config configs/minimal_loop.yaml --run-id smoke_local
+
+Expected output files:
+  runs/smoke_local/manifeset.json
+
+  

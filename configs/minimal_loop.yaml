@@ -1,3 +1,7 @@
+rl_stack_locked:
+  components: {}
+  seed_sets: {}
+
 minimal_loop:
   mode: fast
   num_envs: 2
