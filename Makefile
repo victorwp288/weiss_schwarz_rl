@@ -1,42 +1,56 @@
-# project-wide commands
+# Makefile that works with either `uv` (preferred) or plain Python + venv.
 
-PYTHON ?= python
+UV := $(shell command -v uv 2>/dev/null)
+VENV ?= .venv
+PY_SYS ?= python3
+PY_VENV := $(VENV)/bin/python
 
-# export PYTHONPATH so tests and scripts can import the package tree
 export PYTHONPATH := python
 
-.PHONY: all lint fmt test train-min eval-dev figures-placeholder clean
+ifeq ($(UV),)
+PY := $(if $(wildcard $(PY_VENV)),$(PY_VENV),$(PY_SYS))
+PYRUN := $(PY)
+SYNC_MSG := "[make] uv not found; using venv at $(VENV)"
+else
+PYRUN := uv run --frozen --extra dev python
+SYNC_MSG := "[make] using uv"
+endif
 
-# default to running quality checks and unit tests
-all: lint fmt test
+.PHONY: sync lint fmt type test check train-min eval-dev figures clean
 
-# linting; using ruff for fast checks – install via `pip install ruff`
+sync:
+	@echo $(SYNC_MSG)
+ifeq ($(UV),)
+	@$(PY_SYS) -m venv $(VENV) || (echo "Failed to create venv. On Debian/Ubuntu install python3-venv." && exit 1)
+	@$(PY_VENV) -m pip install -q --upgrade pip
+	@$(PY_VENV) -m pip install -q -e ".[dev]"
+else
+	@uv sync --frozen --extra dev
+endif
+
 lint:
-	$(PYTHON) -m ruff check python
+	@$(PYRUN) -m ruff check python tests examples
 
-# formatting; assumes a formatter such as black is installed
 fmt:
-	$(PYTHON) -m black python
+	@$(PYRUN) -m ruff format python tests examples
 
-# run the unit tests in the repository
-# the `-q` flag makes pytest quieter but you can remove it
-# no need to manually set PYTHONPATH because we exported it above
+type:
+	@$(PYRUN) -m mypy
+
 test:
-	$(PYTHON) -m pytest -q python/weiss_rl/tests
+	@$(PYRUN) -m pytest -q python/weiss_rl/tests
 
-# minimal training invocation; change config path to suit your setup
+check: lint fmt type test
+
 train-min:
-	$(PYTHON) python/scripts/train.py --stack-config configs/minimal_loop.yaml
+	@$(PYRUN) python/scripts/train.py --stack-config configs/minimal_loop.yaml
 
-# simple evaluation on the development stack config
 eval-dev:
-	$(PYTHON) python/scripts/eval.py --stack-config configs/minimal_loop.yaml
+	@$(PYRUN) python/scripts/eval.py --stack-config configs/minimal_loop.yaml
 
-# placeholder target for generating figures from experiment output
-figures-placeholder:
-	@echo "figure generation is not implemented yet"
+figures:
+	@$(PYRUN) python/scripts/make_figures.py --out runs/figures/placeholder.txt
 
-# clean up typical build artifacts (none are produced by this repo, but useful
-# if you add bytecode, __pycache__, etc.)
 clean:
-	rm -rf __pycache__ python/**/__pycache__
+	@find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+	@rm -rf .ruff_cache .mypy_cache
