@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from .spec import SpecMismatchPolicy
+
 
 @dataclass(slots=True)
 class StackConfig:
@@ -16,6 +18,8 @@ class StackConfig:
     root: Path
     components: dict[str, Path]
     seed_sets: dict[str, Path]
+    spec_mismatch_policy: SpecMismatchPolicy = SpecMismatchPolicy.HARD_FAIL
+    """Policy for handling spec bundle mismatches (eval always HARD_FAIL)."""
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -25,6 +29,20 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Expected mapping in {path}, got {type(data).__name__}")
     return data
+
+
+def _parse_spec_mismatch_policy(value: str | None) -> SpecMismatchPolicy:
+    """Parse spec mismatch policy from config string."""
+    if value is None or value == "":
+        return SpecMismatchPolicy.HARD_FAIL
+    token = str(value).strip().lower()
+    for policy in SpecMismatchPolicy:
+        if policy.value == token:
+            return policy
+    raise ValueError(
+        f"Unknown spec_mismatch_policy: {value}. "
+        f"Expected one of: {', '.join(p.value for p in SpecMismatchPolicy)}"
+    )
 
 
 def load_stack_config(stack_path: Path | str) -> StackConfig:
@@ -43,4 +61,14 @@ def load_stack_config(stack_path: Path | str) -> StackConfig:
 
     components = {k: (root / str(v)).resolve() for k, v in raw_components.items()}
     seed_sets = {k: (root / str(v)).resolve() for k, v in raw_seed_sets.items()}
-    return StackConfig(root=root, components=components, seed_sets=seed_sets)
+    
+    # Load spec mismatch policy if present
+    spec_mismatch_policy_str = body.get("spec_mismatch_policy", "hard_fail")
+    spec_mismatch_policy = _parse_spec_mismatch_policy(spec_mismatch_policy_str)
+    
+    return StackConfig(
+        root=root,
+        components=components,
+        seed_sets=seed_sets,
+        spec_mismatch_policy=spec_mismatch_policy,
+    )

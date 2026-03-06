@@ -5,6 +5,7 @@ from pathlib import Path
 
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import load_stack_config
+from weiss_rl.spec import SpecMismatchPolicy
 
 
 def main() -> None:
@@ -15,10 +16,20 @@ def main() -> None:
     parser.add_argument("--run-id", type=str, default="", help="Run identifier for reproducibility")
     args = parser.parse_args()
 
-    print_startup_banner(args.spec_hash, args.config_hash, args.run_id)
-    
     stack = load_stack_config(args.stack_config)
-    print(f"Evaluation scaffold ready; seed sets: {sorted(stack.seed_sets)}")
+    
+    # Evaluation ALWAYS uses HARD_FAIL regardless of training config
+    eval_policy = SpecMismatchPolicy.HARD_FAIL
+    
+    print_startup_banner(
+        args.spec_hash,
+        args.config_hash,
+        args.run_id,
+        spec_mismatch_policy=eval_policy,
+    )
+    
+    print(f"Evaluation harness ready (spec_mismatch_policy={eval_policy.value})")
+    print(f"Seed sets: {sorted(stack.seed_sets)}")
 
 
 if __name__ == "__main__":
