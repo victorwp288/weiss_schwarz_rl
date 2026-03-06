@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
-from datetime import datetime, timezone
 
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import load_stack_config
-
-def _default_run_id() -> str:
-    return "run_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+from weiss_rl.manifest import RunManifest
+from weiss_rl.repro import compute_seed_hashes
 
 
 def main() -> None:
@@ -25,23 +22,18 @@ def main() -> None:
     stack = load_stack_config(args.stack_config)
     print(f"Loaded stack config with {len(stack.components)} components")
 
-    run_id = args.run_id.strip() or _default_run_id()
-    run_dir = Path("runs") / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if args.run_id:
+        seed_hashes = compute_seed_hashes(stack.seed_sets)
+        manifest = RunManifest(
+            run_id=args.run_id,
+            config_hash=args.config_hash,
+            spec_hash=args.spec_hash,
+            seed_hashes=seed_hashes,
+        )
+        run_dir = Path("runs") / args.run_id
+        manifest.write_json(run_dir / "manifest.json")
+        print(f"Manifest written to {run_dir / 'manifest.json'}")
 
-    manifest_path = run_dir / "manifest.json"
-    manifest = {
-        "run_id": run_id,
-        "created_utc": datetime.now(timezone.utc).isoformat(),
-        "stack_config": str(args.stack_config),
-        "spec_hash": args.spec_hash,
-        "config_hash": args.config_hash,
-        "component_count": len(stack.components),
-        "seed_set_count": len(stack.seed_sets),
-        "note": "Smoke run: config loading only (no training executed).",
-    }
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-    print(f"Wrote manifest: {manifest_path}")
 
 if __name__ == "__main__":
     main()

@@ -15,6 +15,7 @@ class RunManifest:
     created_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     config_hash: str = ""
     spec_hash: str = ""
+    seed_hashes: dict[str, str] = field(default_factory=dict)
     notes: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
