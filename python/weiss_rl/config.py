@@ -486,16 +486,24 @@ def _parse_system_config(body: dict[str, Any]) -> SystemConfig:
         profile=SystemProfileConfig(
             training=_require_text(profile["training"], field_name="system.profile.training"),
             local_iteration=_require_text(profile["local_iteration"], field_name="system.profile.local_iteration"),
-            ci_invariant_testing=_require_text(profile["ci_invariant_testing"], field_name="system.profile.ci_invariant_testing"),
+            ci_invariant_testing=_require_text(
+                profile["ci_invariant_testing"], field_name="system.profile.ci_invariant_testing"
+            ),
         ),
         mp_start_method=_require_text(body["mp_start_method"], field_name="system.mp_start_method"),
         learner_device=_require_text(body["learner_device"], field_name="system.learner_device"),
         actor_device=_require_text(body["actor_device"], field_name="system.actor_device"),
-        actor_process_count=_require_int(body["actor_process_count"], field_name="system.actor_process_count", minimum=1),
+        actor_process_count=_require_int(
+            body["actor_process_count"], field_name="system.actor_process_count", minimum=1
+        ),
         envs_per_actor=_require_int(body["envs_per_actor"], field_name="system.envs_per_actor", minimum=1),
         total_envs=_require_int(body["total_envs"], field_name="system.total_envs", minimum=1),
-        actor_torch_threads=_require_int(body["actor_torch_threads"], field_name="system.actor_torch_threads", minimum=1),
-        learner_torch_threads=_require_int(body["learner_torch_threads"], field_name="system.learner_torch_threads", minimum=1),
+        actor_torch_threads=_require_int(
+            body["actor_torch_threads"], field_name="system.actor_torch_threads", minimum=1
+        ),
+        learner_torch_threads=_require_int(
+            body["learner_torch_threads"], field_name="system.learner_torch_threads", minimum=1
+        ),
         actor_queue_capacity_unrolls=_require_int(
             body["actor_queue_capacity_unrolls"],
             field_name="system.actor_queue_capacity_unrolls",
@@ -618,9 +626,13 @@ def _parse_environment_config(body: dict[str, Any]) -> EnvironmentConfig:
     deck_set_size = _require_mapping(body["deck_set_size"], context="environment.deck_set_size")
     _reject_unknown_keys(deck_set_size, allowed={"bring_up", "paper"}, context="environment.deck_set_size")
     return EnvironmentConfig(
-        observation_visibility=_require_text(body["observation_visibility"], field_name="environment.observation_visibility"),
+        observation_visibility=_require_text(
+            body["observation_visibility"], field_name="environment.observation_visibility"
+        ),
         visibility=_require_text(body["visibility"], field_name="environment.visibility"),
-        truncate_on_max_steps=_require_bool(body["truncate_on_max_steps"], field_name="environment.truncate_on_max_steps"),
+        truncate_on_max_steps=_require_bool(
+            body["truncate_on_max_steps"], field_name="environment.truncate_on_max_steps"
+        ),
         max_raw_decisions_per_episode=_require_int(
             body["max_raw_decisions_per_episode"],
             field_name="environment.max_raw_decisions_per_episode",
@@ -644,7 +656,9 @@ def _parse_environment_config(body: dict[str, Any]) -> EnvironmentConfig:
             field_name="environment.shaping_enabled_family_a",
         ),
         deck_set_size=DeckSetSizeConfig(
-            bring_up=_require_int(deck_set_size["bring_up"], field_name="environment.deck_set_size.bring_up", minimum=1),
+            bring_up=_require_int(
+                deck_set_size["bring_up"], field_name="environment.deck_set_size.bring_up", minimum=1
+            ),
             paper=_require_int(deck_set_size["paper"], field_name="environment.deck_set_size.paper", minimum=1),
         ),
         truncation_bootstrap_value=_require_bool(
@@ -687,7 +701,9 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
         context="league.warmup",
     )
     anchor_set = _require_mapping(body["promotion_anchor_set_v1"], context="league.promotion_anchor_set_v1")
-    _reject_unknown_keys(anchor_set, allowed={"required", "optional_if_available"}, context="league.promotion_anchor_set_v1")
+    _reject_unknown_keys(
+        anchor_set, allowed={"required", "optional_if_available"}, context="league.promotion_anchor_set_v1"
+    )
     promotion_gate = _require_mapping(body["promotion_gate"], context="league.promotion_gate")
     _reject_unknown_keys(
         promotion_gate,
@@ -742,7 +758,9 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
                 minimum=1,
             ),
         ),
-        promotion_gate_enabled=_require_bool(body["promotion_gate_enabled"], field_name="league.promotion_gate_enabled"),
+        promotion_gate_enabled=_require_bool(
+            body["promotion_gate_enabled"], field_name="league.promotion_gate_enabled"
+        ),
         promotion_gate_paired_seeds=_require_int(
             body["promotion_gate_paired_seeds"],
             field_name="league.promotion_gate_paired_seeds",
@@ -805,7 +823,9 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
         context="evaluation",
     )
     stop_rules = _require_mapping(body["stop_rules"], context="evaluation.stop_rules")
-    _reject_unknown_keys(stop_rules, allowed={"stop_delta_ci_half_width", "stop_confidence"}, context="evaluation.stop_rules")
+    _reject_unknown_keys(
+        stop_rules, allowed={"stop_delta_ci_half_width", "stop_confidence"}, context="evaluation.stop_rules"
+    )
     legal_fingerprint_checks = _require_mapping(
         body["legal_fingerprint_checks"],
         context="evaluation.legal_fingerprint_checks",
@@ -866,8 +886,7 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
             field_name="evaluation.eval_assert_sorted_legal_ids",
         ),
         seed_files={
-            key: _require_text(value, field_name=f"evaluation.seed_files.{key}")
-            for key, value in seed_files.items()
+            key: _require_text(value, field_name=f"evaluation.seed_files.{key}") for key, value in seed_files.items()
         },
         periodic_dev_eval_interval_updates=_require_int(
             body["periodic_dev_eval_interval_updates"],
@@ -1007,7 +1026,14 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
 def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig:
     _reject_unknown_keys(
         body,
-        allowed={"spec_bundle", "ids", "seed_derivation", "seed_files", "determinism_requirements", "legal_fingerprint"},
+        allowed={
+            "spec_bundle",
+            "ids",
+            "seed_derivation",
+            "seed_files",
+            "determinism_requirements",
+            "legal_fingerprint",
+        },
         context="reproducibility",
     )
     spec_bundle = _require_mapping(body["spec_bundle"], context="reproducibility.spec_bundle")
@@ -1019,7 +1045,13 @@ def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig
     ids = _require_mapping(body["ids"], context="reproducibility.ids")
     _reject_unknown_keys(
         ids,
-        allowed={"run_id_hash", "config_hash", "spec_hash", "store_full_256_bit_ids", "store_short_64_bit_ids_for_filenames"},
+        allowed={
+            "run_id_hash",
+            "config_hash",
+            "spec_hash",
+            "store_full_256_bit_ids",
+            "store_short_64_bit_ids_for_filenames",
+        },
         context="reproducibility.ids",
     )
     seed_derivation = _require_mapping(body["seed_derivation"], context="reproducibility.seed_derivation")
@@ -1123,7 +1155,9 @@ def _parse_metagame_config(body: dict[str, Any]) -> MetagameConfig:
         context="metagame",
     )
     nash = _require_mapping(body["nash"], context="metagame.nash")
-    _reject_unknown_keys(nash, allowed={"impl", "backend", "threads", "value_tolerance", "tie_break"}, context="metagame.nash")
+    _reject_unknown_keys(
+        nash, allowed={"impl", "backend", "threads", "value_tolerance", "tie_break"}, context="metagame.nash"
+    )
     alpharank = _require_mapping(body["alpharank"], context="metagame.alpharank")
     _reject_unknown_keys(
         alpharank,
@@ -1197,7 +1231,9 @@ def _parse_sensitivity_config(body: dict[str, Any]) -> SensitivityConfig:
     return SensitivityConfig(
         cases=cases,
         report=SensitivityReportConfig(
-            required_outputs=_require_str_list(report["required_outputs"], field_name="sensitivity.report.required_outputs")
+            required_outputs=_require_str_list(
+                report["required_outputs"], field_name="sensitivity.report.required_outputs"
+            )
         ),
     )
 
@@ -1222,7 +1258,9 @@ def _parse_compute_budget_config(body: dict[str, Any]) -> ComputeBudgetConfig:
         context="compute_budget.allocation",
     )
     return ComputeBudgetConfig(
-        baseline_credits=_require_int(body["baseline_credits"], field_name="compute_budget.baseline_credits", minimum=1),
+        baseline_credits=_require_int(
+            body["baseline_credits"], field_name="compute_budget.baseline_credits", minimum=1
+        ),
         allocation=ComputeBudgetAllocationConfig(
             bring_up_correctness=_require_int(
                 allocation["bring_up_correctness"],
@@ -1234,7 +1272,9 @@ def _parse_compute_budget_config(body: dict[str, Any]) -> ComputeBudgetConfig:
                 field_name="compute_budget.allocation.main_training_3_seeds",
                 minimum=0,
             ),
-            ablations=_require_int(allocation["ablations"], field_name="compute_budget.allocation.ablations", minimum=0),
+            ablations=_require_int(
+                allocation["ablations"], field_name="compute_budget.allocation.ablations", minimum=0
+            ),
             baseline_extra_run=_require_int(
                 allocation["baseline_extra_run"],
                 field_name="compute_budget.allocation.baseline_extra_run",
@@ -1242,8 +1282,12 @@ def _parse_compute_budget_config(body: dict[str, Any]) -> ComputeBudgetConfig:
             ),
             reserve=_require_int(allocation["reserve"], field_name="compute_budget.allocation.reserve", minimum=0),
         ),
-        calibration_required=_require_bool(body["calibration_required"], field_name="compute_budget.calibration_required"),
-        calibration_metrics=_require_str_list(body["calibration_metrics"], field_name="compute_budget.calibration_metrics"),
+        calibration_required=_require_bool(
+            body["calibration_required"], field_name="compute_budget.calibration_required"
+        ),
+        calibration_metrics=_require_str_list(
+            body["calibration_metrics"], field_name="compute_budget.calibration_metrics"
+        ),
         update_targets_from_calibration=_require_bool(
             body["update_targets_from_calibration"],
             field_name="compute_budget.update_targets_from_calibration",
@@ -1263,7 +1307,9 @@ def _parse_family_b_discount_ablation_config(body: dict[str, Any]) -> FamilyBDis
         context="family_b_discount_ablation",
     )
     return FamilyBDiscountAblationConfig(
-        enabled_by_default=_require_bool(body["enabled_by_default"], field_name="family_b_discount_ablation.enabled_by_default"),
+        enabled_by_default=_require_bool(
+            body["enabled_by_default"], field_name="family_b_discount_ablation.enabled_by_default"
+        ),
         gamma_default=_require_float(body["gamma_default"], field_name="family_b_discount_ablation.gamma_default"),
         requires_k_raw_decisions_tracking=_require_bool(
             body["requires_k_raw_decisions_tracking"],
@@ -1285,7 +1331,14 @@ def _parse_family_c_shaping_ablation_config(body: dict[str, Any]) -> FamilyCShap
     stall_trigger = _require_mapping(body["stall_trigger"], context="family_c_shaping_ablation.stall_trigger")
     _reject_unknown_keys(
         stall_trigger,
-        allowed={"after_updates", "eval_opponent", "eval_seed_file", "seat_swap", "probability_metric", "trigger_if_below"},
+        allowed={
+            "after_updates",
+            "eval_opponent",
+            "eval_seed_file",
+            "seat_swap",
+            "probability_metric",
+            "trigger_if_below",
+        },
         context="family_c_shaping_ablation.stall_trigger",
     )
     shaping_defaults = _require_mapping(body["shaping_defaults"], context="family_c_shaping_ablation.shaping_defaults")
@@ -1302,7 +1355,9 @@ def _parse_family_c_shaping_ablation_config(body: dict[str, Any]) -> FamilyCShap
         context="family_c_shaping_ablation.shaping_defaults",
     )
     return FamilyCShapingAblationConfig(
-        enabled_by_default=_require_bool(body["enabled_by_default"], field_name="family_c_shaping_ablation.enabled_by_default"),
+        enabled_by_default=_require_bool(
+            body["enabled_by_default"], field_name="family_c_shaping_ablation.enabled_by_default"
+        ),
         stall_trigger=FamilyCStallTriggerConfig(
             after_updates=_require_int(
                 stall_trigger["after_updates"],
@@ -1380,10 +1435,7 @@ _COMPONENT_PARSERS = {
 
 
 def canonical_config_dict(stack: StackConfig) -> dict[str, Any]:
-    seed_sets = {
-        key: str(path.relative_to(stack.root).as_posix())
-        for key, path in sorted(stack.seed_sets.items())
-    }
+    seed_sets = {key: str(path.relative_to(stack.root).as_posix()) for key, path in sorted(stack.seed_sets.items())}
     config = {
         component_name: asdict(component)
         for component_name in sorted(_COMPONENT_PARSERS)
@@ -1408,7 +1460,6 @@ def canonical_config_json(stack: StackConfig) -> str:
 
 def compute_config_hash256(stack: StackConfig) -> str:
     return sha256_hex(canonical_config_bytes(stack))
-
 
 
 def load_stack_config(stack_path: Path | str) -> StackConfig:
@@ -1450,7 +1501,9 @@ def load_stack_config(stack_path: Path | str) -> StackConfig:
             if "schema_version" in body
             else None
         ),
-        description=_require_text(body["description"], field_name="rl_stack_locked.description") if "description" in body else "",
+        description=_require_text(body["description"], field_name="rl_stack_locked.description")
+        if "description" in body
+        else "",
         lock_intent=_require_mapping(body.get("lock_intent", {}), context="rl_stack_locked.lock_intent"),
         components=components,
         seed_sets=seed_sets,

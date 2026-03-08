@@ -20,7 +20,6 @@ def test_seed_derivation_is_deterministic() -> None:
     assert episode_seed_a == episode_seed_b
 
 
-
 def test_run_id_serialization_is_tagged_and_stable() -> None:
     spec_hash = "00" * 32
     config_hash = "11" * 32

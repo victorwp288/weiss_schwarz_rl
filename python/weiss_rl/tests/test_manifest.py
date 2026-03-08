@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from weiss_rl.config import canonical_config_dict, compute_config_hash256, load_stack_config
 from weiss_rl.manifest import RunManifest, build_seed_file_manifest, write_run_artifacts
 
 
-
-def test_write_run_artifacts_creates_paper_grade_scaffold(tmp_path: Path) -> None:
+def test_write_run_artifacts_creates_manifest_scaffold(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[3]
     stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
     manifest = RunManifest(
@@ -18,6 +18,8 @@ def test_write_run_artifacts_creates_paper_grade_scaffold(tmp_path: Path) -> Non
         git_dirty=False,
         spec_hash256="cd" * 32,
         config_hash256=compute_config_hash256(stack),
+        simulator={"version": "0.7.0"},
+        spec_bundle={"spec_hash": 123},
         config_canonical=canonical_config_dict(stack),
         seed_files=build_seed_file_manifest(stack.seed_sets, root=stack.root),
         hardware={"platform": "test"},
@@ -33,6 +35,8 @@ def test_write_run_artifacts_creates_paper_grade_scaffold(tmp_path: Path) -> Non
     assert artifacts.spec_hash_path.read_text(encoding="utf-8") == f"{manifest.spec_hash256}\n"
     assert artifacts.config_hash_path.read_text(encoding="utf-8") == f"{manifest.config_hash256}\n"
     assert artifacts.config_json_path.exists()
+    assert json.loads(artifacts.spec_bundle_path.read_text(encoding="utf-8")) == {"spec_hash": 123}
+    assert json.loads(artifacts.manifest_path.read_text(encoding="utf-8"))["simulator"]["version"] == "0.7.0"
     assert (artifacts.run_dir / "checkpoints").is_dir()
     assert (artifacts.run_dir / "eval").is_dir()
     assert (artifacts.run_dir / "figures").is_dir()

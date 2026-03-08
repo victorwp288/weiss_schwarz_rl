@@ -11,10 +11,10 @@ from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import StackConfig, canonical_config_dict, compute_config_hash256, load_stack_config
 from weiss_rl.manifest import RunManifest, build_seed_file_manifest, write_run_artifacts
 from weiss_rl.repro import compute_run_id64, compute_run_id256
+from weiss_rl.simulator_contract import load_simulator_contract
 
 _SHA256_HEX_LENGTH = 64
 _U64_MASK = (1 << 64) - 1
-
 
 
 def _normalize_sha256(value: str) -> str:
@@ -26,10 +26,22 @@ def _normalize_sha256(value: str) -> str:
     return normalized
 
 
+def _expected_sha256(value: str, *, flag_name: str) -> str:
+    if not value.strip():
+        return ""
+    normalized = _normalize_sha256(value)
+    if not normalized:
+        raise ValueError(f"{flag_name} must be a 64-character lowercase or uppercase SHA-256 hex string")
+    return normalized
+
+
+def _require_matching_hash(*, flag_name: str, expected: str, actual: str) -> None:
+    if expected and expected != actual:
+        raise RuntimeError(f"{flag_name} mismatch: expected {expected}, observed {actual}")
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
-
 
 
 def _git_output(args: list[str]) -> str:
@@ -43,13 +55,11 @@ def _git_output(args: list[str]) -> str:
     return result.stdout.strip()
 
 
-
 def _git_commit() -> str:
     try:
         return _git_output(["rev-parse", "HEAD"])
     except (OSError, subprocess.CalledProcessError):
         return ""
-
 
 
 def _git_dirty() -> bool:
@@ -59,10 +69,8 @@ def _git_dirty() -> bool:
         return False
 
 
-
 def _start_nonce() -> int:
     return time.time_ns() & _U64_MASK
-
 
 
 def _hardware_summary() -> dict[str, str | int]:
@@ -73,7 +81,6 @@ def _hardware_summary() -> dict[str, str | int]:
         "processor": platform.processor(),
         "cpu_count": os.cpu_count() or 0,
     }
-
 
 
 def _evaluation_pinning(stack: StackConfig) -> dict[str, str | bool]:
@@ -90,7 +97,6 @@ def _evaluation_pinning(stack: StackConfig) -> dict[str, str | bool]:
     }
 
 
-
 def _policy_set_selection(stack: StackConfig) -> list[str]:
     if stack.config.evaluation is None:
         return []
@@ -98,18 +104,35 @@ def _policy_set_selection(stack: StackConfig) -> list[str]:
     return [*selection.fixed_anchor_set_v1.required, *selection.fixed_anchor_set_v1.optional_if_available]
 
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train scaffold entrypoint")
     parser.add_argument("--stack-config", type=Path, required=True)
-    parser.add_argument("--spec-hash", type=str, default="", help="Spec hash for contract validation")
-    parser.add_argument("--config-hash", type=str, default="", help="Config hash for contract validation")
+    parser.add_argument("--spec-hash", type=str, default="", help="Expected spec_hash256 for contract validation")
+    parser.add_argument(
+        "--config-hash",
+        type=str,
+        default="",
+        help="Expected config_hash256 for contract validation",
+    )
     parser.add_argument("--run-id", type=str, default="", help="Run directory label override")
     args = parser.parse_args()
 
     stack = load_stack_config(args.stack_config)
-    spec_hash256 = _normalize_sha256(args.spec_hash) or ("0" * _SHA256_HEX_LENGTH)
-    config_hash256 = _normalize_sha256(args.config_hash) or compute_config_hash256(stack)
+    simulator_contract = load_simulator_contract(stack.root)
+    spec_hash256 = simulator_contract.spec_hash256
+    config_hash256 = compute_config_hash256(stack)
+
+    _require_matching_hash(
+        flag_name="--spec-hash",
+        expected=_expected_sha256(args.spec_hash, flag_name="--spec-hash"),
+        actual=spec_hash256,
+    )
+    _require_matching_hash(
+        flag_name="--config-hash",
+        expected=_expected_sha256(args.config_hash, flag_name="--config-hash"),
+        actual=config_hash256,
+    )
+
     git_commit = _git_commit()
     start_nonce = _start_nonce()
     run_id256 = compute_run_id256(spec_hash256, config_hash256, git_commit or None, start_nonce)
@@ -126,8 +149,8 @@ def main() -> None:
         git_dirty=_git_dirty(),
         spec_hash256=spec_hash256,
         config_hash256=config_hash256,
-        simulator={},
-        spec_bundle={},
+        simulator=simulator_contract.simulator,
+        spec_bundle=simulator_contract.spec_bundle,
         config_canonical=canonical_config_dict(stack),
         seed_files=build_seed_file_manifest(stack.seed_sets, root=stack.root),
         hardware=_hardware_summary(),

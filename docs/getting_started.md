@@ -1,10 +1,13 @@
 # Getting Started (Dev)
 
-Goal: get a fresh clone to a successful smoke run without 1:1 help.
+Goal: get a fresh clone to a successful manifest smoke run without 1:1 help.
 
 ## Prereqs
 - Python >= 3.10
-- `uv` installed and available in your terminal: (pip install uv)
+- `uv` installed and available in your terminal (`pip install uv`)
+- Access to a local `weiss_sim` checkout/build. On Victor's machine the default probe path is `/mnt/d/code/thesis/weiss-schwarz-simulator/python`.
+  - If your simulator lives elsewhere, set `WEISS_SIM_PYTHONPATH=/path/to/weiss-schwarz-simulator/python`
+  - If it needs a different interpreter, also set `WEISS_SIM_PYTHON=/path/to/python3.12`
 
 Repo paths in this guide are relative to the repo root.
 
@@ -13,42 +16,50 @@ From the repo root:
 
 ```bash
 uv sync
-If uv sync fails with “No pyproject.toml found”, you are not in the repo root or the project metadata has not been added yet. 
-In that case, ask in the group chat and include your current directory (pwd) plus the full error output.
+```
 
-## Smoke test (minimal_loop, <2 minutes CPU)
+If `uv sync` fails with `No pyproject.toml found`, you are not in the repo root. In that case, include your current directory (`pwd`) plus the full error output when asking for help.
+
+## Manifest smoke test (<2 minutes CPU)
 This does not execute training. It verifies:
-- The entrypoints runs.
-- The stack config loads.
-- A deterministic run artifact is written.
+- the train entrypoint runs
+- the strict stack config loader accepts the dedicated smoke stack
+- the run scaffold records the real simulator spec bundle and provenance
 
-Terminal input:
-uv run python python/scripts/train.py --stack-config configs/minimal_loop.yaml --run-id smoke_local
+Run:
+
+```bash
+uv run python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-id smoke_local
+```
 
 Expected console lines:
-- Loaded stack config with 0 components
-- Wrote manifest: runs/smoke_local/manifest.json
+- `Loaded stack config with 0 components`
+- `Wrote manifest: runs/smoke_local/manifest.json`
 
 ## Expected output files
 After the smoke run, you should have:
-- runs/smoke_local/manifest.json
+- `runs/smoke_local/manifest.json`
+- `runs/smoke_local/spec_bundle.json`
+- `runs/smoke_local/config_canonical.json`
 
 Inspection:
-- cat runs/smoke_local/manifest.json
 
-You should see fields like run_id, created_utc, stack_config, and counts.
+```bash
+cat runs/smoke_local/manifest.json
+```
 
-## Common Errors
-ModuleNotFoundError: No module named 'weiss_rl'
-Cause: running outside the managed environment or without installing the repo package.
-Fix: run the command via uv run ... and ensure uv sync succeeded.
+You should see fields like `run_id256`, `spec_hash256`, `config_hash256`, `simulator`, and `spec_bundle`.
 
+## Common errors
 
-error: No pyproject.toml found
-Cause: you ran uv from the wrong directory.
-Fix: cd into the repo root and retry uv sync.
+`ModuleNotFoundError: No module named 'weiss_rl'`
+- Cause: running outside the managed environment or without installing the repo package.
+- Fix: run the command via `uv run ...` and ensure `uv sync` succeeded.
 
+`Unable to collect simulator provenance via weiss_sim.export_spec_bundle()`
+- Cause: the train scaffold could not find a compatible simulator checkout/interpreter.
+- Fix: set `WEISS_SIM_PYTHONPATH` (and, if needed, `WEISS_SIM_PYTHON`) to a working simulator environment.
 
---stack-config not found or YAML load error
-Cause: wrong working directory or incorrect config path.
-Fix: run from repo root and verify configs/minimal_loop.yaml exists.
+`--stack-config` not found or YAML load error
+- Cause: wrong working directory or incorrect config path.
+- Fix: run from repo root and verify `configs/stack_smoke.yaml` exists.

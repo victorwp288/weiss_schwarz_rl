@@ -16,7 +16,7 @@ def main() -> None:
     args = parser.parse_args()
 
     print_startup_banner(args.spec_hash, args.config_hash, args.run_id)
-    
+
     stack = load_stack_config(args.stack_config)
     print(f"Evaluation scaffold ready; seed sets: {sorted(stack.seed_sets)}")
 

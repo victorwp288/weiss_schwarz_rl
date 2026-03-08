@@ -37,10 +37,7 @@ class RunManifest:
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
-        payload["seed_files"] = {
-            key: asdict(value)
-            for key, value in self.seed_files.items()
-        }
+        payload["seed_files"] = {key: asdict(value) for key, value in self.seed_files.items()}
         return payload
 
     def write_json(self, out_path: Path) -> None:
@@ -58,10 +55,8 @@ class RunArtifacts:
     config_json_path: Path
 
 
-
 def sha256_file(path: Path) -> str:
     return sha256_hex(path.read_bytes())
-
 
 
 def build_seed_file_manifest(seed_files: dict[str, Path], *, root: Path) -> dict[str, SeedFileManifest]:
@@ -71,10 +66,8 @@ def build_seed_file_manifest(seed_files: dict[str, Path], *, root: Path) -> dict
     }
 
 
-
 def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
 
 
 def write_run_artifacts(base_dir: Path, manifest: RunManifest, *, run_dir_name: str | None = None) -> RunArtifacts:

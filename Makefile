@@ -43,10 +43,10 @@ test:
 check: lint fmt type test
 
 train-min:
-	@$(PYRUN) python/scripts/train.py --stack-config configs/minimal_loop.yaml
+	@$(PYRUN) python/scripts/train.py --stack-config configs/stack_smoke.yaml
 
 eval-dev:
-	@$(PYRUN) python/scripts/eval.py --stack-config configs/minimal_loop.yaml
+	@$(PYRUN) python/scripts/eval.py --stack-config configs/stack_smoke.yaml
 
 figures:
 	@$(PYRUN) python/scripts/make_figures.py --out runs/figures/placeholder.txt

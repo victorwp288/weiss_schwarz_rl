@@ -57,10 +57,7 @@ def test_config_hash_changes_when_merged_semantics_change(tmp_path: Path) -> Non
 
     system_text = (repo_root / "configs/system_locked.yaml").read_text(encoding="utf-8")
     (configs_dir / "stack.yaml").write_text(
-        "rl_stack_locked:\n"
-        "  schema_version: 1\n"
-        "  components:\n"
-        "    system: configs/system_locked.yaml\n",
+        "rl_stack_locked:\n  schema_version: 1\n  components:\n    system: configs/system_locked.yaml\n",
         encoding="utf-8",
     )
     (configs_dir / "system_locked.yaml").write_text(system_text, encoding="utf-8")
@@ -81,9 +78,7 @@ def test_load_stack_config_rejects_unknown_component(tmp_path: Path) -> None:
     stack_path = tmp_path / "configs" / "stack.yaml"
     stack_path.parent.mkdir(parents=True)
     stack_path.write_text(
-        "rl_stack_locked:\n"
-        "  components:\n"
-        "    mystery: configs/mystery.yaml\n",
+        "rl_stack_locked:\n  components:\n    mystery: configs/mystery.yaml\n",
         encoding="utf-8",
     )
 
@@ -95,11 +90,7 @@ def test_load_stack_config_rejects_mixed_top_level_config_docs(tmp_path: Path) -
     stack_path = tmp_path / "configs" / "stack.yaml"
     stack_path.parent.mkdir(parents=True)
     stack_path.write_text(
-        "rl_stack_locked:\n"
-        "  components: {}\n"
-        "  seed_sets: {}\n"
-        "minimal_loop:\n"
-        "  mode: fast\n",
+        "rl_stack_locked:\n  components: {}\n  seed_sets: {}\nminimal_loop:\n  mode: fast\n",
         encoding="utf-8",
     )
 
@@ -115,9 +106,7 @@ def test_load_stack_config_rejects_unknown_component_fields(tmp_path: Path) -> N
     system_text = (repo_root / "configs/system_locked.yaml").read_text(encoding="utf-8")
     (configs_dir / "system_locked.yaml").write_text(system_text + "  hidden_toggle: true\n", encoding="utf-8")
     (configs_dir / "stack.yaml").write_text(
-        "rl_stack_locked:\n"
-        "  components:\n"
-        "    system: configs/system_locked.yaml\n",
+        "rl_stack_locked:\n  components:\n    system: configs/system_locked.yaml\n",
         encoding="utf-8",
     )
 
