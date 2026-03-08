@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from weiss_rl.repro import canonical_json_bytes, sha256_hex
+
 _REQUIRED_KEYS = (
     "encoding_versions",
     "action_space_size",
@@ -88,6 +90,19 @@ def parse_spec_bundle(value: Mapping[str, Any]) -> SpecBundle:
         compatibility_hash=_read_compatibility_hash(bundle),
         raw=dict(bundle),
     )
+
+
+def canonical_spec_bundle_bytes(bundle: Mapping[str, Any] | SpecBundle) -> bytes:
+    parsed = bundle if isinstance(bundle, SpecBundle) else parse_spec_bundle(bundle)
+    return canonical_json_bytes(parsed.to_dict())
+
+
+def canonical_spec_bundle_json(bundle: Mapping[str, Any] | SpecBundle) -> str:
+    return canonical_spec_bundle_bytes(bundle).decode("utf-8")
+
+
+def compute_spec_hash256(bundle: Mapping[str, Any] | SpecBundle) -> str:
+    return sha256_hex(canonical_spec_bundle_bytes(bundle))
 
 
 def assert_spec_compatibility(
