@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -429,14 +429,57 @@ def _resolve_repo_path(root: Path, relative_path: str) -> Path:
     return (root / relative_path).resolve()
 
 
+def _reject_unknown_keys(body: Mapping[str, Any], *, allowed: Collection[str], context: str) -> None:
+    unknown_keys = sorted(key for key in body if key not in allowed)
+    if unknown_keys:
+        extras = ", ".join(unknown_keys)
+        raise ValueError(f"{context} has unsupported keys: {extras}")
+
+
+def _unwrap_named_mapping(doc: dict[str, Any], *, expected_key: str, path: Path) -> dict[str, Any]:
+    if expected_key not in doc:
+        return dict(doc)
+
+    extra_keys = sorted(key for key in doc if key != expected_key)
+    if extra_keys:
+        extras = ", ".join(extra_keys)
+        raise ValueError(
+            f"{path} mixes `{expected_key}` with extra top-level keys: {extras}. "
+            "Split unrelated config blocks into separate files."
+        )
+    return _require_mapping(doc[expected_key], context=expected_key)
+
+
 def _load_component_doc(path: Path, component_name: str) -> dict[str, Any]:
     doc = _load_yaml(path)
-    body = doc.get(component_name, doc)
+    body = _unwrap_named_mapping(doc, expected_key=component_name, path=path)
     return _require_mapping(body, context=component_name)
 
 
 def _parse_system_config(body: dict[str, Any]) -> SystemConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={
+            "profile",
+            "mp_start_method",
+            "learner_device",
+            "actor_device",
+            "actor_process_count",
+            "envs_per_actor",
+            "total_envs",
+            "actor_torch_threads",
+            "learner_torch_threads",
+            "actor_queue_capacity_unrolls",
+            "learner_prefetch_batches",
+        },
+        context="system",
+    )
     profile = _require_mapping(body["profile"], context="system.profile")
+    _reject_unknown_keys(
+        profile,
+        allowed={"training", "local_iteration", "ci_invariant_testing"},
+        context="system.profile",
+    )
     return SystemConfig(
         profile=SystemProfileConfig(
             training=_require_text(profile["training"], field_name="system.profile.training"),
@@ -465,7 +508,13 @@ def _parse_system_config(body: dict[str, Any]) -> SystemConfig:
 
 
 def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={"gru_hidden_size", "encoder_mlp_width", "encoder_mlp_layers", "layer_norm", "dropout"},
+        context="model",
+    )
     dropout = _require_mapping(body["dropout"], context="model.dropout")
+    _reject_unknown_keys(dropout, allowed={"family_a", "ablation"}, context="model.dropout")
     return ModelConfig(
         gru_hidden_size=_require_int(body["gru_hidden_size"], field_name="model.gru_hidden_size", minimum=1),
         encoder_mlp_width=_require_int(body["encoder_mlp_width"], field_name="model.encoder_mlp_width", minimum=1),
@@ -479,6 +528,30 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
 
 
 def _parse_training_family_a_config(body: dict[str, Any]) -> TrainingFamilyAConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={
+            "algorithm",
+            "unroll_length",
+            "batch_unrolls_per_update",
+            "gamma",
+            "reward_mode",
+            "optimizer",
+            "learning_rate",
+            "grad_norm_clip",
+            "value_loss_coef",
+            "entropy_coef",
+            "entropy_anneal_to",
+            "entropy_anneal_steps_updates",
+            "vtrace_rho_bar",
+            "vtrace_c_bar",
+            "mixed_precision",
+            "masking_math_float32",
+            "checkpoint_interval_updates",
+            "snapshot_interval_updates",
+        },
+        context="training_family_a",
+    )
     return TrainingFamilyAConfig(
         algorithm=_require_text(body["algorithm"], field_name="training_family_a.algorithm"),
         unroll_length=_require_int(body["unroll_length"], field_name="training_family_a.unroll_length", minimum=1),
@@ -521,7 +594,27 @@ def _parse_training_family_a_config(body: dict[str, Any]) -> TrainingFamilyAConf
 
 
 def _parse_environment_config(body: dict[str, Any]) -> EnvironmentConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={
+            "observation_visibility",
+            "visibility",
+            "truncate_on_max_steps",
+            "max_raw_decisions_per_episode",
+            "max_decisions",
+            "max_decisions_per_episode",
+            "max_learner_steps_per_episode",
+            "max_ticks",
+            "truncation_reward",
+            "shaping_enabled_family_a",
+            "deck_set_size",
+            "truncation_bootstrap_value",
+            "truncation_bootstrap_rule",
+        },
+        context="environment",
+    )
     deck_set_size = _require_mapping(body["deck_set_size"], context="environment.deck_set_size")
+    _reject_unknown_keys(deck_set_size, allowed={"bring_up", "paper"}, context="environment.deck_set_size")
     return EnvironmentConfig(
         observation_visibility=_require_text(body["observation_visibility"], field_name="environment.observation_visibility"),
         visibility=_require_text(body["visibility"], field_name="environment.visibility"),
@@ -564,10 +657,47 @@ def _parse_environment_config(body: dict[str, Any]) -> EnvironmentConfig:
 
 
 def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={
+            "enabled",
+            "snapshot_pool_recent_size",
+            "snapshot_pool_champion_size",
+            "opponent_sampling",
+            "pfsp_power",
+            "pfsp_epsilon_uniform",
+            "pfsp_stats_source",
+            "pfsp_window_episodes",
+            "warmup",
+            "promotion_gate_enabled",
+            "promotion_gate_paired_seeds",
+            "promotion_threshold",
+            "promotion_anchor_set_v1",
+            "promotion_seed_file",
+            "promotion_gate",
+        },
+        context="league",
+    )
     warmup = _require_mapping(body["warmup"], context="league.warmup")
+    _reject_unknown_keys(
+        warmup,
+        allowed={"first_updates", "initial_window_episodes", "ramp_target_updates", "ramp_target_window_episodes"},
+        context="league.warmup",
+    )
     anchor_set = _require_mapping(body["promotion_anchor_set_v1"], context="league.promotion_anchor_set_v1")
+    _reject_unknown_keys(anchor_set, allowed={"required", "optional_if_available"}, context="league.promotion_anchor_set_v1")
     promotion_gate = _require_mapping(body["promotion_gate"], context="league.promotion_gate")
+    _reject_unknown_keys(
+        promotion_gate,
+        allowed={"uncertainty_method", "weighting", "seat_swap", "folding", "guardrails", "record_file"},
+        context="league.promotion_gate",
+    )
     guardrails = _require_mapping(promotion_gate["guardrails"], context="league.promotion_gate.guardrails")
+    _reject_unknown_keys(
+        guardrails,
+        allowed={"max_prob_anchor_loss_below_0_45", "max_truncation_rate"},
+        context="league.promotion_gate.guardrails",
+    )
     return LeagueConfig(
         enabled=_require_bool(body["enabled"], field_name="league.enabled"),
         snapshot_pool_recent_size=_require_int(
@@ -649,18 +779,75 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
 
 
 def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={
+            "seat_swap",
+            "eval_device",
+            "eval_inference_mode",
+            "eval_sampling_algorithm",
+            "eval_assert_sorted_legal_ids",
+            "seed_files",
+            "periodic_dev_eval_interval_updates",
+            "periodic_dev_eval_paired_seeds",
+            "final_policy_set_size",
+            "final_matrix_stage1_paired_seeds",
+            "final_matrix_stage2_adaptive_max_paired_seeds",
+            "stop_rules",
+            "replay_capture_rate_eval",
+            "regression_capture_count",
+            "legal_fingerprint_checks",
+            "decision_kind_tagging",
+            "final_policy_set_selection",
+        },
+        context="evaluation",
+    )
     stop_rules = _require_mapping(body["stop_rules"], context="evaluation.stop_rules")
+    _reject_unknown_keys(stop_rules, allowed={"stop_delta_ci_half_width", "stop_confidence"}, context="evaluation.stop_rules")
     legal_fingerprint_checks = _require_mapping(
         body["legal_fingerprint_checks"],
         context="evaluation.legal_fingerprint_checks",
     )
+    _reject_unknown_keys(
+        legal_fingerprint_checks,
+        allowed={"enabled", "version", "require_strictly_increasing_legal_ids", "mismatch_policy"},
+        context="evaluation.legal_fingerprint_checks",
+    )
     decision_kind_tagging = _require_mapping(body["decision_kind_tagging"], context="evaluation.decision_kind_tagging")
+    _reject_unknown_keys(
+        decision_kind_tagging,
+        allowed={"required_for_training", "enable_python_derived_debug_tag"},
+        context="evaluation.decision_kind_tagging",
+    )
     final_policy_set_selection = _require_mapping(
         body["final_policy_set_selection"],
         context="evaluation.final_policy_set_selection",
     )
+    _reject_unknown_keys(
+        final_policy_set_selection,
+        allowed={
+            "version",
+            "include_random_legal_baseline_b0",
+            "include_no_league_baseline_b1",
+            "include_heuristic_public_b2_if_exists",
+            "include_final_champion_snapshot",
+            "include_spaced_snapshots_near_percent_updates",
+            "remaining_slots_strategy",
+            "fixed_anchor_set_v1",
+            "seed_file",
+            "folding",
+            "seat_swap",
+            "tie_break",
+        },
+        context="evaluation.final_policy_set_selection",
+    )
     fixed_anchor_set = _require_mapping(
         final_policy_set_selection["fixed_anchor_set_v1"],
+        context="evaluation.final_policy_set_selection.fixed_anchor_set_v1",
+    )
+    _reject_unknown_keys(
+        fixed_anchor_set,
+        allowed={"required", "optional_if_available"},
         context="evaluation.final_policy_set_selection.fixed_anchor_set_v1",
     )
     seed_files = _require_mapping(body["seed_files"], context="evaluation.seed_files")
@@ -816,11 +1003,36 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
 
 
 def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={"spec_bundle", "ids", "seed_derivation", "seed_files", "determinism_requirements", "legal_fingerprint"},
+        context="reproducibility",
+    )
     spec_bundle = _require_mapping(body["spec_bundle"], context="reproducibility.spec_bundle")
+    _reject_unknown_keys(
+        spec_bundle,
+        allowed={"require_export_spec_bundle", "persist_in_manifest", "fail_on_spec_mismatch"},
+        context="reproducibility.spec_bundle",
+    )
     ids = _require_mapping(body["ids"], context="reproducibility.ids")
+    _reject_unknown_keys(
+        ids,
+        allowed={"run_id_hash", "config_hash", "spec_hash", "store_full_256_bit_ids", "store_short_64_bit_ids_for_filenames"},
+        context="reproducibility.ids",
+    )
     seed_derivation = _require_mapping(body["seed_derivation"], context="reproducibility.seed_derivation")
+    _reject_unknown_keys(
+        seed_derivation,
+        allowed={"base_seed64", "actor_seed_formula", "episode_seed_formula"},
+        context="reproducibility.seed_derivation",
+    )
     seed_files = _require_mapping(body["seed_files"], context="reproducibility.seed_files")
     legal_fingerprint = _require_mapping(body["legal_fingerprint"], context="reproducibility.legal_fingerprint")
+    _reject_unknown_keys(
+        legal_fingerprint,
+        allowed={"version", "compute_in_rl_layer", "canonical_bytes", "replay_eval_mismatch_policy"},
+        context="reproducibility.legal_fingerprint",
+    )
     return ReproducibilityConfig(
         spec_bundle=SpecBundlePolicyConfig(
             require_export_spec_bundle=_require_bool(
@@ -894,8 +1106,28 @@ def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig
 
 
 def _parse_metagame_config(body: dict[str, Any]) -> MetagameConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={
+            "payoff_uncertainty_method",
+            "sampling_M",
+            "optional_secondary_uncertainty_method",
+            "dirichlet_alpha_wldt",
+            "primary_analysis",
+            "secondary_analysis",
+            "nash",
+            "alpharank",
+        },
+        context="metagame",
+    )
     nash = _require_mapping(body["nash"], context="metagame.nash")
+    _reject_unknown_keys(nash, allowed={"impl", "backend", "threads", "value_tolerance", "tie_break"}, context="metagame.nash")
     alpharank = _require_mapping(body["alpharank"], context="metagame.alpharank")
+    _reject_unknown_keys(
+        alpharank,
+        allowed={"impl", "m", "alpha", "local_selection", "use_inf_alpha", "inf_alpha_eps"},
+        context="metagame.alpharank",
+    )
     return MetagameConfig(
         payoff_uncertainty_method=_require_text(
             body["payoff_uncertainty_method"],
@@ -935,11 +1167,17 @@ def _parse_metagame_config(body: dict[str, Any]) -> MetagameConfig:
 
 def _parse_sensitivity_config(body: dict[str, Any]) -> SensitivityConfig:
     report = _require_mapping(body["report"], context="sensitivity.report")
+    _reject_unknown_keys(report, allowed={"required_outputs"}, context="sensitivity.report")
     cases: dict[str, SensitivityCaseConfig] = {}
     for key, value in body.items():
         if key == "report":
             continue
         case = _require_mapping(value, context=f"sensitivity.{key}")
+        _reject_unknown_keys(
+            case,
+            allowed={"draw_score", "description", "truncation_score", "truncation_handling"},
+            context=f"sensitivity.{key}",
+        )
         cases[key] = SensitivityCaseConfig(
             draw_score=_require_float(case["draw_score"], field_name=f"sensitivity.{key}.draw_score"),
             description=_require_text(case["description"], field_name=f"sensitivity.{key}.description"),
@@ -963,7 +1201,24 @@ def _parse_sensitivity_config(body: dict[str, Any]) -> SensitivityConfig:
 
 
 def _parse_compute_budget_config(body: dict[str, Any]) -> ComputeBudgetConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={
+            "baseline_credits",
+            "allocation",
+            "calibration_required",
+            "calibration_metrics",
+            "update_targets_from_calibration",
+            "drift_alert_threshold_percent",
+        },
+        context="compute_budget",
+    )
     allocation = _require_mapping(body["allocation"], context="compute_budget.allocation")
+    _reject_unknown_keys(
+        allocation,
+        allowed={"bring_up_correctness", "main_training_3_seeds", "ablations", "baseline_extra_run", "reserve"},
+        context="compute_budget.allocation",
+    )
     return ComputeBudgetConfig(
         baseline_credits=_require_int(body["baseline_credits"], field_name="compute_budget.baseline_credits", minimum=1),
         allocation=ComputeBudgetAllocationConfig(
@@ -1000,6 +1255,11 @@ def _parse_compute_budget_config(body: dict[str, Any]) -> ComputeBudgetConfig:
 
 
 def _parse_family_b_discount_ablation_config(body: dict[str, Any]) -> FamilyBDiscountAblationConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={"enabled_by_default", "gamma_default", "requires_k_raw_decisions_tracking", "gamma_step_formula"},
+        context="family_b_discount_ablation",
+    )
     return FamilyBDiscountAblationConfig(
         enabled_by_default=_require_bool(body["enabled_by_default"], field_name="family_b_discount_ablation.enabled_by_default"),
         gamma_default=_require_float(body["gamma_default"], field_name="family_b_discount_ablation.gamma_default"),
@@ -1015,8 +1275,30 @@ def _parse_family_b_discount_ablation_config(body: dict[str, Any]) -> FamilyBDis
 
 
 def _parse_family_c_shaping_ablation_config(body: dict[str, Any]) -> FamilyCShapingAblationConfig:
+    _reject_unknown_keys(
+        body,
+        allowed={"enabled_by_default", "stall_trigger", "shaping_defaults", "truncation_reward"},
+        context="family_c_shaping_ablation",
+    )
     stall_trigger = _require_mapping(body["stall_trigger"], context="family_c_shaping_ablation.stall_trigger")
+    _reject_unknown_keys(
+        stall_trigger,
+        allowed={"after_updates", "eval_opponent", "eval_seed_file", "seat_swap", "probability_metric", "trigger_if_below"},
+        context="family_c_shaping_ablation.stall_trigger",
+    )
     shaping_defaults = _require_mapping(body["shaping_defaults"], context="family_c_shaping_ablation.shaping_defaults")
+    _reject_unknown_keys(
+        shaping_defaults,
+        allowed={
+            "terminal_win",
+            "terminal_loss",
+            "terminal_draw_timeout",
+            "per_learner_step_penalty_formula",
+            "lambda_default",
+            "max_total_shaping_magnitude_per_episode",
+        },
+        context="family_c_shaping_ablation.shaping_defaults",
+    )
     return FamilyCShapingAblationConfig(
         enabled_by_default=_require_bool(body["enabled_by_default"], field_name="family_c_shaping_ablation.enabled_by_default"),
         stall_trigger=FamilyCStallTriggerConfig(
@@ -1100,9 +1382,12 @@ def load_stack_config(stack_path: Path | str) -> StackConfig:
     stack_file = Path(stack_path).resolve()
     root = stack_file.parents[1]
     doc = _load_yaml(stack_file)
-    body = doc.get("rl_stack_locked", doc)
-    if not isinstance(body, dict):
-        raise ValueError("Missing `rl_stack_locked` mapping in stack config")
+    body = _unwrap_named_mapping(doc, expected_key="rl_stack_locked", path=stack_file)
+    _reject_unknown_keys(
+        body,
+        allowed={"schema_version", "description", "lock_intent", "components", "seed_sets"},
+        context="rl_stack_locked",
+    )
 
     raw_components = _require_mapping(body.get("components", {}), context="rl_stack_locked.components")
     raw_seed_sets = _require_mapping(body.get("seed_sets", {}), context="rl_stack_locked.seed_sets")
