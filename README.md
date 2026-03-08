@@ -52,3 +52,9 @@ python -c "import weiss_rl; print(weiss_rl.__all__)"
 uv run --extra dev pytest -q python/weiss_rl/tests
 python -m py_compile $(find python -name '*.py')
 ```
+
+## Schema validation line
+1. uv run python -c "from weiss_rl.trajectory.schema import TRAJ_SCHEMA_VERSION, TrajectoryStep; assert TRAJ_SCHEMA_VERSION==1; _=TrajectoryStep; print('ok')"
+
+2. uv run python -c "import weiss_rl.trajectory.schema as s; print('schema_version', s.TRAJ_SCHEMA_VERSION); print('schema_path', s.__file__)"
+

@@ -15,6 +15,14 @@ class RunManifest:
     created_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     config_hash: str = ""
     spec_hash: str = ""
+    
+    #M1-11 Timescale amibiguitry elimination
+    step_definition: str = "decision_boundary"  # "decision_boundary" | "learner_turn_env"
+    env_wrapper: str = "DecisionBoundaryEnv"
+    reward_mode: str = "shaping"  # "terminal_only" | "shaping"
+    reward_perspective: str = "P"  # "P" actor-to-act | "L" fixed learning seat
+    discount_gamma: float = 1.0
+    
     notes: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

@@ -38,6 +38,14 @@ def main() -> None:
         "config_hash": args.config_hash,
         "component_count": len(stack.components),
         "seed_set_count": len(stack.seed_sets),
+
+        #M1-11: time-scale + reward semantics (explicit, no ambiguity)
+        "env_wrapper": "DecisionBoundaryEnv",          # or "LearnerTurnEnv"
+        "step_definition": "decision_boundary",        # or "learner_turn_env"
+        "reward_mode": "shaping",                      # or "terminal_only"
+        "reward_perspective": "P",                     # "P" actor-to-act, "L" fixed learning seat
+        "discount_gamma": 1.0,                         # explicit even if default
+
         "note": "Smoke run: config loading only (no training executed).",
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
