@@ -12,11 +12,11 @@ PY := $(if $(wildcard $(PY_VENV)),$(PY_VENV),$(PY_SYS))
 PYRUN := $(PY)
 SYNC_MSG := "[make] uv not found; using venv at $(VENV)"
 else
-PYRUN := uv run --frozen --extra dev python
+PYRUN := uv run --extra dev python
 SYNC_MSG := "[make] using uv"
 endif
 
-.PHONY: sync lint fmt type test check train-min eval-dev figures clean
+.PHONY: sync lint fmt type test check check-placeholders train-min eval-dev figures clean
 
 sync:
 	@echo $(SYNC_MSG)
@@ -25,8 +25,11 @@ ifeq ($(UV),)
 	@$(PY_VENV) -m pip install -q --upgrade pip
 	@$(PY_VENV) -m pip install -q -e ".[dev]"
 else
-	@uv sync --frozen --extra dev
+	@uv sync --extra dev
 endif
+
+check-placeholders:
+	@$(PYRUN) python/scripts/check_core_placeholders.py
 
 lint:
 	@$(PYRUN) -m ruff check python tests examples
@@ -40,7 +43,7 @@ type:
 test:
 	@$(PYRUN) -m pytest -q python/weiss_rl/tests
 
-check: lint fmt type test
+check: check-placeholders lint fmt type test
 
 train-min:
 	@$(PYRUN) python/scripts/train.py --stack-config configs/stack_smoke.yaml

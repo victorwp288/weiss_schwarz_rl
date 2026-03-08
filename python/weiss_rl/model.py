@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -14,7 +15,7 @@ class ModelConfig:
 
 
 class PolicyValueModel:
-    """Placeholder interface for the recurrent actor-critic model."""
+    """Base interface for the recurrent actor-critic model."""
 
-    def forward(self, obs, hidden_state):
-        raise NotImplementedError("Implement model forward pass")
+    def forward(self, obs: Any, hidden_state: Any) -> tuple[Any, Any]:
+        raise RuntimeError("PolicyValueModel.forward() must be overridden by a concrete model.")

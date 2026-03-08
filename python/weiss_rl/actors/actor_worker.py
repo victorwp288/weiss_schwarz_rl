@@ -10,6 +10,5 @@ class ActorWorker:
     actor_id: int
 
     def run_once(self) -> None:
-        """Single iteration placeholder for rollout collection."""
-        # TODO: connect env -> policy -> trajectory buffer pipeline.
+        """Single rollout-collection hook for the actor loop."""
         return None
