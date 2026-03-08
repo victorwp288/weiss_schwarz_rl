@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weiss_rl.repro import derive_actor_seed, derive_episode_seed, parse_seed_file
+import pytest
+
+from weiss_rl.repro import derive_actor_seed, derive_episode_seed, hash_seed_file, parse_seed_file
 
 
 def test_seed_derivation_is_deterministic() -> None:
@@ -22,28 +24,41 @@ def test_parse_seed_file_valid(tmp_path: Path) -> None:
     assert seeds == [123, 456, 789]
 
 
-def test_parse_seed_file_rejects_comments_and_blanks(tmp_path: Path) -> None:
+def test_parse_seed_file_rejects_blank_lines(tmp_path: Path) -> None:
     seed_file = tmp_path / "seeds.txt"
-    seed_file.write_text("123\n# comment\n\n456\n")
-    seeds = parse_seed_file(seed_file)
-    assert seeds == [123, 456]
+    seed_file.write_text("123\n\n456\n")
+
+    with pytest.raises(ValueError, match="Blank line 2"):
+        parse_seed_file(seed_file)
+
+
+def test_parse_seed_file_rejects_comments(tmp_path: Path) -> None:
+    seed_file = tmp_path / "seeds.txt"
+    seed_file.write_text("123\n# comment\n456\n")
+
+    with pytest.raises(ValueError, match="Comment on line 2"):
+        parse_seed_file(seed_file)
 
 
 def test_parse_seed_file_invalid_line(tmp_path: Path) -> None:
     seed_file = tmp_path / "seeds.txt"
     seed_file.write_text("123\nabc\n456\n")
-    try:
+
+    with pytest.raises(ValueError, match="Invalid seed on line 2"):
         parse_seed_file(seed_file)
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "Invalid seed on line 2" in str(e)
 
 
 def test_parse_seed_file_out_of_range(tmp_path: Path) -> None:
     seed_file = tmp_path / "seeds.txt"
     seed_file.write_text("123\n-1\n456\n")
-    try:
+
+    with pytest.raises(ValueError, match="out of u64 range"):
         parse_seed_file(seed_file)
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "out of u64 range" in str(e)
+
+
+def test_hash_seed_file_rejects_invalid_contents(tmp_path: Path) -> None:
+    seed_file = tmp_path / "seeds.txt"
+    seed_file.write_text("123\n# comment\n456\n")
+
+    with pytest.raises(ValueError, match="Comment on line 2"):
+        hash_seed_file(seed_file)

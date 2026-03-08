@@ -37,14 +37,16 @@ def derive_episode_seed(actor_seed64: int, env_id: int, episode_index: int) -> i
 def parse_seed_file(path: Path) -> list[int]:
     """Parse a seed file with strict format: one u64 per line, no comments or blanks."""
     seeds = []
-    for line_num, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
+    for line_num, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            raise ValueError(f"Blank line {line_num} in {path}; seed files must contain one u64 per line")
+        if line.startswith("#"):
+            raise ValueError(f"Comment on line {line_num} in {path}; seed files do not allow comments")
         try:
             seed = int(line)
-        except ValueError:
-            raise ValueError(f"Invalid seed on line {line_num} in {path}: {line!r}")
+        except ValueError as err:
+            raise ValueError(f"Invalid seed on line {line_num} in {path}: {line!r}") from err
         if not (0 <= seed < (1 << 64)):
             raise ValueError(f"Seed out of u64 range on line {line_num} in {path}: {seed}")
         seeds.append(seed)
@@ -52,9 +54,9 @@ def parse_seed_file(path: Path) -> list[int]:
 
 
 def hash_seed_file(path: Path) -> str:
-    """Compute SHA256 hash of the seed file content."""
-    content = path.read_text(encoding="utf-8")
-    return sha256_hex(content.encode("utf-8"))
+    """Compute the raw-file SHA-256 after validating the seed-file contract."""
+    parse_seed_file(path)
+    return sha256_hex(path.read_bytes())
 
 
 def compute_seed_hashes(seed_sets: dict[str, Path]) -> dict[str, str]:

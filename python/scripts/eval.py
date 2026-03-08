@@ -17,20 +17,20 @@ def main() -> None:
     parser.add_argument("--run-id", type=str, default="", help="Run identifier for reproducibility")
     args = parser.parse_args()
 
-    print_startup_banner(args.spec_hash, args.config_hash, args.run_id)
-    
+    run_id = args.run_id.strip()
+    print_startup_banner(args.spec_hash, args.config_hash, run_id)
+
     stack = load_stack_config(args.stack_config)
     print(f"Evaluation scaffold ready; seed sets: {sorted(stack.seed_sets)}")
 
-    if args.run_id:
-        seed_hashes = compute_seed_hashes(stack.seed_sets)
+    if run_id:
         manifest = RunManifest(
-            run_id=args.run_id,
+            run_id=run_id,
             config_hash=args.config_hash,
             spec_hash=args.spec_hash,
-            seed_hashes=seed_hashes,
+            seed_hashes=compute_seed_hashes(stack.seed_sets),
         )
-        run_dir = Path("runs") / args.run_id
+        run_dir = Path("runs") / run_id
         manifest.write_json(run_dir / "manifest.json")
         print(f"Manifest written to {run_dir / 'manifest.json'}")
 
