@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import load_stack_config
-from weiss_rl.spec import SpecMismatchPolicy
+
 
 def _default_run_id() -> str:
     return "run_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -21,18 +21,17 @@ def main() -> None:
     parser.add_argument("--run-id", type=str, default="", help="Run identifier for reproducibility")
     args = parser.parse_args()
 
+    run_id = args.run_id.strip() or _default_run_id()
     stack = load_stack_config(args.stack_config)
-    
+
     print_startup_banner(
         args.spec_hash,
         args.config_hash,
-        args.run_id or _default_run_id(),
+        run_id,
         spec_mismatch_policy=stack.spec_mismatch_policy,
     )
-    
-    print(f"Loaded stack config with {len(stack.components)} components")
 
-    run_id = args.run_id.strip() or _default_run_id()
+    print(f"Loaded stack config with {len(stack.components)} components")
     run_dir = Path("runs") / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -43,7 +42,7 @@ def main() -> None:
         "stack_config": str(args.stack_config),
         "spec_hash": args.spec_hash,
         "config_hash": args.config_hash,
-        "spec_mismatch_policy": stack.spec_mismatch_policy.value,
+        "spec_mismatch_policy": stack.spec_mismatch_policy,
         "component_count": len(stack.components),
         "seed_set_count": len(stack.seed_sets),
         "note": "Smoke run: config loading only (no training executed).",

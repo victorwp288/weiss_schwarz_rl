@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from .spec import SpecMismatchPolicy
+from .spec import HARD_FAIL_SPEC_MISMATCH_POLICY, normalize_spec_mismatch_policy, require_fail_on_spec_mismatch
 
 
 @dataclass(slots=True)
@@ -18,8 +18,7 @@ class StackConfig:
     root: Path
     components: dict[str, Path]
     seed_sets: dict[str, Path]
-    spec_mismatch_policy: SpecMismatchPolicy = SpecMismatchPolicy.HARD_FAIL
-    """Policy for handling spec bundle mismatches (eval always HARD_FAIL)."""
+    spec_mismatch_policy: str = HARD_FAIL_SPEC_MISMATCH_POLICY
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -31,18 +30,49 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
-def _parse_spec_mismatch_policy(value: str | None) -> SpecMismatchPolicy:
-    """Parse spec mismatch policy from config string."""
-    if value is None or value == "":
-        return SpecMismatchPolicy.HARD_FAIL
-    token = str(value).strip().lower()
-    for policy in SpecMismatchPolicy:
-        if policy.value == token:
-            return policy
-    raise ValueError(
-        f"Unknown spec_mismatch_policy: {value}. "
-        f"Expected one of: {', '.join(p.value for p in SpecMismatchPolicy)}"
-    )
+def _mapping_field(parent: dict[str, Any], key: str, *, source: str) -> dict[str, Any]:
+    value = parent.get(key, {})
+    if not isinstance(value, dict):
+        raise ValueError(f"Expected mapping at {source}.{key}")
+    return value
+
+
+def _load_component_policy(components: dict[str, Path]) -> str:
+    policy = HARD_FAIL_SPEC_MISMATCH_POLICY
+
+    reproducibility_path = components.get("reproducibility")
+    if reproducibility_path is not None:
+        doc = _load_yaml(reproducibility_path)
+        body = doc.get("reproducibility", doc)
+        if not isinstance(body, dict):
+            raise ValueError(f"Missing `reproducibility` mapping in {reproducibility_path}")
+
+        spec_bundle = _mapping_field(body, "spec_bundle", source=str(reproducibility_path))
+        policy = require_fail_on_spec_mismatch(
+            spec_bundle.get("fail_on_spec_mismatch", True),
+            source=f"{reproducibility_path}: reproducibility.spec_bundle.fail_on_spec_mismatch",
+        )
+
+        legal_fingerprint = _mapping_field(body, "legal_fingerprint", source=str(reproducibility_path))
+        normalize_spec_mismatch_policy(
+            legal_fingerprint.get("replay_eval_mismatch_policy"),
+            source=f"{reproducibility_path}: reproducibility.legal_fingerprint.replay_eval_mismatch_policy",
+        )
+
+    evaluation_path = components.get("evaluation")
+    if evaluation_path is not None:
+        doc = _load_yaml(evaluation_path)
+        body = doc.get("evaluation", doc)
+        if not isinstance(body, dict):
+            raise ValueError(f"Missing `evaluation` mapping in {evaluation_path}")
+
+        legal_fingerprint_checks = _mapping_field(body, "legal_fingerprint_checks", source=str(evaluation_path))
+        normalize_spec_mismatch_policy(
+            legal_fingerprint_checks.get("mismatch_policy"),
+            source=f"{evaluation_path}: evaluation.legal_fingerprint_checks.mismatch_policy",
+        )
+
+    return policy
 
 
 def load_stack_config(stack_path: Path | str) -> StackConfig:
@@ -61,11 +91,8 @@ def load_stack_config(stack_path: Path | str) -> StackConfig:
 
     components = {k: (root / str(v)).resolve() for k, v in raw_components.items()}
     seed_sets = {k: (root / str(v)).resolve() for k, v in raw_seed_sets.items()}
-    
-    # Load spec mismatch policy if present
-    spec_mismatch_policy_str = body.get("spec_mismatch_policy", "hard_fail")
-    spec_mismatch_policy = _parse_spec_mismatch_policy(spec_mismatch_policy_str)
-    
+    spec_mismatch_policy = _load_component_policy(components)
+
     return StackConfig(
         root=root,
         components=components,
