@@ -4,11 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from weiss_rl.config import (
-    canonical_config_json,
-    compute_config_hash256,
-    load_stack_config,
-)
+from weiss_rl.config import canonical_config_json, compute_config_hash256, load_stack_config
 
 
 def _repo_root() -> Path:
@@ -45,14 +41,40 @@ def test_load_stack_config_allows_minimal_smoke_index() -> None:
 
 
 def test_canonical_config_hash_is_stable() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = _repo_root()
     stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
 
-    assert canonical_config_json(stack).startswith('{"components":{"compute_budget":')
+    assert canonical_config_json(stack).startswith('{"config":{"compute_budget":')
     assert compute_config_hash256(stack) == compute_config_hash256(
         load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
     )
 
+
+def test_config_hash_changes_when_merged_semantics_change(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True)
+
+    system_text = (repo_root / "configs/system_locked.yaml").read_text(encoding="utf-8")
+    (configs_dir / "stack.yaml").write_text(
+        "rl_stack_locked:\n"
+        "  schema_version: 1\n"
+        "  components:\n"
+        "    system: configs/system_locked.yaml\n",
+        encoding="utf-8",
+    )
+    (configs_dir / "system_locked.yaml").write_text(system_text, encoding="utf-8")
+    baseline = load_stack_config(configs_dir / "stack.yaml")
+
+    (configs_dir / "system_locked.yaml").write_text(
+        system_text.replace("  total_envs: 96\n", "  total_envs: 97\n"),
+        encoding="utf-8",
+    )
+    changed = load_stack_config(configs_dir / "stack.yaml")
+
+    assert changed.config.system is not None
+    assert changed.config.system.total_envs == 97
+    assert compute_config_hash256(changed) != compute_config_hash256(baseline)
 
 
 def test_load_stack_config_rejects_unknown_component(tmp_path: Path) -> None:

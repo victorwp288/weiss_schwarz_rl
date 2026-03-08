@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -1384,32 +1384,26 @@ def canonical_config_dict(stack: StackConfig) -> dict[str, Any]:
         key: str(path.relative_to(stack.root).as_posix())
         for key, path in sorted(stack.seed_sets.items())
     }
-    components = {
-        key: stack.component_docs[key]
-        for key in sorted(stack.component_docs)
+    config = {
+        component_name: asdict(component)
+        for component_name in sorted(_COMPONENT_PARSERS)
+        if (component := getattr(stack.config, component_name)) is not None
     }
     payload: dict[str, Any] = {
-        "components": components,
+        "config": config,
         "seed_sets": seed_sets,
     }
     if stack.schema_version is not None:
         payload["schema_version"] = stack.schema_version
-    if stack.description:
-        payload["description"] = stack.description
-    if stack.lock_intent:
-        payload["lock_intent"] = stack.lock_intent
     return payload
-
 
 
 def canonical_config_bytes(stack: StackConfig) -> bytes:
     return canonical_json_bytes(canonical_config_dict(stack))
 
 
-
 def canonical_config_json(stack: StackConfig) -> str:
     return canonical_config_bytes(stack).decode("utf-8")
-
 
 
 def compute_config_hash256(stack: StackConfig) -> str:
