@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from weiss_rl.config import load_stack_config
+from weiss_rl.config import (
+    canonical_config_json,
+    compute_config_hash256,
+    load_stack_config,
+)
 
 
 def _repo_root() -> Path:
@@ -38,6 +42,17 @@ def test_load_stack_config_allows_minimal_smoke_index() -> None:
     assert stack.components == {}
     assert stack.seed_sets == {}
     assert stack.config.system is None
+
+
+def test_canonical_config_hash_is_stable() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+
+    assert canonical_config_json(stack).startswith('{"components":{"compute_budget":')
+    assert compute_config_hash256(stack) == compute_config_hash256(
+        load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    )
+
 
 
 def test_load_stack_config_rejects_unknown_component(tmp_path: Path) -> None:

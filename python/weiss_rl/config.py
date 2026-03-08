@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from weiss_rl.repro import canonical_json_bytes, sha256_hex
+
 
 @dataclass(frozen=True, slots=True)
 class SystemProfileConfig:
@@ -1375,6 +1377,44 @@ _COMPONENT_PARSERS = {
     "family_b_discount_ablation": _parse_family_b_discount_ablation_config,
     "family_c_shaping_ablation": _parse_family_c_shaping_ablation_config,
 }
+
+
+def canonical_config_dict(stack: StackConfig) -> dict[str, Any]:
+    seed_sets = {
+        key: str(path.relative_to(stack.root).as_posix())
+        for key, path in sorted(stack.seed_sets.items())
+    }
+    components = {
+        key: stack.component_docs[key]
+        for key in sorted(stack.component_docs)
+    }
+    payload: dict[str, Any] = {
+        "components": components,
+        "seed_sets": seed_sets,
+    }
+    if stack.schema_version is not None:
+        payload["schema_version"] = stack.schema_version
+    if stack.description:
+        payload["description"] = stack.description
+    if stack.lock_intent:
+        payload["lock_intent"] = stack.lock_intent
+    return payload
+
+
+
+def canonical_config_bytes(stack: StackConfig) -> bytes:
+    return canonical_json_bytes(canonical_config_dict(stack))
+
+
+
+def canonical_config_json(stack: StackConfig) -> str:
+    return canonical_config_bytes(stack).decode("utf-8")
+
+
+
+def compute_config_hash256(stack: StackConfig) -> str:
+    return sha256_hex(canonical_config_bytes(stack))
+
 
 
 def load_stack_config(stack_path: Path | str) -> StackConfig:
