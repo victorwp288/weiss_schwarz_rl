@@ -15,6 +15,11 @@ def canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def canonical_seed_bytes(seeds: list[int]) -> bytes:
+    """Serialize parsed seed values in a platform-stable form."""
+    return canonical_json_bytes(seeds)
+
+
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -54,9 +59,9 @@ def parse_seed_file(path: Path) -> list[int]:
 
 
 def hash_seed_file(path: Path) -> str:
-    """Compute the raw-file SHA-256 after validating the seed-file contract."""
-    parse_seed_file(path)
-    return sha256_hex(path.read_bytes())
+    """Hash parsed seed contents so equivalent files stay stable across checkouts."""
+    seeds = parse_seed_file(path)
+    return sha256_hex(canonical_seed_bytes(seeds))
 
 
 def compute_seed_hashes(seed_sets: dict[str, Path]) -> dict[str, str]:

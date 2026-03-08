@@ -62,3 +62,13 @@ def test_hash_seed_file_rejects_invalid_contents(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Comment on line 2"):
         hash_seed_file(seed_file)
+
+
+def test_hash_seed_file_is_stable_across_lf_and_crlf(tmp_path: Path) -> None:
+    lf_seed_file = tmp_path / "seeds_lf.txt"
+    crlf_seed_file = tmp_path / "seeds_crlf.txt"
+
+    lf_seed_file.write_bytes(b"123\n456\n789\n")
+    crlf_seed_file.write_bytes(b"123\r\n456\r\n789\r\n")
+
+    assert hash_seed_file(lf_seed_file) == hash_seed_file(crlf_seed_file)
