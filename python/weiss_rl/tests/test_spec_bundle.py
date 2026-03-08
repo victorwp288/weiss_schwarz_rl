@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+import pytest
+
+from weiss_rl.spec import SpecBundle, parse_spec_bundle
+
+
+def test_parse_spec_bundle_accepts_required_keys() -> None:
+    bundle = parse_spec_bundle(
+        {
+            "encoding_versions": {"obs": 1, "action": 2},
+            "action_space_size": 17,
+            "pass_id": 16,
+            "observation_dtype": "float32",
+            "observation_length": 2048,
+            "spec_hash": 8590000130,
+            "extra_field": "kept-for-manifest",
+        }
+    )
+
+    assert isinstance(bundle, SpecBundle)
+    assert bundle.compatibility_hash == "8590000130"
+    assert bundle.raw["extra_field"] == "kept-for-manifest"
+
+
+@pytest.mark.parametrize("missing_key", ["pass_id", "observation_length"])
+def test_parse_spec_bundle_rejects_missing_required_keys(missing_key: str) -> None:
+    raw_bundle = {
+        "encoding_versions": {"obs": 1},
+        "action_space_size": 8,
+        "pass_id": 7,
+        "observation_dtype": "uint8",
+        "observation_length": 64,
+        "compatibility_hash": 123,
+    }
+    raw_bundle.pop(missing_key)
+
+    with pytest.raises(ValueError, match=missing_key):
+        parse_spec_bundle(raw_bundle)
+
+
+def test_parse_spec_bundle_rejects_invalid_pass_id() -> None:
+    with pytest.raises(ValueError, match="pass_id"):
+        parse_spec_bundle(
+            {
+                "encoding_versions": {"obs": 1},
+                "action_space_size": 3,
+                "pass_id": 3,
+                "observation_dtype": "uint8",
+                "observation_length": 64,
+                "compatibility_hash": 123,
+            }
+        )
