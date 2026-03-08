@@ -32,6 +32,8 @@ rl_stack_locked:
         f"""
 reproducibility:
   spec_bundle:
+    require_export_spec_bundle: true
+    persist_in_manifest: true
     fail_on_spec_mismatch: {str(fail_on_spec_mismatch).lower()}
   legal_fingerprint:
     replay_eval_mismatch_policy: {replay_eval_policy}
@@ -57,6 +59,8 @@ def test_load_stack_config_accepts_fail_fast_component_policies(tmp_path: Path) 
     config = load_stack_config(stack_path)
 
     assert config.spec_mismatch_policy == "hard_fail"
+    assert config.require_export_spec_bundle is True
+    assert config.persist_spec_bundle_in_manifest is True
 
 
 @pytest.mark.parametrize(
@@ -83,3 +87,35 @@ def test_load_stack_config_rejects_non_fail_fast_component_policies(
 
     with pytest.raises(ValueError, match=expected_message):
         load_stack_config(stack_path)
+
+
+def test_load_stack_config_rejects_string_boolean_flags(tmp_path: Path) -> None:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+
+    (config_dir / "rl_stack_locked.yaml").write_text(
+        """
+rl_stack_locked:
+  components:
+    reproducibility: configs/reproducibility_locked.yaml
+  seed_sets: {}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (config_dir / "reproducibility_locked.yaml").write_text(
+        """
+reproducibility:
+  spec_bundle:
+    require_export_spec_bundle: "true"
+    persist_in_manifest: true
+    fail_on_spec_mismatch: "false"
+  legal_fingerprint:
+    replay_eval_mismatch_policy: hard_fail
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be a boolean"):
+        load_stack_config(config_dir / "rl_stack_locked.yaml")

@@ -8,7 +8,12 @@ from typing import Any
 
 import yaml
 
-from .spec import HARD_FAIL_SPEC_MISMATCH_POLICY, normalize_spec_mismatch_policy, require_fail_on_spec_mismatch
+from .spec import (
+    HARD_FAIL_SPEC_MISMATCH_POLICY,
+    normalize_bool_flag,
+    normalize_spec_mismatch_policy,
+    require_fail_on_spec_mismatch,
+)
 
 
 @dataclass(slots=True)
@@ -19,6 +24,8 @@ class StackConfig:
     components: dict[str, Path]
     seed_sets: dict[str, Path]
     spec_mismatch_policy: str = HARD_FAIL_SPEC_MISMATCH_POLICY
+    require_export_spec_bundle: bool = False
+    persist_spec_bundle_in_manifest: bool = False
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -37,8 +44,10 @@ def _mapping_field(parent: dict[str, Any], key: str, *, source: str) -> dict[str
     return value
 
 
-def _load_component_policy(components: dict[str, Path]) -> str:
+def _load_component_contract(components: dict[str, Path]) -> tuple[str, bool, bool]:
     policy = HARD_FAIL_SPEC_MISMATCH_POLICY
+    require_export_spec_bundle = False
+    persist_spec_bundle_in_manifest = False
 
     reproducibility_path = components.get("reproducibility")
     if reproducibility_path is not None:
@@ -48,6 +57,16 @@ def _load_component_policy(components: dict[str, Path]) -> str:
             raise ValueError(f"Missing `reproducibility` mapping in {reproducibility_path}")
 
         spec_bundle = _mapping_field(body, "spec_bundle", source=str(reproducibility_path))
+        require_export_spec_bundle = normalize_bool_flag(
+            spec_bundle.get("require_export_spec_bundle"),
+            source=f"{reproducibility_path}: reproducibility.spec_bundle.require_export_spec_bundle",
+            default=False,
+        )
+        persist_spec_bundle_in_manifest = normalize_bool_flag(
+            spec_bundle.get("persist_in_manifest"),
+            source=f"{reproducibility_path}: reproducibility.spec_bundle.persist_in_manifest",
+            default=False,
+        )
         policy = require_fail_on_spec_mismatch(
             spec_bundle.get("fail_on_spec_mismatch", True),
             source=f"{reproducibility_path}: reproducibility.spec_bundle.fail_on_spec_mismatch",
@@ -72,7 +91,7 @@ def _load_component_policy(components: dict[str, Path]) -> str:
             source=f"{evaluation_path}: evaluation.legal_fingerprint_checks.mismatch_policy",
         )
 
-    return policy
+    return policy, require_export_spec_bundle, persist_spec_bundle_in_manifest
 
 
 def load_stack_config(stack_path: Path | str) -> StackConfig:
@@ -91,11 +110,15 @@ def load_stack_config(stack_path: Path | str) -> StackConfig:
 
     components = {k: (root / str(v)).resolve() for k, v in raw_components.items()}
     seed_sets = {k: (root / str(v)).resolve() for k, v in raw_seed_sets.items()}
-    spec_mismatch_policy = _load_component_policy(components)
+    spec_mismatch_policy, require_export_spec_bundle, persist_spec_bundle_in_manifest = _load_component_contract(
+        components
+    )
 
     return StackConfig(
         root=root,
         components=components,
         seed_sets=seed_sets,
         spec_mismatch_policy=spec_mismatch_policy,
+        require_export_spec_bundle=require_export_spec_bundle,
+        persist_spec_bundle_in_manifest=persist_spec_bundle_in_manifest,
     )
