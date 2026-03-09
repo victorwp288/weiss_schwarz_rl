@@ -116,15 +116,15 @@ def resolve_episode_key256(
     episode_seed64: int,
 ) -> bytes:
     """Store simulator-provided deterministic episode key if present; else derive fallback per §13.4."""
-    if simulator_episode_key is not None:
-        return normalize_simulator_episode_key256(simulator_episode_key)
-    return derive_episode_key256(
-        run_id256=run_id256,
-        actor_id=actor_id,
-        env_id=env_id,
-        episode_index=episode_index,
-        episode_seed64=episode_seed64,
-    )
+    if simulator_episode_key is None or simulator_episode_key == b"":
+        return derive_episode_key256(
+            run_id256=run_id256,
+            actor_id=actor_id,
+            env_id=env_id,
+            episode_index=episode_index,
+            episode_seed64=episode_seed64,
+        )
+    return normalize_simulator_episode_key256(simulator_episode_key)
 
 
 def key256_to_hex(key256: bytes) -> str:

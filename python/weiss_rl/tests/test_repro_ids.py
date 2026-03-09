@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from weiss_rl.repro import (
     derive_actor_seed,
+    derive_episode_key256,
     derive_episode_seed,
     key256_to_short64,
     normalize_simulator_episode_key256,
@@ -60,3 +61,24 @@ def test_resolve_episode_key256_derives_fallback_when_simulator_key_missing() ->
     )
 
     assert len(resolved) == 32
+
+
+def test_resolve_episode_key256_treats_empty_bytes_as_missing() -> None:
+    resolved = resolve_episode_key256(
+        simulator_episode_key=b"",
+        run_id256=b"r" * 32,
+        actor_id=1,
+        env_id=2,
+        episode_index=3,
+        episode_seed64=4,
+    )
+
+    expected = derive_episode_key256(
+        run_id256=b"r" * 32,
+        actor_id=1,
+        env_id=2,
+        episode_index=3,
+        episode_seed64=4,
+    )
+
+    assert resolved == expected
