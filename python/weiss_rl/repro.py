@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-import struct
 import json
-
+import struct
 from typing import Any
 
 _U64_MASK = (1 << 64) - 1
@@ -57,6 +56,10 @@ def _ensure_32_bytes(x: bytes, name: str) -> bytes:
     return x
 
 
+def _tagged_payload(tag: bytes, payload: bytes) -> bytes:
+    return b"".join([tag, _u32_le(len(payload)), payload])
+
+
 def key256_to_short64(key256: bytes) -> int:
     """Deterministic short id for filenames: first 8 bytes as little-endian uint64."""
     key256 = _ensure_32_bytes(key256, "key256")
@@ -94,9 +97,18 @@ def derive_replay_key256(*, episode_key256: bytes, spec_hash256: bytes) -> bytes
     return sha256_bytes(payload)
 
 
+def normalize_simulator_episode_key256(simulator_episode_key: int | bytes) -> bytes:
+    """Convert simulator-provided raw episode keys into the canonical 256-bit form."""
+    if isinstance(simulator_episode_key, int):
+        return sha256_bytes(_tagged_payload(b"episode_u64", _u64_le(simulator_episode_key)))
+    if len(simulator_episode_key) == 32:
+        return simulator_episode_key
+    return sha256_bytes(_tagged_payload(b"episode_bytes", simulator_episode_key))
+
+
 def resolve_episode_key256(
     *,
-    simulator_episode_key: Optional[bytes],
+    simulator_episode_key: int | bytes | None,
     run_id256: bytes,
     actor_id: int,
     env_id: int,
@@ -104,9 +116,8 @@ def resolve_episode_key256(
     episode_seed64: int,
 ) -> bytes:
     """Store simulator-provided deterministic episode key if present; else derive fallback per §13.4."""
-    if simulator_episode_key is not None and len(simulator_episode_key) > 0:
-        # Contract for *256*: must be 32 bytes.
-        return _ensure_32_bytes(simulator_episode_key, "simulator_episode_key")
+    if simulator_episode_key is not None:
+        return normalize_simulator_episode_key256(simulator_episode_key)
     return derive_episode_key256(
         run_id256=run_id256,
         actor_id=actor_id,
@@ -119,4 +130,3 @@ def resolve_episode_key256(
 def key256_to_hex(key256: bytes) -> str:
     key256 = _ensure_32_bytes(key256, "key256")
     return key256.hex()
-
