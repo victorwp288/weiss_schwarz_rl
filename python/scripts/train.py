@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import json
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import load_stack_config
+from weiss_rl.manifest import make_smoke_run_manifest
+
 
 def _default_run_id() -> str:
     return "run_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -21,7 +22,7 @@ def main() -> None:
     args = parser.parse_args()
 
     print_startup_banner(args.spec_hash, args.config_hash, args.run_id)
-    
+
     stack = load_stack_config(args.stack_config)
     print(f"Loaded stack config with {len(stack.components)} components")
 
@@ -29,27 +30,18 @@ def main() -> None:
     run_dir = Path("runs") / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    manifest = make_smoke_run_manifest(
+        run_id=run_id,
+        stack_config=args.stack_config,
+        spec_hash=args.spec_hash,
+        config_hash=args.config_hash,
+        component_count=len(stack.components),
+        seed_set_count=len(stack.seed_sets),
+    )
     manifest_path = run_dir / "manifest.json"
-    manifest = {
-        "run_id": run_id,
-        "created_utc": datetime.now(timezone.utc).isoformat(),
-        "stack_config": str(args.stack_config),
-        "spec_hash": args.spec_hash,
-        "config_hash": args.config_hash,
-        "component_count": len(stack.components),
-        "seed_set_count": len(stack.seed_sets),
-
-        #M1-11: time-scale + reward semantics (explicit, no ambiguity)
-        "env_wrapper": "DecisionBoundaryEnv",          # or "LearnerTurnEnv"
-        "step_definition": "decision_boundary",        # or "learner_turn_env"
-        "reward_mode": "shaping",                      # or "terminal_only"
-        "reward_perspective": "P",                     # "P" actor-to-act, "L" fixed learning seat
-        "discount_gamma": 1.0,                         # explicit even if default
-
-        "note": "Smoke run: config loading only (no training executed).",
-    }
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest.write_json(manifest_path)
     print(f"Wrote manifest: {manifest_path}")
+
 
 if __name__ == "__main__":
     main()
