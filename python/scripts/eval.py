@@ -8,7 +8,7 @@ from weiss_rl.config import load_stack_config
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluation scaffold entrypoint")
+    parser = argparse.ArgumentParser(description="Eval scaffold entrypoint")
     parser.add_argument("--stack-config", type=Path, required=True)
     parser.add_argument("--spec-hash", type=str, default="", help="Spec hash for contract validation")
     parser.add_argument("--config-hash", type=str, default="", help="Config hash for contract validation")

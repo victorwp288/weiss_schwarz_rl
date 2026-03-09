@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from weiss_rl.repro import sha256_hex
+from weiss_rl.repro import hash_seed_file
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,13 +55,9 @@ class RunArtifacts:
     config_json_path: Path
 
 
-def sha256_file(path: Path) -> str:
-    return sha256_hex(path.read_bytes())
-
-
 def build_seed_file_manifest(seed_files: dict[str, Path], *, root: Path) -> dict[str, SeedFileManifest]:
     return {
-        key: SeedFileManifest(path=path.relative_to(root).as_posix(), sha256=sha256_file(path))
+        key: SeedFileManifest(path=path.relative_to(root).as_posix(), sha256=hash_seed_file(path))
         for key, path in sorted(seed_files.items())
     }
 
