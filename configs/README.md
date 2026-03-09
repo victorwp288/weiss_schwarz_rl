@@ -26,8 +26,10 @@ This project keeps thesis defaults in split, domain-focused YAML files under `co
 
 ## Consolidated Index
 
-Use `rl_stack_locked.yaml` as the canonical entrypoint when wiring a loader.
+Use `rl_stack_locked.yaml` as the canonical thesis entrypoint when wiring the loader.
 It points to all split files and to committed seed-set files.
+
+Use `stack_smoke.yaml` for the manifest smoke run. It is intentionally minimal and only exercises the loader + manifest wiring.
 
 ## Path Convention
 
@@ -38,14 +40,15 @@ All file paths in YAML configs are **repo-root relative**.
 Seed files contain one unsigned 64-bit integer per line with no comments.
 This keeps parsing simple and deterministic across tooling.
 
-## Smoke test (minimal_loop)
+## Manifest smoke
 
-Quick sanity check (<2 minutes on CPU). Loads `configs/minimal_loop.yaml` via the train entrypoint and writes a run manifest.
+Quick sanity check (<2 minutes on CPU). Loads `configs/stack_smoke.yaml` via the train entrypoint and writes a scaffold manifest with real simulator provenance.
 
 ```bash
-python python/scripts/train.py --stack-config configs/minimal_loop.yaml --run-id smoke_local
+python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-id smoke_local
+```
 
 Expected output files:
-  runs/smoke_local/manifeset.json
-
-  
+- `runs/smoke_local/manifest.json`
+- `runs/smoke_local/spec_bundle.json`
+- `runs/smoke_local/config_canonical.json`

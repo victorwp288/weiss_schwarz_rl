@@ -1,0 +1,5 @@
+rl_stack_locked:
+  schema_version: 1
+  description: Minimal stack smoke config for manifest and entrypoint checks.
+  components: {}
+  seed_sets: {}
