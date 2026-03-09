@@ -1,81 +1,81 @@
+"""Canonical trajectory schema objects (storage contract)."""
+
 from __future__ import annotations
-
-"""Canonical trajectory schema objects (storage contract).
-
-v1 contract:
-- Per-step fields correspond to master plan §7.2.
-- Reward is stored in actor perspective as provided by the simulator.
-- behavior_logp is log π_behavior(a_t | obs_t, legal_t) for the stored action.
-- If a wrapper folds multiple raw decisions into one stored step, it must record k_raw_decisions.
-"""
 
 from dataclasses import dataclass
 from typing import Literal
 
-
 TRAJ_SCHEMA_VERSION: int = 1
 
 LegalRepr = Literal["ids_offsets", "mask", "none"]
+StepDefinition = Literal["decision_boundary", "learner_turn_env"]
+
+LEGAL_REPR_FIELDS: dict[LegalRepr, tuple[str, ...]] = {
+    "ids_offsets": ("legal_ids", "legal_offsets"),
+    "mask": ("legal_mask",),
+    "none": (),
+}
+
+
+def legal_storage_fields(legal_repr: LegalRepr) -> tuple[str, ...]:
+    """Return the canonical array fields required for the selected legal representation."""
+    return LEGAL_REPR_FIELDS[legal_repr]
+
+
+def requires_k_raw_decisions(step_definition: StepDefinition) -> bool:
+    """Learner-turn wrapper steps must record how many raw decisions were folded."""
+    return step_definition == "learner_turn_env"
 
 
 @dataclass(slots=True)
 class TrajectoryStep:
-    """Required per-step stored fields at the chosen step definition."""
+    """Required per-step fields for the chosen external step definition."""
 
-    #Observation (dtype recorded at chunk-level)
-    obs: list[int]  # int16 or int32 values, length OBS_LEN
-
-    #Turn identity
-    to_play_seat: int  # int8 (canonical values {0,1})
-
-    #Decision identity and action
-    decision_id: int  # int32, monotonic per env (simulator-provided)
-    action: int  # uint32 action id
-
-    #Reward/termination
-    reward: float  #float32, actor perspective
+    obs: list[int]
+    to_play_seat: int
+    decision_id: int
+    action: int
+    reward: float
     terminated: bool
     truncated: bool
-    engine_status: int  #int16/int32; 0 = OK
-
-    #Episode identity
-    episode_seed: int  # uint64
-    episode_key: int | bytes  # uint64 or raw bytes
-
-    #Behavior policy
-    behavior_logp: float  # float32 log π_behavior(a | obs, legal)
+    engine_status: int
+    episode_seed: int
+    episode_key: int | bytes
+    behavior_logp: float
 
 
-"""Optional per-step fields (not required for training correctness)."""
 @dataclass(slots=True)
 class TrajectoryOptional:
-    policy_version: int | None = None  #int32
-    value_pred: float | None = None  #float32 debug
+    """Optional per-step fields that are useful but not required for correctness."""
+
+    policy_version: int | None = None
+    value_pred: float | None = None
 
 
-"""Optional debug/analysis per-step fields (not required for training correctness)."""
 @dataclass(slots=True)
 class TrajectoryDebug:
-    decision_kind: int | None = None  #int8/uint8 tag
-    legal_fingerprint64: int | None = None  #uint64
-    actor: int | None = None  #optional alias of to_play_seat
+    """Optional debug and analysis fields."""
 
-    #Time-scale disambiguation: number of underlying DecisionBoundaryEnv steps executed (>= 1)
-    #Only required when step_definition folds multiple raw decisions into one stored step.
+    decision_kind: int | None = None
+    legal_fingerprint64: int | None = None
+    actor: int | None = None
     k_raw_decisions: int | None = None
 
+    def validate(self, *, step_definition: StepDefinition) -> None:
+        if self.k_raw_decisions is not None and self.k_raw_decisions < 1:
+            raise ValueError("k_raw_decisions must be >= 1 when recorded")
+        if requires_k_raw_decisions(step_definition) and self.k_raw_decisions is None:
+            raise ValueError("k_raw_decisions is required for learner_turn_env steps")
 
-"""Chunk-level fields stored once per unroll (v1)."""
+
 @dataclass(slots=True)
 class TrajectoryChunkMeta:
+    """Chunk-level metadata stored once per unroll."""
+
     schema_version: int = TRAJ_SCHEMA_VERSION
-
-    #Interpretation metadata
-    obs_dtype: str = "int16"  #"int16" or "int32"
+    obs_dtype: str = "int16"
     legal_repr: LegalRepr = "none"
-    visibility_mode: str | None = None  #e.g., "public"
-
-    #Provenance (optional)
+    visibility_mode: str | None = None
     run_id256: bytes | None = None
     config_hash256: bytes | None = None
     spec_hash256: bytes | None = None
