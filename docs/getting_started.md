@@ -5,8 +5,9 @@ Goal: get a fresh clone to a successful manifest smoke run without 1:1 help.
 ## Prereqs
 - Python >= 3.10
 - `uv` installed and available in your terminal (`pip install uv`)
-- Access to a local `weiss_sim` checkout/build.
-  - The probe first checks `WEISS_SIM_PYTHONPATH` if set.
+- Access to `weiss_sim` with `export_spec_bundle()` available.
+  - If `weiss_sim` is already installed in your active Python environment, the probe uses that first.
+  - Otherwise it checks `WEISS_SIM_PYTHONPATH` if set.
   - Otherwise it looks for a sibling checkout at `../weiss-schwarz-simulator/python` relative to this repo.
   - If the simulator needs a different interpreter, also set `WEISS_SIM_PYTHON=/path/to/python3.12`.
 
@@ -58,8 +59,8 @@ You should see fields like `run_id256`, `spec_hash256`, `config_hash256`, `simul
 - Fix: run the command via `uv run ...` and ensure `uv sync` succeeded.
 
 `Unable to collect simulator provenance via weiss_sim.export_spec_bundle()`
-- Cause: the train scaffold could not find a compatible simulator checkout/interpreter.
-- Fix: set `WEISS_SIM_PYTHONPATH` (and, if needed, `WEISS_SIM_PYTHON`) to a working simulator environment.
+- Cause: the train scaffold could not import a compatible `weiss_sim` package or find a working simulator checkout/interpreter.
+- Fix: either install `weiss_sim` into the active environment, or set `WEISS_SIM_PYTHONPATH` (and, if needed, `WEISS_SIM_PYTHON`) to a working simulator environment.
 
 `--stack-config` not found or YAML load error
 - Cause: wrong working directory or incorrect config path.

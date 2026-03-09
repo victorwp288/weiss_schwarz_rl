@@ -12,6 +12,7 @@ from weiss_rl.repro import (
     derive_episode_seed,
     hash_seed_file,
     key256_to_short64,
+    legal_fingerprint_v1,
     normalize_simulator_episode_key256,
     parse_seed_file,
     resolve_episode_key256,
@@ -28,6 +29,19 @@ def test_seed_derivation_is_deterministic() -> None:
     episode_seed_a = derive_episode_seed(actor_seed_a, env_id=1, episode_index=77)
     episode_seed_b = derive_episode_seed(actor_seed_b, env_id=1, episode_index=77)
     assert episode_seed_a == episode_seed_b
+
+
+def test_legal_fingerprint_is_deterministic() -> None:
+    spec_hash = bytes.fromhex("ab" * 32)
+    fingerprint_a = legal_fingerprint_v1(spec_hash, decision_id=7, legal_ids=[1, 3, 9])
+    fingerprint_b = legal_fingerprint_v1(spec_hash, decision_id=7, legal_ids=[1, 3, 9])
+    assert fingerprint_a == fingerprint_b
+
+
+def test_legal_fingerprint_rejects_unsorted_legal_ids() -> None:
+    spec_hash = bytes.fromhex("cd" * 32)
+    with pytest.raises(ValueError, match="strictly increasing"):
+        legal_fingerprint_v1(spec_hash, decision_id=7, legal_ids=[1, 3, 3])
 
 
 def test_normalize_simulator_episode_key256_accepts_uint64_keys() -> None:

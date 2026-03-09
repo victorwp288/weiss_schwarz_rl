@@ -39,7 +39,7 @@ class SimulatorContract:
 @dataclass(frozen=True, slots=True)
 class _ProbeTarget:
     python: str
-    pythonpath: Path
+    pythonpath: Path | None = None
 
 
 def _git_common_repo_root(repo_root: Path) -> Path | None:
@@ -106,18 +106,22 @@ def _candidate_pythons() -> list[str]:
 
 
 def _candidate_targets(repo_root: Path) -> list[_ProbeTarget]:
-    return [
-        _ProbeTarget(python=python, pythonpath=pythonpath)
-        for python in _candidate_pythons()
-        for pythonpath in _candidate_pythonpaths(repo_root)
-    ]
+    targets: list[_ProbeTarget] = []
+    for python in _candidate_pythons():
+        targets.append(_ProbeTarget(python=python))
+        targets.extend(
+            _ProbeTarget(python=python, pythonpath=pythonpath)
+            for pythonpath in _candidate_pythonpaths(repo_root)
+        )
+    return targets
 
 
 def _run_probe(target: _ProbeTarget) -> dict[str, Any]:
     env = os.environ.copy()
-    extra_path = str(target.pythonpath)
-    existing_pythonpath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = extra_path if not existing_pythonpath else f"{extra_path}:{existing_pythonpath}"
+    if target.pythonpath is not None:
+        extra_path = str(target.pythonpath)
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = extra_path if not existing_pythonpath else f"{extra_path}:{existing_pythonpath}"
     result = subprocess.run(
         [target.python, "-c", _COLLECTION_SCRIPT],
         check=True,
@@ -131,19 +135,25 @@ def _run_probe(target: _ProbeTarget) -> dict[str, Any]:
     return payload
 
 
+def _target_label(target: _ProbeTarget) -> str:
+    if target.pythonpath is None:
+        return f"python={target.python}"
+    return f"python={target.python} pythonpath={target.pythonpath}"
+
+
 def load_simulator_contract(repo_root: Path) -> SimulatorContract:
     failures: list[str] = []
     for target in _candidate_targets(repo_root):
         try:
             payload = _run_probe(target)
         except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, RuntimeError) as exc:
-            failures.append(f"- python={target.python} pythonpath={target.pythonpath}: {exc}")
+            failures.append(f"- {_target_label(target)}: {exc}")
             continue
 
         simulator = dict(payload.get("simulator", {}))
         spec_bundle = dict(payload.get("spec_bundle", {}))
         if not spec_bundle:
-            failures.append(f"- python={target.python} pythonpath={target.pythonpath}: empty spec_bundle payload")
+            failures.append(f"- {_target_label(target)}: empty spec_bundle payload")
             continue
 
         if "spec_hash" in spec_bundle:
@@ -157,6 +167,7 @@ def load_simulator_contract(repo_root: Path) -> SimulatorContract:
     tried = "\n".join(failures) or "- no simulator candidates found"
     raise RuntimeError(
         "Unable to collect simulator provenance via weiss_sim.export_spec_bundle(). "
-        "Set WEISS_SIM_PYTHONPATH and optionally WEISS_SIM_PYTHON to a working simulator checkout.\n"
+        "If weiss_sim is not importable in the active interpreter, set WEISS_SIM_PYTHONPATH and optionally "
+        "WEISS_SIM_PYTHON to a working simulator environment.\n"
         f"Tried:\n{tried}"
     )

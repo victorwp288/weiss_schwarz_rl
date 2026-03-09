@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 _U64_MASK = (1 << 64) - 1
 _U32_MASK = (1 << 32) - 1
 
@@ -118,6 +120,19 @@ def derive_actor_seed(base_seed64: int, actor_id: int) -> int:
 def derive_episode_seed(actor_seed64: int, env_id: int, episode_index: int) -> int:
     payload = f"episode|{actor_seed64}|{env_id}|{episode_index}".encode("utf-8")
     return stable_hash64(payload) & _U64_MASK
+
+
+def legal_fingerprint_v1(spec_hash256: bytes, decision_id: int, legal_ids: list[int] | np.ndarray) -> int:
+    legal_ids_array = legal_ids if isinstance(legal_ids, np.ndarray) else np.asarray(legal_ids, dtype=np.uint32)
+    if legal_ids_array.size > 1 and np.any(legal_ids_array[1:] <= legal_ids_array[:-1]):
+        raise ValueError(f"legal_ids must be strictly increasing; got {legal_ids_array}")
+
+    parts = [b"legal_fp_v1", _ensure_32_bytes(spec_hash256, "spec_hash256")]
+    parts.append(decision_id.to_bytes(4, byteorder="little", signed=False))
+    parts.append(len(legal_ids_array).to_bytes(4, byteorder="little", signed=False))
+    for legal_id in legal_ids_array:
+        parts.append(int(legal_id).to_bytes(4, byteorder="little", signed=False))
+    return stable_hash64(b"".join(parts)) & _U64_MASK
 
 
 def key256_to_short64(key256: bytes) -> int:
