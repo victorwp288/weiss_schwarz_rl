@@ -46,9 +46,19 @@ def _u64_le(value: int) -> bytes:
     return value.to_bytes(8, byteorder="little", signed=False)
 
 
+def _ensure_32_bytes(value: bytes, name: str) -> bytes:
+    if len(value) != 32:
+        raise ValueError(f"{name} must be 32 bytes, got {len(value)}")
+    return value
+
+
 def _tagged_bytes(tag: str, payload: bytes) -> bytes:
     tag_bytes = tag.encode("utf-8")
     return _u32_le(len(tag_bytes)) + tag_bytes + _u32_le(len(payload)) + payload
+
+
+def _tagged_payload(tag: bytes, payload: bytes) -> bytes:
+    return tag + _u32_le(len(payload)) + payload
 
 
 def _git_commit_bytes(git_commit: str | bytes | None) -> bytes:
@@ -108,6 +118,71 @@ def derive_actor_seed(base_seed64: int, actor_id: int) -> int:
 def derive_episode_seed(actor_seed64: int, env_id: int, episode_index: int) -> int:
     payload = f"episode|{actor_seed64}|{env_id}|{episode_index}".encode("utf-8")
     return stable_hash64(payload) & _U64_MASK
+
+
+def key256_to_short64(key256: bytes) -> int:
+    key256 = _ensure_32_bytes(key256, "key256")
+    return int.from_bytes(key256[:8], byteorder="little", signed=False)
+
+
+def derive_episode_key256(
+    *,
+    run_id256: bytes,
+    actor_id: int,
+    env_id: int,
+    episode_index: int,
+    episode_seed64: int,
+) -> bytes:
+    run_id256 = _ensure_32_bytes(run_id256, "run_id256")
+    payload = b"".join(
+        (
+            b"episode",
+            run_id256,
+            _u32_le(actor_id),
+            _u32_le(env_id),
+            _u32_le(episode_index),
+            _u64_le(episode_seed64),
+        )
+    )
+    return sha256_bytes(payload)
+
+
+def derive_replay_key256(*, episode_key256: bytes, spec_hash256: bytes) -> bytes:
+    episode_key256 = _ensure_32_bytes(episode_key256, "episode_key256")
+    spec_hash256 = _ensure_32_bytes(spec_hash256, "spec_hash256")
+    return sha256_bytes(b"".join((b"replay", episode_key256, spec_hash256)))
+
+
+def normalize_simulator_episode_key256(simulator_episode_key: int | bytes) -> bytes:
+    if isinstance(simulator_episode_key, int):
+        return sha256_bytes(_tagged_payload(b"episode_u64", _u64_le(simulator_episode_key)))
+    if len(simulator_episode_key) == 32:
+        return simulator_episode_key
+    return sha256_bytes(_tagged_payload(b"episode_bytes", simulator_episode_key))
+
+
+def resolve_episode_key256(
+    *,
+    simulator_episode_key: int | bytes | None,
+    run_id256: bytes,
+    actor_id: int,
+    env_id: int,
+    episode_index: int,
+    episode_seed64: int,
+) -> bytes:
+    if simulator_episode_key is None or simulator_episode_key == b"":
+        return derive_episode_key256(
+            run_id256=run_id256,
+            actor_id=actor_id,
+            env_id=env_id,
+            episode_index=episode_index,
+            episode_seed64=episode_seed64,
+        )
+    return normalize_simulator_episode_key256(simulator_episode_key)
+
+
+def key256_to_hex(key256: bytes) -> str:
+    return _ensure_32_bytes(key256, "key256").hex()
 
 
 def parse_seed_file(path: Path) -> list[int]:
