@@ -29,9 +29,12 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync --extra dev
+<<<<<<< HEAD
 
       - name: Core placeholder gate
         run: uv run --extra dev python python/scripts/check_core_placeholders.py
+=======
+>>>>>>> origin/M1-10-Spec-mismatch-policy
 
       - name: Ruff
         run: uv run --extra dev ruff check python tests examples

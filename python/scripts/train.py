@@ -12,6 +12,7 @@ from weiss_rl.config import StackConfig, canonical_config_dict, compute_config_h
 from weiss_rl.manifest import RunManifest, build_seed_file_manifest, write_run_artifacts
 from weiss_rl.repro import compute_run_id64, compute_run_id256
 from weiss_rl.simulator_contract import load_simulator_contract
+from weiss_rl.spec import assert_spec_bundle_contract
 
 _SHA256_HEX_LENGTH = 64
 _U64_MASK = (1 << 64) - 1
@@ -104,10 +105,17 @@ def _policy_set_selection(stack: StackConfig) -> list[str]:
     return [*selection.fixed_anchor_set_v1.required, *selection.fixed_anchor_set_v1.optional_if_available]
 
 
+def _spec_mismatch_policy(stack: StackConfig) -> str:
+    reproducibility = stack.config.reproducibility
+    if reproducibility is None:
+        return "hard_fail"
+    return "hard_fail" if reproducibility.spec_bundle.fail_on_spec_mismatch else "disabled"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train scaffold entrypoint")
     parser.add_argument("--stack-config", type=Path, required=True)
-    parser.add_argument("--spec-hash", type=str, default="", help="Expected spec_hash256 for contract validation")
+    parser.add_argument("--spec-hash", type=str, default="", help="Expected spec hash or spec bundle SHA-256")
     parser.add_argument(
         "--config-hash",
         type=str,
@@ -119,14 +127,10 @@ def main() -> None:
 
     stack = load_stack_config(args.stack_config)
     simulator_contract = load_simulator_contract(stack.root)
+    assert_spec_bundle_contract(args.spec_hash, simulator_contract.spec_bundle)
+
     spec_hash256 = simulator_contract.spec_hash256
     config_hash256 = compute_config_hash256(stack)
-
-    _require_matching_hash(
-        flag_name="--spec-hash",
-        expected=_expected_sha256(args.spec_hash, flag_name="--spec-hash"),
-        actual=spec_hash256,
-    )
     _require_matching_hash(
         flag_name="--config-hash",
         expected=_expected_sha256(args.config_hash, flag_name="--config-hash"),
@@ -138,7 +142,11 @@ def main() -> None:
     run_id256 = compute_run_id256(spec_hash256, config_hash256, git_commit or None, start_nonce)
     run_id64 = f"{compute_run_id64(spec_hash256, config_hash256, git_commit or None, start_nonce):016x}"
 
-    print_startup_banner(spec_hash256, config_hash256, run_id64)
+    print_startup_banner(spec_hash256, config_hash256, run_id64, spec_mismatch_policy=_spec_mismatch_policy(stack))
+    print(
+        "Verified runtime spec bundle: "
+        f"compat={simulator_contract.simulator.get('compatibility_hash', '')} sha256={spec_hash256}"
+    )
     print(f"Loaded stack config with {len(stack.components)} components")
 
     manifest = RunManifest(

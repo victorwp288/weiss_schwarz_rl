@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from weiss_rl.spec import normalize_spec_mismatch_policy, require_fail_on_spec_mismatch
+
 from .models import (
     AlphaRankConfig,
     ComputeBudgetAllocationConfig,
@@ -614,9 +616,9 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
                 legal_fingerprint_checks["require_strictly_increasing_legal_ids"],
                 field_name="evaluation.legal_fingerprint_checks.require_strictly_increasing_legal_ids",
             ),
-            mismatch_policy=_require_text(
+            mismatch_policy=normalize_spec_mismatch_policy(
                 legal_fingerprint_checks["mismatch_policy"],
-                field_name="evaluation.legal_fingerprint_checks.mismatch_policy",
+                source="evaluation.legal_fingerprint_checks.mismatch_policy",
             ),
         ),
         decision_kind_tagging=DecisionKindTaggingConfig(
@@ -736,6 +738,18 @@ def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig
         allowed={"version", "compute_in_rl_layer", "canonical_bytes", "replay_eval_mismatch_policy"},
         context="reproducibility.legal_fingerprint",
     )
+    fail_on_spec_mismatch = _require_bool(
+        spec_bundle["fail_on_spec_mismatch"],
+        field_name="reproducibility.spec_bundle.fail_on_spec_mismatch",
+    )
+    require_fail_on_spec_mismatch(
+        fail_on_spec_mismatch,
+        source="reproducibility.spec_bundle.fail_on_spec_mismatch",
+    )
+    replay_eval_mismatch_policy = normalize_spec_mismatch_policy(
+        legal_fingerprint["replay_eval_mismatch_policy"],
+        source="reproducibility.legal_fingerprint.replay_eval_mismatch_policy",
+    )
     return ReproducibilityConfig(
         spec_bundle=SpecBundlePolicyConfig(
             require_export_spec_bundle=_require_bool(
@@ -746,10 +760,7 @@ def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig
                 spec_bundle["persist_in_manifest"],
                 field_name="reproducibility.spec_bundle.persist_in_manifest",
             ),
-            fail_on_spec_mismatch=_require_bool(
-                spec_bundle["fail_on_spec_mismatch"],
-                field_name="reproducibility.spec_bundle.fail_on_spec_mismatch",
-            ),
+            fail_on_spec_mismatch=fail_on_spec_mismatch,
         ),
         ids=IdsConfig(
             run_id_hash=_require_text(ids["run_id_hash"], field_name="reproducibility.ids.run_id_hash"),
@@ -800,10 +811,7 @@ def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig
                 legal_fingerprint["canonical_bytes"],
                 field_name="reproducibility.legal_fingerprint.canonical_bytes",
             ),
-            replay_eval_mismatch_policy=_require_text(
-                legal_fingerprint["replay_eval_mismatch_policy"],
-                field_name="reproducibility.legal_fingerprint.replay_eval_mismatch_policy",
-            ),
+            replay_eval_mismatch_policy=replay_eval_mismatch_policy,
         ),
     )
 
