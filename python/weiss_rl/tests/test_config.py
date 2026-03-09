@@ -101,8 +101,14 @@ def test_load_stack_config_rejects_string_boolean_flags(tmp_path: Path) -> None:
     config_dir.mkdir()
 
     reproducibility_text = (repo_root / "configs" / "reproducibility_locked.yaml").read_text(encoding="utf-8")
-    reproducibility_text = reproducibility_text.replace("require_export_spec_bundle: true", 'require_export_spec_bundle: "true"')
-    reproducibility_text = reproducibility_text.replace("fail_on_spec_mismatch: true", 'fail_on_spec_mismatch: "false"')
+    reproducibility_text = reproducibility_text.replace(
+        "require_export_spec_bundle: true",
+        'require_export_spec_bundle: "true"',
+    )
+    reproducibility_text = reproducibility_text.replace(
+        "fail_on_spec_mismatch: true",
+        'fail_on_spec_mismatch: "false"',
+    )
 
     (config_dir / "rl_stack_locked.yaml").write_text(
         "\n".join(

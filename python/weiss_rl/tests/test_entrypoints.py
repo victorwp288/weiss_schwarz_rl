@@ -55,6 +55,8 @@ def _run_entrypoint(
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), str(REPO_ROOT / "python")])
+    env["WEISS_SIM_PYTHONPATH"] = str(tmp_path)
+    env["WEISS_SIM_PYTHON"] = sys.executable
 
     command = [sys.executable, str(REPO_ROOT / "python" / "scripts" / script_name), "--stack-config", str(stack_config)]
     if spec_hash:
