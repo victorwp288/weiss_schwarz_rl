@@ -13,7 +13,6 @@ from typing import Any
 
 from weiss_rl.repro import canonical_json_bytes, sha256_hex
 
-_DEFAULT_SIMULATOR_PYTHONPATH = Path("/mnt/d/code/thesis/weiss-schwarz-simulator/python")
 _COLLECTION_SCRIPT = """
 import json
 import weiss_sim
@@ -43,13 +42,32 @@ class _ProbeTarget:
     pythonpath: Path
 
 
+def _git_common_repo_root(repo_root: Path) -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+    git_common_dir = Path(result.stdout.strip())
+    if git_common_dir.name != ".git":
+        return None
+    return git_common_dir.parent
+
+
 def _candidate_pythonpaths(repo_root: Path) -> list[Path]:
     candidates: list[Path] = []
     env_path = os.environ.get("WEISS_SIM_PYTHONPATH", "").strip()
     if env_path:
         candidates.append(Path(env_path).expanduser())
-    candidates.append(_DEFAULT_SIMULATOR_PYTHONPATH)
     candidates.append(repo_root.parent / "weiss-schwarz-simulator" / "python")
+    common_repo_root = _git_common_repo_root(repo_root)
+    if common_repo_root is not None:
+        candidates.append(common_repo_root.parent / "weiss-schwarz-simulator" / "python")
 
     unique_candidates: list[Path] = []
     seen: set[Path] = set()
@@ -128,8 +146,6 @@ def load_simulator_contract(repo_root: Path) -> SimulatorContract:
             failures.append(f"- python={target.python} pythonpath={target.pythonpath}: empty spec_bundle payload")
             continue
 
-        simulator["python_executable"] = target.python
-        simulator["pythonpath_entry"] = str(target.pythonpath)
         if "spec_hash" in spec_bundle:
             simulator["compatibility_hash"] = str(spec_bundle["spec_hash"])
         return SimulatorContract(

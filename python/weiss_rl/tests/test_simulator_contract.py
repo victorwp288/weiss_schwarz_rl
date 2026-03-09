@@ -30,8 +30,6 @@ def test_load_simulator_contract_uses_first_success(monkeypatch: pytest.MonkeyPa
     contract = load_simulator_contract(Path("/repo"))
 
     assert contract.simulator["version"] == "0.7.0"
-    assert contract.simulator["python_executable"] == "/good/python"
-    assert contract.simulator["pythonpath_entry"] == str(tmp_path / "sim")
     assert contract.simulator["compatibility_hash"] == "123"
     assert contract.spec_bundle == payload["spec_bundle"]
     assert contract.spec_hash256 == sha256_hex(canonical_json_bytes(payload["spec_bundle"]))

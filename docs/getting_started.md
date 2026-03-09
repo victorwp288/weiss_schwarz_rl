@@ -5,9 +5,10 @@ Goal: get a fresh clone to a successful manifest smoke run without 1:1 help.
 ## Prereqs
 - Python >= 3.10
 - `uv` installed and available in your terminal (`pip install uv`)
-- Access to a local `weiss_sim` checkout/build. On Victor's machine the default probe path is `/mnt/d/code/thesis/weiss-schwarz-simulator/python`.
-  - If your simulator lives elsewhere, set `WEISS_SIM_PYTHONPATH=/path/to/weiss-schwarz-simulator/python`
-  - If it needs a different interpreter, also set `WEISS_SIM_PYTHON=/path/to/python3.12`
+- Access to a local `weiss_sim` checkout/build.
+  - The probe first checks `WEISS_SIM_PYTHONPATH` if set.
+  - Otherwise it looks for a sibling checkout at `../weiss-schwarz-simulator/python` relative to this repo.
+  - If the simulator needs a different interpreter, also set `WEISS_SIM_PYTHON=/path/to/python3.12`.
 
 Repo paths in this guide are relative to the repo root.
 
