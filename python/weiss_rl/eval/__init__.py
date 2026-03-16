@@ -1,6 +1,39 @@
 """Evaluation harness entry points."""
 
-from weiss_rl.eval.harness import EvalSamplerAnomalies, sample_action_pinned
+from weiss_rl.eval.harness import (
+    EvalGameRecord,
+    EvalRunResult,
+    EvalSamplerAnomalies,
+    GameResult,
+    MatchupSummary,
+    ScheduledGame,
+    build_seat_swapped_schedule,
+    game_result_from_step,
+    record_completed_game,
+    run_seat_swapped_matchup,
+    sample_action_pinned,
+    summarize_game_records,
+    summarize_pair_outcomes,
+    write_episodes_jsonl,
+)
 from weiss_rl.eval.rng_pcg32 import NEXT_U64_ORDER, PCG32_XSH_RR_V1, Pcg32XshRrV1
 
-__all__ = ["EvalSamplerAnomalies", "NEXT_U64_ORDER", "PCG32_XSH_RR_V1", "Pcg32XshRrV1", "sample_action_pinned"]
+__all__ = [
+    "EvalGameRecord",
+    "EvalRunResult",
+    "EvalSamplerAnomalies",
+    "GameResult",
+    "MatchupSummary",
+    "NEXT_U64_ORDER",
+    "PCG32_XSH_RR_V1",
+    "Pcg32XshRrV1",
+    "ScheduledGame",
+    "build_seat_swapped_schedule",
+    "game_result_from_step",
+    "record_completed_game",
+    "run_seat_swapped_matchup",
+    "sample_action_pinned",
+    "summarize_game_records",
+    "summarize_pair_outcomes",
+    "write_episodes_jsonl",
+]
