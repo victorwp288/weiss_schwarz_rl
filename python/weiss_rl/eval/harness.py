@@ -9,6 +9,37 @@ from typing import Any
 
 import numpy as np
 
+import numpy as np
+
+from weiss_rl.masking import masked_logp_from_legal_ids, masked_logp_from_mask
+
+
+def eval_sampler_logp_from_mask(
+    logits: np.ndarray,
+    legal_mask: np.ndarray,
+    actions: np.ndarray,
+    *,
+    pass_action_id: int | None = None,
+) -> np.ndarray:
+    return masked_logp_from_mask(logits, legal_mask, actions, pass_action_id=pass_action_id)
+
+
+def eval_sampler_logp_from_legal_ids(
+    logits: np.ndarray,
+    legal_ids: np.ndarray,
+    legal_offsets: np.ndarray,
+    actions: np.ndarray,
+    *,
+    pass_action_id: int | None = None,
+) -> np.ndarray:
+    return masked_logp_from_legal_ids(
+        logits,
+        legal_ids,
+        legal_offsets,
+        actions,
+        pass_action_id=pass_action_id,
+    )
+
 
 @dataclass(slots=True)
 class MatchupSummary:

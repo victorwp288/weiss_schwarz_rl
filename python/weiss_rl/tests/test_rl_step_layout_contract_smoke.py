@@ -19,18 +19,24 @@ def _require_weiss_sim() -> None:
         reason="simulator-backed rl smoke test requires weiss_sim on PYTHONPATH",
     )
 
+
+def _sim() -> Any:
+    assert weiss_sim is not None
+    return weiss_sim
+
+
 Layout = Literal["mask", "nomask", "i16_legal_ids"]
 _LAYOUTS: tuple[Layout, ...] = ("mask", "nomask", "i16_legal_ids")
 _LEGAL_DECK = (list(range(1, 14)) * 4)[:50]
 
 
 def _fixture_db_path() -> Path:
-    return Path(weiss_sim.__file__).resolve().parents[1] / "tests" / "fixtures" / "cards.wsdb"
+    return Path(_sim().__file__).resolve().parents[1] / "tests" / "fixtures" / "cards.wsdb"
 
 
 def _make_pool(layout: Layout):
     kwargs = {"output_masks": False} if layout == "i16_legal_ids" else {}
-    return weiss_sim.make_pool(
+    return _sim().make_pool(
         mode="train",
         num_envs=2,
         db_path=str(_fixture_db_path()),
@@ -45,7 +51,8 @@ def _make_pool(layout: Layout):
 
 
 def _assert_common_fields(step, *, num_envs: int) -> None:
-    assert step.obs.shape == (num_envs, int(weiss_sim.OBS_LEN))
+    sim = _sim()
+    assert step.obs.shape == (num_envs, int(sim.OBS_LEN))
     assert step.rewards.shape == (num_envs,)
     assert step.terminated.shape == (num_envs,)
     assert step.truncated.shape == (num_envs,)
@@ -54,17 +61,18 @@ def _assert_common_fields(step, *, num_envs: int) -> None:
     assert step.decision_id.shape == (num_envs,)
     assert step.engine_status.shape == (num_envs,)
     assert step.spec_hash.shape == (num_envs,)
-    assert np.array_equal(step.spec_hash, np.full((num_envs,), weiss_sim.SPEC_HASH, dtype=step.spec_hash.dtype))
+    assert np.array_equal(step.spec_hash, np.full((num_envs,), sim.SPEC_HASH, dtype=step.spec_hash.dtype))
 
 
 def _actions_from_mask(masks: np.ndarray, *, action_space: int) -> np.ndarray:
+    sim = _sim()
     num_envs = int(masks.shape[0])
     assert masks.shape == (num_envs, action_space)
     actions = np.empty((num_envs,), dtype=np.uint32)
     for env_index in range(num_envs):
         legal_ids = np.flatnonzero(masks[env_index]).astype(np.uint32, copy=False)
         assert_strictly_increasing_legal_ids(legal_ids)
-        actions[env_index] = weiss_sim.PASS_ACTION_ID if legal_ids.size == 0 else int(legal_ids[0])
+        actions[env_index] = sim.PASS_ACTION_ID if legal_ids.size == 0 else int(legal_ids[0])
     return actions
 
 
@@ -75,6 +83,7 @@ def _actions_from_packed_legal_ids(
     num_envs: int,
     action_space: int,
 ) -> np.ndarray:
+    sim = _sim()
     assert legal_offsets.shape == (num_envs + 1,)
     assert int(legal_offsets[0]) == 0
     assert np.all(legal_offsets[1:] >= legal_offsets[:-1])
@@ -90,7 +99,7 @@ def _actions_from_packed_legal_ids(
         env_legal_ids = used_legal_ids[start:end]
         assert_strictly_increasing_legal_ids(env_legal_ids)
         assert np.all(env_legal_ids < action_space)
-        actions[env_index] = weiss_sim.PASS_ACTION_ID if start == end else int(env_legal_ids[0])
+        actions[env_index] = sim.PASS_ACTION_ID if start == end else int(env_legal_ids[0])
     return actions
 
 
@@ -128,17 +137,18 @@ def _assert_layout_contract(step, *, layout: Layout, buffers, action_space: int)
 
 @pytest.mark.parametrize("layout", _LAYOUTS)
 def test_rl_step_contract_smoke_covers_supported_layouts(layout: Layout) -> None:
+    sim = _sim()
     pool, buffers = _make_pool(layout)
     num_envs = int(pool.envs_len)
     action_space = int(pool.action_space)
 
     assert num_envs == 2
-    assert action_space == int(weiss_sim.ACTION_SPACE_SIZE)
+    assert action_space == int(sim.ACTION_SPACE_SIZE)
 
-    reset_step = weiss_sim.rl.reset_rl(pool, layout=layout)
+    reset_step = sim.rl.reset_rl(pool, layout=layout)
     actions = _assert_layout_contract(reset_step, layout=layout, buffers=buffers, action_space=action_space)
     assert actions.shape == (num_envs,)
 
-    step_step = weiss_sim.rl.step_rl(pool, actions, layout=layout)
+    step_step = sim.rl.step_rl(pool, actions, layout=layout)
     next_actions = _assert_layout_contract(step_step, layout=layout, buffers=buffers, action_space=action_space)
     assert next_actions.shape == (num_envs,)
