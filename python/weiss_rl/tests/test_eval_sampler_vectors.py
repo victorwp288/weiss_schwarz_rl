@@ -4,9 +4,14 @@ import json
 from pathlib import Path
 from typing import TypedDict, cast
 
+import numpy as np
 import pytest
 
+import weiss_rl.eval.harness as eval_harness
+from weiss_rl.eval import EvalSamplerAnomalies, sample_action_pinned
+from weiss_rl.eval.harness import _normalize_cdf_probs
 from weiss_rl.eval.rng_pcg32 import NEXT_U64_ORDER, PCG32_XSH_RR_V1, Pcg32XshRrV1
+from weiss_rl.masking import masked_logp_from_legal_ids
 
 TEST_VECTORS_PATH = Path(__file__).with_name("test_vectors") / "pcg32_xsh_rr_v1.json"
 PINNED_VECTOR_SEEDS = [
@@ -46,6 +51,7 @@ SEEDED_STREAM_ANCHOR: StreamAnchor = {
         "0x1.33e34dc2f70dap-1",
     ],
 }
+PINNED_SAMPLER_ACTIONS = [4, 5, 5, 0, 5, 5, 7, 7, 4, 4]
 
 
 class VectorCase(TypedDict):
@@ -69,6 +75,19 @@ class StreamAnchor(TypedDict):
     uniform01_hex: list[str]
 
 
+class _StubFloatRng:
+    def __init__(self, *draws: float) -> None:
+        self._draws = list(draws)
+        self.calls = 0
+
+    def next_float(self) -> float:
+        if self.calls >= len(self._draws):
+            raise AssertionError("stub rng exhausted")
+        draw = self._draws[self.calls]
+        self.calls += 1
+        return draw
+
+
 def _load_vectors() -> VectorPayload:
     payload = json.loads(TEST_VECTORS_PATH.read_text(encoding="utf-8"))
     return cast(VectorPayload, payload)
@@ -76,6 +95,25 @@ def _load_vectors() -> VectorPayload:
 
 def _cases() -> list[VectorCase]:
     return _load_vectors()["cases"]
+
+
+def _expected_single_row_logp(
+    logits: np.ndarray,
+    legal_ids: np.ndarray,
+    action: int,
+    *,
+    pass_action_id: int | None = None,
+) -> np.float32:
+    legal_offsets = np.array([0, legal_ids.size], dtype=np.int64)
+    actions = np.array([action], dtype=np.int64)
+    logp = masked_logp_from_legal_ids(
+        logits[np.newaxis, :],
+        legal_ids,
+        legal_offsets,
+        actions,
+        pass_action_id=pass_action_id,
+    )
+    return np.float32(logp[0])
 
 
 @pytest.mark.parametrize("case", _cases(), ids=lambda case: f"seed={case['seed64']}")
@@ -153,3 +191,167 @@ def test_pcg32_next_float_uses_top_53_bits() -> None:
 def test_pcg32_rejects_out_of_range_seed() -> None:
     with pytest.raises(ValueError, match="rng_seed64 must be in"):
         Pcg32XshRrV1(1 << 64)
+
+
+def test_sample_action_pinned_matches_anchor_sequence() -> None:
+    logits = np.array([0.0, -3.0, 0.5, -2.0, 1.0, 1.5, -4.0, -0.5], dtype=np.float32)
+    legal_ids = np.array([0, 2, 4, 5, 7], dtype=np.uint32)
+    rng = Pcg32XshRrV1(20260316)
+
+    actions = [sample_action_pinned(logits, legal_ids, rng=rng)[0] for _ in range(10)]
+
+    assert actions == PINNED_SAMPLER_ACTIONS
+
+
+def test_sample_action_pinned_returns_masking_core_logp() -> None:
+    logits = np.array([0.25, -9.0, -0.5, 8.0, 1.5, 0.75], dtype=np.float32)
+    legal_ids = np.array([0, 2, 4, 5], dtype=np.uint32)
+    rng = _StubFloatRng(0.72)
+
+    action, logp = sample_action_pinned(logits, legal_ids, rng=rng)
+
+    assert action == 4
+    assert logp == pytest.approx(_expected_single_row_logp(logits, legal_ids, action), abs=1e-6)
+    assert rng.calls == 1
+
+
+def test_sample_action_pinned_rejects_non_finite_legal_logits() -> None:
+    logits = np.array([0.25, np.nan, 1.5, 0.75], dtype=np.float32)
+    legal_ids = np.array([1, 2], dtype=np.uint32)
+    rng = _StubFloatRng(0.25)
+
+    with pytest.raises(ValueError, match="legal logits must be finite"):
+        sample_action_pinned(logits, legal_ids, rng=rng)
+
+    assert rng.calls == 0
+
+
+def test_sample_action_pinned_ignores_non_finite_illegal_logits() -> None:
+    logits = np.array([0.25, np.nan, 1.5, np.inf, 0.75], dtype=np.float32)
+    legal_ids = np.array([0, 2, 4], dtype=np.uint32)
+    rng = _StubFloatRng(0.6)
+
+    action, logp = sample_action_pinned(logits, legal_ids, rng=rng)
+
+    assert action == 2
+    assert logp == pytest.approx(_expected_single_row_logp(logits, legal_ids, action), abs=1e-6)
+    assert rng.calls == 1
+
+
+def test_sample_action_pinned_empty_legal_returns_pass_without_rng_draw() -> None:
+    logits = np.array([0.25, -0.5, 1.5, 0.75], dtype=np.float32)
+    legal_ids = np.array([], dtype=np.uint32)
+    rng = _StubFloatRng(0.4)
+
+    action, logp = sample_action_pinned(logits, legal_ids, rng=rng, pass_action_id=3)
+
+    assert action == 3
+    assert logp == pytest.approx(0.0)
+    assert rng.calls == 0
+
+
+def test_sample_action_pinned_singleton_legal_set_consumes_rng() -> None:
+    logits = np.array([0.25, -0.5, 1.5, 0.75], dtype=np.float32)
+    legal_ids = np.array([2], dtype=np.uint32)
+    rng = _StubFloatRng(0.999999)
+
+    action, logp = sample_action_pinned(logits, legal_ids, rng=rng)
+
+    assert action == 2
+    assert logp == pytest.approx(0.0)
+    assert rng.calls == 1
+
+
+def test_sample_action_pinned_skips_zero_prob_plateau_at_draw_zero() -> None:
+    logits = np.array([-1000.0, 0.0, 0.0], dtype=np.float32)
+    legal_ids = np.array([0, 1, 2], dtype=np.uint32)
+    rng = _StubFloatRng(0.0)
+
+    action, logp = sample_action_pinned(logits, legal_ids, rng=rng)
+
+    assert action == 1
+    assert logp == pytest.approx(_expected_single_row_logp(logits, legal_ids, action), abs=1e-6)
+    assert rng.calls == 1
+
+
+def test_sample_action_pinned_pins_final_bin_at_draw_one_with_zero_prob_tail() -> None:
+    logits = np.array([0.0, -1000.0, -1000.0], dtype=np.float32)
+    legal_ids = np.array([0, 1, 2], dtype=np.uint32)
+    rng = _StubFloatRng(1.0)
+
+    action, logp = sample_action_pinned(logits, legal_ids, rng=rng)
+
+    assert action == 2
+    assert logp == pytest.approx(_expected_single_row_logp(logits, legal_ids, action), abs=1e-6)
+    assert rng.calls == 1
+
+
+def test_sample_action_pinned_rounding_guard_pins_final_cdf_bin() -> None:
+    logits = np.array([0.0, 0.5, 1.0, 1.5], dtype=np.float32)
+    legal_ids = np.array([0, 1, 2, 3], dtype=np.uint32)
+    rng = _StubFloatRng(1.0)
+
+    action, logp = sample_action_pinned(logits, legal_ids, rng=rng)
+
+    assert action == 3
+    assert logp == pytest.approx(_expected_single_row_logp(logits, legal_ids, action), abs=1e-6)
+    assert rng.calls == 1
+
+
+def test_normalize_cdf_probs_counts_renormalization_anomaly() -> None:
+    probs64 = np.array([0.6, 0.400002], dtype=np.float64)
+    anomalies = EvalSamplerAnomalies()
+
+    normalized = _normalize_cdf_probs(probs64, anomalies=anomalies)
+
+    assert float(np.sum(normalized, dtype=np.float64)) == pytest.approx(1.0)
+    assert anomalies.cdf_renormalizations == 1
+
+
+def test_sample_action_pinned_plumbs_renormalization_anomaly(monkeypatch: pytest.MonkeyPatch) -> None:
+    logits = np.array([0.0, 0.5], dtype=np.float32)
+    legal_ids = np.array([0, 1], dtype=np.uint32)
+    anomalies = EvalSamplerAnomalies()
+
+    def _fake_legal_probs_for_cdf(
+        logits: np.ndarray,
+        legal_ids: np.ndarray,
+        *,
+        anomalies: EvalSamplerAnomalies | None = None,
+    ) -> np.ndarray:
+        del logits, legal_ids
+        return _normalize_cdf_probs(np.array([0.6, 0.400002], dtype=np.float64), anomalies=anomalies)
+
+    monkeypatch.setattr(eval_harness, "_legal_probs_for_cdf", _fake_legal_probs_for_cdf)
+
+    action, logp = sample_action_pinned(logits, legal_ids, rng=_StubFloatRng(0.75), anomalies=anomalies)
+
+    assert action == 1
+    assert logp == pytest.approx(_expected_single_row_logp(logits, legal_ids, action), abs=1e-6)
+    assert anomalies.cdf_renormalizations == 1
+
+
+def test_sample_action_pinned_empty_rows_do_not_consume_rng_but_non_empty_rows_do() -> None:
+    logits = np.array([0.0, 0.5, 1.0, 1.5], dtype=np.float32)
+    rng = _StubFloatRng(0.2)
+
+    pass_action, pass_logp = sample_action_pinned(
+        logits,
+        np.array([], dtype=np.uint32),
+        rng=rng,
+        pass_action_id=1,
+    )
+    sampled_action, sampled_logp = sample_action_pinned(
+        logits,
+        np.array([0, 2, 3], dtype=np.uint32),
+        rng=rng,
+    )
+
+    assert pass_action == 1
+    assert pass_logp == pytest.approx(0.0)
+    assert sampled_action == 2
+    assert sampled_logp == pytest.approx(
+        _expected_single_row_logp(logits, np.array([0, 2, 3], dtype=np.uint32), sampled_action),
+        abs=1e-6,
+    )
+    assert rng.calls == 1
