@@ -15,6 +15,7 @@ __all__ = [
     "fold_game_payoff",
     "paired_seed_mean_score",
     "paired_seed_score",
+    "paired_seed_scores",
 ]
 
 
@@ -43,21 +44,25 @@ def paired_seed_score(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldSc
     return _mean(included_scores)
 
 
-def paired_seed_mean_score(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldScheme) -> float:
+def paired_seed_scores(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldScheme) -> tuple[float, ...]:
     normalized_scheme = _normalize_scheme(scheme)
     if not records:
-        raise ValueError("paired_seed_mean_score requires at least one record")
+        raise ValueError("paired_seed_scores requires at least one record")
 
     pair_groups: dict[int, list[EvalGameRecord]] = defaultdict(list)
     for record in records:
         pair_groups[int(record.pair_index)].append(record)
 
-    pair_scores = []
+    pair_scores: list[float] = []
     for pair_index in sorted(pair_groups):
         score = paired_seed_score(pair_groups[pair_index], scheme=normalized_scheme)
         if score is not None:
             pair_scores.append(score)
+    return tuple(pair_scores)
 
+
+def paired_seed_mean_score(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldScheme) -> float:
+    pair_scores = paired_seed_scores(records, scheme=scheme)
     if pair_scores:
         return _mean(pair_scores)
     raise ValueError("S2 excluded all paired seeds")
