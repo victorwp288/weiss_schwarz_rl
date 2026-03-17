@@ -121,7 +121,11 @@ def test_summarize_stage2_records_reports_summary_and_continue_state() -> None:
         ),
     ],
 )
-def test_summarize_stage2_records_selects_stop_reason_by_priority(monkeypatch: pytest.MonkeyPatch, uncertainty: EvalUncertaintySummary, expected_reason: str) -> None:
+def test_summarize_stage2_records_selects_stop_reason_by_priority(
+    monkeypatch: pytest.MonkeyPatch,
+    uncertainty: EvalUncertaintySummary,
+    expected_reason: str,
+) -> None:
     def _fake_uncertainty(*args, **kwargs):
         return uncertainty
 

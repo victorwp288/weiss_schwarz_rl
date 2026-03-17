@@ -23,11 +23,36 @@ def main() -> None:
     parser.add_argument("--spec-hash", type=str, default="", help="Spec hash for contract validation")
     parser.add_argument("--config-hash", type=str, default="", help="Config hash for contract validation")
     parser.add_argument("--run-id", type=str, default="", help="Run identifier for reproducibility")
-    parser.add_argument("--episodes-jsonl", type=Path, default=None, help="Existing seat-swapped episodes.jsonl to summarize")
-    parser.add_argument("--summary-json", type=Path, default=None, help="Output path for summary JSON export")
-    parser.add_argument("--summary-csv", type=Path, default=None, help="Output path for summary CSV export")
-    parser.add_argument("--diagnostics-json", type=Path, default=None, help="Output path for seat diagnostics JSON export")
-    parser.add_argument("--bootstrap-samples", type=int, default=1000, help="Bootstrap sample count for uncertainty")
+    parser.add_argument(
+        "--episodes-jsonl",
+        type=Path,
+        default=None,
+        help="Existing seat-swapped episodes.jsonl to summarize",
+    )
+    parser.add_argument(
+        "--summary-json",
+        type=Path,
+        default=None,
+        help="Output path for summary JSON export",
+    )
+    parser.add_argument(
+        "--summary-csv",
+        type=Path,
+        default=None,
+        help="Output path for summary CSV export",
+    )
+    parser.add_argument(
+        "--diagnostics-json",
+        type=Path,
+        default=None,
+        help="Output path for seat diagnostics JSON export",
+    )
+    parser.add_argument(
+        "--bootstrap-samples",
+        type=int,
+        default=1000,
+        help="Bootstrap sample count for uncertainty",
+    )
     parser.add_argument("--bootstrap-seed", type=int, default=0, help="Bootstrap RNG seed")
     args = parser.parse_args()
 
