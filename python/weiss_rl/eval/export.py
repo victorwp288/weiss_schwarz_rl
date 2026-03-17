@@ -1,0 +1,151 @@
+"""Summary export helpers for seat-swapped evaluation records."""
+
+from __future__ import annotations
+
+import csv
+import json
+from pathlib import Path
+from typing import Any
+
+from weiss_rl.config.models import StopRulesConfig
+from weiss_rl.eval.harness import EvalGameRecord
+from weiss_rl.eval.payoff_folding import PayoffFoldScheme
+from weiss_rl.eval.stage2 import summarize_stage2_records
+
+__all__ = [
+    "build_matchup_export",
+    "load_eval_game_records",
+    "write_matchup_summary_csv",
+    "write_matchup_summary_json",
+]
+
+
+def load_eval_game_records(path: Path) -> tuple[EvalGameRecord, ...]:
+    records: list[EvalGameRecord] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                raise ValueError(f"expected object payload on line {line_number}")
+            try:
+                record = EvalGameRecord(
+                    pair_index=int(payload["pair_index"]),
+                    swap_index=int(payload["swap_index"]),
+                    episode_index=int(payload["episode_index"]),
+                    episode_seed=int(payload["episode_seed"]),
+                    episode_key=str(payload["episode_key"]),
+                    episode_key64=int(payload["episode_key64"]),
+                    config_hash256=str(payload["config_hash256"]),
+                    spec_hash256=str(payload["spec_hash256"]),
+                    focal_policy_id=str(payload["focal_policy_id"]),
+                    opponent_policy_id=str(payload["opponent_policy_id"]),
+                    seat0_policy_id=str(payload["seat0_policy_id"]),
+                    seat1_policy_id=str(payload["seat1_policy_id"]),
+                    focal_seat=int(payload["focal_seat"]),
+                    outcome=str(payload["outcome"]),
+                    terminated=bool(payload["terminated"]),
+                    truncated=bool(payload["truncated"]),
+                    engine_status=int(payload["engine_status"]),
+                )
+            except KeyError as exc:
+                raise ValueError(f"missing required field {exc.args[0]!r} on line {line_number}") from exc
+            records.append(record)
+    if not records:
+        raise ValueError(f"no EvalGameRecord rows found in {path}")
+    return tuple(records)
+
+
+def build_matchup_export(
+    records: tuple[EvalGameRecord, ...] | list[EvalGameRecord],
+    *,
+    stop_rules: StopRulesConfig,
+    max_paired_seeds: int,
+    scheme: PayoffFoldScheme = "S0",
+    sample_count: int = 1000,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    focal_policy_id, opponent_policy_id = _matchup_ids(records)
+    decision = summarize_stage2_records(
+        records,
+        stop_rules=stop_rules,
+        max_paired_seeds=max_paired_seeds,
+        scheme=scheme,
+        sample_count=sample_count,
+        seed=seed,
+    )
+    summary = decision.summary
+    uncertainty = decision.uncertainty
+    return {
+        "focal_policy_id": focal_policy_id,
+        "opponent_policy_id": opponent_policy_id,
+        "scheme": scheme,
+        "paired_seeds": uncertainty.paired_seed_count,
+        "max_paired_seeds": decision.max_paired_seeds,
+        "stop_reason": decision.stop_reason,
+        "should_stop": decision.should_stop,
+        "summary": {
+            "games": summary.games,
+            "wins": summary.wins,
+            "losses": summary.losses,
+            "draws": summary.draws,
+            "truncations": summary.truncations,
+            "engine_errors": summary.engine_errors,
+        },
+        "uncertainty": {
+            "mean": uncertainty.mean,
+            "ci_low": uncertainty.ci_low,
+            "ci_high": uncertainty.ci_high,
+            "ci_half_width": uncertainty.ci_half_width,
+            "prob_gt_half": uncertainty.prob_gt_half,
+            "prob_lt_half": uncertainty.prob_lt_half,
+            "paired_seed_count": uncertainty.paired_seed_count,
+            "sample_count": uncertainty.sample_count,
+        },
+    }
+
+
+def write_matchup_summary_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def write_matchup_summary_csv(path: Path, payload: dict[str, Any]) -> None:
+    summary = payload["summary"]
+    uncertainty = payload["uncertainty"]
+    row = {
+        "focal_policy_id": payload["focal_policy_id"],
+        "opponent_policy_id": payload["opponent_policy_id"],
+        "scheme": payload["scheme"],
+        "paired_seeds": payload["paired_seeds"],
+        "max_paired_seeds": payload["max_paired_seeds"],
+        "stop_reason": payload["stop_reason"],
+        "should_stop": payload["should_stop"],
+        "games": summary["games"],
+        "wins": summary["wins"],
+        "losses": summary["losses"],
+        "draws": summary["draws"],
+        "truncations": summary["truncations"],
+        "engine_errors": summary["engine_errors"],
+        "mean": uncertainty["mean"],
+        "ci_low": uncertainty["ci_low"],
+        "ci_high": uncertainty["ci_high"],
+        "ci_half_width": uncertainty["ci_half_width"],
+        "prob_gt_half": uncertainty["prob_gt_half"],
+        "prob_lt_half": uncertainty["prob_lt_half"],
+        "sample_count": uncertainty["sample_count"],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+
+
+def _matchup_ids(records: tuple[EvalGameRecord, ...] | list[EvalGameRecord]) -> tuple[str, str]:
+    focal_ids = {record.focal_policy_id for record in records}
+    opponent_ids = {record.opponent_policy_id for record in records}
+    if len(focal_ids) != 1 or len(opponent_ids) != 1:
+        raise ValueError("summary export expects records for exactly one focal/opponent matchup")
+    return next(iter(focal_ids)), next(iter(opponent_ids))
