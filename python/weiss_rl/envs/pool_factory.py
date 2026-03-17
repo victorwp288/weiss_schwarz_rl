@@ -1,57 +1,102 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from dataclasses import dataclass
+from typing import Any, Literal, Mapping
 
 Profile = Literal["debug", "balanced", "fast"]
 LayoutName = Literal["mask", "i16_legal_ids"]
 
-"""Build weiss_sim EnvPool from env_config and select an RL layout label by profile.
+REQUIRED_ENV_CONFIG_KEYS = ("max_decisions", "max_ticks", "observation_visibility")
+PROFILE_ORDER = ("debug", "balanced", "fast")
 
-    Returns:
-        (pool, layout_name)
 
-    Profile mapping (master plan §5.3 + task):
-      - debug -> legal_repr=mask_u8, obs_dtype=i32, layout_name="mask"
-      - fast  -> legal_repr=ids_u16, obs_dtype=i16, layout_name="i16_legal_ids"
-      - balanced -> legal_repr=mask_u8, obs_dtype=i16, layout_name="mask"
+@dataclass(frozen=True)
+class _ProfileSettings:
+    entrypoint: str
+    legal_repr: str
+    obs_dtype: str
+    layout_name: LayoutName
 
-    Note:
-      This factory calls weiss_sim.fast/inspect to obtain a WeissEnv and returns env.pool.
- """
 
-def make_env_pool_from_config(
-    env_config: dict[str, Any],
-    *,
-    profile: Profile,
-) -> tuple[Any, LayoutName]:
-    if profile == "debug":
-        legal_repr: str = "mask_u8"
-        obs_dtype: str = "i32"
-        layout_name: LayoutName = "mask"
-        entrypoint = "inspect"
-    elif profile == "fast":
-        legal_repr = "ids_u16"
-        obs_dtype = "i16"
-        layout_name = "i16_legal_ids"
-        entrypoint = "fast"
-    else:  # balanced
-        legal_repr = "mask_u8"
-        obs_dtype = "i16"
-        layout_name = "mask"
-        entrypoint = "fast"
+PROFILE_SETTINGS: dict[str, _ProfileSettings] = {
+    "debug": _ProfileSettings(
+        entrypoint="inspect",
+        legal_repr="mask_u8",
+        obs_dtype="i32",
+        layout_name="mask",
+    ),
+    "balanced": _ProfileSettings(
+        entrypoint="fast",
+        legal_repr="mask_u8",
+        obs_dtype="i16",
+        layout_name="mask",
+    ),
+    "fast": _ProfileSettings(
+        entrypoint="fast",
+        legal_repr="ids_u16",
+        obs_dtype="i16",
+        layout_name="i16_legal_ids",
+    ),
+}
 
-    # Import locally so weiss_rl can be imported without weiss_sim installed.
-    import weiss_sim  # type: ignore
 
-    kwargs = dict(env_config)
-    kwargs["legal_repr"] = legal_repr
-    kwargs["obs_dtype"] = obs_dtype
+def _resolve_profile_settings(profile: str) -> _ProfileSettings:
+    settings = PROFILE_SETTINGS.get(profile)
+    if settings is None:
+        expected = ", ".join(PROFILE_ORDER)
+        raise ValueError(f"Unknown profile {profile!r}. Expected one of: {expected}.")
+    return settings
 
-    # Optional: fail early if caller forgot key surfaces.
-    required = ("num_envs", "max_decisions", "max_ticks", "observation_visibility")
-    missing = [k for k in required if k not in kwargs]
+
+def _resolve_num_envs(kwargs: dict[str, Any], explicit_num_envs: int | None) -> int:
+    config_num_envs = kwargs.pop("num_envs", None)
+
+    if explicit_num_envs is not None and config_num_envs is not None:
+        raise ValueError("num_envs was provided twice. Pass it either in env_config or as num_envs=, not both.")
+
+    raw_num_envs = explicit_num_envs if explicit_num_envs is not None else config_num_envs
+    if raw_num_envs is None:
+        raise ValueError("num_envs is required. Pass it via num_envs= or include it in env_config.")
+
+    num_envs = int(raw_num_envs)
+    if num_envs < 1:
+        raise ValueError(f"num_envs must be >= 1, got {num_envs}.")
+    return num_envs
+
+
+def _validate_env_config(kwargs: Mapping[str, Any]) -> None:
+    reserved_keys = [key for key in ("legal_repr", "obs_dtype") if key in kwargs]
+    if reserved_keys:
+        raise ValueError(f"env_config cannot override profile-managed keys: {reserved_keys}")
+
+    missing = [key for key in REQUIRED_ENV_CONFIG_KEYS if key not in kwargs]
     if missing:
         raise ValueError(f"env_config missing required keys: {missing}")
 
-    env = weiss_sim.inspect(**kwargs) if entrypoint == "inspect" else weiss_sim.fast(**kwargs)
-    return env.pool, layout_name
+
+def make_env_pool_from_config(
+    env_config: Mapping[str, Any],
+    *,
+    profile: Profile,
+    num_envs: int | None = None,
+) -> tuple[Any, LayoutName]:
+    """Build a `weiss_sim` pool using profile-derived simulator settings.
+
+    `env_config` should contain the shared simulator settings. `num_envs` may be
+    passed explicitly, or omitted when it is already present in `env_config`.
+    Providing both is rejected so the call site stays unambiguous.
+    """
+
+    settings = _resolve_profile_settings(profile)
+
+    kwargs = dict(env_config)
+    _validate_env_config(kwargs)
+    kwargs["num_envs"] = _resolve_num_envs(kwargs, num_envs)
+    kwargs["legal_repr"] = settings.legal_repr
+    kwargs["obs_dtype"] = settings.obs_dtype
+
+    import weiss_sim
+
+    factory = getattr(weiss_sim, settings.entrypoint)
+    env = factory(**kwargs)
+    return env.pool, settings.layout_name
