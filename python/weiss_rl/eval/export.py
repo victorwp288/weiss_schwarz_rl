@@ -5,10 +5,10 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from weiss_rl.config.models import StopRulesConfig
-from weiss_rl.eval.harness import EvalGameRecord
+from weiss_rl.eval.harness import EvalGameRecord, OutcomeToken
 from weiss_rl.eval.payoff_folding import PayoffFoldScheme
 from weiss_rl.eval.stage2 import summarize_stage2_records
 
@@ -30,6 +30,9 @@ def load_eval_game_records(path: Path) -> tuple[EvalGameRecord, ...]:
             if not isinstance(payload, dict):
                 raise ValueError(f"expected object payload on line {line_number}")
             try:
+                outcome = str(payload["outcome"])
+                if outcome not in {"W", "L", "D", "T"}:
+                    raise ValueError(f"invalid outcome {outcome!r} on line {line_number}")
                 record = EvalGameRecord(
                     pair_index=int(payload["pair_index"]),
                     swap_index=int(payload["swap_index"]),
@@ -44,7 +47,7 @@ def load_eval_game_records(path: Path) -> tuple[EvalGameRecord, ...]:
                     seat0_policy_id=str(payload["seat0_policy_id"]),
                     seat1_policy_id=str(payload["seat1_policy_id"]),
                     focal_seat=int(payload["focal_seat"]),
-                    outcome=str(payload["outcome"]),
+                    outcome=cast(OutcomeToken, outcome),
                     terminated=bool(payload["terminated"]),
                     truncated=bool(payload["truncated"]),
                     engine_status=int(payload["engine_status"]),
