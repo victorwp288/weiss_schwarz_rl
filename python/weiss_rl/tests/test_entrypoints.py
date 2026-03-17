@@ -129,6 +129,7 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
     episodes_path = tmp_path / "episodes.jsonl"
     summary_json = tmp_path / "summary.json"
     summary_csv = tmp_path / "summary.csv"
+    diagnostics_json = tmp_path / "diagnostics.json"
     episodes_path.write_text(
         "\n".join(
             (
@@ -194,6 +195,8 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
             str(summary_json),
             "--summary-csv",
             str(summary_csv),
+            "--diagnostics-json",
+            str(diagnostics_json),
             "--bootstrap-samples",
             "16",
             "--bootstrap-seed",
@@ -203,6 +206,9 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(summary_json.read_text(encoding="utf-8"))
+    diagnostics = json.loads(diagnostics_json.read_text(encoding="utf-8"))
     assert payload["stop_reason"] == "decisive"
     assert payload["summary"]["wins"] == 2
+    assert diagnostics["seat_results"]["seat0_wins"] == 1
+    assert diagnostics["seat_results"]["seat1_wins"] == 1
     assert summary_csv.read_text(encoding="utf-8").splitlines()[0].startswith("focal_policy_id,")

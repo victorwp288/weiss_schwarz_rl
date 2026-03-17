@@ -1,5 +1,6 @@
 """Evaluation harness entry points."""
 
+from weiss_rl.eval.diagnostics import build_seat_advantage_diagnostics, write_matchup_diagnostics_json
 from weiss_rl.eval.export import build_matchup_export, load_eval_game_records, write_matchup_summary_csv, write_matchup_summary_json
 from weiss_rl.eval.harness import (
     EvalGameRecord,
@@ -48,6 +49,7 @@ __all__ = [
     "Stage2StopReason",
     "bayesian_bootstrap_summary",
     "build_matchup_export",
+    "build_seat_advantage_diagnostics",
     "build_seat_swapped_schedule",
     "fold_game_payoff",
     "game_result_from_step",
@@ -63,6 +65,7 @@ __all__ = [
     "summarize_pair_outcomes",
     "summarize_stage2_records",
     "write_episodes_jsonl",
+    "write_matchup_diagnostics_json",
     "write_matchup_summary_csv",
     "write_matchup_summary_json",
 ]
