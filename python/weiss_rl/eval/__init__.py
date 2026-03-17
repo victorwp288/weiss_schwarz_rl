@@ -24,6 +24,7 @@ from weiss_rl.eval.payoff_folding import (
     paired_seed_scores,
 )
 from weiss_rl.eval.rng_pcg32 import NEXT_U64_ORDER, PCG32_XSH_RR_V1, Pcg32XshRrV1
+from weiss_rl.eval.stage2 import Stage2Decision, Stage2StopReason, summarize_stage2_records
 from weiss_rl.eval.uncertainty import (
     EvalUncertaintySummary,
     bayesian_bootstrap_summary,
@@ -42,6 +43,8 @@ __all__ = [
     "PayoffFoldScheme",
     "Pcg32XshRrV1",
     "ScheduledGame",
+    "Stage2Decision",
+    "Stage2StopReason",
     "bayesian_bootstrap_summary",
     "build_seat_swapped_schedule",
     "fold_game_payoff",
@@ -55,5 +58,6 @@ __all__ = [
     "sample_action_pinned",
     "summarize_game_records",
     "summarize_pair_outcomes",
+    "summarize_stage2_records",
     "write_episodes_jsonl",
 ]
