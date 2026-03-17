@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from weiss_rl.masking import MaskingAnomalyCounters, apply_empty_legal_action_fallback
+
 
 def sample_actions_for_policy(
     *,
@@ -9,19 +11,25 @@ def sample_actions_for_policy(
     legal_actions,
     base_seed: int,
     step_index: int,
+    counters: MaskingAnomalyCounters | None = None,
 ) -> np.ndarray:
-    """Return one action per env using the current legal-action helper.
-
-    `legal_actions` is expected to be `batch.legal` from weiss_sim `ResetBatch` / `StepBatch`.
-    """
-
+    """Return one action per env using the current legal-action helper."""
     token = policy_name.strip().lower()
 
     if token == "first_legal":
-        return legal_actions.first_legal()
+        sampled_actions = legal_actions.first_legal()
+    elif token == "uniform_legal":
+        sampled_actions = legal_actions.sample_uniform(seed=int(base_seed) + int(step_index))
+    else:
+        raise ValueError(f"Unknown policy_name: {policy_name}")
 
-    if token == "uniform_legal":
-        # Step-dependent seed keeps the run deterministic while still varying actions.
-        return legal_actions.sample_uniform(seed=int(base_seed) + int(step_index))
+    legal_mask = getattr(legal_actions, "mask", None)
+    if legal_mask is None:
+        return sampled_actions
 
-    raise ValueError(f"Unknown policy_name: {policy_name}")
+    _, adjusted_actions = apply_empty_legal_action_fallback(
+        sampled_actions,
+        legal_mask,
+        counters=counters,
+    )
+    return adjusted_actions
