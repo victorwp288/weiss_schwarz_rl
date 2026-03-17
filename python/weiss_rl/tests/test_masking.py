@@ -140,7 +140,8 @@ def test_resolve_pass_action_id_rejects_mismatched_weiss_sim_constant(monkeypatc
         resolve_pass_action_id()
 
 
-def test_sample_actions_for_policy_applies_empty_legal_pass_fallback() -> None:
+@pytest.mark.parametrize("policy_name", ["uniform_legal", "random_legal"])
+def test_sample_actions_for_policy_applies_empty_legal_pass_fallback(policy_name: str) -> None:
     module = _load_policy_example_module()
 
     class FakeLegalActions:
@@ -156,7 +157,7 @@ def test_sample_actions_for_policy_applies_empty_legal_pass_fallback() -> None:
     counters = MaskingAnomalyCounters()
 
     actions = module.sample_actions_for_policy(
-        policy_name="uniform_legal",
+        policy_name=policy_name,
         legal_actions=legal_actions,
         base_seed=10,
         step_index=3,
