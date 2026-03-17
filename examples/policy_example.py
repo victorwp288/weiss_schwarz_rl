@@ -18,7 +18,7 @@ def sample_actions_for_policy(
 
     if token == "first_legal":
         sampled_actions = legal_actions.first_legal()
-    elif token == "uniform_legal":
+    elif token in {"uniform_legal", "random_legal"}:
         sampled_actions = legal_actions.sample_uniform(seed=int(base_seed) + int(step_index))
     else:
         raise ValueError(f"Unknown policy_name: {policy_name}")
