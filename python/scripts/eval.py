@@ -7,7 +7,9 @@ from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import load_stack_config
 from weiss_rl.eval import (
     build_matchup_export,
+    build_seat_advantage_diagnostics,
     load_eval_game_records,
+    write_matchup_diagnostics_json,
     write_matchup_summary_csv,
     write_matchup_summary_json,
 )
@@ -24,6 +26,7 @@ def main() -> None:
     parser.add_argument("--episodes-jsonl", type=Path, default=None, help="Existing seat-swapped episodes.jsonl to summarize")
     parser.add_argument("--summary-json", type=Path, default=None, help="Output path for summary JSON export")
     parser.add_argument("--summary-csv", type=Path, default=None, help="Output path for summary CSV export")
+    parser.add_argument("--diagnostics-json", type=Path, default=None, help="Output path for seat diagnostics JSON export")
     parser.add_argument("--bootstrap-samples", type=int, default=1000, help="Bootstrap sample count for uncertainty")
     parser.add_argument("--bootstrap-seed", type=int, default=0, help="Bootstrap RNG seed")
     args = parser.parse_args()
@@ -78,6 +81,11 @@ def main() -> None:
 
     print(f"Evaluation summary JSON: {summary_json}")
     print(f"Evaluation summary CSV: {summary_csv}")
+
+    if args.diagnostics_json is not None:
+        diagnostics_payload = build_seat_advantage_diagnostics(records)
+        write_matchup_diagnostics_json(args.diagnostics_json, diagnostics_payload)
+        print(f"Evaluation diagnostics JSON: {args.diagnostics_json}")
 
 
 if __name__ == "__main__":
