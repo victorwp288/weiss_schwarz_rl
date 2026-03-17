@@ -1,26 +1,117 @@
-"""Deterministic evaluation harness scaffold."""
+"""Deterministic evaluation harness and pinned sampling helpers."""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import numpy as np
 
 from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_legal_ids, masked_logp_from_mask
+from weiss_rl.repro import canonical_json_bytes, key256_to_hex, key256_to_short64, resolve_episode_key256, stable_hash64
 
 _CDF_RENORMALIZE_TOL = 1e-6
+_U32_MASK = (1 << 32) - 1
+
+OutcomeToken = Literal["W", "L", "D", "T"]
 
 
 class _FloatRng(Protocol):
     def next_float(self) -> float: ...
 
 
+class EvalGameRunner(Protocol):
+    def run_game(self, scheduled_game: "ScheduledGame") -> "GameResult": ...
+
+
 @dataclass(slots=True)
 class EvalSamplerAnomalies:
     cdf_renormalizations: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledGame:
+    pair_index: int
+    swap_index: int
+    episode_index: int
+    episode_seed: int
+    focal_policy_id: str
+    opponent_policy_id: str
+    seat0_policy_id: str
+    seat1_policy_id: str
+    focal_seat: int
+
+
+@dataclass(frozen=True, slots=True)
+class GameResult:
+    episode_seed: int
+    terminated: bool
+    truncated: bool
+    winner_seat: int | None
+    engine_status: int = 0
+    simulator_episode_key: int | bytes | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EvalGameRecord:
+    pair_index: int
+    swap_index: int
+    episode_index: int
+    episode_seed: int
+    episode_key: str
+    episode_key64: int
+    config_hash256: str
+    spec_hash256: str
+    focal_policy_id: str
+    opponent_policy_id: str
+    seat0_policy_id: str
+    seat1_policy_id: str
+    focal_seat: int
+    outcome: OutcomeToken
+    terminated: bool
+    truncated: bool
+    engine_status: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "config_hash256": self.config_hash256,
+            "engine_status": self.engine_status,
+            "episode_index": self.episode_index,
+            "episode_key": self.episode_key,
+            "episode_key64": self.episode_key64,
+            "episode_seed": self.episode_seed,
+            "focal_policy_id": self.focal_policy_id,
+            "focal_seat": self.focal_seat,
+            "opponent_policy_id": self.opponent_policy_id,
+            "outcome": self.outcome,
+            "pair_index": self.pair_index,
+            "seat0_policy_id": self.seat0_policy_id,
+            "seat1_policy_id": self.seat1_policy_id,
+            "spec_hash256": self.spec_hash256,
+            "swap_index": self.swap_index,
+            "terminated": self.terminated,
+            "truncated": self.truncated,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class EvalRunResult:
+    episodes_path: Path
+    records: tuple[EvalGameRecord, ...]
+    summary: "MatchupSummary"
+
+
+@dataclass(slots=True)
+class MatchupSummary:
+    games: int = 0
+    wins: int = 0
+    losses: int = 0
+    draws: int = 0
+    truncations: int = 0
+    engine_errors: int = 0
 
 
 def eval_sampler_logp_from_mask(
@@ -75,27 +166,162 @@ def sample_action_pinned(
     return action, logp
 
 
-@dataclass(slots=True)
-class MatchupSummary:
-    wins: int = 0
-    losses: int = 0
-    draws: int = 0
-    truncations: int = 0
+def build_seat_swapped_schedule(
+    *,
+    focal_policy_id: str,
+    opponent_policy_id: str,
+    paired_seeds: Sequence[int],
+) -> list[ScheduledGame]:
+    schedule: list[ScheduledGame] = []
+    for pair_index, raw_seed in enumerate(paired_seeds):
+        episode_seed = int(raw_seed)
+        schedule.append(
+            ScheduledGame(
+                pair_index=pair_index,
+                swap_index=0,
+                episode_index=len(schedule),
+                episode_seed=episode_seed,
+                focal_policy_id=focal_policy_id,
+                opponent_policy_id=opponent_policy_id,
+                seat0_policy_id=focal_policy_id,
+                seat1_policy_id=opponent_policy_id,
+                focal_seat=0,
+            )
+        )
+        schedule.append(
+            ScheduledGame(
+                pair_index=pair_index,
+                swap_index=1,
+                episode_index=len(schedule),
+                episode_seed=episode_seed,
+                focal_policy_id=focal_policy_id,
+                opponent_policy_id=opponent_policy_id,
+                seat0_policy_id=opponent_policy_id,
+                seat1_policy_id=focal_policy_id,
+                focal_seat=1,
+            )
+        )
+    return schedule
 
 
-def summarize_pair_outcomes(outcomes: list[str]) -> MatchupSummary:
-    out = MatchupSummary()
+def run_seat_swapped_matchup(
+    *,
+    focal_policy_id: str,
+    opponent_policy_id: str,
+    paired_seeds: Sequence[int],
+    runner: EvalGameRunner,
+    episodes_path: Path,
+    run_id256: str | bytes,
+    config_hash256: str,
+    spec_hash256: str,
+) -> EvalRunResult:
+    schedule = build_seat_swapped_schedule(
+        focal_policy_id=focal_policy_id,
+        opponent_policy_id=opponent_policy_id,
+        paired_seeds=paired_seeds,
+    )
+    records = [
+        record_completed_game(
+            scheduled_game=game,
+            result=runner.run_game(game),
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+        )
+        for game in schedule
+    ]
+    write_episodes_jsonl(episodes_path, records)
+    return EvalRunResult(
+        episodes_path=episodes_path,
+        records=tuple(records),
+        summary=summarize_game_records(records),
+    )
+
+
+def record_completed_game(
+    *,
+    scheduled_game: ScheduledGame,
+    result: GameResult,
+    run_id256: str | bytes,
+    config_hash256: str,
+    spec_hash256: str,
+) -> EvalGameRecord:
+    if int(result.episode_seed) != scheduled_game.episode_seed:
+        raise ValueError(
+            f"game result episode_seed mismatch: expected {scheduled_game.episode_seed}, got {int(result.episode_seed)}"
+        )
+    _validate_completed_game_result(result)
+
+    episode_key256 = resolve_eval_episode_key256(scheduled_game=scheduled_game, result=result, run_id256=run_id256)
+    return EvalGameRecord(
+        pair_index=scheduled_game.pair_index,
+        swap_index=scheduled_game.swap_index,
+        episode_index=scheduled_game.episode_index,
+        episode_seed=scheduled_game.episode_seed,
+        episode_key=key256_to_hex(episode_key256),
+        episode_key64=key256_to_short64(episode_key256),
+        config_hash256=_normalize_hash256(config_hash256, name="config_hash256"),
+        spec_hash256=_normalize_hash256(spec_hash256, name="spec_hash256"),
+        focal_policy_id=scheduled_game.focal_policy_id,
+        opponent_policy_id=scheduled_game.opponent_policy_id,
+        seat0_policy_id=scheduled_game.seat0_policy_id,
+        seat1_policy_id=scheduled_game.seat1_policy_id,
+        focal_seat=scheduled_game.focal_seat,
+        outcome=outcome_for_focal(result=result, focal_seat=scheduled_game.focal_seat),
+        terminated=bool(result.terminated),
+        truncated=bool(result.truncated),
+        engine_status=int(result.engine_status),
+    )
+
+
+def outcome_for_focal(*, result: GameResult, focal_seat: int) -> OutcomeToken:
+    _require_seat(focal_seat, name="focal_seat")
+    if bool(result.truncated):
+        return "T"
+    winner_seat = result.winner_seat
+    if winner_seat is None:
+        return "D"
+    winner = _require_seat(winner_seat, name="winner_seat")
+    return "W" if winner == focal_seat else "L"
+
+
+def _validate_completed_game_result(result: GameResult) -> None:
+    terminated = bool(result.terminated)
+    truncated = bool(result.truncated)
+    if terminated == truncated:
+        raise ValueError("completed game result must set exactly one of terminated or truncated")
+    if truncated and result.winner_seat is not None:
+        raise ValueError("truncated game result cannot include winner_seat")
+
+
+def summarize_pair_outcomes(outcomes: Sequence[str]) -> MatchupSummary:
+    summary = MatchupSummary()
     for token in outcomes:
-        key = token.strip().lower()
-        if key == "w":
-            out.wins += 1
-        elif key == "l":
-            out.losses += 1
-        elif key == "d":
-            out.draws += 1
-        elif key == "t":
-            out.truncations += 1
-    return out
+        normalized = _normalize_outcome_token(token)
+        summary.games += 1
+        if normalized == "W":
+            summary.wins += 1
+        elif normalized == "L":
+            summary.losses += 1
+        elif normalized == "D":
+            summary.draws += 1
+        else:
+            summary.truncations += 1
+    return summary
+
+
+def summarize_game_records(records: Sequence[EvalGameRecord]) -> MatchupSummary:
+    summary = summarize_pair_outcomes([record.outcome for record in records])
+    summary.engine_errors = sum(1 for record in records if record.engine_status != 0)
+    return summary
+
+
+def write_episodes_jsonl(path: Path, records: Sequence[EvalGameRecord]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(canonical_json_bytes(record.to_dict()).decode("utf-8"))
+            handle.write("\n")
 
 
 def _fault_env_indices(engine_status: Any) -> list[int]:
@@ -149,6 +375,129 @@ def abort_on_engine_fault_eval(
 
     fault_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     raise RuntimeError(f"{note}; wrote {fault_path}")
+
+
+def game_result_from_step(step: object, *, env_index: int = 0) -> GameResult:
+    reward = _step_scalar(step, ("reward", "rewards"), env_index=env_index, cast_fn=float)
+    terminated = _step_scalar(step, ("terminated",), env_index=env_index, cast_fn=bool)
+    truncated = _step_scalar(step, ("truncated",), env_index=env_index, cast_fn=bool)
+    engine_status = _step_scalar(step, ("engine_status",), env_index=env_index, cast_fn=int)
+    episode_seed = _step_scalar(step, ("episode_seed",), env_index=env_index, cast_fn=int)
+    simulator_episode_key = _optional_step_scalar(step, ("episode_key",), env_index=env_index)
+
+    winner_seat: int | None = None
+    if terminated:
+        if reward > 0.0:
+            winner_seat = 0
+        elif reward < 0.0:
+            winner_seat = 1
+
+    return GameResult(
+        episode_seed=episode_seed,
+        terminated=terminated,
+        truncated=truncated,
+        winner_seat=winner_seat,
+        engine_status=engine_status,
+        simulator_episode_key=simulator_episode_key,
+    )
+
+
+def resolve_eval_episode_key(
+    *,
+    scheduled_game: ScheduledGame,
+    result: GameResult,
+    run_id256: str | bytes,
+) -> str:
+    return key256_to_hex(resolve_eval_episode_key256(scheduled_game=scheduled_game, result=result, run_id256=run_id256))
+
+
+def resolve_eval_episode_key256(
+    *,
+    scheduled_game: ScheduledGame,
+    result: GameResult,
+    run_id256: str | bytes,
+) -> bytes:
+    matchup_id = f"{scheduled_game.focal_policy_id}\0{scheduled_game.opponent_policy_id}"
+    return resolve_episode_key256(
+        simulator_episode_key=result.simulator_episode_key,
+        run_id256=_coerce_run_id256(run_id256),
+        actor_id=_stable_u32(scheduled_game.focal_policy_id),
+        env_id=_stable_u32(matchup_id),
+        episode_index=scheduled_game.episode_index,
+        episode_seed64=scheduled_game.episode_seed,
+    )
+
+
+def _coerce_run_id256(run_id256: str | bytes) -> bytes:
+    if isinstance(run_id256, bytes):
+        if len(run_id256) != 32:
+            raise ValueError(f"run_id256 must be 32 bytes, got {len(run_id256)}")
+        return run_id256
+    normalized = run_id256.strip()
+    if len(normalized) != 64:
+        raise ValueError(f"run_id256 must be 64 hex chars, got {len(normalized)}")
+    return bytes.fromhex(normalized)
+
+
+def _normalize_hash256(value: str, *, name: str) -> str:
+    normalized = value.strip().lower()
+    if len(normalized) != 64:
+        raise ValueError(f"{name} must be 64 hex chars, got {len(normalized)}")
+    bytes.fromhex(normalized)
+    return normalized
+
+
+def _stable_u32(value: str) -> int:
+    return stable_hash64(value.encode("utf-8")) & _U32_MASK
+
+
+def _normalize_outcome_token(token: str) -> OutcomeToken:
+    normalized = token.strip().upper()
+    if normalized == "W":
+        return "W"
+    if normalized == "L":
+        return "L"
+    if normalized == "D":
+        return "D"
+    if normalized == "T":
+        return "T"
+    raise ValueError(f"unknown outcome token: {token!r}")
+
+
+def _require_seat(value: int, *, name: str) -> int:
+    seat = int(value)
+    if seat not in (0, 1):
+        raise ValueError(f"{name} must be 0 or 1, got {seat}")
+    return seat
+
+
+def _step_scalar(
+    step: object,
+    names: Sequence[str],
+    *,
+    env_index: int,
+    cast_fn: Any,
+) -> Any:
+    for name in names:
+        if hasattr(step, name):
+            values = np.asarray(getattr(step, name))
+            return cast_fn(values[env_index])
+    joined_names = ", ".join(names)
+    raise AttributeError(f"step is missing required field(s): {joined_names}")
+
+
+def _optional_step_scalar(step: object, names: Sequence[str], *, env_index: int) -> int | bytes | None:
+    for name in names:
+        if not hasattr(step, name):
+            continue
+        values = np.asarray(getattr(step, name))
+        value = values[env_index]
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, bytes):
+            return value
+        return int(value)
+    return None
 
 
 def _coerce_eval_logits(logits: np.ndarray) -> np.ndarray:
