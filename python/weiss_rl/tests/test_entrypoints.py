@@ -7,9 +7,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.spec import spec_bundle_hash
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _mismatched_sha256(value: str) -> str:
+    return ("0" if value[0] != "0" else "1") + value[1:]
 
 
 def _write_stub_weiss_sim(tmp_path: Path, *, spec_hash: int = 123) -> dict[str, object]:
@@ -185,6 +190,23 @@ def test_eval_entrypoint_reports_run_label_without_claiming_run_identity(tmp_pat
     assert "run_label:              eval_report_label" in result.stdout
     assert "computed_run_id64:" not in result.stdout
     assert "computed_run_id256:" not in result.stdout
+
+
+def test_eval_entrypoint_fails_fast_on_config_hash_mismatch(tmp_path: Path) -> None:
+    _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+    config_hash256 = compute_config_hash256(load_stack_config(stack_config))
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="eval.py",
+        stack_config=stack_config,
+        spec_hash="",
+        extra_args=["--config-hash", _mismatched_sha256(config_hash256)],
+    )
+
+    assert result.returncode != 0
+    assert "--config-hash mismatch" in result.stderr
 
 
 def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:

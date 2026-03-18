@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import cast
 
 from weiss_rl.cli_banner import print_startup_banner
-from weiss_rl.config import load_stack_config
+from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.eval import (
     build_matchup_export,
     build_seat_advantage_diagnostics,
@@ -14,8 +15,34 @@ from weiss_rl.eval import (
     write_matchup_summary_csv,
     write_matchup_summary_json,
 )
+from weiss_rl.eval.payoff_folding import PayoffFoldScheme
 from weiss_rl.simulator_contract import load_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract
+
+_SHA256_HEX_LENGTH = 64
+
+
+def _normalize_sha256(value: str) -> str:
+    normalized = value.strip().lower()
+    if len(normalized) != _SHA256_HEX_LENGTH:
+        return ""
+    if any(char not in "0123456789abcdef" for char in normalized):
+        return ""
+    return normalized
+
+
+def _expected_sha256(value: str, *, flag_name: str) -> str:
+    if not value.strip():
+        return ""
+    normalized = _normalize_sha256(value)
+    if not normalized:
+        raise ValueError(f"{flag_name} must be a 64-character lowercase or uppercase SHA-256 hex string")
+    return normalized
+
+
+def _require_matching_hash(*, flag_name: str, expected: str, actual: str) -> None:
+    if expected and expected != actual:
+        raise RuntimeError(f"{flag_name} mismatch: expected {expected}, observed {actual}")
 
 
 def _resolve_run_label(parser: argparse.ArgumentParser, run_label: str, run_id_alias: str) -> str:
@@ -73,6 +100,13 @@ def main() -> None:
         parser.error("--summary-json/--summary-csv require --episodes-jsonl")
 
     stack = load_stack_config(args.stack_config)
+    config_hash256 = compute_config_hash256(stack)
+    _require_matching_hash(
+        flag_name="--config-hash",
+        expected=_expected_sha256(args.config_hash, flag_name="--config-hash"),
+        actual=config_hash256,
+    )
+
     reproducibility = stack.config.reproducibility
     policy = "hard_fail"
     contract = None
@@ -113,7 +147,7 @@ def main() -> None:
         records,
         stop_rules=evaluation.stop_rules,
         max_paired_seeds=evaluation.final_matrix_stage2_adaptive_max_paired_seeds,
-        scheme=evaluation.final_policy_set_selection.folding,
+        scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
         sample_count=args.bootstrap_samples,
         seed=args.bootstrap_seed,
     )
