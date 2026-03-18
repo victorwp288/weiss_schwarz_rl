@@ -4,12 +4,13 @@ import argparse
 import os
 import platform
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import StackConfig, canonical_config_dict, compute_config_hash256, load_stack_config
-from weiss_rl.manifest import RunManifest, build_seed_file_manifest, write_run_artifacts
+from weiss_rl.manifest import RunManifest, build_seed_file_manifest, default_run_dir_name, write_run_artifacts
 from weiss_rl.repro import compute_run_id64, compute_run_id256
 from weiss_rl.simulator_contract import load_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract
@@ -112,6 +113,16 @@ def _spec_mismatch_policy(stack: StackConfig) -> str:
     return "hard_fail" if reproducibility.spec_bundle.fail_on_spec_mismatch else "disabled"
 
 
+def _resolve_run_label(parser: argparse.ArgumentParser, run_label: str, run_id_alias: str) -> str:
+    normalized_label = run_label.strip()
+    normalized_alias = run_id_alias.strip()
+    if normalized_label and normalized_alias and normalized_label != normalized_alias:
+        parser.error("--run-label and deprecated --run-id must match when both are provided")
+    if normalized_alias:
+        print("Warning: --run-id is deprecated; use --run-label instead.", file=sys.stderr)
+    return normalized_label or normalized_alias
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train scaffold entrypoint")
     parser.add_argument("--stack-config", type=Path, required=True)
@@ -122,8 +133,10 @@ def main() -> None:
         default="",
         help="Expected config_hash256 for contract validation",
     )
-    parser.add_argument("--run-id", type=str, default="", help="Run directory label override")
+    parser.add_argument("--run-label", type=str, default="", help="Optional run directory label override")
+    parser.add_argument("--run-id", dest="run_id_alias", type=str, default="", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    run_label = _resolve_run_label(parser, args.run_label, args.run_id_alias)
 
     stack = load_stack_config(args.stack_config)
     simulator_contract = load_simulator_contract(stack.root)
@@ -141,8 +154,17 @@ def main() -> None:
     start_nonce = _start_nonce()
     run_id256 = compute_run_id256(spec_hash256, config_hash256, git_commit or None, start_nonce)
     run_id64 = f"{compute_run_id64(spec_hash256, config_hash256, git_commit or None, start_nonce):016x}"
+    run_dir_name = run_label or default_run_dir_name(run_id64)
 
-    print_startup_banner(spec_hash256, config_hash256, run_id64, spec_mismatch_policy=_spec_mismatch_policy(stack))
+    print_startup_banner(
+        spec_hash256,
+        config_hash256,
+        run_id64=run_id64,
+        run_id256=run_id256,
+        run_label=run_label,
+        run_dir_name=run_dir_name,
+        spec_mismatch_policy=_spec_mismatch_policy(stack),
+    )
     print(
         "Verified runtime spec bundle: "
         f"compat={simulator_contract.simulator.get('compatibility_hash', '')} sha256={spec_hash256}"
@@ -168,7 +190,7 @@ def main() -> None:
     artifacts = write_run_artifacts(
         stack.root / "runs",
         manifest,
-        run_dir_name=args.run_id.strip() or None,
+        run_label=run_label or None,
     )
     print(f"Wrote manifest: {artifacts.manifest_path}")
 

@@ -51,7 +51,8 @@ def _run_entrypoint(
     script_name: str,
     stack_config: Path,
     spec_hash: str,
-    run_id: str = "",
+    run_label: str = "",
+    run_id_alias: str = "",
     extra_args: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
@@ -62,8 +63,10 @@ def _run_entrypoint(
     command = [sys.executable, str(REPO_ROOT / "python" / "scripts" / script_name), "--stack-config", str(stack_config)]
     if spec_hash:
         command.extend(["--spec-hash", spec_hash])
-    if run_id:
-        command.extend(["--run-id", run_id])
+    if run_label:
+        command.extend(["--run-label", run_label])
+    if run_id_alias:
+        command.extend(["--run-id", run_id_alias])
     if extra_args:
         command.extend(extra_args)
 
@@ -79,7 +82,7 @@ def test_train_entrypoint_fails_fast_on_runtime_spec_mismatch(tmp_path: Path) ->
         script_name="train.py",
         stack_config=stack_config,
         spec_hash="999",
-        run_id="mismatch_run",
+        run_label="mismatch_run",
     )
 
     assert result.returncode != 0
@@ -95,7 +98,7 @@ def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
         script_name="train.py",
         stack_config=stack_config,
         spec_hash=str(bundle["spec_hash"]),
-        run_id="spec_bundle_run",
+        run_label="spec_bundle_run",
     )
 
     assert result.returncode == 0, result.stderr
@@ -106,6 +109,47 @@ def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
     assert manifest["spec_bundle"] == bundle
     assert (manifest_path.parent / "spec_bundle.json").is_file()
     assert (manifest_path.parent / "spec_hash256.txt").read_text(encoding="utf-8").strip() == spec_bundle_hash(bundle)
+    assert "computed_run_id64:" in result.stdout
+    assert "computed_run_id256:" in result.stdout
+    assert "run_label:              spec_bundle_run" in result.stdout
+    assert "run_dir_name:           spec_bundle_run" in result.stdout
+
+
+def test_train_entrypoint_uses_default_run_dir_when_no_label_override(tmp_path: Path) -> None:
+    _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash="123",
+    )
+
+    assert result.returncode == 0, result.stderr
+    manifest_path_line = next(line for line in result.stdout.splitlines() if line.startswith("Wrote manifest: "))
+    manifest_path = Path(manifest_path_line.removeprefix("Wrote manifest: ").strip())
+    assert manifest_path.name == "manifest.json"
+    assert manifest_path.parent.name.startswith("run_")
+    assert "run_label:              (default)" in result.stdout
+    assert f"run_dir_name:           {manifest_path.parent.name}" in result.stdout
+
+
+def test_train_entrypoint_accepts_deprecated_run_id_alias(tmp_path: Path) -> None:
+    _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash="123",
+        run_id_alias="compat_alias_run",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "deprecated; use --run-label instead" in result.stderr
+    assert (tmp_path / "runs" / "compat_alias_run" / "manifest.json").is_file()
 
 
 def test_eval_entrypoint_accepts_spec_bundle_sha256(tmp_path: Path) -> None:
@@ -121,6 +165,26 @@ def test_eval_entrypoint_accepts_spec_bundle_sha256(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "Verified runtime spec bundle" in result.stdout
+    assert "run_label:              (default)" in result.stdout
+    assert "computed_run_id64:" not in result.stdout
+
+
+def test_eval_entrypoint_reports_run_label_without_claiming_run_identity(tmp_path: Path) -> None:
+    _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="eval.py",
+        stack_config=stack_config,
+        spec_hash="",
+        run_label="eval_report_label",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "run_label:              eval_report_label" in result.stdout
+    assert "computed_run_id64:" not in result.stdout
+    assert "computed_run_id256:" not in result.stdout
 
 
 def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:

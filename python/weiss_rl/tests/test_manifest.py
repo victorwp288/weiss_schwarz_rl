@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from weiss_rl.config import canonical_config_dict, compute_config_hash256, load_stack_config
-from weiss_rl.manifest import RunManifest, build_seed_file_manifest, write_run_artifacts
+from weiss_rl.manifest import RunManifest, build_seed_file_manifest, default_run_dir_name, write_run_artifacts
 
 
 def test_write_run_artifacts_creates_manifest_scaffold(tmp_path: Path) -> None:
@@ -29,6 +29,7 @@ def test_write_run_artifacts_creates_manifest_scaffold(tmp_path: Path) -> None:
 
     artifacts = write_run_artifacts(tmp_path, manifest)
 
+    assert artifacts.run_dir_name == default_run_dir_name("0123456789abcdef")
     assert artifacts.run_dir == tmp_path / "run_0123456789abcdef"
     assert artifacts.manifest_path.exists()
     assert artifacts.spec_bundle_path.exists()
@@ -42,3 +43,18 @@ def test_write_run_artifacts_creates_manifest_scaffold(tmp_path: Path) -> None:
     assert (artifacts.run_dir / "figures").is_dir()
     assert (artifacts.run_dir / "logs").is_dir()
     assert (artifacts.run_dir / "replays").is_dir()
+
+
+def test_write_run_artifacts_uses_explicit_run_label(tmp_path: Path) -> None:
+    manifest = RunManifest(
+        run_id256="ab" * 32,
+        run_id64="0123456789abcdef",
+        start_nonce=7,
+        git_commit="deadbeef" * 5,
+        git_dirty=False,
+    )
+
+    artifacts = write_run_artifacts(tmp_path, manifest, run_label="smoke_local")
+
+    assert artifacts.run_dir_name == "smoke_local"
+    assert artifacts.run_dir == tmp_path / "smoke_local"

@@ -31,12 +31,16 @@ This does not execute training. It verifies:
 Run:
 
 ```bash
-uv run python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-id smoke_local
+uv run python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label smoke_local
 ```
 
 Expected console lines:
 - `Loaded stack config with 0 components`
+- `computed_run_id64:` and `computed_run_id256:` entries in the startup contract
+- `run_label:              smoke_local`
 - `Wrote manifest: runs/smoke_local/manifest.json`
+
+`--run-label` only controls the human-friendly run directory name. The computed run identity is recorded separately in the banner and manifest. `--run-id` is still accepted as a deprecated compatibility alias for the label override.
 
 ## Expected output files
 After the smoke run, you should have:
