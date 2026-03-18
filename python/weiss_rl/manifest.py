@@ -48,6 +48,7 @@ class RunManifest:
 @dataclass(frozen=True, slots=True)
 class RunArtifacts:
     run_dir: Path
+    run_dir_name: str
     manifest_path: Path
     spec_bundle_path: Path
     spec_hash_path: Path
@@ -66,8 +67,12 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def write_run_artifacts(base_dir: Path, manifest: RunManifest, *, run_dir_name: str | None = None) -> RunArtifacts:
-    directory_name = run_dir_name or f"run_{manifest.run_id64}"
+def default_run_dir_name(run_id64: str) -> str:
+    return f"run_{run_id64}"
+
+
+def write_run_artifacts(base_dir: Path, manifest: RunManifest, *, run_label: str | None = None) -> RunArtifacts:
+    directory_name = run_label or default_run_dir_name(manifest.run_id64)
     run_dir = base_dir / directory_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -88,6 +93,7 @@ def write_run_artifacts(base_dir: Path, manifest: RunManifest, *, run_dir_name: 
 
     return RunArtifacts(
         run_dir=run_dir,
+        run_dir_name=directory_name,
         manifest_path=manifest_path,
         spec_bundle_path=spec_bundle_path,
         spec_hash_path=spec_hash_path,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from weiss_rl.cli_banner import print_startup_banner
@@ -17,12 +18,23 @@ from weiss_rl.simulator_contract import load_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract
 
 
+def _resolve_run_label(parser: argparse.ArgumentParser, run_label: str, run_id_alias: str) -> str:
+    normalized_label = run_label.strip()
+    normalized_alias = run_id_alias.strip()
+    if normalized_label and normalized_alias and normalized_label != normalized_alias:
+        parser.error("--run-label and deprecated --run-id must match when both are provided")
+    if normalized_alias:
+        print("Warning: --run-id is deprecated; use --run-label instead.", file=sys.stderr)
+    return normalized_label or normalized_alias
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluation scaffold entrypoint")
     parser.add_argument("--stack-config", type=Path, required=True)
     parser.add_argument("--spec-hash", type=str, default="", help="Spec hash for contract validation")
     parser.add_argument("--config-hash", type=str, default="", help="Config hash for contract validation")
-    parser.add_argument("--run-id", type=str, default="", help="Run identifier for reproducibility")
+    parser.add_argument("--run-label", type=str, default="", help="Optional run label for logs and reports")
+    parser.add_argument("--run-id", dest="run_id_alias", type=str, default="", help=argparse.SUPPRESS)
     parser.add_argument(
         "--episodes-jsonl",
         type=Path,
@@ -55,6 +67,7 @@ def main() -> None:
     )
     parser.add_argument("--bootstrap-seed", type=int, default=0, help="Bootstrap RNG seed")
     args = parser.parse_args()
+    run_label = _resolve_run_label(parser, args.run_label, args.run_id_alias)
 
     if args.episodes_jsonl is None and (args.summary_json is not None or args.summary_csv is not None):
         parser.error("--summary-json/--summary-csv require --episodes-jsonl")
@@ -75,7 +88,12 @@ def main() -> None:
             contract = load_simulator_contract(stack.root)
             assert_spec_bundle_contract(args.spec_hash, contract.spec_bundle)
 
-    print_startup_banner(args.spec_hash, args.config_hash, args.run_id, spec_mismatch_policy=policy)
+    print_startup_banner(
+        args.spec_hash,
+        args.config_hash,
+        run_label=run_label,
+        spec_mismatch_policy=policy,
+    )
     if contract is not None:
         print(
             "Verified runtime spec bundle: "
