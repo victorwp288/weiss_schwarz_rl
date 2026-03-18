@@ -6,9 +6,12 @@ from typing import TypedDict, cast
 
 import numpy as np
 import pytest
+import torch
 
+from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
 from weiss_rl.learners.impala_learner import ImpalaLearner, summarize_vtrace_diagnostics
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
+from weiss_rl.model import PolicyValueModel
 
 TEST_VECTORS_PATH = Path(__file__).with_name("test_vectors") / "vtrace_v1.json"
 
@@ -33,6 +36,70 @@ def _load_fixture() -> VTraceFixture:
 
 def _array(rows: list[list[float]]) -> np.ndarray:
     return np.asarray(rows, dtype=np.float32)
+
+
+def _model_config() -> ModelConfig:
+    return ModelConfig(
+        gru_hidden_size=8,
+        encoder_mlp_width=8,
+        encoder_mlp_layers=1,
+        layer_norm=False,
+        dropout=ModelDropoutConfig(family_a=0.0, ablation=0.0),
+    )
+
+
+def _synthetic_training_batch(learner: ImpalaLearner) -> dict[str, object]:
+    obs = np.asarray(
+        [
+            [[1.0, 0.0, 0.5, -1.0], [0.0, 1.0, -0.5, 0.5]],
+            [[0.5, -1.0, 1.0, 0.0], [1.0, 0.5, 0.0, -0.5]],
+            [[-0.5, 0.5, 1.5, 0.5], [1.0, -0.5, 0.5, 1.0]],
+        ],
+        dtype=np.float32,
+    )
+    actions = np.asarray(
+        [
+            [1, 2],
+            [2, 0],
+            [3, 1],
+        ],
+        dtype=np.int64,
+    )
+    legal_mask = np.asarray(
+        [
+            [[1, 1, 0, 0], [1, 0, 1, 0]],
+            [[0, 1, 1, 0], [1, 1, 0, 0]],
+            [[1, 0, 0, 1], [0, 1, 1, 1]],
+        ],
+        dtype=np.uint8,
+    )
+
+    with torch.no_grad():
+        _, values = learner._forward_time_major(torch.from_numpy(obs))
+
+    value_targets = values + torch.tensor(
+        [[0.50, -0.25], [0.75, 0.50], [-0.50, 0.25]],
+        dtype=values.dtype,
+        device=values.device,
+    )
+    advantages = torch.tensor(
+        [[1.00, 0.75], [0.50, 1.25], [1.50, 0.50]],
+        dtype=values.dtype,
+        device=values.device,
+    )
+
+    return {
+        "obs": obs,
+        "actions": actions,
+        "legal_mask": legal_mask,
+        "vtrace_result": VTraceTargets(
+            vs=value_targets.cpu().numpy().astype(np.float32),
+            pg_advantages=advantages.cpu().numpy().astype(np.float32),
+            rhos=np.ones((3, 2), dtype=np.float32),
+        ),
+        "vtrace_rho_bar": 1.0,
+        "vtrace_c_bar": 1.0,
+    }
 
 
 def test_compute_vtrace_targets_matches_golden_fixture() -> None:
@@ -191,3 +258,29 @@ def test_impala_learner_update_exposes_vtrace_metrics() -> None:
     assert metrics["vtrace_rho_p95"] == pytest.approx(1.6487212955951691)
     assert metrics["vtrace_rho_clip_rate"] == pytest.approx(0.5)
     assert metrics["vtrace_c_clip_rate"] == pytest.approx(0.5)
+
+
+def test_impala_learner_update_reduces_fixed_batch_loss_on_synthetic_targets() -> None:
+    torch.manual_seed(0)
+
+    model = PolicyValueModel(observation_dim=4, action_dim=4, config=_model_config())
+    learner = ImpalaLearner(
+        model=model,
+        learning_rate=0.05,
+        value_loss_coef=0.5,
+        entropy_coef=0.0,
+        grad_norm_clip=10.0,
+    )
+    batch = _synthetic_training_batch(learner)
+
+    before_loss, before_metrics = learner._loss_and_metrics(batch)
+    update_metrics = learner.update(batch)
+    after_loss, after_metrics = learner._loss_and_metrics(batch)
+
+    assert update_metrics["loss"] == pytest.approx(float(before_loss.detach()))
+    assert update_metrics["policy_loss"] == pytest.approx(before_metrics["policy_loss"])
+    assert update_metrics["value_loss"] == pytest.approx(before_metrics["value_loss"])
+    assert update_metrics["entropy"] > 0.0
+    assert update_metrics["grad_norm"] > 0.0
+    assert after_metrics["loss"] < before_metrics["loss"]
+    assert float(after_loss.detach()) == pytest.approx(after_metrics["loss"])
