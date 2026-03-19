@@ -9,11 +9,10 @@ import numpy as np
 
 from weiss_rl.masking import (
     MaskingAnomalyCounters,
-    apply_empty_legal_action_fallback,
-    masked_log_softmax,
     masked_logp_from_legal_ids,
-    masked_logp_from_mask,
     resolve_pass_action_id,
+    sample_actions_from_legal_ids,
+    sample_actions_from_mask,
 )
 
 LayoutName = Literal["i16_legal_ids", "mask"]
@@ -29,6 +28,8 @@ class UnrollBatch:
     Notes:
     - obs dtype/layout depends on simulator layout; keep as np.ndarray.
     - legal surfaces: either (legal_ids, legal_offsets) OR (legal_mask).
+    - ids/offsets batches use one coherent flattened packed representation over
+      the row-major decision order of ``obs.reshape(T * N, ...)``.
     """
 
     # dimensions
@@ -50,8 +51,8 @@ class UnrollBatch:
     behavior_logp: np.ndarray  # (T, N) float32
 
     # legality surfaces (layout-dependent)
-    legal_ids: np.ndarray | None = None  # (sum_k,) int
-    legal_offsets: np.ndarray | None = None  # (T, N+1) or flattened offsets
+    legal_ids: np.ndarray | None = None  # (sum_k,) int, flattened over T*N rows
+    legal_offsets: np.ndarray | None = None  # (T*N + 1,) flattened packed offsets
     legal_mask: np.ndarray | None = None  # (T, N, A) uint8/bool
 
     # optional debug
@@ -78,7 +79,8 @@ class ActorWorker:
         Collect one fixed-length unroll of shape (T, N).
 
         Parameters
-        - env: a simulator wrapper you already have (WeissEnv or something exposing reset/step batches)
+        - env: ideally a DecisionBoundary-style env exposing reset()/step() that
+          returns batches with reward + mask/ids_offsets.
         - policy_logits_fn: callable that returns logits given obs (+ maybe seat).
             Signature expected (minimal): logits = policy_logits_fn(obs_batch, to_play_seat_batch)
             where logits is (N, A) float32
@@ -96,9 +98,7 @@ class ActorWorker:
         pass_action_id = resolve_pass_action_id()
         anomaly = MaskingAnomalyCounters()
 
-        # Allocate fixed-shape arrays.
-        # These dtypes are chosen to align with master-plan intent.
-        obs_buf = None  # allocated after first reset when obs dtype known
+        obs_buf: np.ndarray | None = None
         to_play_buf = np.empty((T, N), dtype=np.int8)
         decision_id_buf = np.empty((T, N), dtype=np.int32)
         action_buf = np.empty((T, N), dtype=np.uint32)
@@ -111,49 +111,37 @@ class ActorWorker:
         behavior_logp_buf = np.empty((T, N), dtype=np.float32)
         entropy_buf = np.empty((T, N), dtype=np.float32)
 
-        # For ids_offsets layout, store packed legal_ids and per-step offsets.
-        # We store offsets per t as (N+1,) pointing into one concatenated legal_ids vector for that t.
-        legal_ids_steps: list[np.ndarray] = []
-        legal_offsets_steps: list[np.ndarray] = []
+        packed_legal_ids: list[np.ndarray] = []
+        packed_legal_offsets: list[np.ndarray] = [np.array([0], dtype=np.uint32)]
+        legal_mask_buf: np.ndarray | None = None
 
-        # For mask layout.
-        legal_mask_buf = None
-
-        # Reset once at the start of the unroll.
         batch = env.reset()
 
-        # Allocate obs buffer once we see obs shape.
         obs0 = np.asarray(batch.obs)
         if obs0.ndim != 2 or obs0.shape[0] != N:
             raise ValueError("expected batch.obs shape (N, OBS_LEN)")
         obs_buf = np.empty((T, N, obs0.shape[1]), dtype=obs0.dtype)
 
-        # Main rollout loop.
         for t in range(T):
             obs = np.asarray(batch.obs)
-            to_play = np.asarray(batch.actor) if hasattr(batch, "actor") else np.asarray(batch.to_play_seat)
+            to_play = _batch_to_play(batch)
             decision_id = np.asarray(batch.decision_id)
-            rewards = np.asarray(batch.rewards)
+            reward = _batch_reward(batch)
             terminated = np.asarray(batch.terminated)
             truncated = np.asarray(batch.truncated)
             engine_status = np.asarray(batch.engine_status)
-
-            # These two may not exist depending on simulator layout; guard conservatively.
             episode_seed = np.asarray(getattr(batch, "episode_seed", np.zeros((N,), dtype=np.uint64)), dtype=np.uint64)
             episode_key = np.asarray(getattr(batch, "episode_key", np.zeros((N,), dtype=np.uint64)), dtype=np.uint64)
 
-            if obs.shape[0] != N:
-                raise ValueError("batch dimension mismatch")
+            if obs.shape != (N, obs_buf.shape[2]):
+                raise ValueError("batch.obs shape changed within unroll")
 
             logits = np.asarray(policy_logits_fn(obs, to_play), dtype=np.float32)
             if logits.shape != (N, A):
                 raise ValueError(f"policy_logits_fn must return shape (N, A)=({N}, {A})")
 
             if self.layout_name == "i16_legal_ids":
-                # Expect packed legal ids surfaces in the batch.
-                legal_ids = np.asarray(batch.legal_ids)
-                legal_offsets = np.asarray(batch.legal_offsets)
-                # sample actions + behavior logp + entropy
+                legal_ids, legal_offsets = _batch_legal_ids_offsets(batch)
                 actions, logp, ent = sample_actions_from_legal_ids(
                     logits,
                     legal_ids,
@@ -162,12 +150,14 @@ class ActorWorker:
                     counters=anomaly,
                     pass_action_id=pass_action_id,
                 )
-                # record legal surfaces per step (keep per-step packed representation)
-                legal_ids_steps.append(np.asarray(legal_ids))
-                legal_offsets_steps.append(np.asarray(legal_offsets))
+
+                base = int(packed_legal_offsets[-1][-1])
+                packed_legal_ids.append(legal_ids.astype(np.int32, copy=False))
+                packed_legal_offsets.append((legal_offsets[1:] + base).astype(np.uint32, copy=False))
             else:
-                # mask layout
-                legal_mask = np.asarray(batch.masks)
+                legal_mask = _batch_legal_mask(batch)
+                if legal_mask.shape != (N, A):
+                    raise ValueError(f"expected legal_mask shape (N, A)=({N}, {A})")
                 if legal_mask_buf is None:
                     legal_mask_buf = np.empty((T, N, A), dtype=legal_mask.dtype)
                 actions, logp, ent = sample_actions_from_mask(
@@ -179,12 +169,11 @@ class ActorWorker:
                 )
                 legal_mask_buf[t] = legal_mask
 
-            # Write step fields into buffers.
             obs_buf[t] = obs
             to_play_buf[t] = to_play.astype(np.int8, copy=False)
             decision_id_buf[t] = decision_id.astype(np.int32, copy=False)
             action_buf[t] = actions.astype(np.uint32, copy=False)
-            reward_buf[t] = rewards.astype(np.float32, copy=False)
+            reward_buf[t] = reward.astype(np.float32, copy=False)
             terminated_buf[t] = terminated.astype(np.bool_, copy=False)
             truncated_buf[t] = truncated.astype(np.bool_, copy=False)
             engine_status_buf[t] = engine_status.astype(np.int32, copy=False)
@@ -193,20 +182,16 @@ class ActorWorker:
             behavior_logp_buf[t] = logp.astype(np.float32, copy=False)
             entropy_buf[t] = ent.astype(np.float32, copy=False)
 
-            # Step environment.
             batch = env.step(action_buf[t])
 
-        # Package legality surfaces.
         if self.layout_name == "i16_legal_ids":
-            # For M3-03 we can keep a simple per-step list and concatenate.
-            # M3-04 will likely switch this into a single packed buffer with offsets.
-            legal_ids_packed = np.concatenate(legal_ids_steps, axis=0) if legal_ids_steps else np.zeros((0,), dtype=np.int32)
-
-            # Offsets are per-step, so keep (T, N+1) for now (fixed-shape).
-            legal_offsets_mat = np.stack(legal_offsets_steps, axis=0).astype(np.uint32, copy=False)
+            legal_ids_final = (
+                np.concatenate(packed_legal_ids, axis=0).astype(np.int32, copy=False)
+                if packed_legal_ids
+                else np.zeros((0,), dtype=np.int32)
+            )
+            legal_offsets_final = np.concatenate(packed_legal_offsets, axis=0).astype(np.uint32, copy=False)
             legal_mask_final = None
-            legal_ids_final = legal_ids_packed
-            legal_offsets_final = legal_offsets_mat
         else:
             legal_ids_final = None
             legal_offsets_final = None
@@ -234,3 +219,58 @@ class ActorWorker:
             counters={"empty_legal": anomaly.empty_legal},
         )
 
+
+def actor_behavior_logp_from_legal_ids(
+    logits: np.ndarray,
+    legal_ids: np.ndarray,
+    legal_offsets: np.ndarray,
+    actions: np.ndarray,
+    *,
+    pass_action_id: int | None = None,
+) -> np.ndarray:
+    """Compatibility wrapper kept for older masking tests and actor code."""
+    return masked_logp_from_legal_ids(
+        logits,
+        legal_ids,
+        legal_offsets,
+        actions,
+        pass_action_id=pass_action_id,
+    )
+
+
+def _batch_to_play(batch: Any) -> np.ndarray:
+    if hasattr(batch, "to_play"):
+        return np.asarray(batch.to_play)
+    if hasattr(batch, "to_play_seat"):
+        return np.asarray(batch.to_play_seat)
+    if hasattr(batch, "actor"):
+        return np.asarray(batch.actor)
+    raise AttributeError("batch must expose .to_play, .to_play_seat, or .actor")
+
+
+def _batch_reward(batch: Any) -> np.ndarray:
+    if hasattr(batch, "reward"):
+        return np.asarray(batch.reward)
+    if hasattr(batch, "rewards"):
+        return np.asarray(batch.rewards)
+    raise AttributeError("batch must expose .reward or .rewards")
+
+
+def _batch_legal_mask(batch: Any) -> np.ndarray:
+    if hasattr(batch, "mask"):
+        return np.asarray(batch.mask)
+    if hasattr(batch, "masks"):
+        return np.asarray(batch.masks)
+    raise AttributeError("mask layout batch must expose .mask or .masks")
+
+
+def _batch_legal_ids_offsets(batch: Any) -> tuple[np.ndarray, np.ndarray]:
+    ids_offsets = getattr(batch, "ids_offsets", None)
+    if ids_offsets is not None:
+        legal_ids, legal_offsets = ids_offsets
+        return np.asarray(legal_ids), np.asarray(legal_offsets)
+
+    if hasattr(batch, "legal_ids") and hasattr(batch, "legal_offsets"):
+        return np.asarray(batch.legal_ids), np.asarray(batch.legal_offsets)
+
+    raise AttributeError("ids_offsets layout batch must expose .ids_offsets or (.legal_ids, .legal_offsets)")
