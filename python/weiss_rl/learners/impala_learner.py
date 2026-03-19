@@ -207,7 +207,12 @@ class ImpalaLearner:
         obs = self._require_obs(_batch_value(batch, "obs"))
         actions = self._require_actions(_batch_value(batch, "actions"), expected_shape=obs.shape[:2])
         legal_mask = self._require_legal_mask(_batch_value(batch, "legal_mask"), expected_shape=obs.shape[:2])
-        logits, values = self._forward_time_major(obs, initial_hidden_state=_batch_value(batch, "initial_hidden_state"))
+        logits, values = self._forward_time_major(
+            obs,
+            initial_hidden_state=_batch_value(batch, "initial_hidden_state"),
+            to_play_seat=_batch_value(batch, "to_play_seat"),
+            actor=_batch_value(batch, "actor"),
+        )
         if legal_mask.shape != logits.shape:
             raise ValueError("legal_mask must match learner logits on time, batch, and action dimensions")
 
@@ -245,22 +250,43 @@ class ImpalaLearner:
         obs: Tensor,
         *,
         initial_hidden_state: Any = None,
+        to_play_seat: Any = None,
+        actor: Any = None,
     ) -> tuple[Tensor, Tensor]:
         if self.model is None:
             raise ValueError("ImpalaLearner requires a model to run the forward pass")
         if obs.ndim != 3:
             raise ValueError(f"obs must be 3D (time, batch, observation), got shape {tuple(obs.shape)}")
 
+        expected_shape = obs.shape[:2]
         batch_size = int(obs.shape[1])
-        hidden_state = self._prepare_hidden_state(initial_hidden_state, batch_size=batch_size, like=obs)
+        acting_seat = self._prepare_acting_seat_batch(
+            to_play_seat,
+            actor=actor,
+            expected_shape=expected_shape,
+        )
         logits_steps: list[Tensor] = []
         value_steps: list[Tensor] = []
 
-        for step_obs in obs.unbind(dim=0):
-            step_logits, step_value, hidden_state = self.model(step_obs, hidden_state)
+        if acting_seat is None:
+            hidden_state = self._prepare_legacy_hidden_state(initial_hidden_state, batch_size=batch_size, like=obs)
+            for step_obs in obs.unbind(dim=0):
+                step_logits, step_value, hidden_state = self.model(step_obs, hidden_state)
+                logits_steps.append(torch.as_tensor(step_logits))
+                value_steps.append(torch.as_tensor(step_value))
+                hidden_state = torch.as_tensor(hidden_state)
+            return torch.stack(logits_steps, dim=0), torch.stack(value_steps, dim=0)
+
+        seat_hidden_state = self._prepare_seat_hidden_state(initial_hidden_state, batch_size=batch_size, like=obs)
+        for step_obs, step_seat in zip(obs.unbind(dim=0), acting_seat.unbind(dim=0), strict=True):
+            step_logits, step_value, seat_hidden_state = self.model.forward_seat_aware(
+                step_obs,
+                step_seat,
+                seat_hidden_state,
+            )
             logits_steps.append(torch.as_tensor(step_logits))
             value_steps.append(torch.as_tensor(step_value))
-            hidden_state = torch.as_tensor(hidden_state)
+            seat_hidden_state = torch.as_tensor(seat_hidden_state)
 
         return torch.stack(logits_steps, dim=0), torch.stack(value_steps, dim=0)
 
@@ -289,16 +315,78 @@ class ImpalaLearner:
             raise ValueError(f"target must have shape {tuple(expected_shape)}, got {tuple(tensor.shape)}")
         return tensor
 
-    def _prepare_hidden_state(self, value: Any, *, batch_size: int, like: Tensor) -> Tensor | None:
+    def _prepare_legacy_hidden_state(self, value: Any, *, batch_size: int, like: Tensor) -> Tensor | None:
         if value is None:
             return None
         tensor = self._tensor_on_model_device(value, dtype=like.dtype)
         if tensor.ndim != 2:
             raise ValueError(
-                f"initial_hidden_state must be 2D (batch, hidden_size), got shape {tuple(tensor.shape)}"
+                "initial_hidden_state must be 2D (batch, hidden_size) when to_play_seat/actor is absent, "
+                f"got shape {tuple(tensor.shape)}"
             )
         if tensor.shape[0] != batch_size:
             raise ValueError(f"initial_hidden_state batch mismatch: expected {batch_size}, got {tensor.shape[0]}")
+        return tensor
+
+    def _prepare_seat_hidden_state(self, value: Any, *, batch_size: int, like: Tensor) -> Tensor | None:
+        if value is None:
+            return None
+        tensor = self._tensor_on_model_device(value, dtype=like.dtype)
+        if tensor.ndim != 3:
+            raise ValueError(
+                "initial_hidden_state must be 3D (batch, seat, hidden_size) when to_play_seat/actor is present, "
+                f"got shape {tuple(tensor.shape)}"
+            )
+        if tensor.shape[0] != batch_size:
+            raise ValueError(f"initial_hidden_state batch mismatch: expected {batch_size}, got {tensor.shape[0]}")
+        if tensor.shape[1] != 2:
+            raise ValueError(f"initial_hidden_state seat mismatch: expected 2, got {tensor.shape[1]}")
+        return tensor
+
+    def _prepare_acting_seat_batch(
+        self,
+        to_play_seat: Any,
+        *,
+        actor: Any,
+        expected_shape: torch.Size,
+    ) -> Tensor | None:
+        seat_tensor = self._optional_time_major_seat_field(
+            to_play_seat,
+            field_name="to_play_seat",
+            expected_shape=expected_shape,
+        )
+        actor_tensor = self._optional_time_major_seat_field(
+            actor,
+            field_name="actor",
+            expected_shape=expected_shape,
+        )
+
+        if seat_tensor is None:
+            return actor_tensor
+        if actor_tensor is None:
+            return seat_tensor
+        if not torch.equal(seat_tensor, actor_tensor):
+            raise ValueError("actor must match to_play_seat when both are provided")
+        return seat_tensor
+
+    def _optional_time_major_seat_field(
+        self,
+        value: Any,
+        *,
+        field_name: str,
+        expected_shape: torch.Size,
+    ) -> Tensor | None:
+        if value is None:
+            return None
+        reference = self._model_parameter()
+        tensor = torch.as_tensor(value, device=reference.device)
+        if tensor.is_floating_point() or tensor.is_complex():
+            raise ValueError(f"{field_name} must be integer-valued")
+        tensor = tensor.to(dtype=torch.long)
+        if tensor.shape != expected_shape:
+            raise ValueError(f"{field_name} must have shape {tuple(expected_shape)}, got {tuple(tensor.shape)}")
+        if bool(((tensor != 0) & (tensor != 1)).any().item()):
+            raise ValueError(f"{field_name} values must be 0 or 1")
         return tensor
 
     def _float_input(self, value: Any) -> Tensor:
