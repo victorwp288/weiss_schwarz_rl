@@ -426,7 +426,7 @@ def test_impala_learner_rejects_float_valued_seat_fields(seat_field_name: str) -
     )
     batch[seat_field_name] = cast(np.ndarray, batch[seat_field_name]).astype(np.float32)
 
-    with pytest.raises(ValueError, match=fr"{seat_field_name} must be integer-valued"):
+    with pytest.raises(ValueError, match=rf"{seat_field_name} must be integer-valued"):
         learner._loss_and_metrics(batch)
 
 

@@ -18,9 +18,7 @@ def _batch(
 ) -> SimpleNamespace:
     batch_size = len(to_play_seat)
     reward_arr = np.zeros((batch_size,), dtype=np.float32) if reward is None else np.asarray(reward, dtype=np.float32)
-    terminated_arr = (
-        np.zeros((batch_size,), dtype=bool) if terminated is None else np.asarray(terminated, dtype=bool)
-    )
+    terminated_arr = np.zeros((batch_size,), dtype=bool) if terminated is None else np.asarray(terminated, dtype=bool)
     truncated_arr = np.zeros((batch_size,), dtype=bool) if truncated is None else np.asarray(truncated, dtype=bool)
     return SimpleNamespace(
         to_play_seat=np.asarray(to_play_seat, dtype=np.int8),

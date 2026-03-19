@@ -159,9 +159,7 @@ class PolicyValueModel(nn.Module):
         if obs.ndim != 2:
             raise ValueError(f"obs must be 2D (batch, observation), got shape {tuple(obs.shape)}")
         if obs.shape[1] != self.observation_dim:
-            raise ValueError(
-                f"obs feature dimension mismatch: expected {self.observation_dim}, got {obs.shape[1]}"
-            )
+            raise ValueError(f"obs feature dimension mismatch: expected {self.observation_dim}, got {obs.shape[1]}")
         return obs.to(dtype=self.policy_head.weight.dtype)
 
     def _hidden_tensor_device_dtype(
@@ -181,17 +179,11 @@ class PolicyValueModel(nn.Module):
         if hidden_state is None:
             return self.initial_hidden(batch_size, device=like.device, dtype=like.dtype)
         if hidden_state.ndim != 2:
-            raise ValueError(
-                f"hidden_state must be 2D (batch, hidden_size), got shape {tuple(hidden_state.shape)}"
-            )
+            raise ValueError(f"hidden_state must be 2D (batch, hidden_size), got shape {tuple(hidden_state.shape)}")
         if hidden_state.shape[0] != batch_size:
-            raise ValueError(
-                f"hidden_state batch mismatch: expected {batch_size}, got {hidden_state.shape[0]}"
-            )
+            raise ValueError(f"hidden_state batch mismatch: expected {batch_size}, got {hidden_state.shape[0]}")
         if hidden_state.shape[1] != self.hidden_size:
-            raise ValueError(
-                f"hidden_state feature mismatch: expected {self.hidden_size}, got {hidden_state.shape[1]}"
-            )
+            raise ValueError(f"hidden_state feature mismatch: expected {self.hidden_size}, got {hidden_state.shape[1]}")
         return hidden_state.to(device=like.device, dtype=like.dtype)
 
     def _prepare_seat_hidden_state(self, hidden_state: Tensor | None, *, batch_size: int, like: Tensor) -> Tensor:
@@ -202,13 +194,9 @@ class PolicyValueModel(nn.Module):
                 f"seat_hidden_state must be 3D (batch, seat, hidden_size), got shape {tuple(hidden_state.shape)}"
             )
         if hidden_state.shape[0] != batch_size:
-            raise ValueError(
-                f"seat_hidden_state batch mismatch: expected {batch_size}, got {hidden_state.shape[0]}"
-            )
+            raise ValueError(f"seat_hidden_state batch mismatch: expected {batch_size}, got {hidden_state.shape[0]}")
         if hidden_state.shape[1] != SEAT_COUNT:
-            raise ValueError(
-                f"seat_hidden_state seat mismatch: expected {SEAT_COUNT}, got {hidden_state.shape[1]}"
-            )
+            raise ValueError(f"seat_hidden_state seat mismatch: expected {SEAT_COUNT}, got {hidden_state.shape[1]}")
         if hidden_state.shape[2] != self.hidden_size:
             raise ValueError(
                 f"seat_hidden_state feature mismatch: expected {self.hidden_size}, got {hidden_state.shape[2]}"
@@ -225,9 +213,7 @@ class PolicyValueModel(nn.Module):
                 seat_batch = acting_seat.to(device=device, dtype=torch.long).expand(batch_size)
             elif acting_seat.ndim == 1:
                 if acting_seat.shape[0] != batch_size:
-                    raise ValueError(
-                        f"acting_seat batch mismatch: expected {batch_size}, got {acting_seat.shape[0]}"
-                    )
+                    raise ValueError(f"acting_seat batch mismatch: expected {batch_size}, got {acting_seat.shape[0]}")
                 seat_batch = acting_seat.to(device=device, dtype=torch.long)
             else:
                 raise ValueError(f"acting_seat must be scalar or 1D [batch], got shape {tuple(acting_seat.shape)}")

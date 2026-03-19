@@ -35,20 +35,15 @@ def test_load_example_config_accepts_random_legal_policy(tmp_path: Path) -> None
         encoding="utf-8",
     )
     env_path.write_text(
-        "environment:\n"
-        "  max_decisions: 2000\n"
-        "  max_ticks: 100000\n"
-        "  observation_visibility: public\n",
+        "environment:\n  max_decisions: 2000\n  max_ticks: 100000\n  observation_visibility: public\n",
         encoding="utf-8",
     )
     eval_path.write_text(
-        "evaluation:\n"
-        "  eval_sampling_algorithm: pinned_cpu_cdf\n",
+        "evaluation:\n  eval_sampling_algorithm: pinned_cpu_cdf\n",
         encoding="utf-8",
     )
     loop_path.write_text(
-        "minimal_loop:\n"
-        "  action_policy: random_legal\n",
+        "minimal_loop:\n  action_policy: random_legal\n",
         encoding="utf-8",
     )
 
