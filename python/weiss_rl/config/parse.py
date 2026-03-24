@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,12 @@ from .models import (
     TrainingFamilyAConfig,
 )
 
+_STANDARD_TRAINING_MODE = "standard"
+_B1_NO_LEAGUE_TRAINING_MODE = "b1_no_league"
+_TRAINING_MODES = frozenset({_STANDARD_TRAINING_MODE, _B1_NO_LEAGUE_TRAINING_MODE})
+_B1_NO_LEAGUE_OPPONENT_SAMPLING = "latest_only_mirror"
+_DISABLED_LEAGUE_FIELD = "disabled"
+
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -90,6 +97,14 @@ def _require_text(value: Any, *, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty string")
     return value
+
+
+def _require_choice(value: Any, *, field_name: str, allowed: Collection[str]) -> str:
+    text = _require_text(value, field_name=field_name)
+    if text not in allowed:
+        allowed_values = ", ".join(sorted(allowed))
+        raise ValueError(f"{field_name} must be one of: {allowed_values}")
+    return text
 
 
 def _require_str_list(value: Any, *, field_name: str) -> tuple[str, ...]:
@@ -231,6 +246,7 @@ def _parse_training_family_a_config(body: dict[str, Any]) -> TrainingFamilyAConf
             "checkpoint_interval_updates",
             "snapshot_interval_updates",
             "actor_reload_interval_updates",
+            "mode",
         },
         context="training_family_a",
     )
@@ -276,6 +292,11 @@ def _parse_training_family_a_config(body: dict[str, Any]) -> TrainingFamilyAConf
             body["actor_reload_interval_updates"],
             field_name="training_family_a.actor_reload_interval_updates",
             minimum=1,
+        ),
+        mode=_require_choice(
+            body["mode"],
+            field_name="training_family_a.mode",
+            allowed=_TRAINING_MODES,
         ),
     )
 
@@ -1117,6 +1138,26 @@ _COMPONENT_PARSERS = {
 }
 
 
+def _apply_training_mode_overrides(parsed_components: dict[str, Any]) -> None:
+    training_config = parsed_components.get("training_family_a")
+    league_config = parsed_components.get("league")
+    if not isinstance(training_config, TrainingFamilyAConfig):
+        return
+    if not isinstance(league_config, LeagueConfig):
+        return
+    if training_config.mode != _B1_NO_LEAGUE_TRAINING_MODE:
+        return
+
+    parsed_components["league"] = replace(
+        league_config,
+        enabled=False,
+        opponent_sampling=_B1_NO_LEAGUE_OPPONENT_SAMPLING,
+        pfsp_stats_source=_DISABLED_LEAGUE_FIELD,
+        promotion_gate_enabled=False,
+        promotion_threshold=_DISABLED_LEAGUE_FIELD,
+    )
+
+
 def load_stack_config(stack_path: Path | str) -> StackConfig:
     """Load the stack index, resolve component paths, and validate merged component dataclasses."""
     stack_file = Path(stack_path).resolve()
@@ -1148,6 +1189,8 @@ def load_stack_config(stack_path: Path | str) -> StackConfig:
         component_doc = _load_component_doc(component_path, component_name)
         component_docs[component_name] = component_doc
         parsed_components[component_name] = _COMPONENT_PARSERS[component_name](component_doc)
+
+    _apply_training_mode_overrides(parsed_components)
 
     return StackConfig(
         root=root,

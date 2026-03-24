@@ -65,6 +65,7 @@ class TrainingFamilyAConfig:
     checkpoint_interval_updates: int
     snapshot_interval_updates: int
     actor_reload_interval_updates: int
+    mode: str
 
 
 @dataclass(frozen=True, slots=True)

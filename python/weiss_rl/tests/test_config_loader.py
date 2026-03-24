@@ -112,3 +112,54 @@ def test_load_stack_config_rejects_unknown_component_fields(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="system has unsupported keys: hidden_toggle"):
         load_stack_config(configs_dir / "stack.yaml")
+
+
+def test_load_stack_config_rejects_unknown_training_mode(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True)
+
+    training_text = (repo_root / "configs/training_family_a_locked.yaml").read_text(encoding="utf-8")
+    (configs_dir / "training_family_a_locked.yaml").write_text(
+        training_text.replace("mode: standard  # standard | b1_no_league", "mode: mystery_mode"),
+        encoding="utf-8",
+    )
+    (configs_dir / "stack.yaml").write_text(
+        "rl_stack_locked:\n  components:\n    training_family_a: configs/training_family_a_locked.yaml\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="training_family_a.mode must be one of"):
+        load_stack_config(configs_dir / "stack.yaml")
+
+
+def test_load_stack_config_applies_b1_no_league_overrides(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True)
+
+    training_text = (repo_root / "configs/training_family_a_locked.yaml").read_text(encoding="utf-8")
+    league_text = (repo_root / "configs/league_locked.yaml").read_text(encoding="utf-8")
+    (configs_dir / "training_family_a_locked.yaml").write_text(
+        training_text.replace("mode: standard  # standard | b1_no_league", "mode: b1_no_league"),
+        encoding="utf-8",
+    )
+    (configs_dir / "league_locked.yaml").write_text(league_text, encoding="utf-8")
+    (configs_dir / "stack.yaml").write_text(
+        "rl_stack_locked:\n"
+        "  components:\n"
+        "    training_family_a: configs/training_family_a_locked.yaml\n"
+        "    league: configs/league_locked.yaml\n",
+        encoding="utf-8",
+    )
+
+    stack = load_stack_config(configs_dir / "stack.yaml")
+
+    assert stack.config.training_family_a is not None
+    assert stack.config.training_family_a.mode == "b1_no_league"
+    assert stack.config.league is not None
+    assert stack.config.league.enabled is False
+    assert stack.config.league.opponent_sampling == "latest_only_mirror"
+    assert stack.config.league.pfsp_stats_source == "disabled"
+    assert stack.config.league.promotion_gate_enabled is False
+    assert stack.config.league.promotion_threshold == "disabled"
