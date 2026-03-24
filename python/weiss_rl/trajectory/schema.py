@@ -16,7 +16,6 @@ LEGAL_REPR_FIELDS: dict[LegalRepr, tuple[str, ...]] = {
     "none": (),
 }
 
-
 def legal_storage_fields(legal_repr: LegalRepr) -> tuple[str, ...]:
     """Return the canonical array fields required for the selected legal representation."""
     return LEGAL_REPR_FIELDS[legal_repr]
@@ -68,12 +67,11 @@ class TrajectoryDebug:
             raise ValueError("k_raw_decisions is required for learner_turn_env steps")
 
 
+# Chunk-level metadata stored once per unroll.
 @dataclass(slots=True)
 class TrajectoryChunkMeta:
-    """Chunk-level metadata stored once per unroll."""
-
     schema_version: int = TRAJ_SCHEMA_VERSION
-    obs_dtype: str = "int16"
+    obs_dtype: str = "i16"
     legal_repr: LegalRepr = "none"
     visibility_mode: str | None = None
     run_id256: bytes | None = None
