@@ -15,6 +15,10 @@ from weiss_rl.masking import (
 )
 
 
+_MAX_LOG_RHO = float(np.log(np.finfo(np.float32).max))
+_UNAVAILABLE_METRIC = float("nan")
+
+
 @dataclass(slots=True)
 class VtraceMetrics:
     """V-trace health metrics for monitoring learning."""
@@ -34,6 +38,25 @@ class VTraceTargets:
     vs: np.ndarray
     pg_advantages: np.ndarray
     rhos: np.ndarray
+
+
+def _batch_value(batch: Any, key: str) -> Any:
+    if isinstance(batch, dict):
+        return batch.get(key)
+    return getattr(batch, key, None)
+
+
+def _unavailable_vtrace_metrics() -> VtraceMetrics:
+    return VtraceMetrics(
+        rho_mean=_UNAVAILABLE_METRIC,
+        rho_p50=_UNAVAILABLE_METRIC,
+        rho_p90=_UNAVAILABLE_METRIC,
+        rho_p99=_UNAVAILABLE_METRIC,
+        clip_rate=_UNAVAILABLE_METRIC,
+        c_clipped_rate=_UNAVAILABLE_METRIC,
+        kl_divergence=_UNAVAILABLE_METRIC,
+        entropy=_UNAVAILABLE_METRIC,
+    )
 
 
 def _validate_time_major_inputs(
@@ -104,7 +127,8 @@ def compute_vtrace_targets(
     _validate_time_major_inputs(rewards, values, discounts, behavior_logp, target_logp)
 
     log_rhos = np.asarray(target_logp, dtype=np.float64) - np.asarray(behavior_logp, dtype=np.float64)
-    rhos = np.exp(log_rhos)
+    safe_log_rhos = np.minimum(log_rhos, _MAX_LOG_RHO)
+    rhos = np.minimum(np.exp(safe_log_rhos), np.finfo(np.float32).max)
     vs, pg_advantages = _compute_vtrace_from_rhos(
         rewards,
         values,
@@ -121,25 +145,37 @@ def compute_vtrace_targets(
 
 
 def compute_vtrace_metrics(
-    batch: dict[str, Any],
+    batch: Any,
     rho_bar: float = 2.4,
     c_bar: float = 1.0,
     *,
     pass_action_id: int | None = None,
 ) -> VtraceMetrics:
     """Compute masked V-trace health metrics from a training batch."""
-    metrics = VtraceMetrics()
+    metrics = _unavailable_vtrace_metrics()
 
-    try:
-        logits, legal_mask = _flatten_logits_and_legality(batch["logits"], batch)
-        metrics.entropy = _mean_masked_entropy(logits, legal_mask)
-    except Exception:
+    logits_value = _batch_value(batch, "logits")
+    if logits_value is None:
         return metrics
 
     try:
-        behavior_logits, _ = _flatten_logits_and_legality(batch["behavior_logits"], batch)
-        actions = _flatten_actions(batch["actions"], expected_shape=np.asarray(batch["logits"]).shape[:-1])
-        current_logp = _masked_action_logp(logits, batch, actions, pass_action_id=pass_action_id)
+        flat_logits, legal_mask = _flatten_logits_and_legality(logits_value, batch)
+        metrics.entropy = _mean_masked_entropy(flat_logits, legal_mask)
+    except Exception:
+        return metrics
+
+    behavior_logits_value = _batch_value(batch, "behavior_logits")
+    actions_value = _batch_value(batch, "actions")
+    if behavior_logits_value is None or actions_value is None:
+        return metrics
+
+    try:
+        if np.asarray(behavior_logits_value).shape != np.asarray(logits_value).shape:
+            raise ValueError("behavior_logits must match logits")
+
+        behavior_logits, _ = _flatten_logits_and_legality(behavior_logits_value, batch)
+        actions = _flatten_actions(actions_value, expected_shape=np.asarray(logits_value).shape[:-1])
+        current_logp = _masked_action_logp(flat_logits, batch, actions, pass_action_id=pass_action_id)
         behavior_action_logp = _masked_action_logp(behavior_logits, batch, actions, pass_action_id=pass_action_id)
         rho = np.exp(np.clip(current_logp - behavior_action_logp, a_min=-20.0, a_max=20.0))
 
@@ -149,14 +185,14 @@ def compute_vtrace_metrics(
         metrics.rho_p99 = float(np.percentile(rho, 99))
         metrics.clip_rate = float(np.mean(rho > rho_bar))
         metrics.c_clipped_rate = float(np.mean(rho > c_bar))
-        metrics.kl_divergence = _mean_masked_kl(behavior_logits, logits, legal_mask)
+        metrics.kl_divergence = _mean_masked_kl(behavior_logits, flat_logits, legal_mask)
     except Exception:
-        pass
+        return metrics
 
     return metrics
 
 
-def _flatten_logits_and_legality(logits: Any, batch: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+def _flatten_logits_and_legality(logits: Any, batch: Any) -> tuple[np.ndarray, np.ndarray]:
     logits_array = np.asarray(logits, dtype=np.float32)
     if logits_array.ndim < 2:
         raise ValueError("logits must include an action dimension")
@@ -164,23 +200,36 @@ def _flatten_logits_and_legality(logits: Any, batch: dict[str, Any]) -> tuple[np
     row_count = int(np.prod(logits_array.shape[:-1]))
     action_space = int(logits_array.shape[-1])
     flat_logits = logits_array.reshape(row_count, action_space)
-    legal_mask = _flatten_legal_mask(batch, row_count=row_count, action_space=action_space)
+    legal_mask = _flatten_legal_mask(
+        batch,
+        expected_shape=logits_array.shape,
+        row_count=row_count,
+        action_space=action_space,
+    )
     return flat_logits, legal_mask
 
 
-def _flatten_legal_mask(batch: dict[str, Any], *, row_count: int, action_space: int) -> np.ndarray:
-    if "legal_mask" in batch:
-        legal_mask = np.asarray(batch["legal_mask"])
-        expected_shape = np.asarray(batch["logits"]).shape
+def _flatten_legal_mask(
+    batch: Any,
+    *,
+    expected_shape: tuple[int, ...],
+    row_count: int,
+    action_space: int,
+) -> np.ndarray:
+    legal_mask_value = _batch_value(batch, "legal_mask")
+    if legal_mask_value is not None:
+        legal_mask = np.asarray(legal_mask_value)
         if legal_mask.shape != expected_shape:
             raise ValueError("legal_mask must match logits")
         return legal_mask.reshape(row_count, action_space) != 0
 
-    if "legal_ids" not in batch or "legal_offsets" not in batch:
+    legal_ids_value = _batch_value(batch, "legal_ids")
+    legal_offsets_value = _batch_value(batch, "legal_offsets")
+    if legal_ids_value is None or legal_offsets_value is None:
         raise ValueError("masked V-trace metrics require legal_mask or legal_ids/legal_offsets")
 
-    legal_ids = np.asarray(batch["legal_ids"])
-    legal_offsets = np.asarray(batch["legal_offsets"])
+    legal_ids = np.asarray(legal_ids_value)
+    legal_offsets = np.asarray(legal_offsets_value)
     if legal_offsets.ndim != 1 or legal_offsets.shape[0] != row_count + 1:
         raise ValueError("legal_offsets must have one entry per row plus a sentinel")
     if legal_offsets[0] != 0:
@@ -211,17 +260,18 @@ def _flatten_actions(actions: Any, *, expected_shape: tuple[int, ...]) -> np.nda
 
 def _masked_action_logp(
     flat_logits: np.ndarray,
-    batch: dict[str, Any],
+    batch: Any,
     actions: np.ndarray,
     *,
     pass_action_id: int | None,
 ) -> np.ndarray:
-    if "legal_mask" in batch:
-        legal_mask = np.asarray(batch["legal_mask"]).reshape(flat_logits.shape[0], flat_logits.shape[1])
+    legal_mask_value = _batch_value(batch, "legal_mask")
+    if legal_mask_value is not None:
+        legal_mask = np.asarray(legal_mask_value).reshape(flat_logits.shape[0], flat_logits.shape[1])
         return masked_logp_from_mask(flat_logits, legal_mask, actions, pass_action_id=pass_action_id)
 
-    legal_ids = np.asarray(batch["legal_ids"])
-    legal_offsets = np.asarray(batch["legal_offsets"])
+    legal_ids = np.asarray(_batch_value(batch, "legal_ids"))
+    legal_offsets = np.asarray(_batch_value(batch, "legal_offsets"))
     return masked_logp_from_legal_ids(
         flat_logits,
         legal_ids,

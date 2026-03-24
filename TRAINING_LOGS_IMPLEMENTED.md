@@ -1,23 +1,22 @@
-# Training logs status
+# Training logs implementation snapshot
 
-This branch contains the learner-side JSONL logging scaffold only.
+Short reviewer-facing status note for the learner-side JSONL logger.
+For usage details and examples, see `docs/training_logs.md`.
 
-## Confirmed scope on this stack
+## Confirmed scope today
 
 - `python/weiss_rl/training_logger.py` writes structured JSONL records
 - `python/weiss_rl/learners/impala_learner.py` can emit throughput and masked V-trace metrics
-- `python/weiss_rl/learners/vtrace.py` now requires a legality surface for diagnostics and will not compute health metrics from illegal actions
+- `python/weiss_rl/learners/vtrace.py` requires a legality surface for diagnostics and will not compute health metrics from illegal actions
 - `examples/training_logs_example.py` demonstrates standalone usage
 
 ## Explicit non-claims
 
-These items are **not** implemented on this branch:
+These items are **not** implemented in the current repo entrypoints:
 
 - `train.py` wiring
 - full end-to-end actor/learner integration
-- aggregated actor lag logging from the live training loop
-
-That broader integration belongs to M3-08 scope.
+- aggregated actor-lag logging from a live training loop
 
 ## Logged core fields
 

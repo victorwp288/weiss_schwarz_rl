@@ -19,12 +19,18 @@ def _mismatched_sha256(value: str) -> str:
 
 def _write_stub_weiss_sim(tmp_path: Path, *, spec_hash: int = 123) -> dict[str, object]:
     bundle: dict[str, object] = {
-        "encoding_versions": {"obs": 1},
-        "action_space_size": 9,
-        "pass_id": 8,
-        "observation_dtype": "float32",
-        "observation_length": 512,
+        "policy_version": 3,
         "spec_hash": spec_hash,
+        "observation": {
+            "obs_encoding_version": 2,
+            "dtype": "i32",
+            "obs_len": 512,
+        },
+        "action": {
+            "action_encoding_version": 1,
+            "action_space_size": 9,
+            "pass_action_id": 8,
+        },
     }
     (tmp_path / "weiss_sim.py").write_text(
         "\n".join(
@@ -94,6 +100,44 @@ def test_train_entrypoint_fails_fast_on_runtime_spec_mismatch(tmp_path: Path) ->
     assert "Spec mismatch" in result.stderr
 
 
+def test_train_entrypoint_rejects_invalid_runtime_spec_bundle_before_claiming_verification(tmp_path: Path) -> None:
+    invalid_bundle = {
+        "policy_version": 3,
+        "spec_hash": 123,
+        "observation": {"obs_encoding_version": 2, "dtype": "i32", "obs_len": 512},
+        "action": {"action_encoding_version": 1, "pass_action_id": 8},
+    }
+    (tmp_path / "weiss_sim.py").write_text(
+        "\n".join(
+            (
+                "def build_info():",
+                "    return 'stub-build'",
+                "",
+                "def db_info():",
+                "    return 'stub-db'",
+                "",
+                "def export_spec_bundle():",
+                f"    return {invalid_bundle!r}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    stack_config = _copy_repo_configs(tmp_path)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash="123",
+        run_label="invalid_spec_bundle",
+    )
+
+    assert result.returncode != 0
+    assert "invalid spec_bundle payload" in result.stderr
+    assert "Verified runtime spec bundle" not in result.stdout
+
+
 def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
     bundle = _write_stub_weiss_sim(tmp_path, spec_hash=123)
     stack_config = _copy_repo_configs(tmp_path)
@@ -155,6 +199,22 @@ def test_train_entrypoint_accepts_deprecated_run_id_alias(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
     assert "deprecated; use --run-label instead" in result.stderr
     assert (tmp_path / "runs" / "compat_alias_run" / "manifest.json").is_file()
+
+
+def test_eval_entrypoint_honors_explicit_spec_hash_without_reproducibility_config(tmp_path: Path) -> None:
+    bundle = _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    _copy_repo_configs(tmp_path)
+    stack_config = tmp_path / "configs" / "stack_smoke.yaml"
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="eval.py",
+        stack_config=stack_config,
+        spec_hash=_mismatched_sha256(spec_bundle_hash(bundle)),
+    )
+
+    assert result.returncode != 0
+    assert "Spec bundle hash mismatch" in result.stderr
 
 
 def test_eval_entrypoint_accepts_spec_bundle_sha256(tmp_path: Path) -> None:

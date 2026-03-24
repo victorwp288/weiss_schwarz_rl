@@ -17,7 +17,7 @@ from weiss_rl.eval import (
 )
 from weiss_rl.eval.payoff_folding import PayoffFoldScheme
 from weiss_rl.simulator_contract import load_simulator_contract
-from weiss_rl.spec import assert_spec_bundle_contract
+from weiss_rl.spec import assert_spec_bundle_contract, should_verify_runtime_spec_bundle
 
 _SHA256_HEX_LENGTH = 64
 
@@ -56,17 +56,32 @@ def _resolve_run_label(parser: argparse.ArgumentParser, run_label: str, run_id_a
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluation scaffold entrypoint")
-    parser.add_argument("--stack-config", type=Path, required=True)
-    parser.add_argument("--spec-hash", type=str, default="", help="Spec hash for contract validation")
+    parser = argparse.ArgumentParser(description="Evaluation reporting/contract entrypoint for pre-recorded episodes")
+    parser.add_argument(
+        "--stack-config",
+        type=Path,
+        required=True,
+        help="Path to the stack config used for contract checks and summary settings",
+    )
+    parser.add_argument(
+        "--spec-hash",
+        type=str,
+        default="",
+        help="Expected compatibility spec hash or full spec bundle SHA-256 for contract validation",
+    )
     parser.add_argument("--config-hash", type=str, default="", help="Config hash for contract validation")
-    parser.add_argument("--run-label", type=str, default="", help="Optional run label for logs and reports")
+    parser.add_argument(
+        "--run-label",
+        type=str,
+        default="",
+        help="Optional startup banner/log label only; not persisted in summary exports",
+    )
     parser.add_argument("--run-id", dest="run_id_alias", type=str, default="", help=argparse.SUPPRESS)
     parser.add_argument(
         "--episodes-jsonl",
         type=Path,
         default=None,
-        help="Existing seat-swapped episodes.jsonl to summarize",
+        help="Existing seat-swapped episodes.jsonl to summarize (no rollout generation)",
     )
     parser.add_argument(
         "--summary-json",
@@ -109,22 +124,27 @@ def main() -> None:
 
     reproducibility = stack.config.reproducibility
     policy = "hard_fail"
-    contract = None
+    require_export_spec_bundle = False
+    persist_in_manifest = False
     if reproducibility is not None:
         spec_bundle_policy = reproducibility.spec_bundle
         policy = "hard_fail" if spec_bundle_policy.fail_on_spec_mismatch else "disabled"
-        should_verify = (
-            bool(args.spec_hash.strip())
-            or spec_bundle_policy.require_export_spec_bundle
-            or spec_bundle_policy.persist_in_manifest
-        )
-        if should_verify:
-            contract = load_simulator_contract(stack.root)
-            assert_spec_bundle_contract(args.spec_hash, contract.spec_bundle)
+        require_export_spec_bundle = spec_bundle_policy.require_export_spec_bundle
+        persist_in_manifest = spec_bundle_policy.persist_in_manifest
 
+    contract = None
+    if should_verify_runtime_spec_bundle(
+        expected_spec_hash=args.spec_hash,
+        require_export_spec_bundle=require_export_spec_bundle,
+        persist_in_manifest=persist_in_manifest,
+    ):
+        contract = load_simulator_contract(stack.root)
+        assert_spec_bundle_contract(args.spec_hash, contract.spec_bundle)
+
+    reported_spec_hash = contract.spec_hash256 if contract is not None else "(not checked)"
     print_startup_banner(
-        args.spec_hash,
-        args.config_hash,
+        reported_spec_hash,
+        config_hash256,
         run_label=run_label,
         spec_mismatch_policy=policy,
     )
@@ -135,7 +155,7 @@ def main() -> None:
         )
 
     if args.episodes_jsonl is None:
-        print(f"Evaluation scaffold ready; seed sets: {sorted(stack.seed_sets)}")
+        print(f"Evaluation contract check complete; no episodes were summarized. Seed sets: {sorted(stack.seed_sets)}")
         return
 
     evaluation = stack.config.evaluation
@@ -158,6 +178,7 @@ def main() -> None:
 
     print(f"Evaluation summary JSON: {summary_json}")
     print(f"Evaluation summary CSV: {summary_csv}")
+    print("Evaluation reports were derived from a pre-recorded episodes file; no rollouts were executed here.")
 
     if args.diagnostics_json is not None:
         diagnostics_payload = build_seat_advantage_diagnostics(records)

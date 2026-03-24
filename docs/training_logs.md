@@ -1,9 +1,10 @@
 # Training logs
 
-This branch provides a standalone JSONL logger for learner-side training metrics.
-It does **not** wire the logger into `python/scripts/train.py`; that integration belongs to the broader training loop work in M3-08.
+Learner-side JSONL logging is implemented as a standalone component.
 
-## What works on this stack
+It is **not** wired into `python/scripts/train.py` yet, and the current `make train-min` / `train.py` path remains a manifest-provenance smoke run rather than a live training loop.
+
+## What works today
 
 - `TrainingLogger` writes append-only JSONL records to `runs/<run>/logs/training_metrics.jsonl`
 - `ImpalaLearner` can emit throughput and masked V-trace health metrics when `logs_dir` is configured
@@ -15,42 +16,27 @@ It does **not** wire the logger into `python/scripts/train.py`; that integration
 
 If the legality surface is missing, V-trace diagnostics intentionally fall back to zero instead of computing from illegal actions.
 
-## What is intentionally not claimed here
+## What is intentionally not claimed
 
-- no `train.py` integration on this branch
-- no actor-to-learner lag aggregation on this branch
-- no promise that checkpoint logging equals full end-to-end training readiness
-
-## Record shape
-
-`TrainingMetrics` always stores these fields:
-
-- `update_count`
-- `wall_clock_seconds`
-- `wall_clock_ms`
-- `policy_version`
-
-Common learner-written fields:
-
-- `loss`
-- `throughput_samples_per_sec`
-- `throughput_updates_per_sec`
-- `vtrace_rho_mean`
-- `vtrace_rho_p50`
-- `vtrace_rho_p90`
-- `vtrace_rho_p99`
-- `vtrace_clip_rate`
-- `vtrace_c_clipped_rate`
-- `kl_divergence`
-- `entropy`
-
-Optional caller-supplied fields exist for checkpoint-based actor sync lag:
-
-- `checkpoint_lag_updates`
-- `checkpoint_lag_percentile_p50`
-- `checkpoint_lag_percentile_p90`
+- no `train.py` integration yet
+- no actor-to-learner lag aggregation from a live training loop
+- no claim that checkpoint logging equals full end-to-end training readiness
 
 ## Minimal usage
+
+Run the standalone example from the repo root:
+
+```bash
+uv run python examples/training_logs_example.py
+```
+
+If you are bypassing installation for a quick local check:
+
+```bash
+PYTHONPATH=python python examples/training_logs_example.py
+```
+
+Code sketch:
 
 ```python
 from pathlib import Path
@@ -80,6 +66,35 @@ for _ in range(20):
 records = TrainingLogger.read_jsonl(Path("runs/example/logs/training_metrics.jsonl"))
 print(records[-1]["vtrace_rho_p90"])
 ```
+
+## Record shape
+
+`TrainingMetrics` always stores these fields:
+
+- `update_count`
+- `wall_clock_seconds`
+- `wall_clock_ms`
+- `policy_version`
+
+Common learner-written fields:
+
+- `loss`
+- `throughput_samples_per_sec`
+- `throughput_updates_per_sec`
+- `vtrace_rho_mean`
+- `vtrace_rho_p50`
+- `vtrace_rho_p90`
+- `vtrace_rho_p99`
+- `vtrace_clip_rate`
+- `vtrace_c_clipped_rate`
+- `kl_divergence`
+- `entropy`
+
+Optional caller-supplied fields exist for checkpoint-based actor sync lag:
+
+- `checkpoint_lag_updates`
+- `checkpoint_lag_percentile_p50`
+- `checkpoint_lag_percentile_p90`
 
 ## Validation
 

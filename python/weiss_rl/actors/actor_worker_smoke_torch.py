@@ -14,6 +14,7 @@ try:
 except Exception:
     torch = None
 
+
 def torch_policy_logits(obs: np.ndarray, to_play: np.ndarray):
     assert torch is not None
     x = torch.from_numpy(obs.astype(np.float32, copy=False))
@@ -21,6 +22,7 @@ def torch_policy_logits(obs: np.ndarray, to_play: np.ndarray):
     logits = x[:, :1] * 0.01 + torch.arange(ACTION_SPACE, dtype=torch.float32)[None, :] * 0.001
     assert logits.requires_grad is False
     return logits
+
 
 def main():
     if torch is None:
@@ -49,6 +51,7 @@ def main():
     assert torch.get_num_threads() == 1
 
     print("ok")
+
 
 if __name__ == "__main__":
     main()

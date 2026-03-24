@@ -1,16 +1,36 @@
+"""Minimal weiss_sim loop smoke example.
+
+Run from the repo root after `uv sync --extra dev`:
+
+    uv run python examples/run_loop_example.py --steps 30
+
+`--help` works without `weiss_sim`, but actual execution requires the simulator to be importable.
+This exercises simulator stepping only. It does not train a policy.
+"""
+
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
 import numpy as np
-import weiss_sim
 
 from config_example import load_example_config, repo_root
 from policy_example import sample_actions_for_policy
 
 
 def run_minimal_loop_example(*, stack_config: Path, loop_config: Path, steps_override: int | None) -> None:
+    try:
+        import weiss_sim
+    except ModuleNotFoundError as exc:
+        if exc.name != "weiss_sim":
+            raise
+        raise RuntimeError(
+            "weiss_sim is required to execute this example. "
+            "`uv run python examples/run_loop_example.py --help` works without it, "
+            "but actual execution still needs an importable simulator."
+        ) from exc
+
     config = load_example_config(stack_config_path=stack_config, loop_config_path=loop_config)
     if steps_override is not None:
         config.num_steps = int(steps_override)
@@ -78,7 +98,11 @@ def run_minimal_loop_example(*, stack_config: Path, loop_config: Path, steps_ove
 
 def parse_args() -> argparse.Namespace:
     root = repo_root()
-    parser = argparse.ArgumentParser(description="Run the minimal weiss_sim loop example")
+    parser = argparse.ArgumentParser(
+        description="Run the minimal weiss_sim loop example (simulator smoke only, not learner training)",
+        epilog="Run from the repo root with `uv run python examples/run_loop_example.py`."
+        " `--help` works without `weiss_sim`, but actual execution requires the simulator to be importable.",
+    )
     parser.add_argument(
         "--stack-config",
         type=Path,

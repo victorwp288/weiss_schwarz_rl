@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from weiss_rl.spec import (
@@ -10,77 +12,110 @@ from weiss_rl.spec import (
 )
 
 
-def test_parse_spec_bundle_accepts_required_keys() -> None:
-    bundle = parse_spec_bundle(
-        {
-            "encoding_versions": {"obs": 1, "action": 2},
+def _nested_spec_bundle(*, spec_hash: int | str = 8590000130) -> dict[str, object]:
+    return {
+        "policy_version": 3,
+        "spec_hash": spec_hash,
+        "observation": {
+            "obs_encoding_version": 2,
+            "dtype": "i32",
+            "obs_len": 2048,
+            "header_fields": [{"name": "phase", "index": 0}],
+        },
+        "action": {
+            "action_encoding_version": 1,
             "action_space_size": 17,
-            "pass_id": 16,
-            "observation_dtype": "float32",
-            "observation_length": 2048,
-            "spec_hash": 8590000130,
-            "extra_field": "kept-for-manifest",
-        }
-    )
+            "pass_action_id": 16,
+            "families": [{"name": "pass", "base": 16, "count": 1}],
+        },
+    }
+
+
+def test_parse_spec_bundle_accepts_required_nested_keys() -> None:
+    raw_bundle = _nested_spec_bundle()
+    raw_bundle["extra_field"] = "kept-for-manifest"
+
+    bundle = parse_spec_bundle(raw_bundle)
 
     assert isinstance(bundle, SpecBundle)
+    assert bundle.encoding_versions == {"obs": 2, "action": 1}
+    assert bundle.action_space_size == 17
+    assert bundle.pass_id == 16
+    assert bundle.observation_dtype == "i32"
+    assert bundle.observation_length == 2048
     assert bundle.compatibility_hash == "8590000130"
     assert bundle.raw["extra_field"] == "kept-for-manifest"
 
 
-@pytest.mark.parametrize("missing_key", ["pass_id", "observation_length"])
-def test_parse_spec_bundle_rejects_missing_required_keys(missing_key: str) -> None:
-    raw_bundle = {
-        "encoding_versions": {"obs": 1},
-        "action_space_size": 8,
-        "pass_id": 7,
-        "observation_dtype": "uint8",
-        "observation_length": 64,
-        "compatibility_hash": 123,
-    }
-    raw_bundle.pop(missing_key)
+@pytest.mark.parametrize(
+    ("section", "field_name", "expected_message"),
+    [
+        ("action", "pass_action_id", "action.pass_action_id"),
+        ("observation", "obs_len", "observation.obs_len"),
+    ],
+)
+def test_parse_spec_bundle_rejects_missing_required_nested_keys(
+    section: str, field_name: str, expected_message: str
+) -> None:
+    raw_bundle = _nested_spec_bundle(spec_hash=123)
+    section_payload = dict(cast(dict[str, object], raw_bundle[section]))
+    section_payload.pop(field_name)
+    raw_bundle[section] = section_payload
 
-    with pytest.raises(ValueError, match=missing_key):
+    with pytest.raises(ValueError, match=expected_message):
         parse_spec_bundle(raw_bundle)
 
 
 def test_parse_spec_bundle_rejects_invalid_pass_id() -> None:
-    with pytest.raises(ValueError, match="pass_id"):
-        parse_spec_bundle(
-            {
-                "encoding_versions": {"obs": 1},
-                "action_space_size": 3,
-                "pass_id": 3,
-                "observation_dtype": "uint8",
-                "observation_length": 64,
-                "compatibility_hash": 123,
-            }
-        )
+    raw_bundle = _nested_spec_bundle(spec_hash=123)
+    raw_bundle["action"] = {
+        **cast(dict[str, object], raw_bundle["action"]),
+        "action_space_size": 3,
+        "pass_action_id": 3,
+    }
+
+    with pytest.raises(ValueError, match="action.pass_action_id"):
+        parse_spec_bundle(raw_bundle)
 
 
 def test_spec_bundle_hash_is_key_order_independent() -> None:
     left = {
-        "encoding_versions": {"obs": 1, "action": 2},
-        "action_space_size": 17,
-        "pass_id": 16,
-        "observation_dtype": "float32",
-        "observation_length": 2048,
-        "compatibility_hash": "8590000130",
-        "extra": {"b": 2, "a": 1},
+        "policy_version": 3,
+        "spec_hash": "8590000130",
+        "observation": {
+            "obs_encoding_version": 2,
+            "dtype": "i32",
+            "obs_len": 2048,
+            "extra": {"b": 2, "a": 1},
+        },
+        "action": {
+            "action_encoding_version": 1,
+            "action_space_size": 17,
+            "pass_action_id": 16,
+            "families": [{"name": "pass", "count": 1, "base": 16}],
+        },
     }
     right = {
-        "extra": {"a": 1, "b": 2},
-        "observation_length": 2048,
-        "observation_dtype": "float32",
-        "pass_id": 16,
-        "compatibility_hash": "8590000130",
-        "action_space_size": 17,
-        "encoding_versions": {"action": 2, "obs": 1},
+        "action": {
+            "families": [{"base": 16, "count": 1, "name": "pass"}],
+            "pass_action_id": 16,
+            "action_space_size": 17,
+            "action_encoding_version": 1,
+        },
+        "observation": {
+            "extra": {"a": 1, "b": 2},
+            "obs_len": 2048,
+            "dtype": "i32",
+            "obs_encoding_version": 2,
+        },
+        "spec_hash": "8590000130",
+        "policy_version": 3,
     }
 
     assert canonical_spec_bundle_json(left) == (
-        '{"action_space_size":17,"compatibility_hash":"8590000130","encoding_versions":'
-        '{"action":2,"obs":1},"extra":{"a":1,"b":2},"observation_dtype":"float32",'
-        '"observation_length":2048,"pass_id":16}'
+        '{"action":{"action_encoding_version":1,"action_space_size":17,"families":[{"base":16,'
+        '"count":1,"name":"pass"}],"pass_action_id":16},"observation":{"dtype":"i32",'
+        '"extra":{"a":1,"b":2},"obs_encoding_version":2,"obs_len":2048},'
+        '"policy_version":3,"spec_hash":"8590000130"}'
     )
     assert compute_spec_hash256(left) == compute_spec_hash256(right)

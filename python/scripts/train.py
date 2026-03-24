@@ -124,9 +124,21 @@ def _resolve_run_label(parser: argparse.ArgumentParser, run_label: str, run_id_a
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train scaffold entrypoint")
-    parser.add_argument("--stack-config", type=Path, required=True)
-    parser.add_argument("--spec-hash", type=str, default="", help="Expected spec hash or spec bundle SHA-256")
+    parser = argparse.ArgumentParser(
+        description="Manifest/provenance smoke entrypoint (not an end-to-end training loop)"
+    )
+    parser.add_argument(
+        "--stack-config",
+        type=Path,
+        required=True,
+        help="Path to the stack config used for the manifest/provenance scaffold",
+    )
+    parser.add_argument(
+        "--spec-hash",
+        type=str,
+        default="",
+        help="Expected compatibility spec hash or full spec bundle SHA-256",
+    )
     parser.add_argument(
         "--config-hash",
         type=str,
@@ -193,6 +205,7 @@ def main() -> None:
         run_label=run_label or None,
     )
     print(f"Wrote manifest: {artifacts.manifest_path}")
+    print("Manifest scaffold only: no learner training or rollout collection was executed.")
 
 
 if __name__ == "__main__":

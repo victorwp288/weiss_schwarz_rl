@@ -45,7 +45,7 @@ This keeps parsing simple and deterministic across tooling.
 Quick sanity check (<2 minutes on CPU). Loads `configs/stack_smoke.yaml` via the train entrypoint and writes a scaffold manifest with real simulator provenance.
 
 ```bash
-python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-id smoke_local
+python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label smoke_local
 ```
 
 Expected output files:
