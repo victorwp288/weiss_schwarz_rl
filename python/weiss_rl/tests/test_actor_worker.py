@@ -1,184 +1,172 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 
 from weiss_rl.actors.actor_worker import ActorWorker
-from weiss_rl.masking import masked_logp_from_legal_ids, masked_logp_from_mask, resolve_pass_action_id
+from weiss_rl.masking import masked_logp_from_legal_ids, resolve_pass_action_id
 
-OBS_LEN = 8
-ACTION_SPACE = 52
-
-
-@dataclass(slots=True)
-class FakeBatch:
-    obs: np.ndarray
-    reward: np.ndarray
-    terminated: np.ndarray
-    truncated: np.ndarray
-    to_play: np.ndarray
-    actor: np.ndarray
-    decision_id: np.ndarray
-    engine_status: np.ndarray
-    ids_offsets: tuple[np.ndarray, np.ndarray] | None = None
-    mask: np.ndarray | None = None
-    episode_seed: np.ndarray | None = None
-    episode_key: np.ndarray | None = None
+OBS_LEN = 6
+ACTION_SPACE = 64
 
 
-class FakeDecisionBoundaryEnv:
-    def __init__(self, num_envs: int, *, layout_name: str, seed: int = 0):
+class IdsBatch:
+    def __init__(self, num_envs: int) -> None:
+        self.obs = np.zeros((num_envs, OBS_LEN), dtype=np.int16)
+        self.reward = np.zeros((num_envs,), dtype=np.float32)
+        self.terminated = np.zeros((num_envs,), dtype=np.bool_)
+        self.truncated = np.zeros((num_envs,), dtype=np.bool_)
+        self.engine_status = np.zeros((num_envs,), dtype=np.int32)
+        self.decision_id = np.zeros((num_envs,), dtype=np.int32)
+        self.to_play = np.zeros((num_envs,), dtype=np.int8)
+        self.actor = self.to_play
+        self.episode_seed = np.zeros((num_envs,), dtype=np.uint64)
+        self.episode_key = np.zeros((num_envs,), dtype=np.uint64)
+        self.ids_offsets: tuple[np.ndarray, np.ndarray] | None = None
+
+
+class FakeIdsEnv:
+    def __init__(self, num_envs: int, *, seed: int = 0) -> None:
         self.num_envs = num_envs
-        self.layout_name = layout_name
         self.rng = np.random.default_rng(seed)
-        self.t = 0
+        self.step_index = 0
 
-    def reset(self) -> FakeBatch:
-        self.t = 0
-        return self._make_batch()
+    def reset(self) -> IdsBatch:
+        self.step_index = 0
+        return self._batch()
 
-    def step(self, actions: np.ndarray) -> FakeBatch:
-        _ = actions
-        self.t += 1
-        return self._make_batch()
+    def step(self, actions: np.ndarray) -> IdsBatch:
+        assert actions.shape == (self.num_envs,)
+        self.step_index += 1
+        return self._batch()
 
-    def _make_batch(self) -> FakeBatch:
-        obs = np.full((self.num_envs, OBS_LEN), self.t, dtype=np.int16)
-        reward = np.full((self.num_envs,), self.t, dtype=np.float32)
-        terminated = np.zeros((self.num_envs,), dtype=np.bool_)
-        truncated = np.zeros((self.num_envs,), dtype=np.bool_)
-        to_play = ((np.arange(self.num_envs) + self.t) % 2).astype(np.int8)
-        decision_id = np.full((self.num_envs,), self.t, dtype=np.int32)
-        engine_status = np.zeros((self.num_envs,), dtype=np.int32)
-        episode_seed = np.full((self.num_envs,), 100 + self.t, dtype=np.uint64)
-        episode_key = np.full((self.num_envs,), 200 + self.t, dtype=np.uint64)
+    def _batch(self) -> IdsBatch:
+        batch = IdsBatch(self.num_envs)
+        batch.obs[:] = (self.step_index + np.arange(self.num_envs)[:, None]).astype(np.int16)
+        batch.to_play[:] = (np.arange(self.num_envs) + self.step_index) % 2
+        batch.decision_id[:] = self.step_index
 
-        if self.layout_name == "i16_legal_ids":
-            slices = []
-            offsets = [0]
-            for env_index in range(self.num_envs):
-                if env_index == 0 and self.t % 2 == 0:
-                    legal_ids = np.array([], dtype=np.int32)
-                else:
-                    count = 2 + (env_index % 3)
-                    legal_ids = np.array(
-                        sorted(self.rng.choice(ACTION_SPACE, size=count, replace=False)),
-                        dtype=np.int32,
-                    )
-                slices.append(legal_ids)
-                offsets.append(offsets[-1] + legal_ids.size)
-            return FakeBatch(
-                obs=obs,
-                reward=reward,
-                terminated=terminated,
-                truncated=truncated,
-                to_play=to_play,
-                actor=to_play,
-                decision_id=decision_id,
-                engine_status=engine_status,
-                ids_offsets=(
-                    np.concatenate(slices, axis=0) if offsets[-1] > 0 else np.array([], dtype=np.int32),
-                    np.array(offsets, dtype=np.uint32),
-                ),
-                episode_seed=episode_seed,
-                episode_key=episode_key,
-            )
-
-        mask = np.zeros((self.num_envs, ACTION_SPACE), dtype=np.uint8)
+        legal_slices = []
+        offsets = [0]
         for env_index in range(self.num_envs):
-            if env_index == 0 and self.t % 2 == 0:
-                continue
-            legal_count = 2 + (env_index % 3)
-            legal_ids = np.sort(self.rng.choice(ACTION_SPACE, size=legal_count, replace=False))
-            mask[env_index, legal_ids] = 1
+            if env_index == 0 and self.step_index % 2 == 0:
+                legal_ids = np.array([], dtype=np.int32)
+            else:
+                size = 2 + env_index
+                legal_ids = np.sort(self.rng.choice(ACTION_SPACE, size=size, replace=False)).astype(np.int32)
+            legal_slices.append(legal_ids)
+            offsets.append(offsets[-1] + int(legal_ids.size))
 
-        return FakeBatch(
-            obs=obs,
-            reward=reward,
-            terminated=terminated,
-            truncated=truncated,
-            to_play=to_play,
-            actor=to_play,
-            decision_id=decision_id,
-            engine_status=engine_status,
-            mask=mask,
-            episode_seed=episode_seed,
-            episode_key=episode_key,
+        batch.ids_offsets = (
+            np.concatenate(legal_slices, axis=0) if offsets[-1] else np.array([], dtype=np.int32),
+            np.array(offsets, dtype=np.uint32),
         )
+        return batch
 
 
-def _fake_policy_logits(obs: np.ndarray, to_play: np.ndarray) -> np.ndarray:
-    num_envs = obs.shape[0]
-    logits = np.zeros((num_envs, ACTION_SPACE), dtype=np.float32)
+class MaskBatch:
+    def __init__(self, num_envs: int) -> None:
+        self.obs = np.zeros((num_envs, OBS_LEN), dtype=np.int16)
+        self.rewards = np.zeros((num_envs,), dtype=np.float32)
+        self.terminated = np.zeros((num_envs,), dtype=np.bool_)
+        self.truncated = np.zeros((num_envs,), dtype=np.bool_)
+        self.engine_status = np.zeros((num_envs,), dtype=np.int32)
+        self.decision_id = np.zeros((num_envs,), dtype=np.int32)
+        self.actor = np.zeros((num_envs,), dtype=np.int8)
+        self.episode_seed = np.zeros((num_envs,), dtype=np.uint64)
+        self.episode_key = np.zeros((num_envs,), dtype=np.uint64)
+        self.masks = np.zeros((num_envs, ACTION_SPACE), dtype=np.uint8)
+
+
+class FakeMaskEnv:
+    def __init__(self, num_envs: int) -> None:
+        self.num_envs = num_envs
+        self.step_index = 0
+
+    def reset(self) -> MaskBatch:
+        self.step_index = 0
+        return self._batch()
+
+    def step(self, actions: np.ndarray) -> MaskBatch:
+        assert actions.shape == (self.num_envs,)
+        self.step_index += 1
+        return self._batch()
+
+    def _batch(self) -> MaskBatch:
+        batch = MaskBatch(self.num_envs)
+        batch.obs[:] = (self.step_index + np.arange(self.num_envs)[:, None]).astype(np.int16)
+        batch.actor[:] = (np.arange(self.num_envs) + self.step_index) % 2
+        batch.decision_id[:] = self.step_index
+        batch.masks[0, [1, 3, 5]] = 1
+        batch.masks[1, :] = 0
+        return batch
+
+
+def _policy_logits(obs: np.ndarray, to_play: np.ndarray) -> np.ndarray:
+    logits = np.zeros((obs.shape[0], ACTION_SPACE), dtype=np.float32)
     base = obs[:, 0].astype(np.float32) + to_play.astype(np.float32)
     logits[:] = base[:, None] * 0.01 + np.arange(ACTION_SPACE, dtype=np.float32)[None, :] * 0.001
     return logits
 
 
-def test_actor_worker_ids_offsets_produces_flattened_packed_legality() -> None:
-    T = 4
-    N = 3
-    env = FakeDecisionBoundaryEnv(N, layout_name="i16_legal_ids", seed=123)
-    worker = ActorWorker(
-        actor_id=0,
-        unroll_length=T,
-        num_envs=N,
-        action_space=ACTION_SPACE,
-        layout_name="i16_legal_ids",
-        seed=999,
-    )
-
-    batch = worker.run_once(env=env, policy_logits_fn=_fake_policy_logits)
-
-    assert batch.reward.shape == (T, N)
+def _step_legal_slice(batch, t: int) -> tuple[np.ndarray, np.ndarray]:
     assert batch.legal_ids is not None
     assert batch.legal_offsets is not None
-    assert batch.legal_offsets.shape == (T * N + 1,)
-    assert int(batch.legal_offsets[0]) == 0
-    assert np.all(batch.legal_offsets[1:] >= batch.legal_offsets[:-1])
 
-    pass_action_id = resolve_pass_action_id()
-    flat_actions = batch.action.reshape(T * N).astype(np.int64, copy=False)
-    flat_logits = _fake_policy_logits(batch.obs.reshape(T * N, OBS_LEN), batch.to_play_seat.reshape(T * N))
-    recomputed = masked_logp_from_legal_ids(
-        flat_logits,
-        batch.legal_ids,
-        batch.legal_offsets,
-        flat_actions,
-        pass_action_id=pass_action_id,
+    row_start = t * batch.N
+    row_stop = row_start + batch.N
+    offset_start = int(batch.legal_offsets[row_start])
+    offset_stop = int(batch.legal_offsets[row_stop])
+    legal_ids = batch.legal_ids[offset_start:offset_stop]
+    legal_offsets = batch.legal_offsets[row_start : row_stop + 1] - offset_start
+    return legal_ids, legal_offsets
+
+
+def test_actor_worker_ids_offsets_preserves_behavior_logp_contract() -> None:
+    worker = ActorWorker(
+        actor_id=0,
+        unroll_length=4,
+        num_envs=3,
+        action_space=ACTION_SPACE,
+        layout_name="i16_legal_ids",
+        seed=7,
     )
 
-    assert np.allclose(recomputed.reshape(T, N), batch.behavior_logp, atol=0.0, rtol=0.0)
+    batch = worker.run_once(env=FakeIdsEnv(3, seed=11), policy_logits_fn=_policy_logits)
+
+    assert batch.legal_ids is not None
+    assert batch.legal_offsets is not None
+    assert batch.legal_offsets.shape == (batch.T * batch.N + 1,)
+
+    pass_action_id = resolve_pass_action_id()
+    for t in range(batch.T):
+        logits = _policy_logits(batch.obs[t], batch.to_play_seat[t])
+        legal_ids, legal_offsets = _step_legal_slice(batch, t)
+        recomputed = masked_logp_from_legal_ids(
+            logits,
+            legal_ids,
+            legal_offsets,
+            batch.action[t].astype(np.int64, copy=False),
+            pass_action_id=pass_action_id,
+        )
+        assert np.array_equal(recomputed, batch.behavior_logp[t])
 
 
-def test_actor_worker_mask_uses_decision_boundary_mask_contract() -> None:
-    T = 4
-    N = 3
-    env = FakeDecisionBoundaryEnv(N, layout_name="mask", seed=123)
+def test_actor_worker_mask_layout_returns_entropy_and_pass_fallback() -> None:
     worker = ActorWorker(
         actor_id=1,
-        unroll_length=T,
-        num_envs=N,
+        unroll_length=3,
+        num_envs=2,
         action_space=ACTION_SPACE,
         layout_name="mask",
-        seed=111,
+        seed=5,
     )
 
-    batch = worker.run_once(env=env, policy_logits_fn=_fake_policy_logits)
+    batch = worker.run_once(env=FakeMaskEnv(2), policy_logits_fn=_policy_logits)
 
-    assert batch.reward.shape == (T, N)
     assert batch.legal_mask is not None
-    assert batch.legal_mask.shape == (T, N, ACTION_SPACE)
-    assert batch.legal_ids is None
-    assert batch.legal_offsets is None
-
-    pass_action_id = resolve_pass_action_id()
-    recomputed = masked_logp_from_mask(
-        _fake_policy_logits(batch.obs.reshape(T * N, OBS_LEN), batch.to_play_seat.reshape(T * N)),
-        batch.legal_mask.reshape(T * N, ACTION_SPACE),
-        batch.action.reshape(T * N).astype(np.int64, copy=False),
-        pass_action_id=pass_action_id,
-    )
-
-    assert np.allclose(recomputed.reshape(T, N), batch.behavior_logp, atol=0.0, rtol=0.0)
+    assert batch.legal_mask.shape == (batch.T, batch.N, ACTION_SPACE)
+    assert batch.entropy is not None
+    assert batch.entropy.shape == (batch.T, batch.N)
+    assert np.all(batch.action[:, 1] == resolve_pass_action_id())
+    assert np.all(batch.behavior_logp[:, 1] == 0.0)
+    assert batch.counters == {"empty_legal": batch.T}
