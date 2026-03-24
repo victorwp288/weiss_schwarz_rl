@@ -64,6 +64,7 @@ class TrainingFamilyAConfig:
     masking_math_float32: bool
     checkpoint_interval_updates: int
     snapshot_interval_updates: int
+    actor_reload_interval_updates: int
 
 
 @dataclass(frozen=True, slots=True)
