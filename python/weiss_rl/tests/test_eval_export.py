@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
@@ -151,6 +152,30 @@ def test_build_matchup_export_rejects_mixed_matchups() -> None:
     with pytest.raises(ValueError, match="exactly one focal/opponent matchup"):
         build_matchup_export(
             [*_pair(0, "W", "L"), _record(1, 0, "W", episode_seed=101, opponent_policy_id="other")],
+            stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+            max_paired_seeds=8,
+        )
+
+
+def test_build_matchup_export_rejects_mixed_config_hashes() -> None:
+    records = [*_pair(0, "W", "L"), *_pair(1, "D", "T")]
+    records[-1] = replace(records[-1], config_hash256="ef" * 32)
+
+    with pytest.raises(ValueError, match="exactly one config/spec contract"):
+        build_matchup_export(
+            records,
+            stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+            max_paired_seeds=8,
+        )
+
+
+def test_build_matchup_export_rejects_mixed_spec_hashes() -> None:
+    records = [*_pair(0, "W", "L"), *_pair(1, "D", "T")]
+    records[-1] = replace(records[-1], spec_hash256="01" * 32)
+
+    with pytest.raises(ValueError, match="exactly one config/spec contract"):
+        build_matchup_export(
+            records,
             stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
             max_paired_seeds=8,
         )

@@ -70,6 +70,7 @@ def build_matchup_export(
     seed: int | None = None,
 ) -> dict[str, Any]:
     focal_policy_id, opponent_policy_id = _matchup_ids(records)
+    _require_single_contract(records)
     decision = summarize_stage2_records(
         records,
         stop_rules=stop_rules,
@@ -152,3 +153,10 @@ def _matchup_ids(records: tuple[EvalGameRecord, ...] | list[EvalGameRecord]) -> 
     if len(focal_ids) != 1 or len(opponent_ids) != 1:
         raise ValueError("summary export expects records for exactly one focal/opponent matchup")
     return next(iter(focal_ids)), next(iter(opponent_ids))
+
+
+def _require_single_contract(records: tuple[EvalGameRecord, ...] | list[EvalGameRecord]) -> None:
+    config_hashes = {record.config_hash256 for record in records}
+    spec_hashes = {record.spec_hash256 for record in records}
+    if len(config_hashes) != 1 or len(spec_hashes) != 1:
+        raise ValueError("summary export expects records for exactly one config/spec contract")
