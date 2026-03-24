@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -182,3 +183,51 @@ def test_actor_worker_mask_uses_decision_boundary_mask_contract() -> None:
     )
 
     assert np.allclose(recomputed.reshape(T, N), batch.behavior_logp, atol=0.0, rtol=0.0)
+
+
+def test_actor_worker_reports_checkpoint_lag_in_checkpoint_update_units(tmp_path: Path) -> None:
+    checkpoint_dir = tmp_path / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    (checkpoint_dir / "checkpoint_100.pt").write_text("stub\n", encoding="utf-8")
+    (checkpoint_dir / "checkpoint_250.pt").write_text("stub\n", encoding="utf-8")
+
+    worker = ActorWorker(
+        actor_id=7,
+        unroll_length=1,
+        num_envs=1,
+        action_space=ACTION_SPACE,
+        checkpoint_dir=checkpoint_dir,
+        reload_interval_updates=2,
+    )
+
+    first = worker.poll_checkpoint_sync()
+    assert first == {"loaded_checkpoint_update": 0, "checkpoint_lag_updates": 250}
+
+    second = worker.poll_checkpoint_sync()
+    assert second == {"loaded_checkpoint_update": 250, "checkpoint_lag_updates": 0}
+
+    (checkpoint_dir / "checkpoint_400.pt").write_text("stub\n", encoding="utf-8")
+    third = worker.poll_checkpoint_sync()
+    assert third == {"loaded_checkpoint_update": 250, "checkpoint_lag_updates": 150}
+
+    fourth = worker.poll_checkpoint_sync()
+    assert fourth == {"loaded_checkpoint_update": 400, "checkpoint_lag_updates": 0}
+
+
+def test_actor_worker_ignores_malformed_checkpoint_names(tmp_path: Path) -> None:
+    checkpoint_dir = tmp_path / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    (checkpoint_dir / "checkpoint_latest.pt").write_text("bad\n", encoding="utf-8")
+    (checkpoint_dir / "checkpoint_50.pt").write_text("stub\n", encoding="utf-8")
+
+    worker = ActorWorker(
+        actor_id=1,
+        unroll_length=1,
+        num_envs=1,
+        action_space=ACTION_SPACE,
+        checkpoint_dir=checkpoint_dir,
+        reload_interval_updates=1,
+    )
+
+    result = worker.poll_checkpoint_sync()
+    assert result == {"loaded_checkpoint_update": 50, "checkpoint_lag_updates": 0}

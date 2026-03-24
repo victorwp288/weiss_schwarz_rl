@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
@@ -68,6 +69,13 @@ class ActorWorker:
     action_space: int
     layout_name: LayoutName = "i16_legal_ids"
     seed: int = 0
+    checkpoint_dir: Path | None = None
+    reload_interval_updates: int = 1000
+
+    update_count: int = field(default=0, init=False)
+    loaded_checkpoint_update: int = field(default=0, init=False)
+    last_reload_checkpoint_update: int = field(default=-1, init=False)
+    checkpoint_lag_updates: int = field(default=0, init=False)
 
     def run_once(
         self,
@@ -88,6 +96,8 @@ class ActorWorker:
         Returns
         - UnrollBatch with behavior_logp filled.
         """
+        self.poll_checkpoint_sync()
+
         T = int(self.unroll_length)
         N = int(self.num_envs)
         A = int(self.action_space)
@@ -218,6 +228,45 @@ class ActorWorker:
             entropy=entropy_buf,
             counters={"empty_legal": anomaly.empty_legal},
         )
+
+    def poll_checkpoint_sync(self) -> dict[str, int]:
+        self.update_count += 1
+        if self.checkpoint_dir and self.update_count % self.reload_interval_updates == 0:
+            self._reload_checkpoint_if_available()
+
+        latest_checkpoint_update = self._get_latest_checkpoint_update()
+        self.checkpoint_lag_updates = max(0, latest_checkpoint_update - self.loaded_checkpoint_update)
+        return {
+            "loaded_checkpoint_update": self.loaded_checkpoint_update,
+            "checkpoint_lag_updates": self.checkpoint_lag_updates,
+        }
+
+    def _reload_checkpoint_if_available(self) -> None:
+        if not self.checkpoint_dir:
+            return
+
+        latest_checkpoint_update = self._get_latest_checkpoint_update()
+        if latest_checkpoint_update <= self.last_reload_checkpoint_update:
+            return
+
+        checkpoint_path = self.checkpoint_dir / f"checkpoint_{latest_checkpoint_update}.pt"
+        if checkpoint_path.exists():
+            print(f"Actor {self.actor_id} reloading checkpoint: {checkpoint_path}")
+            self.loaded_checkpoint_update = latest_checkpoint_update
+            self.last_reload_checkpoint_update = latest_checkpoint_update
+
+    def _get_latest_checkpoint_update(self) -> int:
+        if not self.checkpoint_dir:
+            return 0
+
+        latest_checkpoint_update = 0
+        for checkpoint_path in self.checkpoint_dir.glob("checkpoint_*.pt"):
+            try:
+                checkpoint_update = int(checkpoint_path.stem.split("_", maxsplit=1)[1])
+            except (IndexError, ValueError):
+                continue
+            latest_checkpoint_update = max(latest_checkpoint_update, checkpoint_update)
+        return latest_checkpoint_update
 
 
 def actor_behavior_logp_from_legal_ids(

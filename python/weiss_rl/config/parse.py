@@ -230,6 +230,7 @@ def _parse_training_family_a_config(body: dict[str, Any]) -> TrainingFamilyAConf
             "masking_math_float32",
             "checkpoint_interval_updates",
             "snapshot_interval_updates",
+            "actor_reload_interval_updates",
         },
         context="training_family_a",
     )
@@ -269,6 +270,11 @@ def _parse_training_family_a_config(body: dict[str, Any]) -> TrainingFamilyAConf
         snapshot_interval_updates=_require_int(
             body["snapshot_interval_updates"],
             field_name="training_family_a.snapshot_interval_updates",
+            minimum=1,
+        ),
+        actor_reload_interval_updates=_require_int(
+            body["actor_reload_interval_updates"],
+            field_name="training_family_a.actor_reload_interval_updates",
             minimum=1,
         ),
     )
