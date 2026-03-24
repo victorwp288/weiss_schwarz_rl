@@ -18,3 +18,4 @@ training_family_a:
   checkpoint_interval_updates: 50000
   snapshot_interval_updates: 100000
   actor_reload_interval_updates: 1000
+  mode: standard  # standard | b1_no_league
