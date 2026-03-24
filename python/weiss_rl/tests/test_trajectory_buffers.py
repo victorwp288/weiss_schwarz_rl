@@ -82,6 +82,7 @@ def test_large_action_spaces_store_packed_legal_ids_without_uint16_wrap() -> Non
     finalized = finalize_unroll(batch)
 
     assert finalized.legal_ids is not None
+    assert finalized.legal_offsets is not None
     assert finalized.legal_ids.dtype == np.uint32
     assert np.array_equal(finalized.legal_ids, np.array([0, 69_999, 42], dtype=np.uint32))
     assert np.array_equal(finalized.legal_offsets, np.array([[0, 2, 3]], dtype=np.uint32))
