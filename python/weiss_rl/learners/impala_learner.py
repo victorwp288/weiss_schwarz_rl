@@ -1,4 +1,4 @@
-"""IMPALA learner scaffold."""
+"""IMPALA learner helpers."""
 
 from __future__ import annotations
 
@@ -9,9 +9,12 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.learners.vtrace import compute_vtrace_metrics
+from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_metrics
 from weiss_rl.masking import masked_logp_from_legal_ids, masked_logp_from_mask
 from weiss_rl.training_logger import TrainingLogger, TrainingMetrics
+
+
+VTRACE_RHO_PERCENTILES = (50, 90, 95, 99)
 
 
 def learner_logp_from_mask(
@@ -39,6 +42,31 @@ def learner_logp_from_legal_ids(
         actions,
         pass_action_id=pass_action_id,
     )
+
+
+def summarize_vtrace_diagnostics(
+    result: VTraceTargets,
+    *,
+    rho_bar: float,
+    c_bar: float,
+) -> dict[str, float]:
+    flat_rhos = np.asarray(result.rhos, dtype=np.float64).reshape(-1)
+    if flat_rhos.size == 0:
+        raise ValueError("result.rhos must not be empty")
+
+    metrics = {
+        f"vtrace_rho_p{percentile}": float(np.percentile(flat_rhos, percentile))
+        for percentile in VTRACE_RHO_PERCENTILES
+    }
+    metrics["vtrace_rho_clip_rate"] = float(np.mean(flat_rhos > rho_bar))
+    metrics["vtrace_c_clip_rate"] = float(np.mean(flat_rhos > c_bar))
+    return metrics
+
+
+def _batch_value(batch: Any, key: str) -> Any:
+    if isinstance(batch, dict):
+        return batch.get(key)
+    return getattr(batch, key, None)
 
 
 @dataclass(slots=True)
@@ -86,11 +114,19 @@ class ImpalaLearner:
             self.last_log_time = time.time()
             self.last_log_update = self.update_count
 
-        return {
+        metrics = {
             "loss": 0.0,
             "throughput_samples_per_sec": throughput_samples_per_sec,
             "throughput_updates_per_sec": throughput_updates_per_sec,
         }
+        vtrace_result = _batch_value(batch, "vtrace_result")
+        if isinstance(vtrace_result, VTraceTargets):
+            rho_bar_value = _batch_value(batch, "vtrace_rho_bar")
+            c_bar_value = _batch_value(batch, "vtrace_c_bar")
+            rho_bar = self.vtrace_rho_bar if rho_bar_value is None else float(rho_bar_value)
+            c_bar = self.vtrace_c_bar if c_bar_value is None else float(c_bar_value)
+            metrics.update(summarize_vtrace_diagnostics(vtrace_result, rho_bar=rho_bar, c_bar=c_bar))
+        return metrics
 
     def _batch_size(self, batch: Any) -> int:
         if isinstance(batch, dict):
