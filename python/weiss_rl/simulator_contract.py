@@ -110,8 +110,7 @@ def _candidate_targets(repo_root: Path) -> list[_ProbeTarget]:
     for python in _candidate_pythons():
         targets.append(_ProbeTarget(python=python))
         targets.extend(
-            _ProbeTarget(python=python, pythonpath=pythonpath)
-            for pythonpath in _candidate_pythonpaths(repo_root)
+            _ProbeTarget(python=python, pythonpath=pythonpath) for pythonpath in _candidate_pythonpaths(repo_root)
         )
     return targets
 

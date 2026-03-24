@@ -200,7 +200,7 @@ class ImpalaLearner:
         }
         vtrace_result = _batch_value(batch, "vtrace_result")
 
-        has_training_inputs = any(_batch_value(batch, key) is not None for key in ("obs", "actions", "legal_mask"))
+        has_training_inputs = _batch_value(batch, "obs") is not None
         if has_training_inputs:
             missing = [
                 key for key in ("obs", "actions", "legal_mask", "vtrace_result") if _batch_value(batch, key) is None
