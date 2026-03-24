@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from weiss_rl.learners.vtrace import compute_vtrace_metrics
 from weiss_rl.masking import masked_logp_from_legal_ids, masked_logp_from_mask
+from weiss_rl.training_logger import TrainingLogger, TrainingMetrics
 
 
 def learner_logp_from_mask(
@@ -43,20 +46,58 @@ class ImpalaLearner:
     learning_rate: float = 2e-4
     checkpoint_dir: Path | None = None
     checkpoint_interval_updates: int = 50000
+    logs_dir: Path | None = None
+    logging_interval_updates: int = 100
+    vtrace_rho_bar: float = 2.4
+    vtrace_c_bar: float = 1.0
+    pass_action_id: int | None = None
 
     update_count: int = field(default=0, init=False)
     policy_version: int = field(default=0, init=False)
+    total_samples_processed: int = field(default=0, init=False)
+    start_time: float = field(default_factory=time.time, init=False)
+    logger: TrainingLogger | None = field(default=None, init=False)
+    last_log_time: float = field(default_factory=time.time, init=False)
+    last_log_update: int = field(default=0, init=False)
+
+    def __post_init__(self) -> None:
+        if self.logs_dir:
+            self.logger = TrainingLogger(self.logs_dir, start_time=self.start_time)
 
     def update(self, batch: Any) -> dict[str, float]:
-        """Learner update hook."""
-        _ = batch
         self.update_count += 1
+        batch_size = self._batch_size(batch)
+        self.total_samples_processed += batch_size
+
+        elapsed = time.time() - self.start_time
+        throughput_samples_per_sec = self.total_samples_processed / max(elapsed, 1e-6)
+        throughput_updates_per_sec = self.update_count / max(elapsed, 1e-6)
 
         if self.checkpoint_dir and self.update_count % self.checkpoint_interval_updates == 0:
             self.policy_version += 1
             self._save_checkpoint()
 
-        return {"loss": 0.0}
+        if self.logger and self.update_count % self.logging_interval_updates == 0:
+            self._log_metrics(
+                batch,
+                throughput_samples_per_sec=throughput_samples_per_sec,
+                throughput_updates_per_sec=throughput_updates_per_sec,
+            )
+            self.last_log_time = time.time()
+            self.last_log_update = self.update_count
+
+        return {
+            "loss": 0.0,
+            "throughput_samples_per_sec": throughput_samples_per_sec,
+            "throughput_updates_per_sec": throughput_updates_per_sec,
+        }
+
+    def _batch_size(self, batch: Any) -> int:
+        if isinstance(batch, dict):
+            for key in ("rewards", "actions", "logits"):
+                if key in batch:
+                    return int(np.asarray(batch[key]).size)
+        return 1
 
     def _save_checkpoint(self) -> None:
         if not self.checkpoint_dir:
@@ -69,6 +110,42 @@ class ImpalaLearner:
             encoding="utf-8",
         )
         print(f"Saved checkpoint: {checkpoint_path}")
+
+    def _log_metrics(
+        self,
+        batch: Any,
+        *,
+        throughput_samples_per_sec: float,
+        throughput_updates_per_sec: float,
+    ) -> None:
+        if not self.logger:
+            return
+
+        vtrace_metrics = compute_vtrace_metrics(
+            batch if isinstance(batch, dict) else {},
+            rho_bar=self.vtrace_rho_bar,
+            c_bar=self.vtrace_c_bar,
+            pass_action_id=self.pass_action_id,
+        )
+        elapsed = time.time() - self.start_time
+        metrics = TrainingMetrics(
+            update_count=self.update_count,
+            wall_clock_seconds=elapsed,
+            wall_clock_ms=int(elapsed * 1000),
+            policy_version=self.policy_version,
+            loss=0.0,
+            throughput_samples_per_sec=throughput_samples_per_sec,
+            throughput_updates_per_sec=throughput_updates_per_sec,
+            vtrace_rho_mean=vtrace_metrics.rho_mean,
+            vtrace_rho_p50=vtrace_metrics.rho_p50,
+            vtrace_rho_p90=vtrace_metrics.rho_p90,
+            vtrace_rho_p99=vtrace_metrics.rho_p99,
+            vtrace_clip_rate=vtrace_metrics.clip_rate,
+            vtrace_c_clipped_rate=vtrace_metrics.c_clipped_rate,
+            kl_divergence=vtrace_metrics.kl_divergence,
+            entropy=vtrace_metrics.entropy,
+        )
+        self.logger.log(metrics)
 
     def get_policy_version(self) -> int:
         return self.policy_version
