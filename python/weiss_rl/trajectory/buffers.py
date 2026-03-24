@@ -4,16 +4,53 @@ M3-04: replace list-backed storage with array-backed T x N unroll buffers.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Optional
-from .schema import LegalRepr, TrajectoryChunkMeta
 
 import numpy as np
+
+from weiss_rl.masking import assert_strictly_increasing_legal_ids
+from weiss_rl.trajectory.schema import LegalRepr, TrajectoryChunkMeta
 
 
 def _require_shape(name: str, arr: np.ndarray, shape: tuple[int, ...]) -> None:
     if arr.shape != shape:
         raise ValueError(f"{name} must have shape {shape}, got {arr.shape}")
+
+
+def _legal_ids_dtype(action_space: int) -> np.dtype[np.unsignedinteger]:
+    if action_space <= np.iinfo(np.uint16).max + 1:
+        return np.dtype(np.uint16)
+    if action_space <= np.iinfo(np.uint32).max + 1:
+        return np.dtype(np.uint32)
+    raise ValueError("action_space is too large for packed legal ids")
+
+
+def _coerce_legal_ids(legal_ids: np.ndarray, *, action_space: int) -> np.ndarray:
+    legal_ids_arr = np.asarray(legal_ids)
+    if legal_ids_arr.ndim != 1:
+        raise ValueError("legal_ids must be 1D packed")
+    if legal_ids_arr.dtype == np.bool_ or not np.issubdtype(legal_ids_arr.dtype, np.integer):
+        raise ValueError("legal_ids must be an integer array")
+
+    signed = legal_ids_arr.astype(np.int64, copy=False)
+    if np.any(signed < 0):
+        raise ValueError("legal_ids must be >= 0")
+    if np.any(signed >= action_space):
+        raise ValueError(f"legal_ids must be < action_space ({action_space})")
+    return signed
+
+
+def _validate_packed_legal_ids(legal_ids: np.ndarray, legal_offsets: np.ndarray, *, action_space: int) -> np.ndarray:
+    signed = _coerce_legal_ids(legal_ids, action_space=action_space)
+    if int(legal_offsets[-1]) != int(signed.shape[0]):
+        raise ValueError("legal_offsets[-1] must equal len(legal_ids)")
+    for row_index in range(int(legal_offsets.shape[0]) - 1):
+        start = int(legal_offsets[row_index])
+        end = int(legal_offsets[row_index + 1])
+        assert_strictly_increasing_legal_ids(signed[start:end])
+    return signed
 
 
 @dataclass(slots=True)
@@ -107,7 +144,7 @@ def allocate_unroll_batch(
     elif legal_repr == "ids_offsets":
         if max_packed_legal <= 0:
             raise ValueError("max_packed_legal must be set for legal_repr='ids_offsets'")
-        batch.legal_ids = np.zeros((max_packed_legal,), dtype=np.uint16)
+        batch.legal_ids = np.zeros((max_packed_legal,), dtype=_legal_ids_dtype(action_space))
         batch.legal_offsets = np.zeros((T, N + 1), dtype=np.uint32)
     elif legal_repr == "none":
         pass
@@ -222,14 +259,16 @@ def write_step_ids_offsets(
     if batch.meta.legal_repr != "ids_offsets":
         raise RuntimeError(f"write_step_ids_offsets called for legal_repr={batch.meta.legal_repr}")
 
-    legal_ids_arr = np.asarray(legal_ids)
-    if legal_ids_arr.ndim != 1:
-        raise ValueError("legal_ids must be 1D packed")
     legal_offsets_arr = np.asarray(legal_offsets, dtype=np.int64)
     if int(legal_offsets_arr[0]) != 0:
         raise ValueError("legal_offsets must start at 0")
     if np.any(legal_offsets_arr[1:] < legal_offsets_arr[:-1]):
         raise ValueError("legal_offsets must be nondecreasing")
+    legal_ids_arr = _validate_packed_legal_ids(
+        legal_ids,
+        legal_offsets_arr,
+        action_space=batch.action_space,
+    )
     if int(legal_offsets_arr[-1]) != int(legal_ids_arr.shape[0]):
         raise ValueError("legal_offsets[-1] must equal len(legal_ids)")
 
