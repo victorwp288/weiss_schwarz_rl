@@ -1,15 +1,18 @@
 # python/weiss_rl/actors/actor_worker_smoke_torch.py
 from __future__ import annotations
+
+from types import ModuleType
+
 import numpy as np
 
 from weiss_rl.actors.actor_worker import ActorWorker
+from weiss_rl.actors.actor_worker_smoke import ACTION_SPACE, FakeEnvIdsOffsets
 
+torch: ModuleType | None
 try:
     import torch
 except Exception:
     torch = None
-
-from weiss_rl.actors.actor_worker_smoke import ACTION_SPACE, FakeEnvIdsOffsets
 
 def torch_policy_logits(obs: np.ndarray, to_play: np.ndarray):
     assert torch is not None

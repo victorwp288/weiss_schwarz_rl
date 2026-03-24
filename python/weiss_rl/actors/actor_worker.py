@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any, Literal
 
 import numpy as np
@@ -15,10 +16,11 @@ from weiss_rl.masking import (
     sample_actions_from_mask,
 )
 
+torch: ModuleType | None
 try:
     import torch
 except Exception:  # pragma: no cover
-    torch = None  # type: ignore
+    torch = None
 
 
 LayoutName = Literal["i16_legal_ids", "mask"]
