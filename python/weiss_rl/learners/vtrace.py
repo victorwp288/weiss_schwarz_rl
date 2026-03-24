@@ -52,8 +52,6 @@ def compute_vtrace_metrics(
 ) -> VtraceMetrics:
     """Compute masked V-trace health metrics from a training batch."""
     metrics = VtraceMetrics()
-    if not isinstance(batch, dict):
-        return metrics
 
     try:
         logits, legal_mask = _flatten_logits_and_legality(batch["logits"], batch)
