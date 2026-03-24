@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any, Literal
 
 import numpy as np
@@ -15,49 +16,52 @@ from weiss_rl.masking import (
     sample_actions_from_mask,
 )
 
+torch: ModuleType | None
+try:
+    import torch
+except Exception:  # pragma: no cover
+    torch = None
+
+
 LayoutName = Literal["i16_legal_ids", "mask"]
+
+
+def _configure_actor_torch_threads(actor_torch_threads: int) -> None:
+    if torch is None:
+        return
+    threads = int(actor_torch_threads)
+    if threads < 1:
+        raise ValueError("actor_torch_threads must be >= 1")
+    torch.set_num_threads(threads)
+    try:
+        torch.set_num_interop_threads(1)
+    except Exception:
+        pass
 
 
 @dataclass(slots=True)
 class UnrollBatch:
-    """
-    Fixed-shape unroll: T x N, ready for learner consumption.
+    """Fixed-shape unroll: T x N, ready for learner consumption."""
 
-    This is the minimal M3-03 contract: fixed shape + behavior_logp present.
-
-    Notes:
-    - obs dtype/layout depends on simulator layout; keep as np.ndarray.
-    - legal surfaces: either (legal_ids, legal_offsets) OR (legal_mask).
-    - ids/offsets batches use one coherent flattened packed representation over
-      the row-major decision order of ``obs.reshape(T * N, ...)``.
-    """
-
-    # dimensions
     T: int
     N: int
     layout_name: LayoutName
-
-    # per-step fields (T, N, ...)
-    obs: np.ndarray  # (T, N, OBS_LEN) int16 or int32
-    to_play_seat: np.ndarray  # (T, N) int8
-    decision_id: np.ndarray  # (T, N) int32
-    action: np.ndarray  # (T, N) uint32 or int64
-    reward: np.ndarray  # (T, N) float32
-    terminated: np.ndarray  # (T, N) bool
-    truncated: np.ndarray  # (T, N) bool
-    engine_status: np.ndarray  # (T, N) int32
-    episode_seed: np.ndarray  # (T, N) uint64
-    episode_key: np.ndarray  # (T, N) uint64 or bytes-like object array
-    behavior_logp: np.ndarray  # (T, N) float32
-
-    # legality surfaces (layout-dependent)
-    legal_ids: np.ndarray | None = None  # (sum_k,) int, flattened over T*N rows
-    legal_offsets: np.ndarray | None = None  # (T*N + 1,) flattened packed offsets
-    legal_mask: np.ndarray | None = None  # (T, N, A) uint8/bool
-
-    # optional debug
-    entropy: np.ndarray | None = None  # (T, N) float32
-    counters: dict[str, int] | None = None  # anomaly counters snapshot
+    obs: np.ndarray
+    to_play_seat: np.ndarray
+    decision_id: np.ndarray
+    action: np.ndarray
+    reward: np.ndarray
+    terminated: np.ndarray
+    truncated: np.ndarray
+    engine_status: np.ndarray
+    episode_seed: np.ndarray
+    episode_key: np.ndarray
+    behavior_logp: np.ndarray
+    legal_ids: np.ndarray | None = None
+    legal_offsets: np.ndarray | None = None
+    legal_mask: np.ndarray | None = None
+    entropy: np.ndarray | None = None
+    counters: dict[str, int] | None = None
 
 
 @dataclass(slots=True)
@@ -68,31 +72,23 @@ class ActorWorker:
     action_space: int
     layout_name: LayoutName = "i16_legal_ids"
     seed: int = 0
+    actor_torch_threads: int = 1
+    _torch_threads_configured: bool = False
 
-    def run_once(
-        self,
-        *,
-        env: Any,
-        policy_logits_fn: Any,
-    ) -> UnrollBatch:
-        """
-        Collect one fixed-length unroll of shape (T, N).
-
-        Parameters
-        - env: ideally a DecisionBoundary-style env exposing reset()/step() that
-          returns batches with reward + mask/ids_offsets.
-        - policy_logits_fn: callable that returns logits given obs (+ maybe seat).
-            Signature expected (minimal): logits = policy_logits_fn(obs_batch, to_play_seat_batch)
-            where logits is (N, A) float32
-
-        Returns
-        - UnrollBatch with behavior_logp filled.
-        """
+    def run_once(self, *, env: Any, policy_logits_fn: Any) -> UnrollBatch:
         T = int(self.unroll_length)
         N = int(self.num_envs)
         A = int(self.action_space)
         if T <= 0 or N <= 0 or A <= 0:
             raise ValueError("unroll_length, num_envs, action_space must be > 0")
+
+        if not self._torch_threads_configured:
+            _configure_actor_torch_threads(self.actor_torch_threads)
+            self._torch_threads_configured = True
+            if torch is not None and int(torch.get_num_threads()) != int(self.actor_torch_threads):
+                raise RuntimeError(
+                    f"torch threads mismatch: got {torch.get_num_threads()}, want {self.actor_torch_threads}"
+                )
 
         rng = np.random.default_rng(self.seed + self.actor_id)
         pass_action_id = resolve_pass_action_id()
@@ -116,7 +112,6 @@ class ActorWorker:
         legal_mask_buf: np.ndarray | None = None
 
         batch = env.reset()
-
         obs0 = np.asarray(batch.obs)
         if obs0.ndim != 2 or obs0.shape[0] != N:
             raise ValueError("expected batch.obs shape (N, OBS_LEN)")
@@ -136,7 +131,7 @@ class ActorWorker:
             if obs.shape != (N, obs_buf.shape[2]):
                 raise ValueError("batch.obs shape changed within unroll")
 
-            logits = np.asarray(policy_logits_fn(obs, to_play), dtype=np.float32)
+            logits = _policy_logits(policy_logits_fn, obs, to_play)
             if logits.shape != (N, A):
                 raise ValueError(f"policy_logits_fn must return shape (N, A)=({N}, {A})")
 
@@ -150,7 +145,6 @@ class ActorWorker:
                     counters=anomaly,
                     pass_action_id=pass_action_id,
                 )
-
                 base = int(packed_legal_offsets[-1][-1])
                 packed_legal_ids.append(legal_ids.astype(np.int32, copy=False))
                 packed_legal_offsets.append((legal_offsets[1:] + base).astype(np.uint32, copy=False))
@@ -228,7 +222,6 @@ def actor_behavior_logp_from_legal_ids(
     *,
     pass_action_id: int | None = None,
 ) -> np.ndarray:
-    """Compatibility wrapper kept for older masking tests and actor code."""
     return masked_logp_from_legal_ids(
         logits,
         legal_ids,
@@ -236,6 +229,17 @@ def actor_behavior_logp_from_legal_ids(
         actions,
         pass_action_id=pass_action_id,
     )
+
+
+def _policy_logits(policy_logits_fn: Any, obs: np.ndarray, to_play: np.ndarray) -> np.ndarray:
+    if torch is not None:
+        with torch.inference_mode():
+            out = policy_logits_fn(obs, to_play)
+        if isinstance(out, torch.Tensor):
+            return out.detach().cpu().numpy().astype(np.float32, copy=False)
+    else:
+        out = policy_logits_fn(obs, to_play)
+    return np.asarray(out, dtype=np.float32)
 
 
 def _batch_to_play(batch: Any) -> np.ndarray:
