@@ -195,6 +195,122 @@ def masked_logp_from_legal_ids(
     return logp
 
 
+def sample_actions_from_legal_ids(
+    logits: np.ndarray,
+    legal_ids: np.ndarray,
+    legal_offsets: np.ndarray,
+    *,
+    rng: np.random.Generator,
+    counters: MaskingAnomalyCounters | None = None,
+    pass_action_id: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Sample actions row-wise from categorical distribution restricted to packed legal-id slices.
+
+    Returns:
+      actions: (B,) int64
+      logp:    (B,) float32
+      entropy: (B,) float32
+    """
+    logits_array = _coerce_logits(logits)
+    action_space = logits_array.shape[1]
+    legal_ids_array = _coerce_legal_ids(legal_ids, action_space=action_space)
+    legal_offsets_array = _coerce_legal_offsets(
+        legal_offsets,
+        num_rows=logits_array.shape[0],
+        legal_count=legal_ids_array.shape[0],
+    )
+
+    B = logits_array.shape[0]
+    actions = np.empty((B,), dtype=np.int64)
+    logp = np.empty((B,), dtype=np.float32)
+    entropy = np.empty((B,), dtype=np.float32)
+
+    resolved_pass = resolve_pass_action_id() if pass_action_id is None else int(pass_action_id)
+    empty_rows = np.zeros((B,), dtype=bool)
+
+    for row_index in range(B):
+        start = int(legal_offsets_array[row_index])
+        end = int(legal_offsets_array[row_index + 1])
+        if start == end:
+            empty_rows[row_index] = True
+            actions[row_index] = resolved_pass
+            logp[row_index] = 0.0
+            entropy[row_index] = 0.0
+            continue
+
+        row_legal = legal_ids_array[start:end]
+        assert_strictly_increasing_legal_ids(row_legal)
+
+        row_logits = logits_array[row_index, row_legal]
+        if not np.all(np.isfinite(row_logits)):
+            raise ValueError(f"legal logits must be finite for row {row_index}")
+
+        row_max = np.max(row_logits)
+        shifted = (row_logits - row_max).astype(np.float32, copy=False)
+        exps = np.exp(shifted, dtype=np.float32)
+        denom = np.sum(exps, dtype=np.float32)
+        if float(denom) <= 0.0:
+            raise ValueError(f"row {row_index} has zero denom in softmax over legal slice")
+
+        row_logp = shifted - np.log(denom)
+        probs = np.exp(row_logp, dtype=np.float32)
+        choice = int(rng.choice(probs.shape[0], p=probs))
+
+        actions[row_index] = int(row_legal[choice])
+        logp[row_index] = np.float32(row_logp[choice])
+        positive_probs = probs[probs > 0.0]
+        entropy[row_index] = np.float32(-np.sum(positive_probs * np.log(positive_probs), dtype=np.float32))
+
+    if counters is not None and np.any(empty_rows):
+        counters.empty_legal += int(np.sum(empty_rows))
+
+    return actions, logp, entropy
+
+
+def sample_actions_from_mask(
+    logits: np.ndarray,
+    legal_mask: np.ndarray,
+    *,
+    rng: np.random.Generator,
+    counters: MaskingAnomalyCounters | None = None,
+    pass_action_id: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Sample masked actions row-wise and return action, behavior logp, and entropy."""
+    logits_array = _coerce_logits(logits)
+    legal_mask_array = _coerce_legal_mask(legal_mask, expected_shape=logits_array.shape)
+    _require_finite_legal_logits_from_mask(logits_array, legal_mask_array)
+
+    batch_size = logits_array.shape[0]
+    pass_id = resolve_pass_action_id() if pass_action_id is None else int(pass_action_id)
+    empty_rows = ~np.any(legal_mask_array, axis=1)
+    actions = np.empty((batch_size,), dtype=np.int64)
+    logp = np.empty((batch_size,), dtype=np.float32)
+    entropy = np.empty((batch_size,), dtype=np.float32)
+
+    non_empty_rows = np.flatnonzero(~empty_rows)
+    if non_empty_rows.size > 0:
+        logp_all = masked_log_softmax(logits_array[non_empty_rows], legal_mask_array[non_empty_rows])
+        probs = np.exp(logp_all, dtype=np.float32)
+
+        for local_row, row_index in enumerate(non_empty_rows.tolist()):
+            row_probs = probs[local_row]
+            action = int(rng.choice(row_probs.shape[0], p=row_probs))
+            actions[row_index] = action
+            logp[row_index] = np.float32(logp_all[local_row, action])
+            positive_probs = row_probs[row_probs > 0.0]
+            entropy[row_index] = np.float32(-np.sum(positive_probs * np.log(positive_probs), dtype=np.float32))
+
+    if np.any(empty_rows):
+        if counters is not None:
+            counters.empty_legal += int(np.sum(empty_rows))
+        actions[empty_rows] = pass_id
+        logp[empty_rows] = 0.0
+        entropy[empty_rows] = 0.0
+
+    return actions.astype(np.int64, copy=False), logp, entropy
+
+
 def _coerce_logits(logits: np.ndarray) -> np.ndarray:
     logits_array = np.asarray(logits, dtype=np.float32)
     if logits_array.ndim != 2:
