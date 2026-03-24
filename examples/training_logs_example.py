@@ -1,4 +1,12 @@
-"""Standalone example for learner-side training logs."""
+"""Standalone learner-side training log example.
+
+Run from the repo root after installing the project:
+
+    uv run python examples/training_logs_example.py
+
+This exercises `TrainingLogger` and `ImpalaLearner` directly.
+It does not go through `python/scripts/train.py`.
+"""
 
 from __future__ import annotations
 
@@ -58,7 +66,7 @@ def example_read_logs() -> None:
 
 
 def print_scope_note() -> None:
-    print("train.py wiring is intentionally not shown here; that belongs to M3-08 integration work.")
+    print("This example exercises the standalone learner-side logger only; train.py does not call it yet.")
 
 
 if __name__ == "__main__":

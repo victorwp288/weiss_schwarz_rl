@@ -12,13 +12,6 @@ from weiss_rl.repro import canonical_json_bytes, sha256_hex
 
 HARD_FAIL_SPEC_MISMATCH_POLICY = "hard_fail"
 _HEX64_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-_REQUIRED_KEYS = (
-    "encoding_versions",
-    "action_space_size",
-    "pass_id",
-    "observation_dtype",
-    "observation_length",
-)
 _HASH_KEYS = ("compatibility_hash", "spec_hash", "SPEC_HASH")
 
 
@@ -91,6 +84,14 @@ def _require_text(value: Any, *, field_name: str) -> str:
     return value
 
 
+def _require_field(bundle: Mapping[str, Any], *, context: str, field_name: str) -> Any:
+    if field_name not in bundle:
+        if context == "Spec bundle":
+            raise ValueError(f"Spec bundle missing required key: {field_name}")
+        raise ValueError(f"Spec bundle missing required key: {context}.{field_name}")
+    return bundle[field_name]
+
+
 def _read_compatibility_hash(bundle: Mapping[str, Any]) -> str:
     for key in _HASH_KEYS:
         if key not in bundle:
@@ -108,21 +109,48 @@ def _read_compatibility_hash(bundle: Mapping[str, Any]) -> str:
 
 def parse_spec_bundle(value: Mapping[str, Any]) -> SpecBundle:
     bundle = _require_mapping(value, context="Spec bundle")
-    missing = [key for key in _REQUIRED_KEYS if key not in bundle]
-    if missing:
-        raise ValueError(f"Spec bundle missing required keys: {', '.join(sorted(missing))}")
+    action = _require_mapping(_require_field(bundle, context="Spec bundle", field_name="action"), context="action")
+    observation = _require_mapping(
+        _require_field(bundle, context="Spec bundle", field_name="observation"),
+        context="observation",
+    )
 
-    action_space_size = _require_int(bundle["action_space_size"], field_name="action_space_size", minimum=1)
-    pass_id = _require_int(bundle["pass_id"], field_name="pass_id", minimum=0)
+    action_encoding_version = _require_int(
+        _require_field(action, context="action", field_name="action_encoding_version"),
+        field_name="action.action_encoding_version",
+        minimum=0,
+    )
+    observation_encoding_version = _require_int(
+        _require_field(observation, context="observation", field_name="obs_encoding_version"),
+        field_name="observation.obs_encoding_version",
+        minimum=0,
+    )
+    action_space_size = _require_int(
+        _require_field(action, context="action", field_name="action_space_size"),
+        field_name="action.action_space_size",
+        minimum=1,
+    )
+    pass_id = _require_int(
+        _require_field(action, context="action", field_name="pass_action_id"),
+        field_name="action.pass_action_id",
+        minimum=0,
+    )
     if pass_id >= action_space_size:
-        raise ValueError("pass_id must be smaller than action_space_size")
+        raise ValueError("action.pass_action_id must be smaller than action.action_space_size")
 
     return SpecBundle(
-        encoding_versions=dict(_require_mapping(bundle["encoding_versions"], context="encoding_versions")),
+        encoding_versions={"obs": observation_encoding_version, "action": action_encoding_version},
         action_space_size=action_space_size,
         pass_id=pass_id,
-        observation_dtype=_require_text(bundle["observation_dtype"], field_name="observation_dtype"),
-        observation_length=_require_int(bundle["observation_length"], field_name="observation_length", minimum=1),
+        observation_dtype=_require_text(
+            _require_field(observation, context="observation", field_name="dtype"),
+            field_name="observation.dtype",
+        ),
+        observation_length=_require_int(
+            _require_field(observation, context="observation", field_name="obs_len"),
+            field_name="observation.obs_len",
+            minimum=1,
+        ),
         compatibility_hash=_read_compatibility_hash(bundle),
         raw=dict(bundle),
     )
@@ -212,11 +240,16 @@ def load_runtime_spec_bundle(*, required: bool) -> RuntimeSpecBundle | None:
     if not isinstance(bundle, Mapping):
         raise RuntimeError(f"weiss_sim.export_spec_bundle() must return a mapping, got {type(bundle).__name__}")
 
-    payload = dict(bundle)
+    try:
+        parsed = parse_spec_bundle(bundle)
+    except ValueError as err:
+        raise RuntimeError(f"weiss_sim.export_spec_bundle() returned invalid spec bundle: {err}") from err
+
+    payload = parsed.to_dict()
     return RuntimeSpecBundle(
         bundle=payload,
-        spec_hash=observed_spec_hash(payload),
-        bundle_hash=spec_bundle_hash(payload),
+        spec_hash=parsed.compatibility_hash,
+        bundle_hash=sha256_hex(canonical_json_bytes(payload)),
     )
 
 

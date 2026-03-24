@@ -56,6 +56,7 @@ def _validate_packed_legal_ids(legal_ids: np.ndarray, legal_offsets: np.ndarray,
 @dataclass(slots=True)
 class UnrollBatch:
     """Array-backed unroll with shape (T, N, ...)."""
+
     T: int
     N: int
     obs_len: int
@@ -63,25 +64,25 @@ class UnrollBatch:
     meta: TrajectoryChunkMeta
 
     # Required per-step stored fields (canonical §7.2)
-    obs: np.ndarray                 # (T, N, obs_len) int16/int32
-    to_play_seat: np.ndarray        # (T, N) int8
-    decision_id: np.ndarray         # (T, N) int32
-    action: np.ndarray              # (T, N) uint32
-    reward: np.ndarray              # (T, N) float32
-    terminated: np.ndarray          # (T, N) bool
-    truncated: np.ndarray           # (T, N) bool
-    engine_status: np.ndarray       # (T, N) int32
-    episode_seed: np.ndarray        # (T, N) uint64
-    episode_key: np.ndarray         # (T, N) uint64 (or bytes later, but keep uint64 for now)
-    behavior_logp: np.ndarray       # (T, N) float32
+    obs: np.ndarray  # (T, N, obs_len) int16/int32
+    to_play_seat: np.ndarray  # (T, N) int8
+    decision_id: np.ndarray  # (T, N) int32
+    action: np.ndarray  # (T, N) uint32
+    reward: np.ndarray  # (T, N) float32
+    terminated: np.ndarray  # (T, N) bool
+    truncated: np.ndarray  # (T, N) bool
+    engine_status: np.ndarray  # (T, N) int32
+    episode_seed: np.ndarray  # (T, N) uint64
+    episode_key: np.ndarray  # (T, N) uint64 (or bytes later, but keep uint64 for now)
+    behavior_logp: np.ndarray  # (T, N) float32
 
     # Optional time-scale disambiguation (M1-11 / M2-12)
     k_raw_decisions: Optional[np.ndarray] = None  # (T, N) int16/int32
 
     # Legality storage (one of these, depending on meta.legal_repr)
-    legal_mask: Optional[np.ndarray] = None       # (T, N, A) uint8/bool
-    legal_ids: Optional[np.ndarray] = None        # (L,) uint16/uint32 packed
-    legal_offsets: Optional[np.ndarray] = None    # (T, N+1) uint32 offsets per (t,row)
+    legal_mask: Optional[np.ndarray] = None  # (T, N, A) uint8/bool
+    legal_ids: Optional[np.ndarray] = None  # (L,) uint16/uint32 packed
+    legal_offsets: Optional[np.ndarray] = None  # (T, N+1) uint32 offsets per (t,row)
 
     _write_t: int = 0  # internal cursor
     _packed_legal_write: int = 0  # next free index in legal_ids
@@ -331,5 +332,5 @@ def finalize_unroll(batch: UnrollBatch) -> UnrollBatch:
     # Extra safety checks
     if batch.meta.legal_repr == "mask" and batch.legal_mask is None:
         raise RuntimeError("legal_repr='mask' but legal_mask is None")
-        
+
     return batch

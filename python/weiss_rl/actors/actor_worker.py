@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal
@@ -25,6 +26,8 @@ except Exception:  # pragma: no cover
 
 
 LayoutName = Literal["i16_legal_ids", "mask"]
+
+_CHECKPOINT_METADATA_STEM = re.compile(r"(?:checkpoint_metadata|checkpoint)_(\d+)")
 
 
 def _configure_actor_torch_threads(actor_torch_threads: int) -> None:
@@ -75,13 +78,14 @@ class ActorWorker:
     seed: int = 0
     actor_torch_threads: int = 1
     checkpoint_dir: Path | None = None
-    reload_interval_updates: int = 1000
+    reload_interval_updates: int = 1000  # Deprecated alias for checkpoint metadata polling cadence.
 
     update_count: int = field(default=0, init=False)
-    loaded_checkpoint_update: int = field(default=0, init=False)
-    last_reload_checkpoint_update: int = field(default=-1, init=False)
-    checkpoint_lag_updates: int = field(default=0, init=False)
+    observed_checkpoint_update: int = field(default=0, init=False)
+    last_observed_checkpoint_update: int = field(default=-1, init=False)
+    checkpoint_metadata_lag_updates: int = field(default=0, init=False)
     _torch_threads_configured: bool = field(default=False, init=False)
+    _rng: np.random.Generator | None = field(default=None, init=False)
 
     def run_once(
         self,
@@ -102,7 +106,7 @@ class ActorWorker:
         Returns
         - UnrollBatch with behavior_logp filled.
         """
-        self.poll_checkpoint_sync()
+        self.poll_checkpoint_metadata()
         T = int(self.unroll_length)
         N = int(self.num_envs)
         A = int(self.action_space)
@@ -117,7 +121,9 @@ class ActorWorker:
                     f"torch threads mismatch: got {torch.get_num_threads()}, want {self.actor_torch_threads}"
                 )
 
-        rng = np.random.default_rng(self.seed + self.actor_id)
+        if self._rng is None:
+            self._rng = np.random.default_rng(self.seed + self.actor_id)
+
         pass_action_id = resolve_pass_action_id()
         anomaly = MaskingAnomalyCounters()
 
@@ -148,12 +154,7 @@ class ActorWorker:
             obs = np.asarray(batch.obs)
             to_play = _batch_to_play(batch)
             decision_id = np.asarray(batch.decision_id)
-            reward = _batch_reward(batch)
-            terminated = np.asarray(batch.terminated)
-            truncated = np.asarray(batch.truncated)
-            engine_status = np.asarray(batch.engine_status)
-            episode_seed = np.asarray(getattr(batch, "episode_seed", np.zeros((N,), dtype=np.uint64)), dtype=np.uint64)
-            episode_key = np.asarray(getattr(batch, "episode_key", np.zeros((N,), dtype=np.uint64)), dtype=np.uint64)
+            episode_seed, episode_key = _batch_episode_identity(batch, num_envs=N)
 
             if obs.shape != (N, obs_buf.shape[2]):
                 raise ValueError("batch.obs shape changed within unroll")
@@ -168,12 +169,13 @@ class ActorWorker:
                     logits,
                     legal_ids,
                     legal_offsets,
-                    rng=rng,
+                    rng=self._rng,
                     counters=anomaly,
                     pass_action_id=pass_action_id,
                 )
+                legal_ids_prefix = _packed_legal_ids_prefix(legal_ids, legal_offsets)
                 base = int(packed_legal_offsets[-1][-1])
-                packed_legal_ids.append(legal_ids.astype(np.int32, copy=False))
+                packed_legal_ids.append(legal_ids_prefix.astype(np.int32, copy=False))
                 packed_legal_offsets.append((legal_offsets[1:] + base).astype(np.uint32, copy=False))
             else:
                 legal_mask = _batch_legal_mask(batch)
@@ -184,11 +186,17 @@ class ActorWorker:
                 actions, logp, ent = sample_actions_from_mask(
                     logits,
                     legal_mask,
-                    rng=rng,
+                    rng=self._rng,
                     counters=anomaly,
                     pass_action_id=pass_action_id,
                 )
                 legal_mask_buf[t] = legal_mask
+
+            next_batch = env.step(actions.astype(np.uint32, copy=False))
+            reward = _batch_reward(next_batch)
+            terminated = np.asarray(next_batch.terminated)
+            truncated = np.asarray(next_batch.truncated)
+            engine_status = np.asarray(next_batch.engine_status)
 
             obs_buf[t] = obs
             to_play_buf[t] = to_play.astype(np.int8, copy=False)
@@ -203,7 +211,15 @@ class ActorWorker:
             behavior_logp_buf[t] = logp.astype(np.float32, copy=False)
             entropy_buf[t] = ent.astype(np.float32, copy=False)
 
-            batch = env.step(action_buf[t])
+            done = np.logical_or(terminated, truncated)
+            if np.any(done):
+                reset_done = getattr(env, "reset_done", None)
+                if callable(reset_done):
+                    batch = reset_done(done.astype(np.bool_, copy=False))
+                else:
+                    batch = next_batch
+            else:
+                batch = next_batch
 
         if self.layout_name == "i16_legal_ids":
             legal_ids_final = (
@@ -240,44 +256,107 @@ class ActorWorker:
             counters={"empty_legal": anomaly.empty_legal},
         )
 
-    def poll_checkpoint_sync(self) -> dict[str, int]:
-        self.update_count += 1
-        if self.checkpoint_dir and self.update_count % self.reload_interval_updates == 0:
-            self._reload_checkpoint_if_available()
+    @property
+    def checkpoint_metadata_poll_interval_updates(self) -> int:
+        """Compatibility-preserving name for checkpoint metadata polling cadence."""
+        return self.reload_interval_updates
 
-        latest_checkpoint_update = self._get_latest_checkpoint_update()
-        self.checkpoint_lag_updates = max(0, latest_checkpoint_update - self.loaded_checkpoint_update)
+    @property
+    def loaded_checkpoint_update(self) -> int:
+        """Deprecated alias for observed_checkpoint_update.
+
+        This worker only observes learner-emitted checkpoint metadata markers.
+        It does not reload model parameters.
+        """
+        return self.observed_checkpoint_update
+
+    @property
+    def last_reload_checkpoint_update(self) -> int:
+        """Deprecated alias for last_observed_checkpoint_update."""
+        return self.last_observed_checkpoint_update
+
+    @property
+    def checkpoint_lag_updates(self) -> int:
+        """Deprecated alias for checkpoint_metadata_lag_updates."""
+        return self.checkpoint_metadata_lag_updates
+
+    def poll_checkpoint_metadata(self) -> dict[str, int]:
+        """Observe learner-emitted checkpoint metadata markers.
+
+        This is a metadata-only surface used for lag tracking. The actor worker
+        does not reload model parameters in this scaffold.
+        """
+        self.update_count += 1
+        if self.checkpoint_dir and self.update_count % self.checkpoint_metadata_poll_interval_updates == 0:
+            self._observe_checkpoint_metadata_if_available()
+
+        latest_checkpoint_update = self._get_latest_checkpoint_metadata_update()
+        self.checkpoint_metadata_lag_updates = max(0, latest_checkpoint_update - self.observed_checkpoint_update)
         return {
-            "loaded_checkpoint_update": self.loaded_checkpoint_update,
-            "checkpoint_lag_updates": self.checkpoint_lag_updates,
+            "observed_checkpoint_update": self.observed_checkpoint_update,
+            "checkpoint_metadata_lag_updates": self.checkpoint_metadata_lag_updates,
         }
 
-    def _reload_checkpoint_if_available(self) -> None:
+    def poll_checkpoint_sync(self) -> dict[str, int]:
+        """Deprecated metadata-only alias.
+
+        The actor does not implement parameter reload. This method only tracks
+        learner-emitted checkpoint metadata markers and preserves the legacy
+        surface for callers that have not yet migrated.
+        """
+        metadata_status = self.poll_checkpoint_metadata()
+        return {
+            "loaded_checkpoint_update": metadata_status["observed_checkpoint_update"],
+            "checkpoint_lag_updates": metadata_status["checkpoint_metadata_lag_updates"],
+        }
+
+    def _observe_checkpoint_metadata_if_available(self) -> None:
         if not self.checkpoint_dir:
             return
 
-        latest_checkpoint_update = self._get_latest_checkpoint_update()
-        if latest_checkpoint_update <= self.last_reload_checkpoint_update:
+        latest_checkpoint_update = self._get_latest_checkpoint_metadata_update()
+        if latest_checkpoint_update <= self.last_observed_checkpoint_update:
             return
 
-        checkpoint_path = self.checkpoint_dir / f"checkpoint_{latest_checkpoint_update}.pt"
-        if checkpoint_path.exists():
-            print(f"Actor {self.actor_id} reloading checkpoint: {checkpoint_path}")
-            self.loaded_checkpoint_update = latest_checkpoint_update
-            self.last_reload_checkpoint_update = latest_checkpoint_update
+        checkpoint_metadata_path = self._checkpoint_metadata_path_for_update(latest_checkpoint_update)
+        if checkpoint_metadata_path is None:
+            return
 
-    def _get_latest_checkpoint_update(self) -> int:
+        print(f"Actor {self.actor_id} observed checkpoint metadata: {checkpoint_metadata_path}")
+        self.observed_checkpoint_update = latest_checkpoint_update
+        self.last_observed_checkpoint_update = latest_checkpoint_update
+
+    def _checkpoint_metadata_path_for_update(self, update_count: int) -> Path | None:
+        if not self.checkpoint_dir:
+            return None
+
+        for path in (
+            self.checkpoint_dir / f"checkpoint_metadata_{update_count}.json",
+            self.checkpoint_dir / f"checkpoint_{update_count}.pt",
+        ):
+            if path.exists():
+                return path
+        return None
+
+    def _get_latest_checkpoint_metadata_update(self) -> int:
         if not self.checkpoint_dir:
             return 0
 
         latest_checkpoint_update = 0
-        for checkpoint_path in self.checkpoint_dir.glob("checkpoint_*.pt"):
-            try:
-                checkpoint_update = int(checkpoint_path.stem.split("_", maxsplit=1)[1])
-            except (IndexError, ValueError):
-                continue
-            latest_checkpoint_update = max(latest_checkpoint_update, checkpoint_update)
+        for pattern in ("checkpoint_metadata_*.json", "checkpoint_*.pt"):
+            for checkpoint_path in self.checkpoint_dir.glob(pattern):
+                checkpoint_update = _checkpoint_update_from_path(checkpoint_path)
+                if checkpoint_update is None:
+                    continue
+                latest_checkpoint_update = max(latest_checkpoint_update, checkpoint_update)
         return latest_checkpoint_update
+
+
+def _checkpoint_update_from_path(checkpoint_path: Path) -> int | None:
+    match = _CHECKPOINT_METADATA_STEM.fullmatch(checkpoint_path.stem)
+    if match is None:
+        return None
+    return int(match.group(1))
 
 
 def actor_behavior_logp_from_legal_ids(
@@ -326,6 +405,15 @@ def _batch_reward(batch: Any) -> np.ndarray:
     raise AttributeError("batch must expose .reward or .rewards")
 
 
+def _batch_episode_identity(batch: Any, *, num_envs: int) -> tuple[np.ndarray, np.ndarray]:
+    episode_seed = getattr(batch, "episode_seed", None)
+    episode_key = getattr(batch, "episode_key", None)
+    if episode_seed is None or episode_key is None:
+        zeros = np.zeros((num_envs,), dtype=np.uint64)
+        return zeros, zeros.copy()
+    return np.asarray(episode_seed, dtype=np.uint64), np.asarray(episode_key, dtype=np.uint64)
+
+
 def _batch_legal_mask(batch: Any) -> np.ndarray:
     if hasattr(batch, "mask"):
         return np.asarray(batch.mask)
@@ -344,3 +432,10 @@ def _batch_legal_ids_offsets(batch: Any) -> tuple[np.ndarray, np.ndarray]:
         return np.asarray(batch.legal_ids), np.asarray(batch.legal_offsets)
 
     raise AttributeError("ids_offsets layout batch must expose .ids_offsets or (.legal_ids, .legal_offsets)")
+
+
+def _packed_legal_ids_prefix(legal_ids: np.ndarray, legal_offsets: np.ndarray) -> np.ndarray:
+    used = 0 if legal_offsets.size == 0 else int(legal_offsets[-1])
+    if used < 0 or used > legal_ids.shape[0]:
+        raise ValueError(f"legal_ids prefix out of bounds: used={used}, capacity={legal_ids.shape[0]}")
+    return legal_ids[:used]

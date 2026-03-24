@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,7 +14,7 @@ from torch import Tensor, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim import Optimizer
 
-from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_metrics
+from weiss_rl.learners.vtrace import VTraceTargets, VtraceMetrics, compute_vtrace_metrics
 from weiss_rl.masking import masked_logp_from_legal_ids, masked_logp_from_mask
 from weiss_rl.training_logger import TrainingLogger, TrainingMetrics
 
@@ -191,7 +192,7 @@ class ImpalaLearner:
 
         if self.checkpoint_dir and self.update_count % self.checkpoint_interval_updates == 0:
             self.policy_version += 1
-            self._save_checkpoint()
+            self._write_checkpoint_metadata()
 
         metrics: dict[str, float] = {
             "loss": 0.0,
@@ -233,11 +234,7 @@ class ImpalaLearner:
             metrics.update(summarize_vtrace_diagnostics(vtrace_result, rho_bar=rho_bar, c_bar=c_bar))
 
         if self.logger and self.update_count % self.logging_interval_updates == 0:
-            self._log_metrics(
-                batch,
-                throughput_samples_per_sec=throughput_samples_per_sec,
-                throughput_updates_per_sec=throughput_updates_per_sec,
-            )
+            self._log_metrics(metrics, batch)
             self.last_log_time = time.time()
             self.last_log_update = self.update_count
 
@@ -468,32 +465,37 @@ class ImpalaLearner:
                 return int(np.asarray(value).size)
         return 1
 
-    def _save_checkpoint(self) -> None:
+    def _write_checkpoint_metadata(self) -> None:
         if not self.checkpoint_dir:
             return
 
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        checkpoint_path = self.checkpoint_dir / f"checkpoint_{self.update_count}.pt"
-        checkpoint_path.write_text(
-            f"update_count: {self.update_count}\npolicy_version: {self.policy_version}\n",
+        checkpoint_metadata_path = self.checkpoint_dir / f"checkpoint_metadata_{self.update_count}.json"
+        checkpoint_metadata_path.write_text(
+            json.dumps(
+                {
+                    "format": "checkpoint_metadata",
+                    "parameters_included": False,
+                    "update_count": self.update_count,
+                    "policy_version": self.policy_version,
+                },
+                sort_keys=True,
+            )
+            + "\n",
             encoding="utf-8",
         )
-        print(f"Saved checkpoint: {checkpoint_path}")
+        print(f"Saved checkpoint metadata: {checkpoint_metadata_path}")
 
-    def _log_metrics(
-        self,
-        batch: Any,
-        *,
-        throughput_samples_per_sec: float,
-        throughput_updates_per_sec: float,
-    ) -> None:
+    def _log_metrics(self, update_metrics: dict[str, float], batch: Any) -> None:
         if not self.logger:
             return
 
+        rho_bar_value = _batch_value(batch, "vtrace_rho_bar")
+        c_bar_value = _batch_value(batch, "vtrace_c_bar")
         vtrace_metrics = compute_vtrace_metrics(
-            batch if isinstance(batch, dict) else {},
-            rho_bar=self.vtrace_rho_bar,
-            c_bar=self.vtrace_c_bar,
+            batch,
+            rho_bar=self.vtrace_rho_bar if rho_bar_value is None else float(rho_bar_value),
+            c_bar=self.vtrace_c_bar if c_bar_value is None else float(c_bar_value),
             pass_action_id=self.pass_action_id,
         )
         elapsed = time.time() - self.start_time
@@ -502,19 +504,36 @@ class ImpalaLearner:
             wall_clock_seconds=elapsed,
             wall_clock_ms=int(elapsed * 1000),
             policy_version=self.policy_version,
-            loss=0.0,
-            throughput_samples_per_sec=throughput_samples_per_sec,
-            throughput_updates_per_sec=throughput_updates_per_sec,
+            loss=float(update_metrics.get("loss", 0.0)),
+            throughput_samples_per_sec=float(update_metrics.get("throughput_samples_per_sec", 0.0)),
+            throughput_updates_per_sec=float(update_metrics.get("throughput_updates_per_sec", 0.0)),
             vtrace_rho_mean=vtrace_metrics.rho_mean,
-            vtrace_rho_p50=vtrace_metrics.rho_p50,
-            vtrace_rho_p90=vtrace_metrics.rho_p90,
-            vtrace_rho_p99=vtrace_metrics.rho_p99,
-            vtrace_clip_rate=vtrace_metrics.clip_rate,
-            vtrace_c_clipped_rate=vtrace_metrics.c_clipped_rate,
+            vtrace_rho_p50=float(update_metrics.get("vtrace_rho_p50", vtrace_metrics.rho_p50)),
+            vtrace_rho_p90=float(update_metrics.get("vtrace_rho_p90", vtrace_metrics.rho_p90)),
+            vtrace_rho_p99=float(update_metrics.get("vtrace_rho_p99", vtrace_metrics.rho_p99)),
+            vtrace_clip_rate=float(update_metrics.get("vtrace_rho_clip_rate", vtrace_metrics.clip_rate)),
+            vtrace_c_clipped_rate=float(update_metrics.get("vtrace_c_clip_rate", vtrace_metrics.c_clipped_rate)),
             kl_divergence=vtrace_metrics.kl_divergence,
-            entropy=vtrace_metrics.entropy,
+            value_loss=float(update_metrics.get("value_loss", 0.0)),
+            actor_loss=float(update_metrics.get("policy_loss", 0.0)),
+            entropy=float(update_metrics.get("entropy", vtrace_metrics.entropy)),
+            custom_metrics=self._custom_log_metrics(update_metrics, vtrace_metrics),
         )
         self.logger.log(metrics)
+
+    def _custom_log_metrics(
+        self,
+        update_metrics: dict[str, float],
+        vtrace_metrics: VtraceMetrics,
+    ) -> dict[str, float]:
+        custom_metrics: dict[str, float] = {
+            "vtrace_batch_metrics_available": float(np.isfinite(vtrace_metrics.rho_mean)),
+        }
+        if "vtrace_rho_p95" in update_metrics:
+            custom_metrics["vtrace_rho_p95"] = float(update_metrics["vtrace_rho_p95"])
+        if np.isfinite(vtrace_metrics.entropy):
+            custom_metrics["vtrace_entropy"] = float(vtrace_metrics.entropy)
+        return custom_metrics
 
     def get_policy_version(self) -> int:
         return self.policy_version

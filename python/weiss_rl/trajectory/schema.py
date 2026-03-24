@@ -16,6 +16,7 @@ LEGAL_REPR_FIELDS: dict[LegalRepr, tuple[str, ...]] = {
     "none": (),
 }
 
+
 def legal_storage_fields(legal_repr: LegalRepr) -> tuple[str, ...]:
     """Return the canonical array fields required for the selected legal representation."""
     return LEGAL_REPR_FIELDS[legal_repr]

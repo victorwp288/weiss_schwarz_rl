@@ -6,7 +6,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import numpy as np
 
@@ -15,6 +15,7 @@ from weiss_rl.repro import canonical_json_bytes, key256_to_hex, key256_to_short6
 
 _CDF_RENORMALIZE_TOL = 1e-6
 _U32_MASK = (1 << 32) - 1
+_MISSING = object()
 
 OutcomeToken = Literal["W", "L", "D", "T"]
 
@@ -377,29 +378,93 @@ def abort_on_engine_fault_eval(
     raise RuntimeError(f"{note}; wrote {fault_path}")
 
 
-def game_result_from_step(step: object, *, env_index: int = 0) -> GameResult:
+def game_result_from_step(
+    step: object,
+    *,
+    env_index: int = 0,
+    acting_seat: int | None = None,
+    episode_seed: int | None = None,
+) -> GameResult:
+    """Decode one environment row into an evaluation result.
+
+    Prefer explicit terminal winner metadata when the step exposes it. Otherwise
+    decisive terminated rows are inferred from reward sign relative to the
+    acting seat, and a terminated zero reward is treated as a draw fallback.
+    That zero-reward draw fallback matches the locked thesis configs and should
+    be revisited if terminal shaping semantics change.
+
+    Some minimal terminal step objects omit context fields such as acting seat
+    or episode seed; callers may supply those explicitly when unavailable on
+    the observed row.
+    """
     reward = _step_scalar(step, ("reward", "rewards"), env_index=env_index, cast_fn=float)
     terminated = _step_scalar(step, ("terminated",), env_index=env_index, cast_fn=bool)
     truncated = _step_scalar(step, ("truncated",), env_index=env_index, cast_fn=bool)
     engine_status = _step_scalar(step, ("engine_status",), env_index=env_index, cast_fn=int)
-    episode_seed = _step_scalar(step, ("episode_seed",), env_index=env_index, cast_fn=int)
+    resolved_episode_seed = _required_step_scalar_with_fallback(
+        step,
+        ("episode_seed",),
+        env_index=env_index,
+        cast_fn=int,
+        fallback=_MISSING if episode_seed is None else episode_seed,
+        fallback_name="episode_seed",
+    )
     simulator_episode_key = _optional_step_scalar(step, ("episode_key",), env_index=env_index)
 
-    winner_seat: int | None = None
-    if terminated:
-        if reward > 0.0:
-            winner_seat = 0
-        elif reward < 0.0:
-            winner_seat = 1
+    winner_seat = _winner_seat_from_terminal_step(
+        step,
+        env_index=env_index,
+        reward=reward,
+        terminated=terminated,
+        truncated=truncated,
+        acting_seat=acting_seat,
+    )
 
     return GameResult(
-        episode_seed=episode_seed,
+        episode_seed=resolved_episode_seed,
         terminated=terminated,
         truncated=truncated,
         winner_seat=winner_seat,
         engine_status=engine_status,
         simulator_episode_key=simulator_episode_key,
     )
+
+
+def _winner_seat_from_terminal_step(
+    step: object,
+    *,
+    env_index: int,
+    reward: float,
+    terminated: bool,
+    truncated: bool,
+    acting_seat: int | None,
+) -> int | None:
+    if not terminated or truncated:
+        return None
+
+    explicit_winner_seat = _optional_terminal_winner_seat(step, env_index=env_index)
+    if explicit_winner_seat is not _MISSING:
+        return cast(int | None, explicit_winner_seat)
+    if reward == 0.0:
+        return None
+
+    perspective_seat = _reward_perspective_seat(step, env_index=env_index, acting_seat=acting_seat)
+    return perspective_seat if reward > 0.0 else 1 - perspective_seat
+
+
+def _optional_terminal_winner_seat(step: object, *, env_index: int) -> object:
+    for name in ("winner_seat", "winner"):
+        if not hasattr(step, name):
+            continue
+        value = _step_value_for_env(step, name=name, env_index=env_index)
+        if value is None:
+            return None
+
+        seat = int(value)
+        if seat == -1:
+            return None
+        return _require_seat(seat, name=name)
+    return _MISSING
 
 
 def resolve_eval_episode_key(
@@ -471,6 +536,19 @@ def _require_seat(value: int, *, name: str) -> int:
     return seat
 
 
+def _step_value_for_env(step: object, *, name: str, env_index: int) -> Any:
+    values = np.asarray(getattr(step, name), dtype=object)
+    if values.ndim == 0:
+        value = values.item()
+    else:
+        value = values[env_index]
+        if isinstance(value, np.ndarray) and value.size == 1:
+            value = value.item()
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
 def _step_scalar(
     step: object,
     names: Sequence[str],
@@ -480,24 +558,75 @@ def _step_scalar(
 ) -> Any:
     for name in names:
         if hasattr(step, name):
-            values = np.asarray(getattr(step, name))
-            return cast_fn(values[env_index])
+            return cast_fn(_step_value_for_env(step, name=name, env_index=env_index))
     joined_names = ", ".join(names)
     raise AttributeError(f"step is missing required field(s): {joined_names}")
+
+
+def _required_step_scalar_with_fallback(
+    step: object,
+    names: Sequence[str],
+    *,
+    env_index: int,
+    cast_fn: Any,
+    fallback: Any,
+    fallback_name: str,
+) -> Any:
+    try:
+        observed = _step_scalar(step, names, env_index=env_index, cast_fn=cast_fn)
+    except AttributeError:
+        if fallback is _MISSING:
+            joined_names = ", ".join(names)
+            raise AttributeError(
+                f"step is missing required field(s): {joined_names}; provide {fallback_name} when unavailable"
+            ) from None
+        return cast_fn(fallback)
+
+    if fallback is _MISSING:
+        return observed
+
+    expected = cast_fn(fallback)
+    if observed != expected:
+        raise ValueError(f"{fallback_name} mismatch: step={observed}, provided={expected}")
+    return observed
 
 
 def _optional_step_scalar(step: object, names: Sequence[str], *, env_index: int) -> int | bytes | None:
     for name in names:
         if not hasattr(step, name):
             continue
-        values = np.asarray(getattr(step, name))
-        value = values[env_index]
-        if isinstance(value, np.generic):
-            return value.item()
-        if isinstance(value, bytes):
-            return value
+        value = _step_value_for_env(step, name=name, env_index=env_index)
+        if value is None:
+            return None
+        if isinstance(value, (bytes, bytearray)):
+            return bytes(value)
         return int(value)
     return None
+
+
+def _reward_perspective_seat(step: object, *, env_index: int, acting_seat: int | None) -> int:
+    aliases: list[tuple[str, int]] = []
+    if acting_seat is not None:
+        aliases.append(("acting_seat", _require_seat(acting_seat, name="acting_seat")))
+
+    for name in ("actor", "to_play_seat", "to_play"):
+        if not hasattr(step, name):
+            continue
+        seat = _step_scalar(step, (name,), env_index=env_index, cast_fn=int)
+        if seat == -1:
+            continue
+        aliases.append((name, _require_seat(seat, name=name)))
+
+    if not aliases:
+        raise AttributeError(
+            "decisive terminated step must expose acting_seat or a valid actor, to_play_seat, or to_play"
+        )
+
+    canonical_name, canonical_seat = aliases[0]
+    for name, seat in aliases[1:]:
+        if seat != canonical_seat:
+            raise ValueError(f"reward perspective seat mismatch: {canonical_name}={canonical_seat}, {name}={seat}")
+    return canonical_seat
 
 
 def _coerce_eval_logits(logits: np.ndarray) -> np.ndarray:

@@ -7,7 +7,7 @@ from weiss_rl.plotting.paper_figures import render_placeholder_figure
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Figure generation scaffold entrypoint")
+    parser = argparse.ArgumentParser(description="Placeholder figure writer (not the final paper figure pipeline)")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 

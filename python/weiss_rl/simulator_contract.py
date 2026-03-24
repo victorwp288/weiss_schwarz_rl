@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from weiss_rl.repro import canonical_json_bytes, sha256_hex
+from weiss_rl.spec import parse_spec_bundle
 
 _COLLECTION_SCRIPT = """
 import json
@@ -150,13 +151,15 @@ def load_simulator_contract(repo_root: Path) -> SimulatorContract:
             continue
 
         simulator = dict(payload.get("simulator", {}))
-        spec_bundle = dict(payload.get("spec_bundle", {}))
-        if not spec_bundle:
-            failures.append(f"- {_target_label(target)}: empty spec_bundle payload")
+        raw_spec_bundle = payload.get("spec_bundle", {})
+        try:
+            parsed_spec_bundle = parse_spec_bundle(raw_spec_bundle)
+        except ValueError as exc:
+            failures.append(f"- {_target_label(target)}: invalid spec_bundle payload: {exc}")
             continue
 
-        if "spec_hash" in spec_bundle:
-            simulator["compatibility_hash"] = str(spec_bundle["spec_hash"])
+        spec_bundle = parsed_spec_bundle.to_dict()
+        simulator["compatibility_hash"] = parsed_spec_bundle.compatibility_hash
         return SimulatorContract(
             simulator=simulator,
             spec_bundle=spec_bundle,
