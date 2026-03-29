@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -22,11 +23,6 @@ _REAL_SIM_LEGAL_DECK = (list(range(1, 14)) * 4)[:50]
 
 def _load_weiss_sim():
     return pytest.importorskip("weiss_sim")
-
-
-def _fixture_db_path() -> Path:
-    weiss_sim = _load_weiss_sim()
-    return Path(weiss_sim.__file__).resolve().parents[1] / "tests" / "fixtures" / "cards.wsdb"
 
 
 def _simulator_episode_key(
@@ -56,11 +52,12 @@ def _make_real_env(
     num_envs: int = 2,
     seed: int = 123,
 ) -> DecisionBoundaryEnv:
+    _load_weiss_sim()
     return DecisionBoundaryEnv.create(
         legality=legality,
         mode="train",
         num_envs=num_envs,
-        db_path=str(_fixture_db_path()),
+        db_path=None,
         deck_lists=[_REAL_SIM_LEGAL_DECK, _REAL_SIM_LEGAL_DECK],
         deck_ids=[101, 102],
         max_decisions=200,
@@ -651,6 +648,36 @@ def test_actor_worker_preserves_rng_stream_across_run_once_calls() -> None:
 
     assert np.array_equal(first.action, expected_chunks[0])
     assert np.array_equal(second.action, expected_chunks[1])
+
+
+def test_actor_worker_writes_fault_bundle_on_nonfinite_logits(tmp_path: Path) -> None:
+    fault_dir = tmp_path / "faults"
+    worker = ActorWorker(
+        actor_id=8,
+        unroll_length=2,
+        num_envs=2,
+        action_space=ACTION_SPACE,
+        layout_name="mask",
+        seed=41,
+        fault_dir=fault_dir,
+    )
+
+    def nan_policy_logits(obs: np.ndarray, to_play: np.ndarray) -> np.ndarray:
+        logits = _policy_logits(obs, to_play)
+        logits[0, 0] = np.nan
+        return logits
+
+    with pytest.raises(RuntimeError, match="non-finite actor policy logits; wrote fault bundle to ") as excinfo:
+        worker.run_once(env=StaticMaskEnv(2), policy_logits_fn=nan_policy_logits)
+
+    [fault_path] = sorted(fault_dir.glob("actor_numeric_fault_*.json"))
+    assert str(fault_path) in str(excinfo.value)
+
+    payload = json.loads(fault_path.read_text(encoding="utf-8"))
+    assert payload["component"] == "actor_worker"
+    assert payload["reason"] == "non-finite actor policy logits"
+    assert payload["step"] == 0
+    assert payload["logits_nonfinite_indices"]["data"] == [[0, 0]]
 
 
 def test_actor_worker_reports_checkpoint_metadata_lag_in_update_units(tmp_path: Path) -> None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -221,11 +220,6 @@ def _load_weiss_sim():
     return pytest.importorskip("weiss_sim")
 
 
-def _fixture_db_path() -> Path:
-    weiss_sim = _load_weiss_sim()
-    return Path(weiss_sim.__file__).resolve().parents[1] / "tests" / "fixtures" / "cards.wsdb"
-
-
 def _simulator_episode_key(
     episode_seed: np.ndarray,
     episode_index: np.ndarray,
@@ -240,11 +234,12 @@ def _simulator_episode_key(
 
 
 def _make_env(*, legality: LegalMode, num_envs: int = 2, seed: int = 123) -> DecisionBoundaryEnv:
+    _load_weiss_sim()
     return DecisionBoundaryEnv.create(
         legality=legality,
         mode="train",
         num_envs=num_envs,
-        db_path=str(_fixture_db_path()),
+        db_path=None,
         deck_lists=[_LEGAL_DECK, _LEGAL_DECK],
         deck_ids=[101, 102],
         max_decisions=200,

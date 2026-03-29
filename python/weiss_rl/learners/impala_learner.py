@@ -16,10 +16,16 @@ from torch.optim import Optimizer
 
 from weiss_rl.learners.vtrace import VTraceTargets, VtraceMetrics, compute_vtrace_metrics
 from weiss_rl.masking import masked_logp_from_legal_ids, masked_logp_from_mask
+from weiss_rl.replay.bundles import write_fault_bundle
 from weiss_rl.training_logger import TrainingLogger, TrainingMetrics
 
 
 VTRACE_RHO_PERCENTILES = (50, 90, 95, 99)
+
+
+def _nonfinite_indices(values: Tensor | np.ndarray) -> np.ndarray:
+    array = values.detach().cpu().numpy() if isinstance(values, torch.Tensor) else np.asarray(values)
+    return np.argwhere(~np.isfinite(array)).astype(np.int64, copy=False)
 
 
 def learner_logp_from_mask(
@@ -161,6 +167,7 @@ class ImpalaLearner:
     entropy_coef: float = 0.01
     grad_norm_clip: float = 40.0
     checkpoint_dir: Path | None = None
+    fault_dir: Path | None = None
     checkpoint_interval_updates: int = 50000
     logs_dir: Path | None = None
     logging_interval_updates: int = 100
@@ -216,11 +223,12 @@ class ImpalaLearner:
                 raise ValueError("ImpalaLearner requires a model to run an optimizer step")
 
             self.model.train()
-            loss, loss_metrics = self._loss_and_metrics(batch)
+            loss, loss_metrics, loss_context = self._loss_and_metrics_with_context(batch)
             optimizer = self._optimizer_for_step()
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             grad_norm = clip_grad_norm_(self.model.parameters(), self.grad_norm_clip)
+            self._ensure_finite_gradients(batch=batch, context=loss_context, grad_norm=grad_norm)
             optimizer.step()
 
             metrics.update(loss_metrics)
@@ -241,6 +249,10 @@ class ImpalaLearner:
         return metrics
 
     def _loss_and_metrics(self, batch: Any) -> tuple[Tensor, dict[str, float]]:
+        loss, metrics, _ = self._loss_and_metrics_with_context(batch)
+        return loss, metrics
+
+    def _loss_and_metrics_with_context(self, batch: Any) -> tuple[Tensor, dict[str, float], dict[str, Any]]:
         if self.model is None:
             raise ValueError("ImpalaLearner requires a model to compute losses")
 
@@ -260,19 +272,42 @@ class ImpalaLearner:
         if legal_mask.shape != logits.shape:
             raise ValueError("legal_mask must match learner logits on time, batch, and action dimensions")
 
+        context: dict[str, Any] = {
+            "logits": logits.detach(),
+            "values": values.detach(),
+        }
+        self._ensure_finite_tensor("forward_logits", logits, batch=batch, context=context)
+        self._ensure_finite_tensor("forward_values", values, batch=batch, context=context)
+
         action_logp, entropy = _masked_action_logp_and_entropy(
             logits,
             legal_mask,
             actions,
             pass_action_id=self.pass_action_id,
         )
+        context["action_logp"] = action_logp.detach()
+        context["entropy"] = entropy.detach()
+        self._ensure_finite_tensor("action_logp", action_logp, batch=batch, context=context)
+        self._ensure_finite_tensor("entropy", entropy, batch=batch, context=context)
+
         targets = self._float_target(vtrace_result.vs, expected_shape=values.shape, like=values)
         advantages = self._float_target(vtrace_result.pg_advantages, expected_shape=values.shape, like=values)
+        context["targets"] = targets.detach()
+        context["advantages"] = advantages.detach()
 
         policy_loss = -(action_logp * advantages).mean()
         value_loss = torch.mean((values - targets) ** 2)
         entropy_mean = entropy.mean()
         total_loss = policy_loss + (self.value_loss_coef * value_loss) - (self.entropy_coef * entropy_mean)
+
+        context["policy_loss"] = policy_loss.detach()
+        context["value_loss"] = value_loss.detach()
+        context["entropy_mean"] = entropy_mean.detach()
+        context["total_loss"] = total_loss.detach()
+        self._ensure_finite_tensor("policy_loss", policy_loss, batch=batch, context=context)
+        self._ensure_finite_tensor("value_loss", value_loss, batch=batch, context=context)
+        self._ensure_finite_tensor("entropy_mean", entropy_mean, batch=batch, context=context)
+        self._ensure_finite_tensor("total_loss", total_loss, batch=batch, context=context)
 
         metrics = {
             "loss": float(total_loss.detach()),
@@ -280,7 +315,7 @@ class ImpalaLearner:
             "value_loss": float(value_loss.detach()),
             "entropy": float(entropy_mean.detach()),
         }
-        return total_loss, metrics
+        return total_loss, metrics, context
 
     def _optimizer_for_step(self) -> Optimizer:
         if self.optimizer is None:
@@ -464,6 +499,91 @@ class ImpalaLearner:
             if value is not None:
                 return int(np.asarray(value).size)
         return 1
+
+    def _fault_dir_path(self) -> Path:
+        if self.fault_dir is not None:
+            return self.fault_dir
+        if self.checkpoint_dir is not None:
+            return self.checkpoint_dir / "faults"
+        if self.logs_dir is not None:
+            return self.logs_dir / "faults"
+        return Path("faults")
+
+    def _batch_fault_snapshot(self, batch: Any) -> dict[str, Any]:
+        snapshot: dict[str, Any] = {}
+        for key in (
+            "obs",
+            "actions",
+            "legal_mask",
+            "to_play_seat",
+            "actor",
+            "initial_hidden_state",
+            "vtrace_rho_bar",
+            "vtrace_c_bar",
+        ):
+            value = _batch_value(batch, key)
+            if value is not None:
+                snapshot[key] = value
+        vtrace_result = _batch_value(batch, "vtrace_result")
+        if vtrace_result is not None:
+            snapshot["vtrace_result"] = vtrace_result
+        return snapshot
+
+    def _write_numeric_fault_bundle(self, *, stage: str, batch: Any, context: dict[str, Any]) -> Path:
+        return write_fault_bundle(
+            fault_dir=self._fault_dir_path(),
+            prefix="learner_numeric_fault",
+            payload={
+                "format": "numeric_fault_bundle",
+                "component": "impala_learner",
+                "stage": stage,
+                "update_count": self.update_count,
+                "policy_version": self.policy_version,
+                "batch_size": self._batch_size(batch),
+                "pass_action_id": self.pass_action_id,
+                "batch": self._batch_fault_snapshot(batch),
+                "context": context,
+            },
+        )
+
+    def _ensure_finite_tensor(
+        self,
+        name: str,
+        tensor: Tensor,
+        *,
+        batch: Any,
+        context: dict[str, Any],
+    ) -> None:
+        if bool(torch.isfinite(tensor).all().item()):
+            return
+        fault_context = dict(context)
+        fault_context[name] = tensor.detach()
+        fault_context[f"{name}_nonfinite_indices"] = _nonfinite_indices(tensor)
+        fault_path = self._write_numeric_fault_bundle(stage=name, batch=batch, context=fault_context)
+        raise RuntimeError(f"non-finite learner {name}; wrote fault bundle to {fault_path}")
+
+    def _ensure_finite_gradients(self, *, batch: Any, context: dict[str, Any], grad_norm: Tensor) -> None:
+        model = self.model
+        if model is None:
+            raise ValueError("ImpalaLearner requires a model")
+
+        bad_gradients = {
+            name: parameter.grad.detach()
+            for name, parameter in model.named_parameters()
+            if parameter.grad is not None and not bool(torch.isfinite(parameter.grad).all().item())
+        }
+        grad_norm_tensor = torch.as_tensor(grad_norm)
+        if not bad_gradients and bool(torch.isfinite(grad_norm_tensor).all().item()):
+            return
+
+        fault_context = dict(context)
+        fault_context["grad_norm"] = grad_norm_tensor.detach()
+        fault_context["grad_norm_nonfinite_indices"] = _nonfinite_indices(grad_norm_tensor)
+        if bad_gradients:
+            fault_context["bad_gradient_names"] = sorted(bad_gradients)
+            fault_context["bad_gradients"] = bad_gradients
+        fault_path = self._write_numeric_fault_bundle(stage="gradients", batch=batch, context=fault_context)
+        raise RuntimeError(f"non-finite learner gradients; wrote fault bundle to {fault_path}")
 
     def _write_checkpoint_metadata(self) -> None:
         if not self.checkpoint_dir:

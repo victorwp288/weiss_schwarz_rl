@@ -17,6 +17,7 @@ from weiss_rl.masking import (
     sample_actions_from_legal_ids,
     sample_actions_from_mask,
 )
+from weiss_rl.replay.bundles import write_fault_bundle
 
 torch: ModuleType | None
 try:
@@ -28,6 +29,10 @@ except Exception:  # pragma: no cover
 LayoutName = Literal["i16_legal_ids", "mask"]
 
 _CHECKPOINT_METADATA_STEM = re.compile(r"(?:checkpoint_metadata|checkpoint)_(\d+)")
+
+
+def _nonfinite_indices(values: np.ndarray) -> np.ndarray:
+    return np.argwhere(~np.isfinite(values)).astype(np.int64, copy=False)
 
 
 def _configure_actor_torch_threads(actor_torch_threads: int) -> None:
@@ -78,6 +83,7 @@ class ActorWorker:
     seed: int = 0
     actor_torch_threads: int = 1
     checkpoint_dir: Path | None = None
+    fault_dir: Path | None = None
     reload_interval_updates: int = 1000  # Deprecated alias for checkpoint metadata polling cadence.
 
     update_count: int = field(default=0, init=False)
@@ -162,6 +168,17 @@ class ActorWorker:
             logits = _policy_logits(policy_logits_fn, obs, to_play)
             if logits.shape != (N, A):
                 raise ValueError(f"policy_logits_fn must return shape (N, A)=({N}, {A})")
+            if not np.all(np.isfinite(logits)):
+                self._raise_numeric_fault(
+                    "non-finite actor policy logits",
+                    step=t,
+                    obs=obs,
+                    to_play=to_play,
+                    decision_id=decision_id,
+                    episode_seed=episode_seed,
+                    episode_key=episode_key,
+                    logits=logits,
+                )
 
             if self.layout_name == "i16_legal_ids":
                 legal_ids, legal_offsets = _batch_legal_ids_offsets(batch)
@@ -177,6 +194,39 @@ class ActorWorker:
                 base = int(packed_legal_offsets[-1][-1])
                 packed_legal_ids.append(legal_ids_prefix.astype(np.int32, copy=False))
                 packed_legal_offsets.append((legal_offsets[1:] + base).astype(np.uint32, copy=False))
+
+                if not np.all(np.isfinite(logp)):
+                    self._raise_numeric_fault(
+                        "non-finite actor sampled logp",
+                        step=t,
+                        obs=obs,
+                        to_play=to_play,
+                        decision_id=decision_id,
+                        episode_seed=episode_seed,
+                        episode_key=episode_key,
+                        logits=logits,
+                        actions=actions,
+                        logp=logp,
+                        entropy=ent,
+                        legal_ids=legal_ids,
+                        legal_offsets=legal_offsets,
+                    )
+                if not np.all(np.isfinite(ent)):
+                    self._raise_numeric_fault(
+                        "non-finite actor sampled entropy",
+                        step=t,
+                        obs=obs,
+                        to_play=to_play,
+                        decision_id=decision_id,
+                        episode_seed=episode_seed,
+                        episode_key=episode_key,
+                        logits=logits,
+                        actions=actions,
+                        logp=logp,
+                        entropy=ent,
+                        legal_ids=legal_ids,
+                        legal_offsets=legal_offsets,
+                    )
             else:
                 legal_mask = _batch_legal_mask(batch)
                 if legal_mask.shape != (N, A):
@@ -191,6 +241,37 @@ class ActorWorker:
                     pass_action_id=pass_action_id,
                 )
                 legal_mask_buf[t] = legal_mask
+
+                if not np.all(np.isfinite(logp)):
+                    self._raise_numeric_fault(
+                        "non-finite actor sampled logp",
+                        step=t,
+                        obs=obs,
+                        to_play=to_play,
+                        decision_id=decision_id,
+                        episode_seed=episode_seed,
+                        episode_key=episode_key,
+                        logits=logits,
+                        actions=actions,
+                        logp=logp,
+                        entropy=ent,
+                        legal_mask=legal_mask,
+                    )
+                if not np.all(np.isfinite(ent)):
+                    self._raise_numeric_fault(
+                        "non-finite actor sampled entropy",
+                        step=t,
+                        obs=obs,
+                        to_play=to_play,
+                        decision_id=decision_id,
+                        episode_seed=episode_seed,
+                        episode_key=episode_key,
+                        logits=logits,
+                        actions=actions,
+                        logp=logp,
+                        entropy=ent,
+                        legal_mask=legal_mask,
+                    )
 
             next_batch = env.step(actions.astype(np.uint32, copy=False))
             reward = _batch_reward(next_batch)
@@ -255,6 +336,69 @@ class ActorWorker:
             entropy=entropy_buf,
             counters={"empty_legal": anomaly.empty_legal},
         )
+
+    def _fault_dir_path(self) -> Path:
+        if self.fault_dir is not None:
+            return self.fault_dir
+        if self.checkpoint_dir is not None:
+            return self.checkpoint_dir / "faults"
+        return Path("faults")
+
+    def _raise_numeric_fault(
+        self,
+        reason: str,
+        *,
+        step: int,
+        obs: np.ndarray,
+        to_play: np.ndarray,
+        decision_id: np.ndarray,
+        episode_seed: np.ndarray,
+        episode_key: np.ndarray,
+        logits: np.ndarray,
+        actions: np.ndarray | None = None,
+        logp: np.ndarray | None = None,
+        entropy: np.ndarray | None = None,
+        legal_ids: np.ndarray | None = None,
+        legal_offsets: np.ndarray | None = None,
+        legal_mask: np.ndarray | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "format": "numeric_fault_bundle",
+            "component": "actor_worker",
+            "reason": reason,
+            "actor_id": self.actor_id,
+            "layout_name": self.layout_name,
+            "update_count": self.update_count,
+            "observed_checkpoint_update": self.observed_checkpoint_update,
+            "step": step,
+            "obs": obs,
+            "to_play": to_play,
+            "decision_id": decision_id,
+            "episode_seed": episode_seed,
+            "episode_key": episode_key,
+            "logits": logits,
+            "logits_nonfinite_indices": _nonfinite_indices(logits),
+        }
+        if actions is not None:
+            payload["actions"] = actions
+        if logp is not None:
+            payload["logp"] = logp
+            payload["logp_nonfinite_indices"] = _nonfinite_indices(logp)
+        if entropy is not None:
+            payload["entropy"] = entropy
+            payload["entropy_nonfinite_indices"] = _nonfinite_indices(entropy)
+        if legal_ids is not None:
+            payload["legal_ids"] = legal_ids
+        if legal_offsets is not None:
+            payload["legal_offsets"] = legal_offsets
+        if legal_mask is not None:
+            payload["legal_mask"] = legal_mask
+        fault_path = write_fault_bundle(
+            fault_dir=self._fault_dir_path(),
+            prefix="actor_numeric_fault",
+            payload=payload,
+        )
+        raise RuntimeError(f"{reason}; wrote fault bundle to {fault_path}")
 
     @property
     def checkpoint_metadata_poll_interval_updates(self) -> int:

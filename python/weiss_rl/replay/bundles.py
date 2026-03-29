@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+import math
+import time
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
+from types import ModuleType
+from typing import Any
+
+import numpy as np
 
 from weiss_rl.repro import (
     derive_replay_key256,
@@ -12,6 +18,12 @@ from weiss_rl.repro import (
     key256_to_short64,
     resolve_episode_key256,
 )
+
+torch: ModuleType | None
+try:  # pragma: no cover - torch is optional here
+    import torch
+except Exception:  # pragma: no cover
+    torch = None
 
 
 @dataclass(slots=True)
@@ -70,3 +82,44 @@ def write_jsonl(records: list[ReplayRecord], path: Path) -> None:
     with path.open("w", encoding="utf-8") as fh:
         for record in records:
             fh.write(json.dumps(asdict(record), separators=(",", ":")) + "\n")
+
+
+def write_fault_bundle(*, fault_dir: Path, prefix: str, payload: dict[str, Any]) -> Path:
+    fault_dir.mkdir(parents=True, exist_ok=True)
+    path = fault_dir / f"{prefix}_{time.time_ns()}.json"
+    path.write_text(json.dumps(_json_ready(payload), allow_nan=False, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _json_ready(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else _nonfinite_token(value)
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.generic):
+        return _json_ready(value.item())
+    if isinstance(value, np.ndarray):
+        return {
+            "dtype": str(value.dtype),
+            "shape": list(value.shape),
+            "data": _json_ready(value.tolist()),
+        }
+    if torch is not None and isinstance(value, torch.Tensor):
+        return _json_ready(value.detach().cpu().numpy())
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_ready(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    return repr(value)
+
+
+def _nonfinite_token(value: float) -> str:
+    if math.isnan(value):
+        return "nan"
+    if value > 0:
+        return "inf"
+    return "-inf"

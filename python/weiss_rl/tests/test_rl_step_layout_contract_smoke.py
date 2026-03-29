@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
@@ -30,16 +29,12 @@ _LAYOUTS: tuple[Layout, ...] = ("mask", "nomask", "i16_legal_ids")
 _LEGAL_DECK = (list(range(1, 14)) * 4)[:50]
 
 
-def _fixture_db_path() -> Path:
-    return Path(_sim().__file__).resolve().parents[1] / "tests" / "fixtures" / "cards.wsdb"
-
-
 def _make_pool(layout: Layout):
     kwargs = {"output_masks": False} if layout == "i16_legal_ids" else {}
     return _sim().make_pool(
         mode="train",
         num_envs=2,
-        db_path=str(_fixture_db_path()),
+        db_path=None,
         deck_lists=[_LEGAL_DECK, _LEGAL_DECK],
         deck_ids=[101, 102],
         max_decisions=200,
