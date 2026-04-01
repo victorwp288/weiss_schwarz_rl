@@ -16,7 +16,7 @@ PYRUN := uv run --extra dev python
 SYNC_MSG := "[make] using uv"
 endif
 
-.PHONY: sync lint fmt type test check check-placeholders train-min eval-dev figures clean
+.PHONY: sync lint fmt type test check check-placeholders train-min train-inline-smoke eval-dev figures clean
 
 sync:
 	@echo $(SYNC_MSG)
@@ -47,6 +47,9 @@ check: check-placeholders lint fmt type test
 
 train-min:
 	@$(PYRUN) python/scripts/train.py --stack-config configs/stack_smoke.yaml
+
+train-inline-smoke:
+	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) python/scripts/train.py --stack-config configs/rl_stack_locked.yaml --run-label m3_08_smoke --device cpu
 
 eval-dev:
 	@$(PYRUN) python/scripts/eval.py --stack-config configs/stack_smoke.yaml

@@ -2,23 +2,24 @@
 
 Thesis RL pipeline scaffold for Weiss Schwarz.
 
-Today this repo is strongest at config, provenance, and small standalone components. It does **not** yet provide an end-to-end training or evaluation loop from the top-level entrypoints.
+Today this repo is strongest at config, contracts, provenance, and small standalone components. It now also includes a **minimal inline training smoke path** in `python/scripts/train.py`, but it still does **not** provide the full multi-actor training or evaluation pipeline from the top-level entrypoints.
 
 ## Current capability snapshot
 
-- `python/scripts/train.py` and `make train-min` perform a manifest/provenance smoke run.
-  - They load the stack config, verify the runtime simulator spec bundle, compute run IDs, and write `runs/<run_dir>/manifest.json` plus scaffold directories.
-  - `<run_dir>` is the explicit `--run-label` when supplied, otherwise the generated `run_<computed_run_id64>` directory.
-  - They do **not** execute learner updates, actor rollout collection, or a real training loop.
+- `make train-min` performs a manifest/provenance smoke run via `configs/stack_smoke.yaml`.
+  - It loads the stack config, verifies the runtime simulator spec bundle, computes run IDs, and writes `runs/<run_dir>/manifest.json` plus scaffold directories.
+  - It does **not** execute learner updates or rollout collection.
+- `python/scripts/train.py` can also run a **minimal inline end-to-end training smoke** when you pass a full training stack such as `configs/rl_stack_locked.yaml` and the active interpreter can import a simulator runtime with stepping APIs. The `make train-inline-smoke` target wires in the standard sibling simulator checkout (`../weiss-schwarz-simulator/python`) when present.
+  - That path writes the same provenance scaffold plus `training/logs/scalars.jsonl`, `training/logs/training_metrics.jsonl`, and `training/checkpoints/` artifacts under the run directory.
+  - If the active interpreter can only expose `weiss_sim.export_spec_bundle()` but not the stepping runtime, the script falls back to manifest-only mode and prints the reason.
 - `python/scripts/eval.py` performs contract checks and can summarize an existing seat-swapped `episodes.jsonl` file into JSON, CSV, and optional diagnostics.
   - It does **not** launch evaluation rollouts or generate episodes from policies.
 - `python/scripts/make_figures.py` writes a placeholder artifact only.
-- `weiss_rl.training_logger.TrainingLogger` and learner-side metrics emission work as standalone components, but they are not wired into `train.py` yet.
 - `examples/run_loop_example.py` exercises the `weiss_sim` stepping API only. It is a simulator smoke example, not RL training.
 
 ## Not implemented end-to-end yet
 
-- integrated actor/learner training via `python/scripts/train.py`
+- the full multi-actor / queue-based IMPALA pipeline from the master plan
 - evaluation rollout generation via `python/scripts/eval.py`
 - paper-ready figure generation via `python/scripts/make_figures.py`
 
@@ -68,6 +69,7 @@ From the repo root:
 ```bash
 uv sync --extra dev
 make train-min
+make train-inline-smoke   # uses the standard sibling simulator checkout when present
 uv run python python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml
 uv run python python/scripts/make_figures.py --out runs/figures/placeholder.txt
 ```

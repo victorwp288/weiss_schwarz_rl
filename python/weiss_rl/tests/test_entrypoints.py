@@ -162,6 +162,8 @@ def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
     assert "computed_run_id256:" in result.stdout
     assert "run_label:              spec_bundle_run" in result.stdout
     assert "run_dir_name:           spec_bundle_run" in result.stdout
+    assert "Manifest scaffold only: no learner training or rollout collection was executed." in result.stdout
+    assert "active weiss_sim runtime is missing stepping APIs" in result.stdout
 
 
 def test_train_entrypoint_uses_default_run_dir_when_no_label_override(tmp_path: Path) -> None:

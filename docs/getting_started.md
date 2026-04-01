@@ -6,10 +6,11 @@ Goal: get a fresh clone to a successful manifest smoke run without 1:1 help.
 
 Before you sink time into the repo, here is the honest version:
 
-- `train.py` currently proves config loading, simulator provenance capture, and run-manifest writing.
+- `make train-min` / `train.py --stack-config configs/stack_smoke.yaml` prove config loading, simulator provenance capture, and run-manifest writing.
+- `train.py` can also run a tiny inline M3-08 training smoke when you pass a full training stack and the active interpreter can step the simulator.
 - `eval.py` currently checks contracts and summarizes an already-produced `episodes.jsonl` file.
 - `make_figures.py` currently writes a placeholder artifact.
-- None of those entrypoints are a full end-to-end RL pipeline yet.
+- None of those entrypoints are the full master-plan pipeline yet.
 
 Repo paths in this guide are relative to the repo root.
 
@@ -87,6 +88,34 @@ After the smoke run, you should have either:
 - `runs/smoke_local/config_canonical.json`
 
 when you used the explicit `--run-label smoke_local` command above, or the same files under `runs/run_<computed_run_id64>/` when you used `make train-min`.
+
+### Minimal inline training smoke (M3-08 bring-up)
+
+This is the small real training path behind the current M3-08 work.
+It still is **not** the full actor/learner architecture from the master plan, but it does run a tiny inline rollout -> learner update -> artifact write path.
+
+Requirements:
+
+- use a full stack config such as `configs/rl_stack_locked.yaml`
+- the **active interpreter** must be able to import `weiss_sim` with stepping APIs, not just `export_spec_bundle()`
+- `make train-inline-smoke` handles the usual sibling-checkout case by prepending `../weiss-schwarz-simulator/python` to `PYTHONPATH`
+
+Run:
+
+```bash
+make train-inline-smoke
+# or
+uv run python python/scripts/train.py --stack-config configs/rl_stack_locked.yaml --run-label m3_08_smoke --device cpu
+```
+
+Expected training artifacts when the runtime is available:
+
+- `runs/m3_08_smoke/training/logs/scalars.jsonl`
+- `runs/m3_08_smoke/training/logs/training_metrics.jsonl`
+- `runs/m3_08_smoke/training/checkpoints/checkpoint_1.pt`
+- `runs/m3_08_smoke/training/checkpoints/checkpoint_metadata_1.json`
+
+If the active interpreter still cannot step the simulator, `train.py` writes the manifest scaffold and then prints a manifest-only fallback reason instead of pretending training ran.
 
 Inspection (replace `smoke_local` with the generated `run_<computed_run_id64>` directory if you used `make train-min`):
 

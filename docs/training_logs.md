@@ -1,12 +1,13 @@
 # Training logs
 
-Learner-side JSONL logging is implemented as a standalone component.
+Learner-side JSONL logging is implemented as a standalone component and is now also exercised by the minimal inline `train.py` smoke path.
 
-It is **not** wired into `python/scripts/train.py` yet, and the current `make train-min` / `train.py` path remains a manifest-provenance smoke run rather than a live training loop.
+`make train-min` remains a manifest/provenance smoke run. The inline training path only activates when `train.py` receives a full training stack and the active interpreter can import a simulator runtime with stepping APIs.
 
 ## What works today
 
 - `TrainingLogger` writes append-only JSONL records to `runs/<run>/logs/training_metrics.jsonl`
+- the minimal inline `train.py` path also writes `runs/<run>/training/logs/scalars.jsonl` for the master-plan style scalar stream
 - `ImpalaLearner` can emit throughput and masked V-trace health metrics when `logs_dir` is configured
 - `compute_vtrace_metrics()` respects the masking contract when the batch includes:
   - `logits`
@@ -18,9 +19,9 @@ If the legality surface is missing, V-trace diagnostics intentionally fall back 
 
 ## What is intentionally not claimed
 
-- no `train.py` integration yet
+- no full multi-actor `train.py` pipeline yet
 - no actor-to-learner lag aggregation from a live training loop
-- no claim that checkpoint logging equals full end-to-end training readiness
+- no claim that the inline smoke path equals full end-to-end training readiness
 
 ## Minimal usage
 
