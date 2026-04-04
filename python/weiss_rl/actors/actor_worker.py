@@ -97,6 +97,8 @@ class ActorWorker:
     checkpoint_dir: Path | None = None
     fault_dir: Path | None = None
     reload_interval_updates: int = 1000  # Deprecated alias for checkpoint metadata polling cadence.
+    opponent_sampler: Any | None = None
+    opponent_assignment_fn: Any | None = None
 
     update_count: int = field(default=0, init=False)
     observed_checkpoint_update: int = field(default=0, init=False)
@@ -104,6 +106,8 @@ class ActorWorker:
     checkpoint_metadata_lag_updates: int = field(default=0, init=False)
     _torch_threads_configured: bool = field(default=False, init=False)
     _rng: np.random.Generator | None = field(default=None, init=False)
+    _opponent_rng: np.random.Generator | None = field(default=None, init=False)
+    _current_opponent_policy_ids: np.ndarray | None = field(default=None, init=False)
     outcomes: OnlineOutcomeTracker = field(default_factory=OnlineOutcomeTracker)
     opponent_id_by_env: np.ndarray | None = field(default=None, init=False)
 
@@ -167,6 +171,7 @@ class ActorWorker:
         packed_legal_offsets: list[np.ndarray] = [np.array([0], dtype=np.uint32)]
         legal_mask_buf: np.ndarray | None = None
 
+        self._resample_opponents(np.ones((N,), dtype=np.bool_))
         batch = env.reset()
         obs0 = np.asarray(batch.obs)
         if obs0.ndim != 2 or obs0.shape[0] != N:
@@ -312,16 +317,18 @@ class ActorWorker:
 
             done = np.logical_or(terminated, truncated)
             if np.any(done):
+                done_mask = done.astype(np.bool_, copy=False)
                 _update_outcomes(
                     self.outcomes,
                     opponent_ids=self.opponent_id_by_env,
                     reward=reward,
                     engine_status=engine_status,
-                    done=done,
+                    done=done_mask,
                 )
                 reset_done = getattr(env, "reset_done", None)
                 if callable(reset_done):
-                    batch = reset_done(done.astype(np.bool_, copy=False))
+                    self._resample_opponents(done_mask)
+                    batch = reset_done(done_mask)
                 else:
                     batch = next_batch
             else:
@@ -361,6 +368,41 @@ class ActorWorker:
             entropy=entropy_buf,
             counters={"empty_legal": anomaly.empty_legal},
         )
+
+    @property
+    def current_opponent_policy_ids(self) -> tuple[str, ...]:
+        if self._current_opponent_policy_ids is None:
+            return ()
+        return tuple(str(policy_id) for policy_id in self._current_opponent_policy_ids.tolist())
+
+    def _resample_opponents(self, done: np.ndarray) -> None:
+        if self.opponent_sampler is None:
+            return
+        if self._opponent_rng is None:
+            self._opponent_rng = np.random.default_rng(np.random.SeedSequence([self.seed, self.actor_id, 1]))
+
+        done_array = np.asarray(done, dtype=np.bool_)
+        if done_array.shape != (self.num_envs,):
+            raise ValueError(f"done must have shape ({self.num_envs},)")
+
+        sample_count = int(np.count_nonzero(done_array))
+        if sample_count == 0:
+            return
+
+        if self._current_opponent_policy_ids is None:
+            self._current_opponent_policy_ids = np.empty((self.num_envs,), dtype=object)
+        if self.opponent_id_by_env is None or int(self.opponent_id_by_env.shape[0]) != self.num_envs:
+            self.opponent_id_by_env = np.full((self.num_envs,), "unknown", dtype=object)
+
+        sampled_policy_ids = _sampled_opponent_policy_ids(
+            self.opponent_sampler,
+            count=sample_count,
+            rng=self._opponent_rng,
+        )
+        self._current_opponent_policy_ids[done_array] = sampled_policy_ids
+        self.opponent_id_by_env[done_array] = sampled_policy_ids
+        if self.opponent_assignment_fn is not None:
+            self.opponent_assignment_fn(done_array.copy(), self.current_opponent_policy_ids)
 
     def _fault_dir_path(self) -> Path:
         if self.fault_dir is not None:
@@ -526,6 +568,22 @@ def _checkpoint_update_from_path(checkpoint_path: Path) -> int | None:
     if match is None:
         return None
     return int(match.group(1))
+
+
+def _sampled_opponent_policy_ids(
+    opponent_sampler: Any,
+    *,
+    count: int,
+    rng: np.random.Generator,
+) -> tuple[str, ...]:
+    sampled_policy_ids = opponent_sampler.sample(count=count, rng=rng)
+    if isinstance(sampled_policy_ids, np.ndarray):
+        sampled_items = sampled_policy_ids.tolist()
+    else:
+        sampled_items = list(sampled_policy_ids)
+    if len(sampled_items) != count:
+        raise ValueError(f"opponent_sampler must return {count} policy ids")
+    return tuple(str(policy_id) for policy_id in sampled_items)
 
 
 def actor_behavior_logp_from_legal_ids(
