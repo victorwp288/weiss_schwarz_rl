@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import hashlib
 
 import numpy as np
 import torch
@@ -27,6 +28,7 @@ from weiss_rl.model import PolicyValueModel
 from weiss_rl.repro import compute_run_id64, compute_run_id256
 from weiss_rl.simulator_contract import SimulatorContract, load_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract
+from weiss_rl.league.registry import SnapshotRegistry 
 
 _SHA256_HEX_LENGTH = 64
 _U64_MASK = (1 << 64) - 1
@@ -73,6 +75,14 @@ def _expected_sha256(value: str, *, flag_name: str) -> str:
     if not normalized:
         raise ValueError(f"{flag_name} must be a 64-character lowercase or uppercase SHA-256 hex string")
     return normalized
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _require_matching_hash(*, flag_name: str, expected: str, actual: str) -> None:
@@ -599,12 +609,30 @@ def _run_minimal_training(
                 start_time=start_time,
             )
             if learner.update_count % checkpoint_interval_updates == 0:
+                ckpt_path = training_paths.checkpoints_dir / f"checkpoint_{learner.update_count}.pt"
                 _write_checkpoint(
-                    checkpoint_path=training_paths.checkpoints_dir / f"checkpoint_{learner.update_count}.pt",
+                    checkpoint_path=ckpt_path,
                     learner=learner,
                     stack=stack,
                     device=device,
                 )
+
+                # M4-01 Snapshot Registry persistence
+                registry_path = training_paths.snapshots_dir / "registry.json"
+                reg = SnapshotRegistry.load(registry_path)
+
+                policy_id = f"policy_{learner.get_policy_version():06d}"
+                weights_sha256 = _sha256_file()
+                rel_path = ckpt_path.relative_to(artifacts.run_dir).as_posix()
+
+                reg.add_snapshot(
+                    policy_id=policy_id,
+                    update=int(learner.update_count),
+                    weights_sha256=weights_sha256,
+                    path=rel_path,
+                )
+                reg.save(registry_path)
+    
     finally:
         env.close()
 
