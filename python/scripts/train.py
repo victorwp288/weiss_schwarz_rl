@@ -109,7 +109,11 @@ class _PeriodicDevEvalRunner:
         self._device = torch.device("cpu")
 
     def run_game(self, scheduled_game: ScheduledGame):
-        env = _build_ids_eval_env(self.stack, seed=scheduled_game.episode_seed)
+        env = _build_ids_eval_env(
+            self.stack,
+            seed=scheduled_game.episode_seed,
+            pass_action_id=self.pass_action_id,
+        )
         seat_hidden = self.model.initial_seat_hidden(1, device=self._device)
         seat_rngs = {
             seat: Pcg32XshRrV1(_periodic_dev_eval_rng_seed(scheduled_game=scheduled_game, seat=seat))
@@ -520,7 +524,12 @@ def _build_env(
 
 
 
-def _build_ids_eval_env(stack: StackConfig, *, seed: int) -> DecisionBoundaryEnv:
+def _build_ids_eval_env(
+    stack: StackConfig,
+    *,
+    seed: int,
+    pass_action_id: int,
+) -> DecisionBoundaryEnv:
     pool, layout_name = make_env_pool_from_config(
         _env_pool_config(stack, seed=seed),
         profile="fast",
@@ -531,7 +540,12 @@ def _build_ids_eval_env(stack: StackConfig, *, seed: int) -> DecisionBoundaryEnv
             "Periodic dev eval requires ids-based legality for the pinned eval protocol. "
             f"Profile 'fast' resolved to layout {layout_name!r}."
         )
-    return DecisionBoundaryEnv(pool, legality="ids_offsets", engine_status_policy="hard_fail")
+    return DecisionBoundaryEnv(
+        pool,
+        legality="ids_offsets",
+        pass_action_id=pass_action_id,
+        engine_status_policy="hard_fail",
+    )
 
 
 def _collect_rollout(
@@ -907,22 +921,31 @@ def _current_focal_policy_id(*, learner: ImpalaLearner) -> str:
     return f"train_u{int(learner.update_count)}_p{int(learner.get_policy_version())}"
 
 
-def _latest_checkpoint_path(checkpoints_dir: Path, *, update_count: int) -> Path | None:
-    exact_path = checkpoints_dir / f"checkpoint_{update_count}.pt"
-    if exact_path.is_file():
-        return exact_path
+def _checkpoint_path_for_update(checkpoints_dir: Path, *, update_count: int) -> Path:
+    return checkpoints_dir / f"checkpoint_{update_count}.pt"
 
-    latest: tuple[int, Path] | None = None
-    for candidate in checkpoints_dir.glob("checkpoint_*.pt"):
-        suffix = candidate.stem.removeprefix("checkpoint_")
-        if not suffix.isdigit():
-            continue
-        candidate_update = int(suffix)
-        if candidate_update > update_count:
-            continue
-        if latest is None or candidate_update > latest[0]:
-            latest = (candidate_update, candidate)
-    return None if latest is None else latest[1]
+
+def _ensure_current_checkpoint(
+    *,
+    training_paths: TrainingPaths,
+    learner: ImpalaLearner,
+    stack: StackConfig,
+    device: torch.device,
+) -> Path:
+    checkpoint_path = _checkpoint_path_for_update(
+        training_paths.checkpoints_dir,
+        update_count=int(learner.update_count),
+    )
+    if checkpoint_path.is_file():
+        return checkpoint_path
+
+    _write_checkpoint(
+        checkpoint_path=checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=device,
+    )
+    return checkpoint_path
 
 
 def _should_run_periodic_dev_eval(stack: StackConfig, *, update_count: int) -> bool:
@@ -940,6 +963,7 @@ def _run_periodic_dev_eval(
     artifacts: Any,
     training_paths: TrainingPaths,
     learner: ImpalaLearner,
+    device: torch.device,
     run_id256: str,
     config_hash256: str,
     spec_hash256: str,
@@ -954,7 +978,12 @@ def _run_periodic_dev_eval(
     update_count = int(learner.update_count)
     policy_version = int(learner.get_policy_version())
     focal_policy_id = _current_focal_policy_id(learner=learner)
-    checkpoint_path = _latest_checkpoint_path(training_paths.checkpoints_dir, update_count=update_count)
+    checkpoint_path = _ensure_current_checkpoint(
+        training_paths=training_paths,
+        learner=learner,
+        stack=stack,
+        device=device,
+    )
 
     update_dir = artifacts.run_dir / "eval" / "dev_eval" / f"update_{update_count}"
     matchup_dir = update_dir / "b0_randomlegal"
@@ -1162,6 +1191,7 @@ def _run_minimal_training(
                     artifacts=artifacts,
                     training_paths=training_paths,
                     learner=learner,
+                    device=device,
                     run_id256=run_id256,
                     config_hash256=config_hash256,
                     spec_hash256=spec_hash256,

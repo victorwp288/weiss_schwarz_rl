@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import torch
+
 from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.spec import spec_bundle_hash
 
@@ -17,7 +19,12 @@ def _mismatched_sha256(value: str) -> str:
     return ("0" if value[0] != "0" else "1") + value[1:]
 
 
-def _write_stub_weiss_sim(tmp_path: Path, *, spec_hash: int = 123) -> dict[str, object]:
+def _write_stub_weiss_sim(
+    tmp_path: Path,
+    *,
+    spec_hash: int = 123,
+    pass_action_id: int = 8,
+) -> dict[str, object]:
     bundle: dict[str, object] = {
         "policy_version": 3,
         "spec_hash": spec_hash,
@@ -29,7 +36,7 @@ def _write_stub_weiss_sim(tmp_path: Path, *, spec_hash: int = 123) -> dict[str, 
         "action": {
             "action_encoding_version": 1,
             "action_space_size": 9,
-            "pass_action_id": 8,
+            "pass_action_id": pass_action_id,
         },
     }
     (tmp_path / "weiss_sim.py").write_text(
@@ -51,15 +58,26 @@ def _write_stub_weiss_sim(tmp_path: Path, *, spec_hash: int = 123) -> dict[str, 
     return bundle
 
 
-def _write_runtime_weiss_sim(tmp_path: Path, *, spec_hash: int = 123) -> dict[str, object]:
-    bundle = _write_stub_weiss_sim(tmp_path, spec_hash=spec_hash)
+def _write_runtime_weiss_sim(
+    tmp_path: Path,
+    *,
+    spec_hash: int = 123,
+    pass_action_id: int = 8,
+    empty_eval_legal_row: bool = False,
+) -> dict[str, object]:
+    bundle = _write_stub_weiss_sim(
+        tmp_path,
+        spec_hash=spec_hash,
+        pass_action_id=pass_action_id,
+    )
     (tmp_path / "weiss_sim.py").write_text(
         "\n".join(
             (
                 "from types import SimpleNamespace",
                 "",
                 f"_BUNDLE = {bundle!r}",
-                "PASS_ACTION_ID = 8",
+                f"PASS_ACTION_ID = {pass_action_id}",
+                f"EMPTY_EVAL_LEGAL_ROW = {empty_eval_legal_row!r}",
                 "",
                 "def build_info():",
                 "    return 'stub-build'",
@@ -149,6 +167,8 @@ def _write_runtime_weiss_sim(tmp_path: Path, *, spec_hash: int = 123) -> dict[st
                 "    out.obs[:] = 0",
                 "    out.legal_ids[:] = 0",
                 "    out.legal_offsets[:] = 0",
+                "    if EMPTY_EVAL_LEGAL_ROW:",
+                "        return",
                 "    out.legal_ids[0] = 0",
                 "    out.legal_offsets[1:] = 1",
                 "",
@@ -519,8 +539,13 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
     assert summary_csv.read_text(encoding="utf-8").splitlines()[0].startswith("focal_policy_id,")
 
 
-def test_train_entrypoint_runs_periodic_dev_eval_and_writes_artifacts(tmp_path: Path) -> None:
-    bundle = _write_runtime_weiss_sim(tmp_path, spec_hash=123)
+def test_train_entrypoint_runs_periodic_dev_eval_and_handles_empty_ids_pass_fallback(tmp_path: Path) -> None:
+    bundle = _write_runtime_weiss_sim(
+        tmp_path,
+        spec_hash=123,
+        pass_action_id=3,
+        empty_eval_legal_row=True,
+    )
     stack_config = _copy_repo_configs(tmp_path)
     _patch_periodic_dev_eval_config(tmp_path)
 
@@ -571,3 +596,43 @@ def test_train_entrypoint_runs_periodic_dev_eval_and_writes_artifacts(tmp_path: 
     assert diagnostics_payload["seat_results"]["seat0_wins"] == 2
     assert diagnostics_payload["seat_results"]["seat1_wins"] == 0
     assert (eval_root / "b0_randomlegal" / "matchup_summary.csv").is_file()
+
+
+def test_train_entrypoint_periodic_dev_eval_writes_exact_current_checkpoint(tmp_path: Path) -> None:
+    bundle = _write_runtime_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+    _patch_periodic_dev_eval_config(tmp_path)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash=str(bundle["spec_hash"]),
+        run_label="periodic_dev_eval_checkpoint_traceability",
+        extra_args=[
+            "--device",
+            "cpu",
+            "--num-envs",
+            "1",
+            "--unroll-length",
+            "1",
+            "--max-updates",
+            "1",
+            "--checkpoint-interval-updates",
+            "2",
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    run_root = tmp_path / "runs" / "periodic_dev_eval_checkpoint_traceability"
+    eval_root = run_root / "eval" / "dev_eval" / "update_1"
+    checkpoint_path = run_root / "training" / "checkpoints" / "checkpoint_1.pt"
+    seed_usage = json.loads((eval_root / "seed_usage.json").read_text(encoding="utf-8"))
+    summary_payload = json.loads((eval_root / "b0_randomlegal" / "matchup_summary.json").read_text(encoding="utf-8"))
+    checkpoint_payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+
+    assert checkpoint_path.is_file()
+    assert seed_usage["focal_policy"]["checkpoint_path"] == "training/checkpoints/checkpoint_1.pt"
+    assert summary_payload["evaluation_context"]["checkpoint_path"] == "training/checkpoints/checkpoint_1.pt"
+    assert checkpoint_payload["update_count"] == 1
