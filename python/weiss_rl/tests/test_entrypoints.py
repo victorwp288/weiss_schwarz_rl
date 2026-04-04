@@ -51,6 +51,163 @@ def _write_stub_weiss_sim(tmp_path: Path, *, spec_hash: int = 123) -> dict[str, 
     return bundle
 
 
+def _write_runtime_weiss_sim(tmp_path: Path, *, spec_hash: int = 123) -> dict[str, object]:
+    bundle = _write_stub_weiss_sim(tmp_path, spec_hash=spec_hash)
+    (tmp_path / "weiss_sim.py").write_text(
+        "\n".join(
+            (
+                "from types import SimpleNamespace",
+                "",
+                f"_BUNDLE = {bundle!r}",
+                "PASS_ACTION_ID = 8",
+                "",
+                "def build_info():",
+                "    return 'stub-build'",
+                "",
+                "def db_info():",
+                "    return 'stub-db'",
+                "",
+                "def export_spec_bundle():",
+                "    return _BUNDLE",
+                "",
+                "class _BaseOut:",
+                "    def __init__(self, num_envs: int) -> None:",
+                "        import numpy as np",
+                "        self.obs = np.zeros((num_envs, 512), dtype=np.float32)",
+                "        self.rewards = np.zeros((num_envs,), dtype=np.float32)",
+                "        self.terminated = np.zeros((num_envs,), dtype=bool)",
+                "        self.truncated = np.zeros((num_envs,), dtype=bool)",
+                "        self.actor = np.zeros((num_envs,), dtype=np.int32)",
+                "        self.decision_kind = np.zeros((num_envs,), dtype=np.int32)",
+                "        self.decision_id = np.zeros((num_envs,), dtype=np.int64)",
+                "        self.engine_status = np.zeros((num_envs,), dtype=np.uint8)",
+                "        self.spec_hash = np.zeros((num_envs,), dtype=np.uint64)",
+                "",
+                "class BatchOutMinimal(_BaseOut):",
+                "    def __init__(self, num_envs: int) -> None:",
+                "        import numpy as np",
+                "        super().__init__(num_envs)",
+                "        self.masks = np.zeros((num_envs, 9), dtype=np.uint8)",
+                "",
+                "class BatchOutMinimalNoMask(_BaseOut):",
+                "    pass",
+                "",
+                "class BatchOutMinimalI16LegalIds(_BaseOut):",
+                "    def __init__(self, num_envs: int) -> None:",
+                "        import numpy as np",
+                "        super().__init__(num_envs)",
+                "        self.obs = np.zeros((num_envs, 512), dtype=np.int16)",
+                "        self.legal_ids = np.zeros((max(1, num_envs),), dtype=np.uint32)",
+                "        self.legal_offsets = np.zeros((num_envs + 1,), dtype=np.int32)",
+                "",
+                "class _Pool:",
+                "    def __init__(self, num_envs: int, seed: int) -> None:",
+                "        import numpy as np",
+                "        self.envs_len = int(num_envs)",
+                "        self.action_space = 9",
+                "        self.seed = int(seed)",
+                "        self._episode_seed = np.full((num_envs,), self.seed, dtype=np.uint64)",
+                "        self._episode_index = np.zeros((num_envs,), dtype=np.uint32)",
+                "        self._env_index = np.arange(num_envs, dtype=np.uint32)",
+                "",
+                "    def close(self) -> None:",
+                "        return None",
+                "",
+                "    def episode_seed_batch(self):",
+                "        return self._episode_seed",
+                "",
+                "    def episode_index_batch(self):",
+                "        return self._episode_index",
+                "",
+                "    def env_index_batch(self):",
+                "        return self._env_index",
+                "",
+                "def _make_pool(**kwargs):",
+                "    return SimpleNamespace(pool=_Pool(kwargs['num_envs'], kwargs.get('seed', 7)))",
+                "",
+                "def fast(**kwargs):",
+                "    return _make_pool(**kwargs)",
+                "",
+                "def inspect(**kwargs):",
+                "    return _make_pool(**kwargs)",
+                "",
+                "def _fill_reset(out, *, layout: str, seed: int) -> None:",
+                "    import numpy as np",
+                "    out.rewards[:] = 0.0",
+                "    out.terminated[:] = False",
+                "    out.truncated[:] = False",
+                "    out.actor[:] = 0",
+                "    out.decision_kind[:] = 0",
+                "    out.decision_id[:] = 1",
+                "    out.engine_status[:] = 0",
+                "    out.spec_hash[:] = np.uint64(seed)",
+                "    if layout == 'mask':",
+                "        out.obs[:] = 0.0",
+                "        out.masks[:] = 0",
+                "        out.masks[:, 0] = 1",
+                "        return",
+                "    out.obs[:] = 0",
+                "    out.legal_ids[:] = 0",
+                "    out.legal_offsets[:] = 0",
+                "    out.legal_ids[0] = 0",
+                "    out.legal_offsets[1:] = 1",
+                "",
+                "def _fill_step(out, *, layout: str, seed: int) -> None:",
+                "    import numpy as np",
+                "    out.rewards[:] = 1.0",
+                "    out.terminated[:] = True",
+                "    out.truncated[:] = False",
+                "    out.actor[:] = -1",
+                "    out.decision_kind[:] = 0",
+                "    out.decision_id[:] = 2",
+                "    out.engine_status[:] = 0",
+                "    out.spec_hash[:] = np.uint64(seed)",
+                "    if layout == 'mask':",
+                "        out.obs[:] = 1.0",
+                "        out.masks[:] = 0",
+                "        return",
+                "    out.obs[:] = 1",
+                "    out.legal_ids[:] = 0",
+                "    out.legal_offsets[:] = 0",
+                "",
+                "class _Rl:",
+                "    def reset_rl(self, pool, *, layout: str, out=None):",
+                "        target = BatchOutMinimal(pool.envs_len) if out is None and layout == 'mask' else out",
+                "        if target is None:",
+                "            target = BatchOutMinimalI16LegalIds(pool.envs_len)",
+                "        _fill_reset(target, layout=layout, seed=pool.seed)",
+                "        return target",
+                "",
+                "    def step_rl(self, pool, actions, *, layout: str, out=None):",
+                "        target = BatchOutMinimal(pool.envs_len) if out is None and layout == 'mask' else out",
+                "        if target is None:",
+                "            target = BatchOutMinimalI16LegalIds(pool.envs_len)",
+                "        _fill_step(target, layout=layout, seed=pool.seed)",
+                "        return target",
+                "",
+                "rl = _Rl()",
+            )
+        ),
+        encoding="utf-8",
+    )
+    return bundle
+
+
+def _patch_periodic_dev_eval_config(tmp_path: Path) -> None:
+    evaluation_path = tmp_path / "configs" / "evaluation_locked.yaml"
+    evaluation_text = evaluation_path.read_text(encoding="utf-8")
+    evaluation_text = evaluation_text.replace(
+        "periodic_dev_eval_interval_updates: 50000",
+        "periodic_dev_eval_interval_updates: 1",
+    )
+    evaluation_text = evaluation_text.replace(
+        "periodic_dev_eval_paired_seeds: 64",
+        "periodic_dev_eval_paired_seeds: 1",
+    )
+    evaluation_path.write_text(evaluation_text, encoding="utf-8")
+    (tmp_path / "configs" / "seeds" / "dev_eval_seeds.txt").write_text("7\n", encoding="utf-8")
+
+
 def _copy_repo_configs(tmp_path: Path) -> Path:
     shutil.copytree(REPO_ROOT / "configs", tmp_path / "configs")
     return tmp_path / "configs" / "rl_stack_locked.yaml"
@@ -360,3 +517,57 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
     assert diagnostics["seat_results"]["seat0_wins"] == 1
     assert diagnostics["seat_results"]["seat1_wins"] == 1
     assert summary_csv.read_text(encoding="utf-8").splitlines()[0].startswith("focal_policy_id,")
+
+
+def test_train_entrypoint_runs_periodic_dev_eval_and_writes_artifacts(tmp_path: Path) -> None:
+    bundle = _write_runtime_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+    _patch_periodic_dev_eval_config(tmp_path)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash=str(bundle["spec_hash"]),
+        run_label="periodic_dev_eval_run",
+        extra_args=[
+            "--device",
+            "cpu",
+            "--num-envs",
+            "1",
+            "--unroll-length",
+            "1",
+            "--max-updates",
+            "1",
+            "--checkpoint-interval-updates",
+            "1",
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Periodic dev eval: update=1 opponent=b0_randomlegal" in result.stdout
+
+    eval_root = tmp_path / "runs" / "periodic_dev_eval_run" / "eval" / "dev_eval" / "update_1"
+    seed_usage = json.loads((eval_root / "seed_usage.json").read_text(encoding="utf-8"))
+    summary_payload = json.loads((eval_root / "b0_randomlegal" / "matchup_summary.json").read_text(encoding="utf-8"))
+    diagnostics_payload = json.loads((eval_root / "b0_randomlegal" / "diagnostics.json").read_text(encoding="utf-8"))
+    episodes_lines = (eval_root / "b0_randomlegal" / "episodes.jsonl").read_text(encoding="utf-8").splitlines()
+
+    assert seed_usage["seed_file"]["path"] == "configs/seeds/dev_eval_seeds.txt"
+    assert seed_usage["paired_seed_count"] == 1
+    assert seed_usage["paired_seeds"] == [7]
+    assert seed_usage["focal_policy"]["update_count"] == 1
+    assert seed_usage["focal_policy"]["policy_version"] == 1
+    assert seed_usage["focal_policy"]["checkpoint_path"] == "training/checkpoints/checkpoint_1.pt"
+    assert len(episodes_lines) == 2
+    assert summary_payload["summary"]["games"] == 2
+    assert summary_payload["evaluation_context"] == {
+        "artifact_scope": "periodic_dev_eval",
+        "update_count": 1,
+        "policy_version": 1,
+        "checkpoint_path": "training/checkpoints/checkpoint_1.pt",
+        "seed_usage_path": "eval/dev_eval/update_1/seed_usage.json",
+    }
+    assert diagnostics_payload["seat_results"]["seat0_wins"] == 2
+    assert diagnostics_payload["seat_results"]["seat1_wins"] == 0
+    assert (eval_root / "b0_randomlegal" / "matchup_summary.csv").is_file()
