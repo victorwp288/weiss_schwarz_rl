@@ -32,7 +32,7 @@ def resolve_opponent_win_rates(
 ) -> np.ndarray:
     if not 0.0 <= neutral_win_rate <= 1.0:
         raise ValueError("neutral_win_rate must be in [0, 1]")
-    win_rates = win_rates_by_snapshot_id or {}
+    win_rates = {} if win_rates_by_snapshot_id is None else win_rates_by_snapshot_id
     return np.asarray([float(win_rates.get(snapshot_id, neutral_win_rate)) for snapshot_id in snapshot_ids])
 
 
@@ -89,7 +89,11 @@ class OpponentPoolSampler:
             self.snapshot_ids(),
             count=count,
             rng=rng,
-            win_rates_by_snapshot_id=win_rates_by_snapshot_id or self.win_rates_by_snapshot_id,
+            win_rates_by_snapshot_id=(
+                self.win_rates_by_snapshot_id
+                if win_rates_by_snapshot_id is None
+                else win_rates_by_snapshot_id
+            ),
             power=self.power,
             eps_uniform=self.eps_uniform,
             neutral_win_rate=self.neutral_win_rate,
