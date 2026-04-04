@@ -1,8 +1,4 @@
-"""Snapshot registry and metadata.
-
-M4-01: Persist snapshot registry as stable JSON under:
-  runs/.../training/snapshots/registry.json
-"""
+"""Snapshot registry and metadata."""
 
 from __future__ import annotations
 
@@ -11,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import json
-
 
 _REGISTRY_SCHEMA_VERSION = 1
 
@@ -34,6 +29,7 @@ class SnapshotMeta:
     created_utc: str = field(default_factory=_now_utc_iso)
 
     def sort_key(self) -> tuple[int, str]:
+        # Stable ordering: primary by update, then policy_id.
         return (int(self.update), str(self.policy_id))
 
 
@@ -57,6 +53,10 @@ class SnapshotRegistry:
             return []
         ordered = self._sorted()
         return ordered[-n:]
+
+    def latest_n(self, n: int = 1) -> list[SnapshotMeta]:
+        # Alias for callers that prefer "latest_n".
+        return self.latest(n)
 
     def latest_ids(self, n: int = 1) -> list[str]:
         return [s.policy_id for s in self.latest(n)]
@@ -92,17 +92,14 @@ class SnapshotRegistry:
             created_utc=created_utc or _now_utc_iso(),
         )
 
-        # Replace existing entry with same (policy_id) if present (id is the stable handle).
-        replaced = False
+        # Replace existing entry with same policy_id (policy_id is the stable handle).
         for i, existing in enumerate(self.snapshots):
             if existing.policy_id == meta.policy_id:
                 self.snapshots[i] = meta
-                replaced = True
-                break
-        if not replaced:
-            self.snapshots.append(meta)
+                self.snapshots = self._sorted()
+                return
 
-        # Keep deterministic in-memory ordering as well.
+        self.snapshots.append(meta)
         self.snapshots = self._sorted()
 
     # ------------------------
@@ -129,20 +126,22 @@ class SnapshotRegistry:
         if not isinstance(raw, dict):
             raise ValueError("registry.json must be a JSON object")
 
-        # Backward compat: old registry was {"snapshots": ["id1","id2"]} or list[str]
+        # Backward compat: old registry was {"snapshots": ["id1","id2"]} without schema_version.
         if isinstance(raw.get("snapshots"), list) and raw.get("schema_version") is None:
             snaps = raw.get("snapshots", [])
-            reg = cls()
-            # If it's list[str], upgrade with placeholders.
             if snaps and all(isinstance(x, str) for x in snaps):
-                for i, sid in enumerate(snaps):
-                    reg.add_snapshot(
-                        policy_id=sid,
-                        update=i,
+                reg = cls()
+                reg.snapshots = [
+                    SnapshotMeta(
+                        policy_id=str(sid),
+                        update=int(i),
                         weights_sha256="",
-                        path="",
+                        path="unknown",
                         created_utc=_now_utc_iso(),
                     )
+                    for i, sid in enumerate(snaps)
+                ]
+                reg.snapshots = reg._sorted()
                 return reg
 
         schema_version = int(raw.get("schema_version", 0))
@@ -160,12 +159,25 @@ class SnapshotRegistry:
         for item in snapshots_raw:
             if not isinstance(item, dict):
                 raise ValueError("registry.snapshots entries must be objects")
+
+            policy_id = str(item.get("policy_id", "")).strip()
+            if not policy_id:
+                raise ValueError("registry snapshot missing policy_id")
+
+            update = int(item.get("update", 0))
+            if update < 0:
+                raise ValueError(f"registry snapshot {policy_id} has update < 0")
+
+            path_value = str(item.get("path", "")).strip()
+            if not path_value:
+                raise ValueError(f"registry snapshot {policy_id} missing non-empty path")
+
             snapshots.append(
                 SnapshotMeta(
-                    policy_id=str(item["policy_id"]),
-                    update=int(item["update"]),
+                    policy_id=policy_id,
+                    update=update,
                     weights_sha256=str(item.get("weights_sha256", "")),
-                    path=str(item.get("path", "")),
+                    path=path_value,
                     created_utc=str(item.get("created_utc", _now_utc_iso())),
                 )
             )
