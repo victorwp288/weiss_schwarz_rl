@@ -383,6 +383,11 @@ def _require_league_config(stack: StackConfig) -> LeagueConfig:
 def _validate_gate_contract(stack: StackConfig) -> None:
     league = _require_league_config(stack)
     gate = league.promotion_gate
+    if gate.uncertainty_method != "bayesian_bootstrap_seedlevel_v1":
+        raise ValueError(
+            "promotion gate requires uncertainty_method='bayesian_bootstrap_seedlevel_v1', "
+            f"got {gate.uncertainty_method!r}"
+        )
     if gate.weighting != "uniform_across_anchors":
         raise ValueError(f"promotion gate requires weighting='uniform_across_anchors', got {gate.weighting!r}")
     if gate.folding != "S0":
