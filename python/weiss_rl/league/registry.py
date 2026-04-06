@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 import json
 
 _REGISTRY_SCHEMA_VERSION = 1
+REGISTRY_FILENAME = "registry.json"
+SNAPSHOT_WEIGHTS_FILENAME = "weights.pt"
+SNAPSHOT_METADATA_FILENAME = "policy_meta.json"
 
 
 def _now_utc_iso() -> str:
@@ -18,6 +21,38 @@ def _now_utc_iso() -> str:
 def _stable_json_dumps(obj: Any) -> str:
     # Stable output for diffs and reproducibility.
     return json.dumps(obj, indent=2, sort_keys=True, separators=(",", ": "))
+
+
+def snapshot_weights_relpath(policy_id: str) -> str:
+    normalized_policy_id = str(policy_id).strip()
+    if not normalized_policy_id:
+        raise ValueError("policy_id must be non-empty")
+    return PurePosixPath("training", "snapshots", normalized_policy_id, SNAPSHOT_WEIGHTS_FILENAME).as_posix()
+
+
+def snapshot_metadata_relpath(policy_id: str) -> str:
+    normalized_policy_id = str(policy_id).strip()
+    if not normalized_policy_id:
+        raise ValueError("policy_id must be non-empty")
+    return PurePosixPath("training", "snapshots", normalized_policy_id, SNAPSHOT_METADATA_FILENAME).as_posix()
+
+
+def _normalize_snapshot_artifact_path(path: str) -> str:
+    normalized_path = str(path).strip()
+    if not normalized_path:
+        raise ValueError("path must be non-empty")
+
+    pure_path = PurePosixPath(normalized_path)
+    parts = pure_path.parts
+    if pure_path.is_absolute() or len(parts) != 4 or parts[:2] != ("training", "snapshots"):
+        raise ValueError(
+            "path must be a run-relative snapshot weights artifact under training/snapshots/<policy_id>/weights.pt"
+        )
+    if parts[-1] != SNAPSHOT_WEIGHTS_FILENAME:
+        raise ValueError(
+            "path must be a run-relative snapshot weights artifact under training/snapshots/<policy_id>/weights.pt"
+        )
+    return pure_path.as_posix()
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,14 +116,14 @@ class SnapshotRegistry:
             raise ValueError("update must be >= 0")
         if not str(policy_id).strip():
             raise ValueError("policy_id must be non-empty")
-        if not str(path).strip():
-            raise ValueError("path must be non-empty")
+
+        normalized_path = _normalize_snapshot_artifact_path(path)
 
         meta = SnapshotMeta(
             policy_id=str(policy_id),
             update=update_i,
             weights_sha256=str(weights_sha256),
-            path=str(path),
+            path=normalized_path,
             created_utc=created_utc or _now_utc_iso(),
         )
 
