@@ -8,6 +8,7 @@ import platform
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -21,6 +22,7 @@ from weiss_rl.config import StackConfig, canonical_config_dict, compute_config_h
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
 from weiss_rl.envs.pool_factory import make_env_pool_from_config
 from weiss_rl.eval import (
+    DevEvalPolicySummary,
     Pcg32XshRrV1,
     PayoffFoldScheme,
     build_matchup_export,
@@ -33,6 +35,7 @@ from weiss_rl.eval import (
     write_matchup_summary_json,
 )
 from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
+from weiss_rl.eval.policy_set import select_final_policy_set_deterministic_v1
 from weiss_rl.learners.impala_learner import ImpalaLearner
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
 from weiss_rl.league import run_promotion_gate
@@ -369,11 +372,142 @@ def _evaluation_pinning(stack: StackConfig) -> dict[str, str | bool]:
     }
 
 
-def _policy_set_selection(stack: StackConfig) -> list[str]:
-    if stack.config.evaluation is None:
+def _manifest_source_path(path: Path, *, root: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} JSON must contain an object at the top level")
+    return payload
+
+
+def _load_snapshot_registry(path: Path) -> SnapshotRegistry:
+    if not path.exists():
+        raise FileNotFoundError(path)
+    return SnapshotRegistry.load(path)
+
+
+def _load_dev_eval_summaries(path: Path) -> dict[str, float | DevEvalPolicySummary]:
+    payload = _load_json_object(path, label="dev-eval summaries")
+    summaries: dict[str, float | DevEvalPolicySummary] = {}
+    for policy_id, raw_summary in payload.items():
+        if isinstance(raw_summary, bool):
+            raise TypeError(f"dev-eval summary for {policy_id!r} cannot be a boolean")
+        if isinstance(raw_summary, (int, float)):
+            summaries[policy_id] = float(raw_summary)
+            continue
+        if not isinstance(raw_summary, dict):
+            raise TypeError(
+                "dev-eval summary values must be numbers or objects with aggregate_score/anchor_scores, "
+                f"got {type(raw_summary).__name__} for {policy_id!r}"
+            )
+        aggregate_score = raw_summary.get("aggregate_score")
+        if isinstance(aggregate_score, bool) or not isinstance(aggregate_score, (int, float)):
+            raise TypeError(f"dev-eval summary for {policy_id!r} must include numeric aggregate_score")
+        anchor_scores = raw_summary.get("anchor_scores", {})
+        if not isinstance(anchor_scores, dict) or any(not isinstance(key, str) for key in anchor_scores):
+            raise TypeError(f"dev-eval summary for {policy_id!r} must include object anchor_scores")
+        summaries[policy_id] = DevEvalPolicySummary(
+            policy_id=policy_id,
+            aggregate_score=float(aggregate_score),
+            anchor_scores=anchor_scores,
+        )
+    return summaries
+
+
+def _selection_requires_snapshot_registry(stack: StackConfig) -> bool:
+    evaluation = stack.config.evaluation
+    if evaluation is None:
+        return False
+    selection = evaluation.final_policy_set_selection
+    return selection.include_final_champion_snapshot or bool(selection.include_spaced_snapshots_near_percent_updates)
+
+
+def _selection_requires_dev_eval_summaries(stack: StackConfig) -> bool:
+    evaluation = stack.config.evaluation
+    if evaluation is None:
+        return False
+    selection = evaluation.final_policy_set_selection
+    fixed_slots = int(selection.include_random_legal_baseline_b0) + int(selection.include_no_league_baseline_b1)
+    fixed_slots += int(selection.include_final_champion_snapshot)
+    fixed_slots += len(selection.include_spaced_snapshots_near_percent_updates)
+    if selection.include_heuristic_public_b2_if_exists:
+        return True
+    return evaluation.final_policy_set_size > fixed_slots
+
+
+def _policy_set_selection(
+    stack: StackConfig,
+    *,
+    snapshot_registry: SnapshotRegistry | None = None,
+    dev_eval_summaries: Mapping[str, float | DevEvalPolicySummary] | None = None,
+) -> list[str]:
+    evaluation = stack.config.evaluation
+    if evaluation is None:
         return []
-    selection = stack.config.evaluation.final_policy_set_selection
-    return [*selection.fixed_anchor_set_v1.required, *selection.fixed_anchor_set_v1.optional_if_available]
+    selection = evaluation.final_policy_set_selection
+    if selection.version != "deterministic_v1":
+        raise ValueError(f"unsupported final_policy_set_selection.version: {selection.version!r}")
+    return select_final_policy_set_deterministic_v1(
+        snapshot_registry=snapshot_registry or SnapshotRegistry(),
+        dev_eval_summaries=dev_eval_summaries or {},
+        config=selection,
+        final_policy_set_size=evaluation.final_policy_set_size,
+    )
+
+
+def _resolve_policy_set_selection(
+    stack: StackConfig,
+    *,
+    snapshot_registry_path: Path | None = None,
+    dev_eval_summaries_path: Path | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    evaluation = stack.config.evaluation
+    source_paths = {
+        "snapshot_registry_json": None
+        if snapshot_registry_path is None
+        else _manifest_source_path(snapshot_registry_path, root=stack.root),
+        "dev_eval_summaries_json": None
+        if dev_eval_summaries_path is None
+        else _manifest_source_path(dev_eval_summaries_path, root=stack.root),
+    }
+    if evaluation is None:
+        return [], {"status": "not_configured", "source_paths": source_paths}
+
+    snapshot_registry = None if snapshot_registry_path is None else _load_snapshot_registry(snapshot_registry_path)
+    dev_eval_summaries = None if dev_eval_summaries_path is None else _load_dev_eval_summaries(dev_eval_summaries_path)
+
+    missing_inputs: list[str] = []
+    if _selection_requires_snapshot_registry(stack) and snapshot_registry is None:
+        missing_inputs.append("snapshot_registry_json")
+    if _selection_requires_dev_eval_summaries(stack) and dev_eval_summaries is None:
+        missing_inputs.append("dev_eval_summaries_json")
+
+    details: dict[str, Any] = {
+        "status": "resolved",
+        "version": evaluation.final_policy_set_selection.version,
+        "final_policy_set_size": evaluation.final_policy_set_size,
+        "source_paths": source_paths,
+        "missing_inputs": missing_inputs,
+    }
+    if missing_inputs:
+        details["status"] = "unresolved"
+        details["reason"] = "deterministic final policy set inputs were not provided"
+        return [], details
+
+    policy_ids = _policy_set_selection(
+        stack,
+        snapshot_registry=snapshot_registry,
+        dev_eval_summaries=dev_eval_summaries,
+    )
+    details["selected_policy_count"] = len(policy_ids)
+    return policy_ids, details
 
 
 def _spec_mismatch_policy(stack: StackConfig) -> str:
@@ -1664,6 +1798,18 @@ def main() -> None:
         default=1,
         help="Checkpoint cadence for the minimal smoke run",
     )
+    parser.add_argument(
+        "--snapshot-registry-json",
+        type=Path,
+        default=None,
+        help="Optional snapshot registry JSON used to resolve the deterministic final policy set in the manifest",
+    )
+    parser.add_argument(
+        "--dev-eval-summaries-json",
+        type=Path,
+        default=None,
+        help="Optional dev-eval summaries JSON used to resolve the deterministic final policy set in the manifest",
+    )
     args = parser.parse_args()
     run_label = _resolve_run_label(parser, args.run_label, args.run_id_alias)
 
@@ -1708,6 +1854,11 @@ def main() -> None:
     )
     print(f"Loaded stack config with {len(stack.components)} components")
 
+    policy_set_selection, policy_set_selection_details = _resolve_policy_set_selection(
+        stack,
+        snapshot_registry_path=args.snapshot_registry_json,
+        dev_eval_summaries_path=args.dev_eval_summaries_json,
+    )
     manifest = RunManifest(
         run_id256=run_id256,
         run_id64=run_id64,
@@ -1722,7 +1873,8 @@ def main() -> None:
         seed_files=build_seed_file_manifest(stack.seed_sets, root=stack.root),
         hardware=_hardware_summary(),
         evaluation_pinning=_evaluation_pinning(stack),
-        policy_set_selection=_policy_set_selection(stack),
+        policy_set_selection=policy_set_selection,
+        policy_set_selection_details=policy_set_selection_details,
     )
     artifacts = write_run_artifacts(
         stack.root / "runs",

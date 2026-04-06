@@ -233,6 +233,89 @@ def _copy_repo_configs(tmp_path: Path) -> Path:
     return tmp_path / "configs" / "rl_stack_locked.yaml"
 
 
+def _write_policy_set_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    snapshot_registry_path = tmp_path / "policy_set_snapshot_registry.json"
+    dev_eval_summaries_path = tmp_path / "policy_set_dev_eval_summaries.json"
+    snapshot_registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "recent_size": 24,
+                "champion_size": 4,
+                "snapshots": [
+                    {
+                        "policy_id": "policy_000100",
+                        "update": 100,
+                        "weights_sha256": "1" * 64,
+                        "path": "training/snapshots/policy_000100/weights.pt",
+                        "created_utc": "2026-01-01T00:00:00+00:00",
+                    },
+                    {
+                        "policy_id": "policy_000200",
+                        "update": 200,
+                        "weights_sha256": "2" * 64,
+                        "path": "training/snapshots/policy_000200/weights.pt",
+                        "created_utc": "2026-01-01T00:00:01+00:00",
+                    },
+                    {
+                        "policy_id": "policy_000300",
+                        "update": 300,
+                        "weights_sha256": "3" * 64,
+                        "path": "training/snapshots/policy_000300/weights.pt",
+                        "created_utc": "2026-01-01T00:00:02+00:00",
+                    },
+                    {
+                        "policy_id": "policy_000400",
+                        "update": 400,
+                        "weights_sha256": "4" * 64,
+                        "path": "training/snapshots/policy_000400/weights.pt",
+                        "created_utc": "2026-01-01T00:00:03+00:00",
+                    },
+                ],
+                "champion_snapshots": ["policy_000400"],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    dev_eval_summaries_path.write_text(
+        json.dumps(
+            {
+                "B2 HeuristicPublic": {"aggregate_score": 0.0, "anchor_scores": {}},
+                "policy_000150": {
+                    "aggregate_score": 0.99,
+                    "anchor_scores": {
+                        "B0 RandomLegal": 0.70,
+                        "B1 NoLeague baseline": 0.70,
+                        "B2 HeuristicPublic": 0.70,
+                    },
+                },
+                "policy_000250": {
+                    "aggregate_score": 0.95,
+                    "anchor_scores": {
+                        "B0 RandomLegal": 0.69,
+                        "B1 NoLeague baseline": 0.69,
+                        "B2 HeuristicPublic": 0.69,
+                    },
+                },
+                "policy_000350": {
+                    "aggregate_score": 0.90,
+                    "anchor_scores": {
+                        "B0 RandomLegal": 0.68,
+                        "B1 NoLeague baseline": 0.68,
+                        "B2 HeuristicPublic": 0.68,
+                    },
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return snapshot_registry_path, dev_eval_summaries_path
+
+
 def _run_entrypoint(
     tmp_path: Path,
     *,
@@ -333,6 +416,18 @@ def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
 
     assert manifest["simulator"]["compatibility_hash"] == "123"
     assert manifest["spec_bundle"] == bundle
+    assert manifest["policy_set_selection"] == []
+    assert manifest["policy_set_selection_details"] == {
+        "status": "unresolved",
+        "version": "deterministic_v1",
+        "final_policy_set_size": 10,
+        "source_paths": {
+            "snapshot_registry_json": None,
+            "dev_eval_summaries_json": None,
+        },
+        "missing_inputs": ["snapshot_registry_json", "dev_eval_summaries_json"],
+        "reason": "deterministic final policy set inputs were not provided",
+    }
     assert (manifest_path.parent / "spec_bundle.json").is_file()
     assert (manifest_path.parent / "spec_hash256.txt").read_text(encoding="utf-8").strip() == spec_bundle_hash(bundle)
     assert "computed_run_id64:" in result.stdout
@@ -341,6 +436,54 @@ def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
     assert "run_dir_name:           spec_bundle_run" in result.stdout
     assert "Manifest scaffold only: no learner training or rollout collection was executed." in result.stdout
     assert "active weiss_sim runtime is missing stepping APIs" in result.stdout
+
+
+def test_train_entrypoint_resolves_policy_set_selection_when_inputs_are_supplied(tmp_path: Path) -> None:
+    bundle = _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash=str(bundle["spec_hash"]),
+        run_label="resolved_policy_set_run",
+        extra_args=[
+            "--snapshot-registry-json",
+            str(snapshot_registry_path),
+            "--dev-eval-summaries-json",
+            str(dev_eval_summaries_path),
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    manifest_path = tmp_path / "runs" / "resolved_policy_set_run" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["policy_set_selection"] == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "policy_000400",
+        "policy_000100",
+        "policy_000200",
+        "policy_000300",
+        "policy_000150",
+        "policy_000250",
+        "policy_000350",
+    ]
+    assert manifest["policy_set_selection_details"] == {
+        "status": "resolved",
+        "version": "deterministic_v1",
+        "final_policy_set_size": 10,
+        "source_paths": {
+            "snapshot_registry_json": "policy_set_snapshot_registry.json",
+            "dev_eval_summaries_json": "policy_set_dev_eval_summaries.json",
+        },
+        "missing_inputs": [],
+        "selected_policy_count": 10,
+    }
 
 
 def test_train_entrypoint_uses_default_run_dir_when_no_label_override(tmp_path: Path) -> None:

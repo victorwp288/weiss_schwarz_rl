@@ -40,6 +40,8 @@ What it does **not** do today:
 
 `--run-label` controls the human-friendly run directory name only. The immutable computed run identity still comes from the runtime spec/config/git/nonce inputs and is reported separately in the startup banner and manifest. `--run-id` remains accepted as a deprecated compatibility alias for the label override.
 
+`manifest.json` only records a resolved deterministic `policy_set_selection` when you also pass the matching `--snapshot-registry-json` and `--dev-eval-summaries-json` inputs. Otherwise the manifest records an unresolved `policy_set_selection_details` block instead of pretending the final set is already known.
+
 If `weiss_sim` is not installed in the active interpreter, the script still tries to collect provenance through a working local simulator interpreter/check-out when available. Configure `WEISS_SIM_PYTHONPATH` and optionally `WEISS_SIM_PYTHON` if your simulator lives elsewhere.
 
 Important: the **inline training smoke path** requires the active interpreter itself to import a simulator runtime with stepping APIs. `make train-inline-smoke` handles the usual sibling-checkout case by prepending `../weiss-schwarz-simulator/python` to `PYTHONPATH`. If only the provenance probe works, `train.py` falls back to manifest-only mode and prints why.
