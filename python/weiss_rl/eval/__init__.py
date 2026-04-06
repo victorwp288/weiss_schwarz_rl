@@ -34,6 +34,11 @@ from weiss_rl.eval.payoff_folding import (
     paired_seed_scores,
 )
 from weiss_rl.eval.rng_pcg32 import NEXT_U64_ORDER, PCG32_XSH_RR_V1, Pcg32XshRrV1
+from weiss_rl.eval.policy_set import (
+    DevEvalPolicySummary,
+    parse_training_policy_id,
+    select_final_policy_set_deterministic_v1,
+)
 from weiss_rl.eval.stage2 import Stage2Decision, Stage2StopReason, summarize_stage2_records
 from weiss_rl.eval.uncertainty import (
     EvalUncertaintySummary,
@@ -42,6 +47,7 @@ from weiss_rl.eval.uncertainty import (
 )
 
 __all__ = [
+    "DevEvalPolicySummary",
     "EvalGameRecord",
     "EvalRunResult",
     "EvalSamplerAnomalies",
@@ -65,7 +71,9 @@ __all__ = [
     "paired_seed_mean_score",
     "paired_seed_score",
     "paired_seed_scores",
+    "parse_training_policy_id",
     "paired_seed_uncertainty_summary",
+    "select_final_policy_set_deterministic_v1",
     "record_completed_game",
     "run_seat_swapped_matchup",
     "sample_action_pinned",

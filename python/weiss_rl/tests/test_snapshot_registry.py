@@ -6,7 +6,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import torch
 
@@ -219,7 +219,7 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
     train_script = _load_train_script_module()
     stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
 
-    bootstrap_calls: list[dict[str, object]] = []
+    bootstrap_calls: list[dict[str, Any]] = []
 
     def fake_ensure_noleague_baseline_anchor(**kwargs):
         bootstrap_calls.append(kwargs)
