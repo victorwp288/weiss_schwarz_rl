@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -55,6 +56,13 @@ def _normalize_snapshot_artifact_path(path: str) -> str:
     return pure_path.as_posix()
 
 
+def _normalize_window_size(value: int, *, field_name: str) -> int:
+    normalized = int(value)
+    if normalized < 0:
+        raise ValueError(f"{field_name} must be >= 0")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class SnapshotMeta:
     policy_id: str
@@ -76,13 +84,14 @@ class SnapshotRegistry:
     champion_size: int = 4
     snapshots: list[SnapshotMeta] = field(default_factory=list)
     champion_snapshots: list[str] = field(default_factory=list)
+    pinned_snapshots: list[str] = field(default_factory=list)
 
     def latest(self, n: int = 1) -> list[SnapshotMeta]:
         n = int(n)
         if n <= 0:
             return []
-        ordered = self._sorted()
-        return ordered[-n:]
+        self.normalize()
+        return self.snapshots[-n:]
 
     def latest_n(self, n: int = 1) -> list[SnapshotMeta]:
         return self.latest(n)
@@ -94,19 +103,27 @@ class SnapshotRegistry:
         n = int(n)
         if n <= 0:
             return []
+        self.normalize()
         return self.champion_snapshots[-n:]
 
-    def add_champion(self, snapshot_id: str) -> None:
+    def has_snapshot(self, snapshot_id: str) -> bool:
         normalized_snapshot_id = str(snapshot_id).strip()
         if not normalized_snapshot_id:
-            raise ValueError("snapshot_id must be non-empty")
-        self.champion_snapshots.append(normalized_snapshot_id)
+            return False
+        return any(snapshot.policy_id == normalized_snapshot_id for snapshot in self.snapshots)
+
+    def add_champion(self, snapshot_id: str) -> None:
+        normalized_snapshot_id = self._require_existing_snapshot_id(snapshot_id)
+        self.champion_snapshots = self._move_ref_to_end(self.champion_snapshots, normalized_snapshot_id)
+        self.normalize()
+
+    def pin_snapshot(self, snapshot_id: str) -> None:
+        normalized_snapshot_id = self._require_existing_snapshot_id(snapshot_id)
+        self.pinned_snapshots = self._move_ref_to_end(self.pinned_snapshots, normalized_snapshot_id)
+        self.normalize()
 
     def add(self, snapshot_id: str, *, is_champion: bool = False) -> None:
         self.add_champion(snapshot_id) if is_champion else None
-
-    def _sorted(self) -> list[SnapshotMeta]:
-        return sorted(self.snapshots, key=lambda snapshot: snapshot.sort_key())
 
     def add_snapshot(
         self,
@@ -135,24 +152,118 @@ class SnapshotRegistry:
         for index, existing in enumerate(self.snapshots):
             if existing.policy_id == meta.policy_id:
                 self.snapshots[index] = meta
-                self.snapshots = self._sorted()
+                self.normalize()
                 return
 
         self.snapshots.append(meta)
-        self.snapshots = self._sorted()
+        self.normalize()
+
+    def retained_snapshot_ids(self) -> set[str]:
+        self.normalize()
+        retained_ids = set(self.latest_ids(self.recent_size))
+        retained_ids.update(self.latest_champions(self.champion_size))
+        retained_ids.update(self.pinned_snapshots)
+        return retained_ids
+
+    def prune(self) -> list[SnapshotMeta]:
+        self.normalize()
+        retained_ids = self.retained_snapshot_ids()
+        retained_snapshots: list[SnapshotMeta] = []
+        pruned_snapshots: list[SnapshotMeta] = []
+        for snapshot in self.snapshots:
+            if snapshot.policy_id in retained_ids:
+                retained_snapshots.append(snapshot)
+            else:
+                pruned_snapshots.append(snapshot)
+
+        self.snapshots = retained_snapshots
+        retained_policy_ids = {snapshot.policy_id for snapshot in self.snapshots}
+        self.champion_snapshots = [
+            snapshot_id for snapshot_id in self.champion_snapshots if snapshot_id in retained_policy_ids
+        ]
+        self.pinned_snapshots = [
+            snapshot_id for snapshot_id in self.pinned_snapshots if snapshot_id in retained_policy_ids
+        ]
+        return pruned_snapshots
+
+    def normalize(self) -> None:
+        self.recent_size = _normalize_window_size(self.recent_size, field_name="recent_size")
+        self.champion_size = _normalize_window_size(self.champion_size, field_name="champion_size")
+        self.snapshots = self._normalized_snapshots()
+        existing_snapshot_ids = {snapshot.policy_id for snapshot in self.snapshots}
+        self.champion_snapshots = self._normalized_refs(
+            self.champion_snapshots,
+            existing_snapshot_ids=existing_snapshot_ids,
+            limit=self.champion_size,
+        )
+        self.pinned_snapshots = self._normalized_refs(
+            self.pinned_snapshots,
+            existing_snapshot_ids=existing_snapshot_ids,
+        )
 
     def to_dict(self) -> dict[str, Any]:
+        self.normalize()
         return {
             "schema_version": _REGISTRY_SCHEMA_VERSION,
             "recent_size": int(self.recent_size),
             "champion_size": int(self.champion_size),
-            "snapshots": [asdict(snapshot) for snapshot in self._sorted()],
+            "snapshots": [asdict(snapshot) for snapshot in self.snapshots],
             "champion_snapshots": list(self.champion_snapshots),
+            "pinned_snapshots": list(self.pinned_snapshots),
         }
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_stable_json_dumps(self.to_dict()) + "\n", encoding="utf-8")
+
+    def _normalized_snapshots(self) -> list[SnapshotMeta]:
+        deduped: dict[str, SnapshotMeta] = {}
+        for snapshot in self.snapshots:
+            policy_id = str(snapshot.policy_id).strip()
+            if not policy_id:
+                raise ValueError("registry snapshot missing policy_id")
+            update = int(snapshot.update)
+            if update < 0:
+                raise ValueError(f"registry snapshot {policy_id} has update < 0")
+            deduped[policy_id] = SnapshotMeta(
+                policy_id=policy_id,
+                update=update,
+                weights_sha256=str(snapshot.weights_sha256),
+                path=_normalize_snapshot_artifact_path(snapshot.path),
+                created_utc=str(snapshot.created_utc or _now_utc_iso()),
+            )
+        return sorted(deduped.values(), key=lambda snapshot: snapshot.sort_key())
+
+    def _normalized_refs(
+        self,
+        snapshot_ids: Iterable[str],
+        *,
+        existing_snapshot_ids: set[str],
+        limit: int | None = None,
+    ) -> list[str]:
+        normalized: list[str] = []
+        for raw_snapshot_id in snapshot_ids:
+            snapshot_id = str(raw_snapshot_id).strip()
+            if not snapshot_id or snapshot_id not in existing_snapshot_ids:
+                continue
+            normalized = self._move_ref_to_end(normalized, snapshot_id)
+        if limit is None:
+            return normalized
+        if limit <= 0:
+            return []
+        return normalized[-limit:]
+
+    @staticmethod
+    def _move_ref_to_end(snapshot_ids: list[str], snapshot_id: str) -> list[str]:
+        return [existing for existing in snapshot_ids if existing != snapshot_id] + [snapshot_id]
+
+    def _require_existing_snapshot_id(self, snapshot_id: str) -> str:
+        normalized_snapshot_id = str(snapshot_id).strip()
+        if not normalized_snapshot_id:
+            raise ValueError("snapshot_id must be non-empty")
+        if not self.has_snapshot(normalized_snapshot_id):
+            raise ValueError(f"snapshot_id must reference an existing snapshot: {normalized_snapshot_id!r}")
+        return normalized_snapshot_id
 
     @classmethod
     def load(cls, path: Path) -> "SnapshotRegistry":
@@ -167,23 +278,21 @@ class SnapshotRegistry:
             snapshot_ids = raw.get("snapshots", [])
             champion_snapshot_ids = raw.get("champion_snapshots", [])
             if snapshot_ids and all(isinstance(item, str) for item in snapshot_ids):
-                registry = cls()
-                registry.snapshots = [
-                    SnapshotMeta(
-                        policy_id=str(snapshot_id),
-                        update=int(index),
-                        weights_sha256="",
-                        path="unknown",
-                        created_utc=_now_utc_iso(),
-                    )
-                    for index, snapshot_id in enumerate(snapshot_ids)
-                ]
-                registry.snapshots = registry._sorted()
-                registry.champion_snapshots = [
-                    str(snapshot_id).strip()
-                    for snapshot_id in champion_snapshot_ids
-                    if str(snapshot_id).strip()
-                ]
+                registry = cls(
+                    snapshots=[
+                        SnapshotMeta(
+                            policy_id=str(snapshot_id).strip(),
+                            update=int(index),
+                            weights_sha256="",
+                            path=snapshot_weights_relpath(str(snapshot_id).strip()),
+                            created_utc=_now_utc_iso(),
+                        )
+                        for index, snapshot_id in enumerate(snapshot_ids)
+                        if str(snapshot_id).strip()
+                    ],
+                    champion_snapshots=[str(snapshot_id).strip() for snapshot_id in champion_snapshot_ids],
+                )
+                registry.normalize()
                 return registry
 
         schema_version = int(raw.get("schema_version", 0))
@@ -219,7 +328,7 @@ class SnapshotRegistry:
                     policy_id=policy_id,
                     update=update,
                     weights_sha256=str(item.get("weights_sha256", "")),
-                    path=path_value,
+                    path=_normalize_snapshot_artifact_path(path_value),
                     created_utc=str(item.get("created_utc", _now_utc_iso())),
                 )
             )
@@ -227,17 +336,16 @@ class SnapshotRegistry:
         champion_snapshots_raw = raw.get("champion_snapshots", [])
         if not isinstance(champion_snapshots_raw, list):
             raise ValueError("registry.champion_snapshots must be a list")
-        champion_snapshots = [
-            snapshot_id
-            for snapshot_id in (str(item).strip() for item in champion_snapshots_raw)
-            if snapshot_id
-        ]
+        pinned_snapshots_raw = raw.get("pinned_snapshots", [])
+        if not isinstance(pinned_snapshots_raw, list):
+            raise ValueError("registry.pinned_snapshots must be a list")
 
         registry = cls(
             recent_size=recent_size,
             champion_size=champion_size,
             snapshots=snapshots,
-            champion_snapshots=champion_snapshots,
+            champion_snapshots=[str(item).strip() for item in champion_snapshots_raw],
+            pinned_snapshots=[str(item).strip() for item in pinned_snapshots_raw],
         )
-        registry.snapshots = registry._sorted()
+        registry.normalize()
         return registry

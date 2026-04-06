@@ -160,15 +160,11 @@ def _latest_champion_policy(
     *,
     snapshot_policies_by_id: Mapping[str, TrainingPolicyId],
 ) -> TrainingPolicyId | None:
-    champion_policies: list[TrainingPolicyId] = []
-    for policy_id in _champion_snapshot_ids(snapshot_registry):
-        existing = snapshot_policies_by_id.get(policy_id)
-        if existing is not None:
-            champion_policies.append(existing)
-            continue
-        parsed = _try_parse_training_policy(policy_id)
-        if parsed is not None:
-            champion_policies.append(parsed)
+    champion_policies = [
+        snapshot_policies_by_id[policy_id]
+        for policy_id in _champion_snapshot_ids(snapshot_registry)
+        if policy_id in snapshot_policies_by_id
+    ]
     if not champion_policies:
         return None
     return max(champion_policies, key=_training_policy_sort_key)

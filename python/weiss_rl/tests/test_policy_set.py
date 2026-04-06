@@ -97,6 +97,24 @@ def test_selector_uses_latest_champion_snapshot_not_latest_snapshot() -> None:
     assert selected == ["B0 RandomLegal", "B1 NoLeague baseline", "policy_000100"]
 
 
+def test_selector_ignores_orphan_champion_refs_when_picking_final_champion() -> None:
+    config = _selection_config(
+        include_heuristic_public_b2_if_exists=False,
+        include_spaced_snapshots_near_percent_updates=(),
+    )
+    registry = _build_registry([("policy_000100", 100), ("policy_000200", 200)])
+    registry.champion_snapshots = ["policy_999999", "policy_000100"]
+
+    selected = select_final_policy_set_deterministic_v1(
+        snapshot_registry=registry,
+        dev_eval_summaries={},
+        config=config,
+        final_policy_set_size=4,
+    )
+
+    assert selected == ["B0 RandomLegal", "B1 NoLeague baseline", "policy_000100"]
+
+
 def test_selector_ranks_remaining_slots_by_anchor_set_then_policy_id() -> None:
     config = _selection_config(
         include_final_champion_snapshot=False,

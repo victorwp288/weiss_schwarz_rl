@@ -34,6 +34,19 @@ def test_select_opponent_snapshot_ids_dedupes_recent_and_champion_overlap() -> N
     assert snapshot_ids == ("s3", "s4", "s1")
 
 
+def test_select_opponent_snapshot_ids_uses_pruned_registry_state() -> None:
+    registry = _build_registry(["s1", "s2", "s3", "s4"], champion_snapshot_ids=["s1", "s3"])
+    registry.recent_size = 2
+    registry.champion_size = 1
+    registry.pin_snapshot("s2")
+    registry.prune()
+
+    snapshot_ids = select_opponent_snapshot_ids(registry, recent_size=2, champion_size=1)
+
+    assert [snapshot.policy_id for snapshot in registry.snapshots] == ["s2", "s3", "s4"]
+    assert snapshot_ids == ("s3", "s4")
+
+
 def test_resolve_opponent_win_rates_uses_neutral_fallback_for_missing_stats() -> None:
     win_rates = resolve_opponent_win_rates(
         ("recent", "champion", "missing"),
