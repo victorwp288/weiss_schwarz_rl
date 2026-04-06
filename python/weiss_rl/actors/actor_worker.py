@@ -17,6 +17,7 @@ from weiss_rl.masking import (
     sample_actions_from_legal_ids,
     sample_actions_from_mask,
 )
+from weiss_rl.league.outcomes import OnlineOutcomeTracker
 from weiss_rl.replay.bundles import write_fault_bundle
 
 torch: ModuleType | None
@@ -29,6 +30,17 @@ except Exception:  # pragma: no cover
 LayoutName = Literal["i16_legal_ids", "mask"]
 
 _CHECKPOINT_METADATA_STEM = re.compile(r"(?:checkpoint_metadata|checkpoint)_(\d+)")
+_OPPONENT_ID_FIELDS = (
+    "opponent_policy_id_by_env",
+    "opponent_policy_ids",
+    "opponent_policy_id",
+    "opponent_id_by_env",
+    "opponent_ids",
+    "opponent_id",
+    "opponent_snapshot_id_by_env",
+    "opponent_snapshot_ids",
+    "opponent_snapshot_id",
+)
 
 
 def _nonfinite_indices(values: np.ndarray) -> np.ndarray:
@@ -92,6 +104,8 @@ class ActorWorker:
     checkpoint_metadata_lag_updates: int = field(default=0, init=False)
     _torch_threads_configured: bool = field(default=False, init=False)
     _rng: np.random.Generator | None = field(default=None, init=False)
+    outcomes: OnlineOutcomeTracker = field(default_factory=OnlineOutcomeTracker)
+    opponent_id_by_env: np.ndarray | None = field(default=None, init=False)
 
     def run_once(
         self,
@@ -118,6 +132,9 @@ class ActorWorker:
         A = int(self.action_space)
         if T <= 0 or N <= 0 or A <= 0:
             raise ValueError("unroll_length, num_envs, action_space must be > 0")
+
+        if self.opponent_id_by_env is None or int(self.opponent_id_by_env.shape[0]) != N:
+            self.opponent_id_by_env = np.full((N,), "unknown", dtype=object)
 
         if not self._torch_threads_configured:
             _configure_actor_torch_threads(self.actor_torch_threads)
@@ -157,6 +174,7 @@ class ActorWorker:
         obs_buf = np.empty((T, N, obs0.shape[1]), dtype=obs0.dtype)
 
         for t in range(T):
+            _refresh_opponent_ids(self.opponent_id_by_env, batch=batch, env=env, num_envs=N)
             obs = np.asarray(batch.obs)
             to_play = _batch_to_play(batch)
             decision_id = np.asarray(batch.decision_id)
@@ -294,6 +312,13 @@ class ActorWorker:
 
             done = np.logical_or(terminated, truncated)
             if np.any(done):
+                _update_outcomes(
+                    self.outcomes,
+                    opponent_ids=self.opponent_id_by_env,
+                    reward=reward,
+                    engine_status=engine_status,
+                    done=done,
+                )
                 reset_done = getattr(env, "reset_done", None)
                 if callable(reset_done):
                     batch = reset_done(done.astype(np.bool_, copy=False))
@@ -583,3 +608,68 @@ def _packed_legal_ids_prefix(legal_ids: np.ndarray, legal_offsets: np.ndarray) -
     if used < 0 or used > legal_ids.shape[0]:
         raise ValueError(f"legal_ids prefix out of bounds: used={used}, capacity={legal_ids.shape[0]}")
     return legal_ids[:used]
+
+
+def _refresh_opponent_ids(opponent_id_by_env: np.ndarray, *, batch: Any, env: Any, num_envs: int) -> None:
+    for source in (batch, env):
+        opponent_ids = _extract_opponent_ids(source, num_envs=num_envs)
+        if opponent_ids is None:
+            continue
+        known = opponent_ids != ""
+        if np.any(known):
+            opponent_id_by_env[known] = opponent_ids[known]
+
+
+def _extract_opponent_ids(source: Any, *, num_envs: int) -> np.ndarray | None:
+    if source is None:
+        return None
+    for field_name in _OPPONENT_ID_FIELDS:
+        if not hasattr(source, field_name):
+            continue
+        value = getattr(source, field_name)
+        if value is None:
+            continue
+        return _coerce_opponent_ids(value, num_envs=num_envs, field_name=field_name)
+    return None
+
+
+def _coerce_opponent_ids(value: Any, *, num_envs: int, field_name: str) -> np.ndarray:
+    if isinstance(value, str):
+        raw_values: list[Any] = [value] * num_envs
+    else:
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            raw_values = [array.item()] * num_envs
+        elif array.shape == (num_envs,):
+            raw_values = array.tolist()
+        else:
+            raise ValueError(f"{field_name} must be scalar or shape ({num_envs},)")
+
+    opponent_ids = np.empty((num_envs,), dtype=object)
+    for env_index, raw_value in enumerate(raw_values):
+        opponent_ids[env_index] = "" if raw_value is None else str(raw_value).strip()
+    return opponent_ids
+
+
+def _update_outcomes(
+    tracker: OnlineOutcomeTracker,
+    *,
+    opponent_ids: np.ndarray,
+    reward: np.ndarray,
+    engine_status: np.ndarray,
+    done: np.ndarray,
+) -> None:
+    valid_done = np.logical_and(done, np.asarray(engine_status) == 0)
+    for env_index in np.flatnonzero(valid_done):
+        tracker.update(
+            opponent_id=str(opponent_ids[int(env_index)]),
+            outcome=_outcome_token_from_reward(float(reward[int(env_index)])),
+        )
+
+
+def _outcome_token_from_reward(reward: float) -> str:
+    if reward > 0.0:
+        return "w"
+    if reward < 0.0:
+        return "l"
+    return "d"
