@@ -6,6 +6,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Protocol, cast
 
 import torch
 
@@ -15,6 +16,10 @@ from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
 from weiss_rl.model import PolicyValueModel
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+class _TrainingPathsLike(Protocol):
+    snapshots_dir: Path
 
 
 @lru_cache(maxsize=1)
@@ -256,7 +261,8 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
     assert len(bootstrap_calls) == 1
     bootstrap_call = bootstrap_calls[0]
     assert bootstrap_call["run_dir"] == run_dir
-    assert bootstrap_call["training_paths"].snapshots_dir == run_dir / "training" / "snapshots"
+    training_paths_arg = cast(_TrainingPathsLike, bootstrap_call["training_paths"])
+    assert training_paths_arg.snapshots_dir == run_dir / "training" / "snapshots"
     assert bootstrap_call["device"] == torch.device("cpu")
     assert bootstrap_call["config_hash256"] == train_script.compute_config_hash256(stack)
 
