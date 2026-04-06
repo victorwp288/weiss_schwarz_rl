@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -12,7 +14,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
-import hashlib
 
 import numpy as np
 import torch
@@ -55,6 +56,8 @@ from weiss_rl.spec import assert_spec_bundle_contract
 from weiss_rl.league.registry import (
     REGISTRY_FILENAME,
     SNAPSHOT_METADATA_FILENAME,
+    SNAPSHOT_WEIGHTS_FILENAME,
+    SnapshotMeta,
     SnapshotRegistry,
     snapshot_weights_relpath,
 )
@@ -274,8 +277,76 @@ def _write_snapshot_artifact(
     return weights_path, weights_sha256
 
 
+def _sync_snapshot_registry_retention(stack: StackConfig, registry: SnapshotRegistry) -> None:
+    league = stack.config.league
+    if league is None:
+        return
+    registry.recent_size = int(league.snapshot_pool_recent_size)
+    registry.champion_size = int(league.snapshot_pool_champion_size)
+
+
+def _snapshot_artifact_dir_for_prune(
+    *,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    snapshot: SnapshotMeta,
+) -> Path:
+    snapshots_root = training_paths.snapshots_dir.resolve()
+    weights_path = (run_dir / snapshot.path).resolve()
+    try:
+        weights_path.relative_to(snapshots_root)
+    except ValueError as exc:
+        raise RuntimeError(f"refusing to delete snapshot artifact outside {snapshots_root}: {snapshot.path}") from exc
+    if weights_path.name != SNAPSHOT_WEIGHTS_FILENAME:
+        raise RuntimeError(f"refusing to delete unexpected snapshot artifact path: {snapshot.path}")
+
+    snapshot_dir = weights_path.parent
+    try:
+        snapshot_dir.relative_to(snapshots_root)
+    except ValueError as exc:
+        raise RuntimeError(f"refusing to delete snapshot directory outside {snapshots_root}: {snapshot_dir}") from exc
+    if snapshot_dir == snapshots_root or snapshot_dir.name != snapshot.policy_id:
+        raise RuntimeError(f"refusing to delete unexpected snapshot directory: {snapshot_dir}")
+    return snapshot_dir
+
+
+def _delete_pruned_snapshot_artifacts(
+    *,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    pruned_snapshots: list[SnapshotMeta],
+) -> None:
+    for snapshot in pruned_snapshots:
+        snapshot_dir = _snapshot_artifact_dir_for_prune(
+            training_paths=training_paths,
+            run_dir=run_dir,
+            snapshot=snapshot,
+        )
+        if snapshot_dir.exists():
+            shutil.rmtree(snapshot_dir)
+
+
+def _save_snapshot_registry_with_retention(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    registry: SnapshotRegistry,
+) -> None:
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    _sync_snapshot_registry_retention(stack, registry)
+    pruned_snapshots = registry.prune()
+    registry.save(registry_path)
+    _delete_pruned_snapshot_artifacts(
+        training_paths=training_paths,
+        run_dir=run_dir,
+        pruned_snapshots=pruned_snapshots,
+    )
+
+
 def _persist_snapshot_registry_entry(
     *,
+    stack: StackConfig,
     training_paths: TrainingPaths,
     run_dir: Path,
     checkpoint_path: Path,
@@ -299,13 +370,19 @@ def _persist_snapshot_registry_entry(
 
     registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
     reg = SnapshotRegistry.load(registry_path)
+    _sync_snapshot_registry_retention(stack, reg)
     reg.add_snapshot(
         policy_id=policy_id,
         update=int(update),
         weights_sha256=weights_sha256,
         path=weights_path.relative_to(run_dir).as_posix(),
     )
-    reg.save(registry_path)
+    _save_snapshot_registry_with_retention(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        registry=reg,
+    )
     return policy_id
 
 
@@ -958,6 +1035,7 @@ def _ensure_noleague_baseline_anchor(
 
     registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
     registry = SnapshotRegistry.load(registry_path)
+    _sync_snapshot_registry_retention(stack, registry)
     available_policy_ids = {snapshot.policy_id for snapshot in registry.snapshots}
     existing_policy_id = next(
         (
@@ -968,6 +1046,13 @@ def _ensure_noleague_baseline_anchor(
         None,
     )
     if existing_policy_id is not None:
+        registry.pin_snapshot(existing_policy_id)
+        _save_snapshot_registry_with_retention(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=run_dir,
+            registry=registry,
+        )
         return existing_policy_id
 
     checkpoint_path = training_paths.checkpoints_dir / _PROMOTION_GATE_NOLEAGUE_BASELINE_CHECKPOINT
@@ -993,7 +1078,13 @@ def _ensure_noleague_baseline_anchor(
         weights_sha256=weights_sha256,
         path=weights_path.relative_to(run_dir).as_posix(),
     )
-    registry.save(registry_path)
+    registry.pin_snapshot(_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID)
+    _save_snapshot_registry_with_retention(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        registry=registry,
+    )
     print(
         "Bootstrapped promotion anchor: "
         f"anchor={_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME} "
@@ -1587,9 +1678,13 @@ def _run_snapshot_promotion_gate(
         ),
     )
     if result.passed:
-        if candidate_policy_id not in registry.champion_snapshots:
-            registry.add_champion(candidate_policy_id)
-            registry.save(registry_path)
+        registry.add_champion(candidate_policy_id)
+        _save_snapshot_registry_with_retention(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=artifacts.run_dir,
+            registry=registry,
+        )
         print(
             "Promotion gate passed: "
             f"update={update_count} candidate={candidate_policy_id} "
@@ -1708,6 +1803,7 @@ def _run_minimal_training(
                 if learner.model is None:
                     raise RuntimeError("Cannot persist a snapshot registry entry without a learner model")
                 candidate_policy_id = _persist_snapshot_registry_entry(
+                    stack=stack,
                     training_paths=training_paths,
                     run_dir=artifacts.run_dir,
                     checkpoint_path=ckpt_path,

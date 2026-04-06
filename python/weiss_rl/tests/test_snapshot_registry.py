@@ -9,6 +9,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, Protocol, cast
 
 import numpy as np
+import pytest
 import torch
 
 from weiss_rl.config import load_stack_config
@@ -38,6 +39,17 @@ def _load_train_script_module() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _retention_stack(*, recent_size: int, champion_size: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        config=SimpleNamespace(
+            league=SimpleNamespace(
+                snapshot_pool_recent_size=recent_size,
+                snapshot_pool_champion_size=champion_size,
+            )
+        )
+    )
 
 
 def test_snapshot_registry_survives_restart_and_returns_latest_n(tmp_path: Path) -> None:
@@ -74,6 +86,97 @@ def test_snapshot_registry_survives_restart_and_returns_latest_n(tmp_path: Path)
     assert reloaded.latest_ids(2) == ["policy_000002", "policy_000003"]
 
 
+def test_snapshot_registry_prune_keeps_recent_champion_and_pinned_union() -> None:
+    registry = SnapshotRegistry(recent_size=2, champion_size=1)
+    for update in range(1, 6):
+        policy_id = f"policy_{update:06d}"
+        registry.add_snapshot(
+            policy_id=policy_id,
+            update=update,
+            weights_sha256=(str(update) * 64)[:64],
+            path=snapshot_weights_relpath(policy_id),
+        )
+
+    registry.pin_snapshot("policy_000002")
+    registry.add_champion("policy_000003")
+    registry.add_champion("policy_000004")
+
+    pruned = registry.prune()
+
+    assert [snapshot.policy_id for snapshot in registry.snapshots] == [
+        "policy_000002",
+        "policy_000004",
+        "policy_000005",
+    ]
+    assert registry.champion_snapshots == ["policy_000004"]
+    assert registry.pinned_snapshots == ["policy_000002"]
+    assert [snapshot.policy_id for snapshot in pruned] == ["policy_000001", "policy_000003"]
+
+
+def test_snapshot_registry_add_champion_dedupes_and_trims_window() -> None:
+    registry = SnapshotRegistry(recent_size=0, champion_size=2)
+    for update in range(1, 4):
+        policy_id = f"policy_{update:06d}"
+        registry.add_snapshot(
+            policy_id=policy_id,
+            update=update,
+            weights_sha256=(str(update) * 64)[:64],
+            path=snapshot_weights_relpath(policy_id),
+        )
+
+    registry.add_champion("policy_000001")
+    registry.add_champion("policy_000002")
+    registry.add_champion("policy_000001")
+    registry.add_champion("policy_000003")
+
+    assert registry.champion_snapshots == ["policy_000001", "policy_000003"]
+
+
+def test_snapshot_registry_add_champion_rejects_unknown_snapshot() -> None:
+    registry = SnapshotRegistry()
+
+    with pytest.raises(ValueError, match="existing snapshot"):
+        registry.add_champion("policy_999999")
+
+
+def test_snapshot_registry_load_normalizes_orphaned_refs(tmp_path: Path) -> None:
+    registry_path = tmp_path / "training" / "snapshots" / "registry.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "recent_size": 3,
+                "champion_size": 2,
+                "snapshots": [
+                    {
+                        "policy_id": "policy_000001",
+                        "update": 1,
+                        "weights_sha256": "a" * 64,
+                        "path": snapshot_weights_relpath("policy_000001"),
+                        "created_utc": "2026-01-01T00:00:00+00:00",
+                    },
+                    {
+                        "policy_id": "policy_000002",
+                        "update": 2,
+                        "weights_sha256": "b" * 64,
+                        "path": snapshot_weights_relpath("policy_000002"),
+                        "created_utc": "2026-01-01T00:00:01+00:00",
+                    },
+                ],
+                "champion_snapshots": ["ghost", "policy_000001", "policy_000001", "policy_000002"],
+                "pinned_snapshots": ["ghost", "policy_000001", "policy_000001"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    registry = SnapshotRegistry.load(registry_path)
+
+    assert registry.champion_snapshots == ["policy_000001", "policy_000002"]
+    assert registry.pinned_snapshots == ["policy_000001"]
+
+
 def test_snapshot_registry_rejects_checkpoint_paths() -> None:
     registry = SnapshotRegistry()
 
@@ -92,6 +195,7 @@ def test_snapshot_registry_rejects_checkpoint_paths() -> None:
 
 def test_train_snapshot_persistence_writes_artifact_bundle_and_registry_entry(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
+    stack = _retention_stack(recent_size=24, champion_size=4)
     run_dir = tmp_path / "run"
     training_paths = train_script._training_paths(run_dir)
     checkpoint_path = training_paths.checkpoints_dir / "checkpoint_7.pt"
@@ -99,6 +203,7 @@ def test_train_snapshot_persistence_writes_artifact_bundle_and_registry_entry(tm
 
     model = torch.nn.Linear(3, 2)
     train_script._persist_snapshot_registry_entry(
+        stack=stack,
         training_paths=training_paths,
         run_dir=run_dir,
         checkpoint_path=checkpoint_path,
@@ -143,6 +248,36 @@ def test_train_snapshot_persistence_writes_artifact_bundle_and_registry_entry(tm
     assert set(payload["model_state_dict"]) == set(model.state_dict())
 
 
+def test_train_snapshot_retention_prunes_old_snapshot_artifacts(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = _retention_stack(recent_size=1, champion_size=0)
+    run_dir = tmp_path / "run"
+    training_paths = train_script._training_paths(run_dir)
+    model = torch.nn.Linear(3, 2)
+
+    for policy_version in (1, 2, 3):
+        checkpoint_path = training_paths.checkpoints_dir / f"checkpoint_{policy_version}.pt"
+        torch.save({"format": "checkpoint_stub"}, checkpoint_path)
+        train_script._persist_snapshot_registry_entry(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=run_dir,
+            checkpoint_path=checkpoint_path,
+            model_state_dict=model.state_dict(),
+            config_hash256="ab" * 32,
+            device=torch.device("cpu"),
+            update=policy_version,
+            policy_version=policy_version,
+        )
+
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+
+    assert [snapshot.policy_id for snapshot in registry.snapshots] == ["policy_000003"]
+    assert not (training_paths.snapshots_dir / "policy_000001").exists()
+    assert not (training_paths.snapshots_dir / "policy_000002").exists()
+    assert (training_paths.snapshots_dir / "policy_000003").is_dir()
+
+
 def test_ensure_noleague_baseline_anchor_bootstraps_frozen_snapshot_once(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
     stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
@@ -175,6 +310,8 @@ def test_ensure_noleague_baseline_anchor_bootstraps_frozen_snapshot_once(tmp_pat
     registry_path = training_paths.snapshots_dir / "registry.json"
     registry = SnapshotRegistry.load(registry_path)
     assert [snapshot.policy_id for snapshot in registry.snapshots] == [policy_id]
+    assert registry.champion_snapshots == []
+    assert registry.pinned_snapshots == [policy_id]
 
     snapshot = registry.snapshots[0]
     weights_path = run_dir / snapshot_weights_relpath(policy_id)
@@ -213,6 +350,8 @@ def test_ensure_noleague_baseline_anchor_bootstraps_frozen_snapshot_once(tmp_pat
     assert second_policy_id == policy_id
     reloaded = SnapshotRegistry.load(registry_path)
     assert [snapshot.policy_id for snapshot in reloaded.snapshots] == [policy_id]
+    assert reloaded.champion_snapshots == []
+    assert reloaded.pinned_snapshots == [policy_id]
     assert reloaded.snapshots[0].weights_sha256 == snapshot.weights_sha256
 
 
@@ -304,6 +443,7 @@ def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path
     candidate_checkpoint_path = training_paths.checkpoints_dir / "checkpoint_7.pt"
     torch.save({"format": "checkpoint_stub"}, candidate_checkpoint_path)
     candidate_policy_id = train_script._persist_snapshot_registry_entry(
+        stack=stack,
         training_paths=training_paths,
         run_dir=run_dir,
         checkpoint_path=candidate_checkpoint_path,
