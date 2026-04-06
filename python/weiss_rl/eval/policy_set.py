@@ -54,13 +54,13 @@ class SnapshotEntryLike(Protocol):
     update: int
 
 
-class SnapshotRegistryLike(Protocol):
-    snapshots: Sequence[object]
+class _SnapshotRegistryAccess(Protocol):
+    snapshots: Sequence[SnapshotEntryLike | str]
     champion_snapshots: Sequence[str]
 
 
 def select_final_policy_set_deterministic_v1(
-    snapshot_registry: SnapshotRegistryLike,
+    snapshot_registry: object,
     dev_eval_summaries: Mapping[str, DevEvalSummaryLike],
     config: FinalPolicySetSelectionConfig,
     final_policy_set_size: int,
@@ -156,12 +156,12 @@ def _find_closest_snapshot(
 
 
 def _latest_champion_policy(
-    snapshot_registry: SnapshotRegistryLike,
+    snapshot_registry: object,
     *,
     snapshot_policies_by_id: Mapping[str, TrainingPolicyId],
 ) -> TrainingPolicyId | None:
     champion_policies: list[TrainingPolicyId] = []
-    for policy_id in snapshot_registry.champion_snapshots:
+    for policy_id in _champion_snapshot_ids(snapshot_registry):
         existing = snapshot_policies_by_id.get(policy_id)
         if existing is not None:
             champion_policies.append(existing)
@@ -195,13 +195,27 @@ def _normalize_dev_eval_summaries(
     return normalized
 
 
-def _snapshot_training_policies(snapshot_registry: SnapshotRegistryLike) -> list[TrainingPolicyId]:
+def _snapshot_training_policies(snapshot_registry: object) -> list[TrainingPolicyId]:
     parsed: list[TrainingPolicyId] = []
-    for snapshot in snapshot_registry.snapshots:
+    for snapshot in _snapshot_entries(snapshot_registry):
         candidate = _parse_registry_snapshot(snapshot)
         if candidate is not None:
             parsed.append(candidate)
     return parsed
+
+
+def _snapshot_entries(snapshot_registry: object) -> Sequence[SnapshotEntryLike | str]:
+    if not hasattr(snapshot_registry, "snapshots"):
+        raise TypeError("snapshot_registry must expose a snapshots sequence")
+    registry = cast(_SnapshotRegistryAccess, snapshot_registry)
+    return registry.snapshots
+
+
+def _champion_snapshot_ids(snapshot_registry: object) -> Sequence[str]:
+    if not hasattr(snapshot_registry, "champion_snapshots"):
+        raise TypeError("snapshot_registry must expose champion_snapshots")
+    registry = cast(_SnapshotRegistryAccess, snapshot_registry)
+    return registry.champion_snapshots
 
 
 def _parse_registry_snapshot(snapshot: object) -> TrainingPolicyId | None:

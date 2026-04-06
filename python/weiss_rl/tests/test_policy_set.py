@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,7 +19,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _selection_config(**overrides: object):
+def _selection_config(**overrides: Any):
     stack = load_stack_config(_repo_root() / "configs/rl_stack_locked.yaml")
     assert stack.config.evaluation is not None
     return replace(stack.config.evaluation.final_policy_set_selection, **overrides)
