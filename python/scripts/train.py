@@ -60,6 +60,9 @@ _SHA256_HEX_LENGTH = 64
 _U64_MASK = (1 << 64) - 1
 _PROMOTION_GATE_RANDOMLEGAL_NAME = "B0 RandomLegal"
 _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID = "b0_randomlegal"
+_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME = "B1 NoLeague baseline"
+_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID = "b1_noleague_baseline"
+_PROMOTION_GATE_NOLEAGUE_BASELINE_CHECKPOINT = "baseline_checkpoint.pt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -797,10 +800,75 @@ def _slug_policy_id(value: str) -> str:
 def _promotion_anchor_policy_id_candidates(anchor_name: str) -> tuple[str, ...]:
     if anchor_name == _PROMOTION_GATE_RANDOMLEGAL_NAME:
         return (_PROMOTION_GATE_RANDOMLEGAL_POLICY_ID,)
+    if anchor_name == _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME:
+        return (_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID, anchor_name)
     normalized = _slug_policy_id(anchor_name)
     if not normalized:
         return ()
     return tuple(dict.fromkeys((normalized, anchor_name)))
+
+
+def _ensure_noleague_baseline_anchor(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    learner: ImpalaLearner,
+    device: torch.device,
+    config_hash256: str,
+) -> str | None:
+    league = stack.config.league
+    if league is None or not league.enabled or not league.promotion_gate_enabled:
+        return None
+    if _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME not in league.promotion_anchor_set_v1.required:
+        return None
+    if learner.model is None:
+        raise RuntimeError("Cannot bootstrap the NoLeague baseline anchor without a learner model")
+
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    registry = SnapshotRegistry.load(registry_path)
+    available_policy_ids = {snapshot.policy_id for snapshot in registry.snapshots}
+    existing_policy_id = next(
+        (
+            candidate
+            for candidate in _promotion_anchor_policy_id_candidates(_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME)
+            if candidate in available_policy_ids
+        ),
+        None,
+    )
+    if existing_policy_id is not None:
+        return existing_policy_id
+
+    checkpoint_path = training_paths.checkpoints_dir / _PROMOTION_GATE_NOLEAGUE_BASELINE_CHECKPOINT
+    _write_checkpoint(
+        checkpoint_path=checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=device,
+    )
+    weights_path, weights_sha256 = _write_snapshot_artifact(
+        snapshots_dir=training_paths.snapshots_dir,
+        run_dir=run_dir,
+        checkpoint_path=checkpoint_path,
+        policy_id=_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID,
+        update=0,
+        config_hash256=config_hash256,
+        device=device,
+        model_state_dict=learner.model.state_dict(),
+    )
+    registry.add_snapshot(
+        policy_id=_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID,
+        update=0,
+        weights_sha256=weights_sha256,
+        path=weights_path.relative_to(run_dir).as_posix(),
+    )
+    registry.save(registry_path)
+    print(
+        "Bootstrapped promotion anchor: "
+        f"anchor={_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME} "
+        f"policy_id={_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID}"
+    )
+    return _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID
 
 
 def _resolve_promotion_anchor_policy_ids(
@@ -1464,8 +1532,16 @@ def _run_minimal_training(
         pass_action_id=pass_action_id,
     )
 
-    env = _build_env(stack, profile=profile, num_envs=num_envs, seed=seed)
     config_hash256 = compute_config_hash256(stack)
+    _ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=artifacts.run_dir,
+        learner=learner,
+        device=device,
+        config_hash256=config_hash256,
+    )
+    env = _build_env(stack, profile=profile, num_envs=num_envs, seed=seed)
     latest_metrics: dict[str, float] = {}
     start_time = time.time()
     try:

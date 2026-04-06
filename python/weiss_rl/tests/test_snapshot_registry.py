@@ -137,6 +137,130 @@ def test_train_snapshot_persistence_writes_artifact_bundle_and_registry_entry(tm
     assert set(payload["model_state_dict"]) == set(model.state_dict())
 
 
+def test_ensure_noleague_baseline_anchor_bootstraps_frozen_snapshot_once(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    assert stack.config.model is not None
+
+    run_dir = tmp_path / "run"
+    training_paths = train_script._training_paths(run_dir)
+    baseline_model = PolicyValueModel(
+        observation_dim=512,
+        config=stack.config.model,
+        action_dim=9,
+    )
+    bootstrap_learner = SimpleNamespace(
+        model=baseline_model,
+        update_count=0,
+        optimizer=None,
+        get_policy_version=lambda: 0,
+    )
+
+    policy_id = train_script._ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        learner=bootstrap_learner,
+        device=torch.device("cpu"),
+        config_hash256="ab" * 32,
+    )
+
+    assert policy_id == "b1_noleague_baseline"
+    registry_path = training_paths.snapshots_dir / "registry.json"
+    registry = SnapshotRegistry.load(registry_path)
+    assert [snapshot.policy_id for snapshot in registry.snapshots] == [policy_id]
+
+    snapshot = registry.snapshots[0]
+    weights_path = run_dir / snapshot_weights_relpath(policy_id)
+    metadata_path = training_paths.snapshots_dir / policy_id / "policy_meta.json"
+    checkpoint_path = training_paths.checkpoints_dir / "baseline_checkpoint.pt"
+
+    assert snapshot.update == 0
+    assert checkpoint_path.is_file()
+    assert weights_path.is_file()
+    assert snapshot.weights_sha256 == train_script._sha256_file(weights_path)
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata == {
+        "format": "minimal_train_snapshot_metadata_v1",
+        "policy_id": policy_id,
+        "source_checkpoint_path": "training/checkpoints/baseline_checkpoint.pt",
+        "update": 0,
+        "weights_path": snapshot_weights_relpath(policy_id),
+        "weights_sha256": snapshot.weights_sha256,
+    }
+
+    payload = torch.load(weights_path, map_location="cpu", weights_only=True)
+    assert payload["policy_id"] == policy_id
+    assert payload["update"] == 0
+    assert payload["config_hash256"] == "ab" * 32
+
+    second_policy_id = train_script._ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        learner=bootstrap_learner,
+        device=torch.device("cpu"),
+        config_hash256="ff" * 32,
+    )
+
+    assert second_policy_id == policy_id
+    reloaded = SnapshotRegistry.load(registry_path)
+    assert [snapshot.policy_id for snapshot in reloaded.snapshots] == [policy_id]
+    assert reloaded.snapshots[0].weights_sha256 == snapshot.weights_sha256
+
+
+def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_path: Path, monkeypatch) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+
+    bootstrap_calls: list[dict[str, object]] = []
+
+    def fake_ensure_noleague_baseline_anchor(**kwargs):
+        bootstrap_calls.append(kwargs)
+        return "b1_noleague_baseline"
+
+    def stop_before_env(*args, **kwargs):
+        raise RuntimeError("stop after bootstrap")
+
+    monkeypatch.setattr(train_script, "_ensure_noleague_baseline_anchor", fake_ensure_noleague_baseline_anchor)
+    monkeypatch.setattr(train_script, "_build_env", stop_before_env)
+
+    run_dir = tmp_path / "run"
+    try:
+        train_script._run_minimal_training(
+            stack=stack,
+            contract=SimpleNamespace(
+                spec_bundle={
+                    "observation": {"obs_len": 512},
+                    "action": {"action_space_size": 9, "pass_action_id": 8},
+                }
+            ),
+            artifacts=SimpleNamespace(run_dir=run_dir),
+            num_envs=1,
+            unroll_length=1,
+            max_updates=1,
+            profile="fast",
+            device=torch.device("cpu"),
+            seed=7,
+            checkpoint_interval_updates=1,
+            run_id256="12" * 32,
+            config_hash256="34" * 32,
+            spec_hash256="56" * 32,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "stop after bootstrap"
+    else:
+        raise AssertionError("expected _build_env to stop the test after baseline bootstrap")
+
+    assert len(bootstrap_calls) == 1
+    bootstrap_call = bootstrap_calls[0]
+    assert bootstrap_call["run_dir"] == run_dir
+    assert bootstrap_call["training_paths"].snapshots_dir == run_dir / "training" / "snapshots"
+    assert bootstrap_call["device"] == torch.device("cpu")
+    assert bootstrap_call["config_hash256"] == train_script.compute_config_hash256(stack)
+
+
 def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path: Path, monkeypatch) -> None:
     train_script = _load_train_script_module()
     stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
@@ -144,33 +268,26 @@ def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path
 
     run_dir = tmp_path / "run"
     training_paths = train_script._training_paths(run_dir)
-    baseline_checkpoint_path = training_paths.checkpoints_dir / "baseline_checkpoint.pt"
-    torch.save({"format": "checkpoint_stub"}, baseline_checkpoint_path)
 
     baseline_model = PolicyValueModel(
         observation_dim=512,
         config=stack.config.model,
         action_dim=9,
     )
-    baseline_weights_path, baseline_weights_sha256 = train_script._write_snapshot_artifact(
-        snapshots_dir=training_paths.snapshots_dir,
+    train_script._ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
         run_dir=run_dir,
-        checkpoint_path=baseline_checkpoint_path,
-        policy_id="b1_noleague_baseline",
-        update=0,
-        config_hash256="ab" * 32,
+        learner=SimpleNamespace(
+            model=baseline_model,
+            update_count=0,
+            optimizer=None,
+            get_policy_version=lambda: 0,
+        ),
         device=torch.device("cpu"),
-        model_state_dict=baseline_model.state_dict(),
+        config_hash256="ab" * 32,
     )
     registry_path = training_paths.snapshots_dir / "registry.json"
-    registry = SnapshotRegistry.load(registry_path)
-    registry.add_snapshot(
-        policy_id="b1_noleague_baseline",
-        update=0,
-        weights_sha256=baseline_weights_sha256,
-        path=baseline_weights_path.relative_to(run_dir).as_posix(),
-    )
-    registry.save(registry_path)
 
     learner_model = PolicyValueModel(
         observation_dim=512,
