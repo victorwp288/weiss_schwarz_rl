@@ -35,6 +35,7 @@ from weiss_rl.eval import (
 from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
 from weiss_rl.learners.impala_learner import ImpalaLearner
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
+from weiss_rl.league import run_promotion_gate
 from weiss_rl.manifest import RunManifest, build_seed_file_manifest, default_run_dir_name, write_run_artifacts
 from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_mask, sample_actions_from_mask
 from weiss_rl.model import PolicyValueModel
@@ -57,6 +58,8 @@ from weiss_rl.league.registry import (
 
 _SHA256_HEX_LENGTH = 64
 _U64_MASK = (1 << 64) - 1
+_PROMOTION_GATE_RANDOMLEGAL_NAME = "B0 RandomLegal"
+_PROMOTION_GATE_RANDOMLEGAL_POLICY_ID = "b0_randomlegal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,7 +279,7 @@ def _persist_snapshot_registry_entry(
     device: torch.device,
     update: int,
     policy_version: int,
-) -> None:
+) -> str:
     policy_id = f"policy_{int(policy_version):06d}"
     weights_path, weights_sha256 = _write_snapshot_artifact(
         snapshots_dir=training_paths.snapshots_dir,
@@ -298,6 +301,7 @@ def _persist_snapshot_registry_entry(
         path=weights_path.relative_to(run_dir).as_posix(),
     )
     reg.save(registry_path)
+    return policy_id
 
 
 def _require_matching_hash(*, flag_name: str, expected: str, actual: str) -> None:
@@ -782,6 +786,219 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _slug_policy_id(value: str) -> str:
+    parts = [
+        "".join(char.lower() for char in chunk if char.isalnum())
+        for chunk in str(value).replace("-", " ").replace("_", " ").split()
+    ]
+    return "_".join(part for part in parts if part)
+
+
+def _promotion_anchor_policy_id_candidates(anchor_name: str) -> tuple[str, ...]:
+    if anchor_name == _PROMOTION_GATE_RANDOMLEGAL_NAME:
+        return (_PROMOTION_GATE_RANDOMLEGAL_POLICY_ID,)
+    normalized = _slug_policy_id(anchor_name)
+    if not normalized:
+        return ()
+    return tuple(dict.fromkeys((normalized, anchor_name)))
+
+
+def _resolve_promotion_anchor_policy_ids(
+    *,
+    stack: StackConfig,
+    registry: SnapshotRegistry,
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    league = stack.config.league
+    if league is None:
+        return {}, ()
+
+    available_policy_ids = {snapshot.policy_id for snapshot in registry.snapshots}
+    resolved: dict[str, str] = {}
+    missing_required: list[str] = []
+    anchor_names = [
+        *league.promotion_anchor_set_v1.required,
+        *league.promotion_anchor_set_v1.optional_if_available,
+    ]
+    required_names = set(league.promotion_anchor_set_v1.required)
+
+    for anchor_name in anchor_names:
+        candidates = _promotion_anchor_policy_id_candidates(anchor_name)
+        policy_id = next((candidate for candidate in candidates if candidate in available_policy_ids), None)
+        if policy_id is None and anchor_name == _PROMOTION_GATE_RANDOMLEGAL_NAME:
+            policy_id = _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID
+        if policy_id is not None:
+            resolved[anchor_name] = policy_id
+            continue
+        if anchor_name in required_names:
+            missing_required.append(anchor_name)
+
+    return resolved, tuple(missing_required)
+
+
+def _snapshot_meta_by_policy_id(registry: SnapshotRegistry) -> dict[str, Any]:
+    return {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
+
+
+def _load_snapshot_eval_model(
+    *,
+    run_dir: Path,
+    snapshot_path: str,
+    observation_dim: int,
+    action_dim: int,
+    stack: StackConfig,
+) -> PolicyValueModel:
+    payload = torch.load(run_dir / snapshot_path, map_location="cpu", weights_only=True)
+    model_state_dict = payload.get("model_state_dict")
+    if not isinstance(model_state_dict, dict):
+        raise RuntimeError(f"Snapshot weights payload missing model_state_dict: {snapshot_path}")
+
+    model_config = stack.config.model
+    if model_config is None:
+        raise RuntimeError("The locked stack is missing the model config block")
+
+    eval_model = PolicyValueModel(
+        observation_dim=observation_dim,
+        config=model_config,
+        action_dim=action_dim,
+    ).to(torch.device("cpu"))
+    eval_model.load_state_dict(model_state_dict)
+    eval_model.eval()
+    return eval_model
+
+
+class _PromotionGateRunner:
+    def __init__(
+        self,
+        *,
+        stack: StackConfig,
+        focal_policy_id: str,
+        focal_model: PolicyValueModel,
+        anchor_models: dict[str, PolicyValueModel],
+        observation_dim: int,
+        action_dim: int,
+        pass_action_id: int,
+        artifact_dir: Path,
+        require_sorted_legal_ids: bool,
+    ) -> None:
+        self.stack = stack
+        self.focal_policy_id = focal_policy_id
+        self.observation_dim = observation_dim
+        self.action_dim = action_dim
+        self.pass_action_id = pass_action_id
+        self.artifact_dir = artifact_dir
+        self.require_sorted_legal_ids = require_sorted_legal_ids
+        self._policy_models = {focal_policy_id: focal_model, **anchor_models}
+        self._baseline_logits = np.zeros((action_dim,), dtype=np.float32)
+        self._device = torch.device("cpu")
+
+    def run_game(self, scheduled_game: ScheduledGame):
+        env = _build_ids_eval_env(
+            self.stack,
+            seed=scheduled_game.episode_seed,
+            pass_action_id=self.pass_action_id,
+        )
+        seat_hidden = {
+            seat: self._initial_hidden(
+                scheduled_game.seat0_policy_id if seat == 0 else scheduled_game.seat1_policy_id
+            )
+            for seat in (0, 1)
+        }
+        seat_rngs = {
+            seat: Pcg32XshRrV1(_promotion_gate_rng_seed(scheduled_game=scheduled_game, seat=seat))
+            for seat in (0, 1)
+        }
+        last_acting_seat: int | None = None
+
+        try:
+            batch = env.reset()
+            self._abort_on_fault(batch)
+            while True:
+                if bool(batch.terminated[0]) or bool(batch.truncated[0]):
+                    return game_result_from_step(
+                        batch,
+                        env_index=0,
+                        acting_seat=last_acting_seat,
+                        episode_seed=scheduled_game.episode_seed,
+                    )
+
+                current_seat = int(batch.actor[0])
+                current_policy_id = (
+                    scheduled_game.seat0_policy_id if current_seat == 0 else scheduled_game.seat1_policy_id
+                )
+                action, next_hidden = self._select_action(
+                    batch=batch,
+                    current_seat=current_seat,
+                    current_policy_id=current_policy_id,
+                    seat_hidden=seat_hidden[current_seat],
+                    rng=seat_rngs[current_seat],
+                )
+                seat_hidden[current_seat] = next_hidden
+                last_acting_seat = current_seat
+                batch = env.step(np.asarray([action], dtype=np.uint32))
+                self._abort_on_fault(batch)
+        finally:
+            env.close()
+
+    def _initial_hidden(self, policy_id: str) -> torch.Tensor | None:
+        model = self._policy_models.get(policy_id)
+        if model is None:
+            return None
+        return model.initial_seat_hidden(1, device=self._device)
+
+    def _select_action(
+        self,
+        *,
+        batch: DecisionBoundaryBatch,
+        current_seat: int,
+        current_policy_id: str,
+        seat_hidden: torch.Tensor | None,
+        rng: Pcg32XshRrV1,
+    ) -> tuple[int, torch.Tensor | None]:
+        legal_ids = _legal_ids_for_env_row(
+            batch=batch,
+            env_index=0,
+            require_sorted=self.require_sorted_legal_ids,
+        )
+        model = self._policy_models.get(current_policy_id)
+        if model is None:
+            if current_policy_id != _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID:
+                raise RuntimeError(f"Unsupported promotion-gate policy_id: {current_policy_id}")
+            action, _ = sample_action_pinned(
+                self._baseline_logits,
+                legal_ids,
+                rng=rng,
+                pass_action_id=self.pass_action_id,
+            )
+            return action, seat_hidden
+
+        if seat_hidden is None:
+            raise RuntimeError(f"Missing hidden state for promotion-gate policy_id: {current_policy_id}")
+
+        with torch.inference_mode():
+            logits_tensor, _value_tensor, next_seat_hidden = model.forward_seat_aware(
+                torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
+                torch.as_tensor([current_seat], device=self._device, dtype=torch.long),
+                seat_hidden,
+            )
+        logits = logits_tensor[0].detach().cpu().numpy().astype(np.float32, copy=False)
+        action, _ = sample_action_pinned(
+            logits,
+            legal_ids,
+            rng=rng,
+            pass_action_id=self.pass_action_id,
+        )
+        return action, next_seat_hidden
+
+    def _abort_on_fault(self, batch: DecisionBoundaryBatch) -> None:
+        abort_on_engine_fault_eval(
+            run_dir=self.artifact_dir,
+            engine_status=batch.engine_status,
+            decision_id=batch.decision_id,
+            episode_key=batch.episode_key,
+            note="engine_status!=0 during promotion gate",
+        )
+
+
 def _evaluation_config_or_raise(stack: StackConfig):
     evaluation = stack.config.evaluation
     if evaluation is None:
@@ -884,11 +1101,37 @@ def _periodic_dev_eval_rng_seed(*, scheduled_game: ScheduledGame, seat: int) -> 
     return stable_hash64(payload)
 
 
+def _promotion_gate_rng_seed(*, scheduled_game: ScheduledGame, seat: int) -> int:
+    payload = canonical_json_bytes(
+        {
+            "kind": "promotion_gate_rng_v1",
+            "pair_index": scheduled_game.pair_index,
+            "swap_index": scheduled_game.swap_index,
+            "episode_seed": scheduled_game.episode_seed,
+            "seat": int(seat),
+            "seat_policy_id": scheduled_game.seat0_policy_id if seat == 0 else scheduled_game.seat1_policy_id,
+        }
+    )
+    return stable_hash64(payload)
+
+
 def _periodic_dev_eval_bootstrap_seed(*, update_count: int, policy_version: int) -> int:
     return stable_hash64(
         canonical_json_bytes(
             {
                 "kind": "periodic_dev_eval_bootstrap_v1",
+                "update_count": int(update_count),
+                "policy_version": int(policy_version),
+            }
+        )
+    )
+
+
+def _promotion_gate_bootstrap_seed(*, update_count: int, policy_version: int) -> int:
+    return stable_hash64(
+        canonical_json_bytes(
+            {
+                "kind": "promotion_gate_bootstrap_v1",
                 "update_count": int(update_count),
                 "policy_version": int(policy_version),
             }
@@ -1076,6 +1319,103 @@ def _run_periodic_dev_eval(
     return summary_payload
 
 
+def _run_snapshot_promotion_gate(
+    *,
+    stack: StackConfig,
+    contract: SimulatorContract,
+    artifacts: Any,
+    training_paths: TrainingPaths,
+    learner: ImpalaLearner,
+    candidate_policy_id: str,
+    update_count: int,
+    policy_version: int,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+) -> bool | None:
+    league = stack.config.league
+    if league is None or not league.enabled or not league.promotion_gate_enabled:
+        return None
+    if learner.model is None:
+        raise RuntimeError("Promotion gate requires an attached learner model")
+
+    evaluation = _validate_periodic_dev_eval_contract(stack)
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    registry = SnapshotRegistry.load(registry_path)
+    anchor_policy_ids, missing_required = _resolve_promotion_anchor_policy_ids(
+        stack=stack,
+        registry=registry,
+    )
+    if missing_required:
+        print(
+            "Promotion gate skipped: "
+            f"update={update_count} candidate={candidate_policy_id} "
+            f"missing_anchors={','.join(missing_required)}"
+        )
+        return None
+
+    observation_dim, action_dim = _spec_dimensions(contract)
+    snapshot_index = _snapshot_meta_by_policy_id(registry)
+    anchor_models = {
+        policy_id: _load_snapshot_eval_model(
+            run_dir=artifacts.run_dir,
+            snapshot_path=snapshot_index[policy_id].path,
+            observation_dim=observation_dim,
+            action_dim=action_dim,
+            stack=stack,
+        )
+        for policy_id in set(anchor_policy_ids.values())
+        if policy_id != _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID
+    }
+    runner = _PromotionGateRunner(
+        stack=stack,
+        focal_policy_id=candidate_policy_id,
+        focal_model=_clone_cpu_eval_model(
+            learner_model=cast(PolicyValueModel, learner.model),
+            observation_dim=observation_dim,
+            action_dim=action_dim,
+            stack=stack,
+        ),
+        anchor_models=anchor_models,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        pass_action_id=int(contract.spec_bundle["action"]["pass_action_id"]),
+        artifact_dir=artifacts.run_dir / "eval" / "promotion_gate" / f"update_{update_count}",
+        require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+    )
+    result = run_promotion_gate(
+        stack=stack,
+        run_dir=artifacts.run_dir / "eval" / "promotion_gate" / f"update_{update_count}",
+        focal_policy_id=candidate_policy_id,
+        anchor_policy_ids=anchor_policy_ids,
+        runner=runner,
+        run_id256=run_id256,
+        config_hash256=config_hash256,
+        spec_hash256=spec_hash256,
+        bootstrap_seed=_promotion_gate_bootstrap_seed(
+            update_count=update_count,
+            policy_version=policy_version,
+        ),
+    )
+    if result.passed:
+        if candidate_policy_id not in registry.champion_snapshots:
+            registry.add_champion(candidate_policy_id)
+            registry.save(registry_path)
+        print(
+            "Promotion gate passed: "
+            f"update={update_count} candidate={candidate_policy_id} "
+            f"anchors={','.join(result.ordered_opponents)}"
+        )
+        return True
+
+    reason_codes = ",".join(str(reason.get("code", "unknown")) for reason in result.reasons) or "unknown"
+    print(
+        "Promotion gate failed: "
+        f"update={update_count} candidate={candidate_policy_id} reasons={reason_codes}"
+    )
+    return False
+
+
 def _run_minimal_training(
     *,
     stack: StackConfig,
@@ -1173,7 +1513,7 @@ def _run_minimal_training(
 
                 if learner.model is None:
                     raise RuntimeError("Cannot persist a snapshot registry entry without a learner model")
-                _persist_snapshot_registry_entry(
+                candidate_policy_id = _persist_snapshot_registry_entry(
                     training_paths=training_paths,
                     run_dir=artifacts.run_dir,
                     checkpoint_path=ckpt_path,
@@ -1182,6 +1522,19 @@ def _run_minimal_training(
                     device=device,
                     update=int(learner.update_count),
                     policy_version=int(learner.get_policy_version()),
+                )
+                _run_snapshot_promotion_gate(
+                    stack=stack,
+                    contract=contract,
+                    artifacts=artifacts,
+                    training_paths=training_paths,
+                    learner=learner,
+                    candidate_policy_id=candidate_policy_id,
+                    update_count=int(learner.update_count),
+                    policy_version=int(learner.get_policy_version()),
+                    run_id256=run_id256,
+                    config_hash256=config_hash256,
+                    spec_hash256=spec_hash256,
                 )
 
             if _should_run_periodic_dev_eval(stack, update_count=int(learner.update_count)):
