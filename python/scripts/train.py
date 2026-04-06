@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import hashlib
 
 import numpy as np
 import torch
@@ -27,6 +28,12 @@ from weiss_rl.model import PolicyValueModel
 from weiss_rl.repro import compute_run_id64, compute_run_id256
 from weiss_rl.simulator_contract import SimulatorContract, load_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract
+from weiss_rl.league.registry import (
+    REGISTRY_FILENAME,
+    SNAPSHOT_METADATA_FILENAME,
+    SnapshotRegistry,
+    snapshot_weights_relpath,
+)
 
 _SHA256_HEX_LENGTH = 64
 _U64_MASK = (1 << 64) - 1
@@ -73,6 +80,92 @@ def _expected_sha256(value: str, *, flag_name: str) -> str:
     if not normalized:
         raise ValueError(f"{flag_name} must be a 64-character lowercase or uppercase SHA-256 hex string")
     return normalized
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_snapshot_artifact(
+    *,
+    snapshots_dir: Path,
+    run_dir: Path,
+    checkpoint_path: Path,
+    policy_id: str,
+    update: int,
+    config_hash256: str,
+    device: torch.device,
+    model_state_dict: dict[str, Any],
+) -> tuple[Path, str]:
+    snapshot_dir = snapshots_dir / policy_id
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    weights_path = snapshot_dir / "weights.pt"
+    weights_payload = {
+        "format": "minimal_train_snapshot_weights_v1",
+        "policy_id": policy_id,
+        "update": int(update),
+        "device": str(device),
+        "config_hash256": config_hash256,
+        "model_state_dict": model_state_dict,
+    }
+    torch.save(weights_payload, weights_path)
+    weights_sha256 = _sha256_file(weights_path)
+
+    _write_json_file(
+        snapshot_dir / SNAPSHOT_METADATA_FILENAME,
+        {
+            "format": "minimal_train_snapshot_metadata_v1",
+            "policy_id": policy_id,
+            "update": int(update),
+            "weights_path": snapshot_weights_relpath(policy_id),
+            "weights_sha256": weights_sha256,
+            "source_checkpoint_path": checkpoint_path.relative_to(run_dir).as_posix(),
+        },
+    )
+    return weights_path, weights_sha256
+
+
+def _persist_snapshot_registry_entry(
+    *,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    checkpoint_path: Path,
+    model_state_dict: dict[str, Any],
+    config_hash256: str,
+    device: torch.device,
+    update: int,
+    policy_version: int,
+) -> None:
+    policy_id = f"policy_{int(policy_version):06d}"
+    weights_path, weights_sha256 = _write_snapshot_artifact(
+        snapshots_dir=training_paths.snapshots_dir,
+        run_dir=run_dir,
+        checkpoint_path=checkpoint_path,
+        policy_id=policy_id,
+        update=update,
+        config_hash256=config_hash256,
+        device=device,
+        model_state_dict=model_state_dict,
+    )
+
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    reg = SnapshotRegistry.load(registry_path)
+    reg.add_snapshot(
+        policy_id=policy_id,
+        update=int(update),
+        weights_sha256=weights_sha256,
+        path=weights_path.relative_to(run_dir).as_posix(),
+    )
+    reg.save(registry_path)
 
 
 def _require_matching_hash(*, flag_name: str, expected: str, actual: str) -> None:
@@ -562,6 +655,7 @@ def _run_minimal_training(
     )
 
     env = _build_env(stack, profile=profile, num_envs=num_envs, seed=seed)
+    config_hash256 = compute_config_hash256(stack)
     latest_metrics: dict[str, float] = {}
     start_time = time.time()
     try:
@@ -599,12 +693,28 @@ def _run_minimal_training(
                 start_time=start_time,
             )
             if learner.update_count % checkpoint_interval_updates == 0:
+                ckpt_path = training_paths.checkpoints_dir / f"checkpoint_{learner.update_count}.pt"
                 _write_checkpoint(
-                    checkpoint_path=training_paths.checkpoints_dir / f"checkpoint_{learner.update_count}.pt",
+                    checkpoint_path=ckpt_path,
                     learner=learner,
                     stack=stack,
                     device=device,
                 )
+
+                # M4-01 Snapshot Registry persistence
+                if learner.model is None:
+                    raise RuntimeError("Cannot persist a snapshot registry entry without a learner model")
+                _persist_snapshot_registry_entry(
+                    training_paths=training_paths,
+                    run_dir=artifacts.run_dir,
+                    checkpoint_path=ckpt_path,
+                    model_state_dict=learner.model.state_dict(),
+                    config_hash256=config_hash256,
+                    device=device,
+                    update=int(learner.update_count),
+                    policy_version=int(learner.get_policy_version()),
+                )
+    
     finally:
         env.close()
 
