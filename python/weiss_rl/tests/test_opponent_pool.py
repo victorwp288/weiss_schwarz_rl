@@ -87,10 +87,7 @@ def test_opponent_pool_sampler_samples_from_recent_plus_champion_pool() -> None:
 
 
 def test_opponent_pool_sampler_empty_override_uses_neutral_fallback() -> None:
-    registry = SnapshotRegistry(
-        snapshots=["s1", "s2"],
-        champion_snapshots=[],
-    )
+    registry = _build_registry(["s1", "s2"], champion_snapshot_ids=[])
     sampler = OpponentPoolSampler(
         registry=registry,
         recent_size=2,
@@ -114,10 +111,7 @@ def test_opponent_pool_sampler_empty_override_uses_neutral_fallback() -> None:
 
 
 def test_opponent_pool_sampler_none_override_uses_stored_win_rates() -> None:
-    registry = SnapshotRegistry(
-        snapshots=["s1", "s2"],
-        champion_snapshots=[],
-    )
+    registry = _build_registry(["s1", "s2"], champion_snapshot_ids=[])
     sampler = OpponentPoolSampler(
         registry=registry,
         recent_size=2,
