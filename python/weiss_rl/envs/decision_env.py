@@ -33,6 +33,10 @@ _RESET_DONE_METHOD_NAMES: dict[LegalMode, str] = {
     "mask": "reset_done_into",
     "ids_offsets": "reset_done_into_i16_legal_ids",
 }
+_RESET_WITH_EPISODE_SEED_METHOD_NAMES: dict[LegalMode, str] = {
+    "mask": "reset_indices_with_episode_seeds_into",
+    "ids_offsets": "reset_indices_with_episode_seeds_into_i16_legal_ids",
+}
 _COMMON_OUT_FIELDS = (
     "rewards",
     "terminated",
@@ -144,15 +148,24 @@ class DecisionBoundaryEnv:
         return int(self.pool.action_space)
 
     def reset(self, seed: int | None = None) -> DecisionBoundaryBatch:
-        if seed is not None:
-            raise ValueError("DecisionBoundaryEnv.reset(seed=...) is not supported yet; pass None")
-
         weiss_sim = _load_weiss_sim()
-        step = weiss_sim.rl.reset_rl(
-            self.pool,
-            layout=_SIM_LAYOUTS[self.legality],
-            out=self._require_step_out(weiss_sim),
-        )
+        step_out = self._require_step_out(weiss_sim)
+        if seed is None:
+            step = weiss_sim.rl.reset_rl(
+                self.pool,
+                layout=_SIM_LAYOUTS[self.legality],
+                out=step_out,
+            )
+        else:
+            resetter = getattr(self.pool, _RESET_WITH_EPISODE_SEED_METHOD_NAMES[self.legality], None)
+            if not callable(resetter):
+                raise RuntimeError(
+                    f"pool must expose {_RESET_WITH_EPISODE_SEED_METHOD_NAMES[self.legality]} for seeded resets"
+                )
+            env_indices = list(range(self.num_envs))
+            episode_seeds = [int(seed)] * self.num_envs
+            resetter(env_indices, episode_seeds, step_out)
+            step = step_out
         batch = _pack_batch(step, legality=self.legality, pool=self.pool)
         self._last_batch = batch
         return batch

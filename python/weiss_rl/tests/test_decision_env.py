@@ -148,6 +148,7 @@ class FakePool:
         )
         self._env_index_batch = np.arange(envs_len, dtype=np.uint32) if env_index_batch is None else env_index_batch
         self.calls: list[tuple[str, np.ndarray, object]] = []
+        self.seeded_reset_calls: list[tuple[str, np.ndarray, np.ndarray, object]] = []
         self.legal_refill_calls: list[tuple[np.ndarray, np.ndarray]] = []
 
     def auto_reset_on_error_codes_into(self, codes: np.ndarray, out: Any) -> int | None:
@@ -165,6 +166,29 @@ class FakePool:
             _copy_step_like(out, self.nomask_reset_result)
         out.reset_applied = True
         return self.reported_rows
+
+    def reset_indices_with_episode_seeds_into(self, indices: list[int], episode_seeds: list[int], out: Any) -> None:
+        self._reset_with_episode_seeds("mask", indices, episode_seeds, out)
+
+    def reset_indices_with_episode_seeds_into_i16_legal_ids(
+        self,
+        indices: list[int],
+        episode_seeds: list[int],
+        out: Any,
+    ) -> None:
+        self._reset_with_episode_seeds("ids_offsets", indices, episode_seeds, out)
+
+    def _reset_with_episode_seeds(
+        self,
+        method_name: str,
+        indices: list[int],
+        episode_seeds: list[int],
+        out: Any,
+    ) -> None:
+        index_array = np.asarray(indices, dtype=np.int64)
+        seed_array = np.asarray(episode_seeds, dtype=np.uint64)
+        self._episode_seed_batch[index_array] = seed_array
+        self.seeded_reset_calls.append((method_name, index_array.copy(), seed_array.copy(), out))
 
     def legal_action_ids_into(self, legal_ids: np.ndarray, legal_offsets: np.ndarray) -> int:
         if self.legal_ids_after_reset is None or self.legal_offsets_after_reset is None:
@@ -508,13 +532,57 @@ def test_step_rejects_illegal_action(legality: LegalMode) -> None:
         env.close()
 
 
-def test_reset_rejects_explicit_seed() -> None:
-    env = _make_env(legality="mask", num_envs=1)
-    try:
-        with pytest.raises(ValueError, match=r"reset\(seed=\.\.\.\)"):
-            env.reset(seed=7)
-    finally:
-        env.close()
+@pytest.mark.parametrize(
+    ("legality", "expected_method"),
+    [("mask", "mask"), ("ids_offsets", "ids_offsets")],
+)
+def test_reset_with_explicit_seed_uses_pool_seeded_reset_contract(
+    legality: LegalMode,
+    expected_method: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = FakePool(envs_len=2)
+    if legality == "mask":
+        reset_step = SimpleNamespace(
+            obs=np.zeros((2, 4), dtype=np.float32),
+            rewards=np.zeros((2,), dtype=np.float32),
+            terminated=np.zeros((2,), dtype=bool),
+            truncated=np.zeros((2,), dtype=bool),
+            actor=np.zeros((2,), dtype=np.int32),
+            decision_kind=np.zeros((2,), dtype=np.int32),
+            decision_id=np.zeros((2,), dtype=np.int64),
+            engine_status=np.zeros((2,), dtype=np.uint8),
+            spec_hash=np.zeros((2,), dtype=np.uint64),
+            masks=np.zeros((2, 52), dtype=np.uint8),
+        )
+    else:
+        reset_step = SimpleNamespace(
+            obs=np.zeros((2, 4), dtype=np.int16),
+            rewards=np.zeros((2,), dtype=np.float32),
+            terminated=np.zeros((2,), dtype=bool),
+            truncated=np.zeros((2,), dtype=bool),
+            actor=np.zeros((2,), dtype=np.int32),
+            decision_kind=np.zeros((2,), dtype=np.int32),
+            decision_id=np.zeros((2,), dtype=np.int64),
+            engine_status=np.zeros((2,), dtype=np.uint8),
+            spec_hash=np.zeros((2,), dtype=np.uint64),
+            legal_ids=np.array([], dtype=np.uint32),
+            legal_offsets=np.array([0, 0, 0], dtype=np.int32),
+        )
+    fake_weiss_sim = FakeWeissSim(reset_result=reset_step, step_result=reset_step)
+    monkeypatch.setattr(decision_env_module, "_load_weiss_sim", lambda: fake_weiss_sim)
+
+    env = DecisionBoundaryEnv(pool, legality=legality)
+    batch = env.reset(seed=77)
+
+    assert fake_weiss_sim.rl.reset_calls == []
+    assert len(pool.seeded_reset_calls) == 1
+    method_name, indices, episode_seeds, out = pool.seeded_reset_calls[0]
+    assert method_name == expected_method
+    npt.assert_array_equal(indices, np.array([0, 1], dtype=np.int64))
+    npt.assert_array_equal(episode_seeds, np.array([77, 77], dtype=np.uint64))
+    npt.assert_array_equal(batch.episode_seed, np.array([77, 77], dtype=np.uint64))
+    assert out is not None
 
 
 def test_hard_fail_raises_and_counts_fault_rows(monkeypatch: pytest.MonkeyPatch) -> None:

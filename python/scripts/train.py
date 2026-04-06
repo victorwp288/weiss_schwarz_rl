@@ -125,13 +125,12 @@ class _PeriodicDevEvalRunner:
         )
         seat_hidden = self.model.initial_seat_hidden(1, device=self._device)
         seat_rngs = {
-            seat: Pcg32XshRrV1(_periodic_dev_eval_rng_seed(scheduled_game=scheduled_game, seat=seat))
-            for seat in (0, 1)
+            seat: Pcg32XshRrV1(_periodic_dev_eval_rng_seed(scheduled_game=scheduled_game, seat=seat)) for seat in (0, 1)
         }
         last_acting_seat: int | None = None
 
         try:
-            batch = env.reset()
+            batch = env.reset(seed=scheduled_game.episode_seed)
             self._abort_on_fault(batch)
             while True:
                 if bool(batch.terminated[0]) or bool(batch.truncated[0]):
@@ -643,7 +642,6 @@ def _env_pool_config(stack: StackConfig, *, seed: int) -> dict[str, int | str]:
     }
 
 
-
 def _build_env(
     stack: StackConfig,
     *,
@@ -662,7 +660,6 @@ def _build_env(
             f"Profile {profile!r} resolved to layout {layout_name!r}."
         )
     return DecisionBoundaryEnv(pool, legality="mask", engine_status_policy="hard_fail")
-
 
 
 def _build_ids_eval_env(
@@ -1100,19 +1097,16 @@ class _PromotionGateRunner:
             pass_action_id=self.pass_action_id,
         )
         seat_hidden = {
-            seat: self._initial_hidden(
-                scheduled_game.seat0_policy_id if seat == 0 else scheduled_game.seat1_policy_id
-            )
+            seat: self._initial_hidden(scheduled_game.seat0_policy_id if seat == 0 else scheduled_game.seat1_policy_id)
             for seat in (0, 1)
         }
         seat_rngs = {
-            seat: Pcg32XshRrV1(_promotion_gate_rng_seed(scheduled_game=scheduled_game, seat=seat))
-            for seat in (0, 1)
+            seat: Pcg32XshRrV1(_promotion_gate_rng_seed(scheduled_game=scheduled_game, seat=seat)) for seat in (0, 1)
         }
         last_acting_seat: int | None = None
 
         try:
-            batch = env.reset()
+            batch = env.reset(seed=scheduled_game.episode_seed)
             self._abort_on_fault(batch)
             while True:
                 if bool(batch.terminated[0]) or bool(batch.truncated[0]):
@@ -1213,10 +1207,7 @@ def _validate_periodic_dev_eval_contract(stack: StackConfig) -> Any:
     if not evaluation.seat_swap:
         raise RuntimeError("Periodic dev eval requires evaluation.seat_swap=true")
     if evaluation.eval_device != "cpu":
-        raise RuntimeError(
-            "Periodic dev eval requires evaluation.eval_device='cpu', "
-            f"got {evaluation.eval_device!r}"
-        )
+        raise RuntimeError(f"Periodic dev eval requires evaluation.eval_device='cpu', got {evaluation.eval_device!r}")
     if not evaluation.eval_inference_mode:
         raise RuntimeError("Periodic dev eval requires evaluation.eval_inference_mode=true")
     if evaluation.eval_sampling_algorithm != "pinned_cdf_pcg_v1":
@@ -1470,9 +1461,7 @@ def _run_periodic_dev_eval(
             "update_count": update_count,
             "policy_version": policy_version,
             "checkpoint_path": (
-                None
-                if checkpoint_path is None
-                else _json_relative_path(checkpoint_path, root=artifacts.run_dir)
+                None if checkpoint_path is None else _json_relative_path(checkpoint_path, root=artifacts.run_dir)
             ),
         },
         "opponent_policy": {
@@ -1506,9 +1495,7 @@ def _run_periodic_dev_eval(
         "update_count": update_count,
         "policy_version": policy_version,
         "checkpoint_path": (
-            None
-            if checkpoint_path is None
-            else _json_relative_path(checkpoint_path, root=artifacts.run_dir)
+            None if checkpoint_path is None else _json_relative_path(checkpoint_path, root=artifacts.run_dir)
         ),
         "seed_usage_path": _json_relative_path(update_dir / "seed_usage.json", root=artifacts.run_dir),
     }
@@ -1611,10 +1598,7 @@ def _run_snapshot_promotion_gate(
         return True
 
     reason_codes = ",".join(str(reason.get("code", "unknown")) for reason in result.reasons) or "unknown"
-    print(
-        "Promotion gate failed: "
-        f"update={update_count} candidate={candidate_policy_id} reasons={reason_codes}"
-    )
+    print(f"Promotion gate failed: update={update_count} candidate={candidate_policy_id} reasons={reason_codes}")
     return False
 
 

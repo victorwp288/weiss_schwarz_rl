@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, Protocol, cast
 
+import numpy as np
 import torch
 
 from weiss_rl.config import load_stack_config
@@ -371,3 +372,136 @@ def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path
     assert promoted is True
     registry = SnapshotRegistry.load(registry_path)
     assert registry.champion_snapshots == [candidate_policy_id]
+
+
+def test_periodic_dev_eval_runner_resets_env_with_scheduled_episode_seed(tmp_path: Path, monkeypatch) -> None:
+    train_script = _load_train_script_module()
+
+    terminal_batch = train_script.DecisionBoundaryBatch(
+        obs=np.zeros((1, 1), dtype=np.float32),
+        reward=np.zeros((1,), dtype=np.float32),
+        terminated=np.array([True]),
+        truncated=np.array([False]),
+        to_play=np.array([-1], dtype=np.int32),
+        actor=np.array([-1], dtype=np.int32),
+        decision_id=np.array([0], dtype=np.int64),
+        engine_status=np.array([0], dtype=np.uint8),
+        episode_seed=np.array([579856027068064], dtype=np.uint64),
+        episode_key=np.array([1], dtype=np.uint64),
+        ids_offsets=(np.array([], dtype=np.uint32), np.array([0, 0], dtype=np.int32)),
+    )
+
+    class FakeEnv:
+        def __init__(self, batch: object) -> None:
+            self._batch = batch
+            self.reset_seed: int | None = None
+            self.closed = False
+
+        def reset(self, seed: int | None = None):
+            self.reset_seed = seed
+            return self._batch
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeModel:
+        def initial_seat_hidden(self, batch_size: int, *, device: torch.device) -> torch.Tensor:
+            return torch.zeros((batch_size, 1), device=device)
+
+    env = FakeEnv(terminal_batch)
+    monkeypatch.setattr(train_script, "_build_ids_eval_env", lambda *args, **kwargs: env)
+
+    runner = train_script._PeriodicDevEvalRunner(
+        stack=SimpleNamespace(),
+        model=FakeModel(),
+        observation_dim=1,
+        action_dim=1,
+        pass_action_id=0,
+        artifact_dir=tmp_path,
+        focal_policy_id="focal",
+        require_sorted_legal_ids=False,
+    )
+    scheduled_game = train_script.ScheduledGame(
+        pair_index=0,
+        swap_index=0,
+        episode_index=0,
+        episode_seed=579856027068064,
+        focal_policy_id="focal",
+        opponent_policy_id="baseline",
+        seat0_policy_id="focal",
+        seat1_policy_id="baseline",
+        focal_seat=0,
+    )
+
+    result = runner.run_game(scheduled_game)
+
+    assert env.reset_seed == scheduled_game.episode_seed
+    assert env.closed is True
+    assert result.episode_seed == scheduled_game.episode_seed
+
+
+def test_promotion_gate_runner_resets_env_with_scheduled_episode_seed(tmp_path: Path, monkeypatch) -> None:
+    train_script = _load_train_script_module()
+
+    terminal_batch = train_script.DecisionBoundaryBatch(
+        obs=np.zeros((1, 1), dtype=np.float32),
+        reward=np.zeros((1,), dtype=np.float32),
+        terminated=np.array([True]),
+        truncated=np.array([False]),
+        to_play=np.array([-1], dtype=np.int32),
+        actor=np.array([-1], dtype=np.int32),
+        decision_id=np.array([0], dtype=np.int64),
+        engine_status=np.array([0], dtype=np.uint8),
+        episode_seed=np.array([579856027068064], dtype=np.uint64),
+        episode_key=np.array([1], dtype=np.uint64),
+        ids_offsets=(np.array([], dtype=np.uint32), np.array([0, 0], dtype=np.int32)),
+    )
+
+    class FakeEnv:
+        def __init__(self, batch: object) -> None:
+            self._batch = batch
+            self.reset_seed: int | None = None
+            self.closed = False
+
+        def reset(self, seed: int | None = None):
+            self.reset_seed = seed
+            return self._batch
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeModel:
+        def initial_seat_hidden(self, batch_size: int, *, device: torch.device) -> torch.Tensor:
+            return torch.zeros((batch_size, 1), device=device)
+
+    env = FakeEnv(terminal_batch)
+    monkeypatch.setattr(train_script, "_build_ids_eval_env", lambda *args, **kwargs: env)
+
+    runner = train_script._PromotionGateRunner(
+        stack=SimpleNamespace(),
+        focal_policy_id="candidate",
+        focal_model=FakeModel(),
+        anchor_models={},
+        observation_dim=1,
+        action_dim=1,
+        pass_action_id=0,
+        artifact_dir=tmp_path,
+        require_sorted_legal_ids=False,
+    )
+    scheduled_game = train_script.ScheduledGame(
+        pair_index=0,
+        swap_index=0,
+        episode_index=0,
+        episode_seed=579856027068064,
+        focal_policy_id="candidate",
+        opponent_policy_id="baseline",
+        seat0_policy_id="candidate",
+        seat1_policy_id="baseline",
+        focal_seat=0,
+    )
+
+    result = runner.run_game(scheduled_game)
+
+    assert env.reset_seed == scheduled_game.episode_seed
+    assert env.closed is True
+    assert result.episode_seed == scheduled_game.episode_seed
