@@ -693,6 +693,119 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
     assert summary_csv.read_text(encoding="utf-8").splitlines()[0].startswith("focal_policy_id,")
 
 
+def test_paper_readiness_entrypoint_writes_summary_json(tmp_path: Path) -> None:
+    final_eval_dir = tmp_path / "final_eval"
+    summary_path = final_eval_dir / "summary.json"
+    readiness_json = final_eval_dir / "paper_readiness_summary.json"
+    diagnostics_paths = [
+        final_eval_dir / "matchups" / "00_b0_randomlegal__vs__00_b0_randomlegal" / "diagnostics.json",
+        final_eval_dir / "matchups" / "00_b0_randomlegal__vs__01_policy_000300" / "diagnostics.json",
+        final_eval_dir / "matchups" / "01_policy_000300__vs__00_b0_randomlegal" / "diagnostics.json",
+        final_eval_dir / "matchups" / "01_policy_000300__vs__01_policy_000300" / "diagnostics.json",
+    ]
+    for diagnostics_path in diagnostics_paths:
+        diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics_path.write_text(
+            json.dumps(
+                {
+                    "seat_results": {
+                        "seat0_wins": 1,
+                        "seat1_wins": 1,
+                        "draws": 0,
+                        "truncations": 0,
+                        "engine_errors": 0,
+                        "decisive_games": 2,
+                        "total_games": 2,
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                "metadata": {"selection": {"mode": "deterministic_v1"}},
+                "matrices": {
+                    "games": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[2, 2], [2, 2]]},
+                    "truncations": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[0, 0], [0, 0]]},
+                    "mean": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[0.5, 0.0], [0.9, 0.5]]},
+                    "ci_low": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[0.5, 0.0], [0.88, 0.5]]},
+                    "ci_high": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[0.5, 0.0], [0.95, 0.5]]},
+                    "has_payoff_samples": {
+                        "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                        "values": [[True, True], [True, True]],
+                    },
+                    "paired_seed_count": {
+                        "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                        "values": [[1, 1], [2, 1]],
+                    },
+                    "stop_reason": {
+                        "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                        "values": [["precision", "precision"], ["precision", "precision"]],
+                    },
+                },
+                "posterior_samples": {
+                    "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                    "sample_count": 4,
+                    "values": [[[], []], [[0.88, 0.9, 0.92, 0.95], []]],
+                },
+                "matchups": [
+                    {
+                        "focal_policy_id": "B0 RandomLegal",
+                        "opponent_policy_id": "B0 RandomLegal",
+                        "diagnostics_path": "matchups/00_b0_randomlegal__vs__00_b0_randomlegal/diagnostics.json",
+                    },
+                    {
+                        "focal_policy_id": "B0 RandomLegal",
+                        "opponent_policy_id": "policy_000300",
+                        "diagnostics_path": "matchups/00_b0_randomlegal__vs__01_policy_000300/diagnostics.json",
+                    },
+                    {
+                        "focal_policy_id": "policy_000300",
+                        "opponent_policy_id": "B0 RandomLegal",
+                        "diagnostics_path": "matchups/01_policy_000300__vs__00_b0_randomlegal/diagnostics.json",
+                    },
+                    {
+                        "focal_policy_id": "policy_000300",
+                        "opponent_policy_id": "policy_000300",
+                        "diagnostics_path": "matchups/01_policy_000300__vs__01_policy_000300/diagnostics.json",
+                    },
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT / "python")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "paper_readiness_check.py"),
+            "--final-eval-dir",
+            str(final_eval_dir),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(readiness_json.read_text(encoding="utf-8"))
+    assert payload["passed"] is True
+    assert payload["checks"]["baseline_win_rate_vs_b0"]["focal_policy_id"] == "policy_000300"
+
+
 def test_train_entrypoint_runs_periodic_dev_eval_and_handles_empty_ids_pass_fallback(tmp_path: Path) -> None:
     bundle = _write_runtime_weiss_sim(
         tmp_path,
