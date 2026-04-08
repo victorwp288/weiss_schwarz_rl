@@ -10,7 +10,12 @@ from pathlib import Path
 import numpy as np
 
 from weiss_rl.eval import EvalGameRecord
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme, paired_seed_scores, validated_paired_seed_groups
+from weiss_rl.eval.payoff_folding import (
+    PayoffFoldScheme,
+    _normalize_scheme,
+    paired_seed_scores,
+    validated_paired_seed_groups,
+)
 
 _DEFAULT_CI_LEVEL = 0.95
 _DEFAULT_SAMPLE_COUNT = 1000
@@ -154,7 +159,7 @@ def dirichlet_wldt_posterior_summary(
 def dirichlet_wldt_posterior_samples(
     records: Sequence[EvalGameRecord],
     *,
-    scheme: PayoffFoldScheme,
+    scheme: str,
     alpha: float = 0.5,
     sample_count: int = _DEFAULT_SAMPLE_COUNT,
     seed: int | None = None,
@@ -166,10 +171,11 @@ def dirichlet_wldt_posterior_samples(
     if alpha <= 0.0:
         raise ValueError("alpha must be positive")
 
+    normalized_scheme = _normalize_scheme(scheme)
     counts = _count_wldt_outcomes(records)
     rng = np.random.default_rng(seed)
     theta = rng.dirichlet(counts + alpha, size=sample_count)
-    if scheme in ("S0", "S1"):
+    if normalized_scheme in ("S0", "S1"):
         return theta[:, 0] + 0.5 * (theta[:, 2] + theta[:, 3])
 
     nontrunc = theta[:, :3]
