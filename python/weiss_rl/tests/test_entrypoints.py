@@ -11,6 +11,7 @@ import torch
 
 from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.spec import spec_bundle_hash
+from weiss_rl.toy_public_demo import public_demo_spec_hash256
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -1035,3 +1036,139 @@ def test_train_entrypoint_periodic_dev_eval_writes_exact_current_checkpoint(tmp_
     assert seed_usage["focal_policy"]["checkpoint_path"] == "training/checkpoints/checkpoint_1.pt"
     assert summary_payload["evaluation_context"]["checkpoint_path"] == "training/checkpoints/checkpoint_1.pt"
     assert checkpoint_payload["update_count"] == 1
+
+
+def _run_public_demo_train(
+    tmp_path: Path,
+    *,
+    run_label: str = "toy_public_demo",
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    stack_config = _copy_repo_configs(tmp_path)
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash=public_demo_spec_hash256(),
+        run_label=run_label,
+        extra_args=["--public-demo"],
+    )
+    return result, tmp_path / "runs" / run_label
+
+
+def test_train_entrypoint_public_demo_stages_public_safe_catalog_without_weiss_sim(tmp_path: Path) -> None:
+    result, run_dir = _run_public_demo_train(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    catalog = json.loads((run_dir / "public_demo" / "catalog.json").read_text(encoding="utf-8"))
+    policies = json.loads((run_dir / "public_demo" / "policy_manifest.json").read_text(encoding="utf-8"))
+    scalars_lines = (run_dir / "training" / "logs" / "scalars.jsonl").read_text(encoding="utf-8").splitlines()
+
+    assert manifest["simulator"]["runtime"] == "public_demo"
+    assert manifest["simulator"]["public_safe"] is True
+    assert manifest["spec_bundle"]["action"]["action_space_size"] == 9
+    assert catalog["public_safe"] is True
+    assert len(catalog["card_pool"]) == 12
+    assert len(catalog["decks"]) == 3
+    assert policies["policy_ids"] == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "toy_policy_000100",
+        "toy_policy_000200",
+    ]
+    assert len(scalars_lines) == 1
+    assert "Staged public-demo toy catalog and policy bundle" in result.stdout
+    assert "demo-only" in result.stdout
+
+
+def test_eval_entrypoint_public_demo_generates_demo_only_final_eval_artifacts(tmp_path: Path) -> None:
+    train_result, run_dir = _run_public_demo_train(tmp_path, run_label="toy_public_demo_eval")
+    assert train_result.returncode == 0, train_result.stderr
+    stack_config = tmp_path / "configs" / "rl_stack_locked.yaml"
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="eval.py",
+        stack_config=stack_config,
+        spec_hash=public_demo_spec_hash256(),
+        extra_args=[
+            "--public-demo",
+            "--run-dir",
+            str(run_dir),
+            "--public-demo-paired-seeds",
+            "4",
+            "--public-demo-bootstrap-samples",
+            "8",
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    summary = json.loads((run_dir / "eval" / "final_eval" / "summary.json").read_text(encoding="utf-8"))
+    metadata = summary["metadata"]
+
+    assert summary["policy_ids"] == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "toy_policy_000100",
+        "toy_policy_000200",
+    ]
+    assert metadata["demo_only"] is True
+    assert metadata["public_safe"] is True
+    assert metadata["catalog_path"] == "public_demo/catalog.json"
+    assert metadata["policy_manifest_path"] == "public_demo/policy_manifest.json"
+    assert metadata["paired_seed_budget"] == 4
+    assert len(summary["matchups"]) == 16
+    assert "Public-demo final_eval summary JSON" in result.stdout
+
+
+def test_make_figures_entrypoint_public_demo_writes_clearly_labeled_bundle(tmp_path: Path) -> None:
+    train_result, run_dir = _run_public_demo_train(tmp_path, run_label="toy_public_demo_figures")
+    assert train_result.returncode == 0, train_result.stderr
+    stack_config = tmp_path / "configs" / "rl_stack_locked.yaml"
+    eval_result = _run_entrypoint(
+        tmp_path,
+        script_name="eval.py",
+        stack_config=stack_config,
+        spec_hash=public_demo_spec_hash256(),
+        extra_args=[
+            "--public-demo",
+            "--run-dir",
+            str(run_dir),
+            "--public-demo-paired-seeds",
+            "4",
+            "--public-demo-bootstrap-samples",
+            "8",
+        ],
+    )
+    assert eval_result.returncode == 0, eval_result.stderr
+
+    figures_dir = run_dir / "figures"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT / "python")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "make_figures.py"),
+            "--public-demo",
+            "--final-eval-dir",
+            str(run_dir / "eval" / "final_eval"),
+            "--out-dir",
+            str(figures_dir),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    placeholder_path = figures_dir / "toy_demo_placeholder.txt"
+    manifest_path = figures_dir / "toy_demo_manifest.json"
+    assert placeholder_path.is_file()
+    assert manifest_path.is_file()
+    placeholder_text = placeholder_path.read_text(encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "toy_public_demo_placeholder_figure" in placeholder_text
+    assert manifest["demo_only"] is True
+    assert manifest["public_safe"] is True
+    assert "Wrote public-demo placeholder figure bundle" in result.stdout

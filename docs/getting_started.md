@@ -9,8 +9,9 @@ Before you sink time into the repo, here is the honest version:
 - `make train-min` / `train.py --stack-config configs/stack_smoke.yaml` prove config loading, simulator provenance capture, and run-manifest writing.
 - `train.py` can also run a tiny inline M3-08 training smoke when you pass a full training stack and the active interpreter can step the simulator.
 - `eval.py` currently checks contracts and summarizes an already-produced `episodes.jsonl` file.
-- `make_figures.py` currently writes a placeholder artifact.
-- None of those entrypoints are the full master-plan pipeline yet.
+- `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline that generates clearly-labeled demo artifacts without proprietary simulator assets.
+- `make_figures.py` otherwise writes placeholder artifacts.
+- None of those entrypoints are the full proprietary master-plan pipeline yet.
 
 Repo paths in this guide are relative to the repo root.
 
@@ -138,6 +139,36 @@ Expected outcomes:
 
 - `eval.py` reports a contract check and seed-set summary when no `--episodes-jsonl` is supplied.
 - `make_figures.py` writes a placeholder artifact under `runs/figures/`.
+
+### Public-safe toy/demo e2e path
+
+This path is intentionally synthetic. It exists so CI and public readers can exercise the same top-level scripts without shipping proprietary assets.
+
+```bash
+uv run python python/scripts/train.py \
+  --stack-config configs/rl_stack_locked.yaml \
+  --public-demo \
+  --run-label toy_public_demo
+
+uv run python python/scripts/eval.py \
+  --stack-config configs/rl_stack_locked.yaml \
+  --public-demo \
+  --run-dir runs/toy_public_demo
+
+uv run python python/scripts/make_figures.py \
+  --public-demo \
+  --final-eval-dir runs/toy_public_demo/eval/final_eval \
+  --out-dir runs/toy_public_demo/figures
+```
+
+Expected demo-only artifacts:
+
+- `runs/toy_public_demo/public_demo/catalog.json`
+- `runs/toy_public_demo/public_demo/policy_manifest.json`
+- `runs/toy_public_demo/eval/final_eval/summary.json`
+- `runs/toy_public_demo/figures/toy_demo_manifest.json`
+
+Those artifacts are public-safe toy outputs only. Do not treat them as thesis results.
 
 ## Examples
 
