@@ -206,6 +206,28 @@ def test_dirichlet_wldt_posterior_samples_rejects_duplicate_swap_indices() -> No
         dirichlet_wldt_posterior_samples(records, scheme="S0")
 
 
+def test_dirichlet_wldt_posterior_samples_rejects_unknown_scheme() -> None:
+    records = [*_pair(0, "W", "D")]
+
+    with pytest.raises(ValueError, match="unknown payoff fold scheme: 'bogus'"):
+        dirichlet_wldt_posterior_samples(records, scheme="bogus")
+
+
+def test_dirichlet_wldt_posterior_samples_normalizes_scheme_input() -> None:
+    records = [*_pair(0, "W", "D")]
+    samples = dirichlet_wldt_posterior_samples(
+        records,
+        scheme=" s0 ",
+        alpha=0.5,
+        sample_count=4,
+        seed=7,
+    )
+
+    assert samples.tolist() == pytest.approx(
+        [0.5655335135059325, 0.6240958098934752, 0.6201304260303977, 0.6547592246472445]
+    )
+
+
 def test_dirichlet_wldt_posterior_summary_reports_posterior_mean_and_interval() -> None:
     records = [*_pair(0, "W", "T")]
     summary = dirichlet_wldt_posterior_summary(
