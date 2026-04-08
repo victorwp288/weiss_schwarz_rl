@@ -17,6 +17,7 @@ __all__ = [
     "fold_game_payoff",
     "paired_seed_group_key",
     "paired_seed_mean_score",
+    "validated_paired_seed_groups",
     "paired_seed_score",
     "paired_seed_scores",
 ]
@@ -39,12 +40,20 @@ def fold_game_payoff(outcome: str, *, scheme: PayoffFoldScheme) -> float | None:
 
 def paired_seed_score(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldScheme) -> float | None:
     normalized_scheme = _normalize_scheme(scheme)
-    _validate_pair_records(records)
-    scores = [fold_game_payoff(record.outcome, scheme=normalized_scheme) for record in records]
-    included_scores = [score for score in scores if score is not None]
-    if not included_scores:
-        return None
-    return _mean(included_scores)
+    return _paired_seed_score(_validate_pair_records(records), scheme=normalized_scheme)
+
+
+def validated_paired_seed_groups(
+    records: Sequence[EvalGameRecord],
+) -> tuple[tuple[EvalGameRecord, ...], ...]:
+    if not records:
+        raise ValueError("paired seed records require at least one record")
+
+    pair_groups: dict[PairedSeedGroupKey, list[EvalGameRecord]] = defaultdict(list)
+    for record in records:
+        pair_groups[paired_seed_group_key(record)].append(record)
+
+    return tuple(_validate_pair_records(pair_groups[group_key]) for group_key in sorted(pair_groups, key=_paired_seed_group_sort_key))
 
 
 def paired_seed_scores(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldScheme) -> tuple[float, ...]:
@@ -52,13 +61,9 @@ def paired_seed_scores(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldS
     if not records:
         raise ValueError("paired_seed_scores requires at least one record")
 
-    pair_groups: dict[PairedSeedGroupKey, list[EvalGameRecord]] = defaultdict(list)
-    for record in records:
-        pair_groups[paired_seed_group_key(record)].append(record)
-
     pair_scores: list[float] = []
-    for group_key in sorted(pair_groups, key=_paired_seed_group_sort_key):
-        score = paired_seed_score(pair_groups[group_key], scheme=normalized_scheme)
+    for pair_records in validated_paired_seed_groups(records):
+        score = _paired_seed_score(pair_records, scheme=normalized_scheme)
         if score is not None:
             pair_scores.append(score)
     return tuple(pair_scores)
@@ -82,7 +87,19 @@ def paired_seed_group_key(record: EvalGameRecord) -> PairedSeedGroupKey:
     )
 
 
-def _validate_pair_records(records: Sequence[EvalGameRecord]) -> None:
+def _paired_seed_score(
+    records: tuple[EvalGameRecord, ...],
+    *,
+    scheme: PayoffFoldScheme,
+) -> float | None:
+    scores = [fold_game_payoff(record.outcome, scheme=scheme) for record in records]
+    included_scores = [score for score in scores if score is not None]
+    if not included_scores:
+        return None
+    return _mean(included_scores)
+
+
+def _validate_pair_records(records: Sequence[EvalGameRecord]) -> tuple[EvalGameRecord, ...]:
     if len(records) < 2:
         raise ValueError(f"paired seed group must contain at least 2 records, got {len(records)}")
 
@@ -114,6 +131,8 @@ def _validate_pair_records(records: Sequence[EvalGameRecord]) -> None:
             raise ValueError("paired seed records must keep focal_seat=1 for swap_index 1")
         if record.seat0_policy_id != record.opponent_policy_id or record.seat1_policy_id != record.focal_policy_id:
             raise ValueError("paired seed records have inconsistent seat assignment for swap_index 1")
+
+    return tuple(records)
 
 
 def _require_shared_value(

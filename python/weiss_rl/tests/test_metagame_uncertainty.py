@@ -189,6 +189,23 @@ def test_dirichlet_wldt_posterior_samples_with_s0_and_jeffreys_prior() -> None:
     )
 
 
+def test_dirichlet_wldt_posterior_samples_rejects_empty_records() -> None:
+    with pytest.raises(ValueError, match="requires at least one record"):
+        dirichlet_wldt_posterior_samples([], scheme="S0")
+
+
+def test_dirichlet_wldt_posterior_samples_rejects_incomplete_pair_groups() -> None:
+    with pytest.raises(ValueError, match="exactly 2 records"):
+        dirichlet_wldt_posterior_samples([_record(0, 0, "W")], scheme="S0")
+
+
+def test_dirichlet_wldt_posterior_samples_rejects_duplicate_swap_indices() -> None:
+    records = [_record(0, 0, "W"), _record(0, 0, "L")]
+
+    with pytest.raises(ValueError, match="swap_index 0 and 1 exactly once"):
+        dirichlet_wldt_posterior_samples(records, scheme="S0")
+
+
 def test_dirichlet_wldt_posterior_summary_reports_posterior_mean_and_interval() -> None:
     records = [*_pair(0, "W", "T")]
     summary = dirichlet_wldt_posterior_summary(
