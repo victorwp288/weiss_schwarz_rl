@@ -1,5 +1,11 @@
 """Metagame analysis utilities."""
 
+from .alpharank import (
+    compute_alpharank_stationary,
+    normalize_stationary,
+    write_alpharank_artifacts,
+    write_stationary_mean_csv,
+)
 from .payoff import (
     build_p_mean_and_counts,
     write_p_mean_csv,
@@ -35,6 +41,10 @@ __all__ = [
     "write_mixture_mean_csv",
     "write_nash_artifacts",
     "write_solver_report_json",
+    "compute_alpharank_stationary",
+    "normalize_stationary",
+    "write_alpharank_artifacts",
+    "write_stationary_mean_csv",
     "PayoffUncertaintySummary",
     "bayesian_bootstrap_summary",
     "paired_seed_uncertainty_summary",
