@@ -19,6 +19,18 @@ def _pair(pair_index: int, outcome_a: OutcomeToken, outcome_b: OutcomeToken) -> 
     ]
 
 
+def _duplicate_seed_runs(episode_seed: int, *outcomes: tuple[OutcomeToken, OutcomeToken]) -> list[EvalGameRecord]:
+    records: list[EvalGameRecord] = []
+    for pair_index, (outcome_a, outcome_b) in enumerate(outcomes):
+        records.extend(
+            [
+                _record(pair_index, 0, outcome_a, episode_seed=episode_seed),
+                _record(pair_index, 1, outcome_b, episode_seed=episode_seed),
+            ]
+        )
+    return records
+
+
 def _record(
     pair_index: int,
     swap_index: int,
@@ -89,6 +101,13 @@ def test_paired_seed_score_applies_scheme_rules() -> None:
     assert paired_seed_score(_pair(8, "T", "T"), scheme="S2") is None
 
 
+def test_paired_seed_score_aggregates_duplicate_same_seed_runs() -> None:
+    records = _duplicate_seed_runs(250, ("W", "L"), ("W", "W"))
+
+    assert paired_seed_score(records, scheme="S0") == pytest.approx(0.75)
+    assert paired_seed_score(records, scheme="S2") == pytest.approx(0.75)
+
+
 def test_paired_seed_mean_score_returns_expected_exact_p_ij_mean() -> None:
     records = [
         *_pair(0, "W", "L"),
@@ -118,9 +137,9 @@ def test_paired_seed_mean_score_is_order_independent() -> None:
 @pytest.mark.parametrize(
     ("records", "expected_message"),
     [
-        (_pair(0, "W", "L")[:1], "exactly 2 records"),
+        (_pair(0, "W", "L")[:1], "at least 2 records"),
         ([_record(1, 0, "W", episode_seed=10), _record(1, 1, "L", episode_seed=11)], "must share episode_seed"),
-        ([_record(2, 0, "W"), _record(2, 0, "L")], "swap_index 0 and 1 exactly once"),
+        ([_record(2, 0, "W"), _record(2, 0, "L")], "matching counts for swap_index 0 and 1"),
     ],
 )
 def test_paired_seed_score_rejects_malformed_pair_groups(

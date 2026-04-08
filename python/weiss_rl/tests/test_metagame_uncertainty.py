@@ -30,6 +30,18 @@ def _pair(pair_index: int, outcome_a: OutcomeToken, outcome_b: OutcomeToken) -> 
     ]
 
 
+def _duplicate_seed_runs(episode_seed: int, *outcomes: tuple[OutcomeToken, OutcomeToken]) -> list[EvalGameRecord]:
+    records: list[EvalGameRecord] = []
+    for pair_index, (outcome_a, outcome_b) in enumerate(outcomes):
+        records.extend(
+            [
+                _record(pair_index, 0, outcome_a, episode_seed=episode_seed),
+                _record(pair_index, 1, outcome_b, episode_seed=episode_seed),
+            ]
+        )
+    return records
+
+
 def _record(
     pair_index: int,
     swap_index: int,
@@ -103,6 +115,16 @@ def test_paired_seed_uncertainty_summary_splits_reused_pair_index_by_episode_see
     summary = paired_seed_uncertainty_summary(records, scheme="S0", sample_count=8, seed=42)
 
     assert summary.paired_seed_count == 2
+    assert summary.mean == pytest.approx(0.75)
+    assert summary.sample_count == 8
+
+
+def test_paired_seed_uncertainty_summary_aggregates_duplicate_same_seed_runs() -> None:
+    records = _duplicate_seed_runs(250, ("W", "L"), ("W", "W"))
+
+    summary = paired_seed_uncertainty_summary(records, scheme="S0", sample_count=8, seed=42)
+
+    assert summary.paired_seed_count == 1
     assert summary.mean == pytest.approx(0.75)
     assert summary.sample_count == 8
 

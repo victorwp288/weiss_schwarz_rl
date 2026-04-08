@@ -39,8 +39,8 @@ def fold_game_payoff(outcome: str, *, scheme: PayoffFoldScheme) -> float | None:
 
 def paired_seed_score(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldScheme) -> float | None:
     normalized_scheme = _normalize_scheme(scheme)
-    pair_records = _validate_pair_records(records)
-    scores = [fold_game_payoff(record.outcome, scheme=normalized_scheme) for record in pair_records]
+    _validate_pair_records(records)
+    scores = [fold_game_payoff(record.outcome, scheme=normalized_scheme) for record in records]
     included_scores = [score for score in scores if score is not None]
     if not included_scores:
         return None
@@ -81,41 +81,37 @@ def paired_seed_group_key(record: EvalGameRecord) -> PairedSeedGroupKey:
     )
 
 
-def _validate_pair_records(records: Sequence[EvalGameRecord]) -> tuple[EvalGameRecord, EvalGameRecord]:
-    if len(records) != 2:
-        raise ValueError(f"paired seed group must contain exactly 2 records, got {len(records)}")
-
-    if len({int(record.pair_index) for record in records}) != 1:
-        raise ValueError("paired seed records must share pair_index")
-    pair_index = int(records[0].pair_index)
+def _validate_pair_records(records: Sequence[EvalGameRecord]) -> None:
+    if len(records) < 2:
+        raise ValueError(f"paired seed group must contain at least 2 records, got {len(records)}")
 
     _require_shared_value(records, selector=lambda record: int(record.episode_seed), name="episode_seed")
     _require_shared_value(records, selector=lambda record: record.focal_policy_id, name="focal_policy_id")
     _require_shared_value(records, selector=lambda record: record.opponent_policy_id, name="opponent_policy_id")
+    _require_shared_value(records, selector=lambda record: record.config_hash256, name="config_hash256")
+    _require_shared_value(records, selector=lambda record: record.spec_hash256, name="spec_hash256")
 
-    records_by_swap: dict[int, EvalGameRecord] = {}
+    records_by_swap: dict[int, list[EvalGameRecord]] = defaultdict(list)
     for record in records:
         swap_index = int(record.swap_index)
         if swap_index not in (0, 1):
-            raise ValueError(f"pair_index {pair_index} must use swap_index 0 or 1, got {swap_index}")
-        if swap_index in records_by_swap:
-            raise ValueError(f"pair_index {pair_index} must contain swap_index 0 and 1 exactly once")
-        records_by_swap[swap_index] = record
+            raise ValueError(f"paired seed records must use swap_index 0 or 1, got {swap_index}")
+        records_by_swap[swap_index].append(record)
 
-    if set(records_by_swap) != {0, 1}:
-        raise ValueError(f"pair_index {pair_index} must contain swap_index 0 and 1 exactly once")
+    if set(records_by_swap) != {0, 1} or len(records_by_swap[0]) != len(records_by_swap[1]):
+        raise ValueError("paired seed records must contain matching counts for swap_index 0 and 1")
 
-    first = records_by_swap[0]
-    second = records_by_swap[1]
+    for record in records_by_swap[0]:
+        if int(record.focal_seat) != 0:
+            raise ValueError("paired seed records must keep focal_seat=0 for swap_index 0")
+        if record.seat0_policy_id != record.focal_policy_id or record.seat1_policy_id != record.opponent_policy_id:
+            raise ValueError("paired seed records have inconsistent seat assignment for swap_index 0")
 
-    if int(first.focal_seat) != 0 or int(second.focal_seat) != 1:
-        raise ValueError(f"pair_index {pair_index} must swap focal seats across the pair")
-    if first.seat0_policy_id != first.focal_policy_id or first.seat1_policy_id != first.opponent_policy_id:
-        raise ValueError(f"pair_index {pair_index} has inconsistent seat assignment for swap_index 0")
-    if second.seat0_policy_id != second.opponent_policy_id or second.seat1_policy_id != second.focal_policy_id:
-        raise ValueError(f"pair_index {pair_index} has inconsistent seat assignment for swap_index 1")
-
-    return first, second
+    for record in records_by_swap[1]:
+        if int(record.focal_seat) != 1:
+            raise ValueError("paired seed records must keep focal_seat=1 for swap_index 1")
+        if record.seat0_policy_id != record.opponent_policy_id or record.seat1_policy_id != record.focal_policy_id:
+            raise ValueError("paired seed records have inconsistent seat assignment for swap_index 1")
 
 
 def _require_shared_value(
@@ -126,8 +122,7 @@ def _require_shared_value(
 ) -> None:
     values = {selector(record) for record in records}
     if len(values) != 1:
-        pair_index = int(records[0].pair_index)
-        raise ValueError(f"pair_index {pair_index} must share {name}")
+        raise ValueError(f"paired seed records must share {name}")
 
 
 def _normalize_outcome(outcome: str) -> str:
