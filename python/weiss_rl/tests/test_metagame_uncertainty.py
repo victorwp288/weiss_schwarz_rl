@@ -10,6 +10,9 @@ import pytest
 from weiss_rl.eval import EvalGameRecord
 from weiss_rl.metagame.uncertainty import (
     bayesian_bootstrap_summary,
+    dirichlet_wldt_posterior_samples,
+    dirichlet_wldt_posterior_summary,
+    optional_secondary_uncertainty_summary,
     paired_seed_uncertainty_summary,
     posterior_samples,
     write_posterior_samples,
@@ -132,3 +135,51 @@ def test_write_uncertainty_artifacts_creates_npz_and_json(tmp_path: Path) -> Non
     assert payload["mean"] == pytest.approx(0.5)
     assert payload["paired_seed_count"] == 2
     assert payload["sample_count"] == 4
+
+
+def test_dirichlet_wldt_posterior_samples_with_s0_and_jeffreys_prior() -> None:
+    records = [*_pair(0, "W", "D")]
+    samples = dirichlet_wldt_posterior_samples(
+        records,
+        scheme="S0",
+        alpha=0.5,
+        sample_count=4,
+        seed=7,
+    )
+
+    assert samples.shape == (4,)
+    assert samples.tolist() == pytest.approx(
+        [0.5655335135059325, 0.6240958098934752, 0.6201304260303977, 0.6547592246472445]
+    )
+
+
+def test_dirichlet_wldt_posterior_summary_reports_posterior_mean_and_interval() -> None:
+    records = [*_pair(0, "W", "T")]
+    summary = dirichlet_wldt_posterior_summary(
+        records,
+        scheme="S1",
+        alpha=0.5,
+        sample_count=16,
+        ci_level=0.9,
+        seed=13,
+    )
+
+    assert summary.paired_seed_count == 1
+    assert summary.sample_count == 16
+    assert 0.0 <= summary.ci_low <= summary.ci_high <= 1.0
+    assert summary.prob_gt_half + summary.prob_lt_half <= 1.0
+
+
+def test_optional_secondary_uncertainty_summary_dispatches_dirichlet_method() -> None:
+    records = [*_pair(0, "W", "L")]
+    summary = optional_secondary_uncertainty_summary(
+        records,
+        scheme="S0",
+        method="dirichlet_wldt_jeffreys_v1",
+        dirichlet_alpha_wldt=0.5,
+        sample_count=8,
+        ci_level=0.8,
+        seed=21,
+    )
+    assert summary.paired_seed_count == 1
+    assert summary.sample_count == 8
