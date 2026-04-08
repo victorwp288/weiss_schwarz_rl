@@ -227,7 +227,32 @@ def test_build_sensitivity_report_rejects_mismatched_matchup_episodes_path(tmp_p
     target["episodes_path"] = source["episodes_path"]
     _write_final_eval_summary(final_eval_dir, payload)
 
-    with pytest.raises(ValueError, match=r"episodes do not match summary metadata"):
+    with pytest.raises(ValueError, match=r"must equal canonical final_eval artifact path"):
+        build_sensitivity_report(
+            final_eval_dir=final_eval_dir,
+            out_dir=tmp_path / "sensitivity",
+            metagame_config=stack.config.metagame,
+            sensitivity_config=stack.config.sensitivity,
+        )
+
+
+def test_build_sensitivity_report_rejects_in_tree_same_pair_rogue_episodes_path(tmp_path: Path) -> None:
+    final_eval_dir = _write_final_eval_fixture(tmp_path)
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    assert stack.config.metagame is not None
+    assert stack.config.sensitivity is not None
+
+    summary_path = final_eval_dir / "summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    target = payload["matchups"][0]
+    rogue_path = final_eval_dir / "matchups" / "rogue_same_pair" / "episodes.jsonl"
+    canonical_path = final_eval_dir / target["episodes_path"]
+    rogue_path.parent.mkdir(parents=True, exist_ok=True)
+    rogue_path.write_text(canonical_path.read_text(encoding="utf-8"), encoding="utf-8")
+    target["episodes_path"] = rogue_path.relative_to(final_eval_dir).as_posix()
+    _write_final_eval_summary(final_eval_dir, payload)
+
+    with pytest.raises(ValueError, match=r"must equal canonical final_eval artifact path"):
         build_sensitivity_report(
             final_eval_dir=final_eval_dir,
             out_dir=tmp_path / "sensitivity",

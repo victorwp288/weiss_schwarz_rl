@@ -170,6 +170,12 @@ def _load_final_eval_context(final_eval_dir: Path) -> FinalEvalContext:
         episodes_path = _resolve_final_eval_episodes_path(
             final_eval_dir=final_eval_dir,
             value=item.get("episodes_path"),
+            expected_relative_path=_expected_final_eval_episodes_path(
+                focal_policy_index=focal_index,
+                opponent_policy_index=opponent_index,
+                focal_policy_id=focal_policy_id,
+                opponent_policy_id=opponent_policy_id,
+            ),
         )
         records = load_eval_game_records(episodes_path)
         _validate_matchup_records(
@@ -612,7 +618,30 @@ def _require_matchup_policy_index(
     return index
 
 
-def _resolve_final_eval_episodes_path(*, final_eval_dir: Path, value: Any) -> Path:
+def _expected_final_eval_episodes_path(
+    *,
+    focal_policy_index: int,
+    opponent_policy_index: int,
+    focal_policy_id: str,
+    opponent_policy_id: str,
+) -> Path:
+    matchup_dir = (
+        f"{focal_policy_index:02d}_{_slug(focal_policy_id)}__vs__"
+        f"{opponent_policy_index:02d}_{_slug(opponent_policy_id)}"
+    )
+    return Path("matchups") / matchup_dir / "episodes.jsonl"
+
+
+def _slug(value: str) -> str:
+    parts = [
+        "".join(char.lower() for char in chunk if char.isalnum())
+        for chunk in str(value).replace("-", " ").replace("_", " ").split()
+    ]
+    slug = "_".join(part for part in parts if part)
+    return slug or "policy"
+
+
+def _resolve_final_eval_episodes_path(*, final_eval_dir: Path, value: Any, expected_relative_path: Path) -> Path:
     if not isinstance(value, str) or not value:
         raise ValueError("final_eval matchup episodes_path must be a non-empty string")
     raw_path = Path(value)
@@ -630,6 +659,12 @@ def _resolve_final_eval_episodes_path(*, final_eval_dir: Path, value: Any) -> Pa
             "final_eval matchup episodes_path resolves outside the final_eval root: "
             f"{value!r}"
         ) from exc
+    expected = expected_relative_path.as_posix()
+    if value != expected:
+        raise ValueError(
+            "final_eval matchup episodes_path must equal canonical final_eval artifact path: "
+            f"expected {expected!r}, got {value!r}"
+        )
     return resolved_path
 
 
