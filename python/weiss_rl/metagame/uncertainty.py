@@ -84,7 +84,7 @@ def paired_seed_uncertainty_summary(
 
 
 def posterior_samples(
-    scores: Sequence[float], *, sample_count: int = _DEFAULT_SAMPLE_COUNT, seed: int | None = None
+    scores: Sequence[float] | np.ndarray, *, sample_count: int = _DEFAULT_SAMPLE_COUNT, seed: int | None = None
 ) -> np.ndarray:
     return eval_posterior_samples(scores, sample_count=sample_count, seed=seed)
 
