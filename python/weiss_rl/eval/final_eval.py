@@ -141,7 +141,7 @@ def run_final_eval(
     output_dir.mkdir(parents=True, exist_ok=True)
     matchup_results: list[dict[str, Any]] = []
     for focal_index, focal_policy_id in enumerate(resolved_policy_ids):
-        for opponent_index, opponent_policy_id in enumerate(resolved_policy_ids):
+        for opponent_index, opponent_policy_id in enumerate(resolved_policy_ids[focal_index:], start=focal_index):
             matchup_results.append(
                 _run_matchup(
                     output_dir=output_dir,
@@ -448,20 +448,24 @@ def _build_final_eval_payload(
     metadata: Mapping[str, Any] | None,
     seed_file_path: Path | None,
 ) -> dict[str, Any]:
-    results_by_key = {
+    canonical_results_by_key = {
         (int(result["focal_index"]), int(result["opponent_index"])): result for result in matchup_results
     }
     matrices = {
         field: _build_matrix(
             policy_ids=policy_ids,
-            results_by_key=results_by_key,
+            canonical_results_by_key=canonical_results_by_key,
             field=field,
         )
         for field in _MATRIX_FIELDS
     }
     posterior_matrix = [
         [
-            list(results_by_key[(focal_index, opponent_index)]["posterior_samples"])
+            _posterior_samples_cell(
+                canonical_results_by_key=canonical_results_by_key,
+                focal_index=focal_index,
+                opponent_index=opponent_index,
+            )
             for opponent_index, _opponent_policy_id in enumerate(policy_ids)
         ]
         for focal_index, _focal_policy_id in enumerate(policy_ids)
@@ -471,6 +475,11 @@ def _build_final_eval_payload(
         {
             "policy_count": len(policy_ids),
             "matchup_count": len(matchup_results),
+            "matchup_artifacts": {
+                "kind": "canonical_unordered_pairs_v1",
+                "canonical_order": "focal_policy_index <= opponent_policy_index",
+                "reverse_matrix_cells": "derived_from_canonical_matchup_artifacts",
+            },
             "stage1_paired_seeds": stage1_paired_seeds,
             "max_paired_seeds": max_paired_seeds,
             "paired_seed_budget": len(paired_seeds),
@@ -513,6 +522,10 @@ def _build_final_eval_payload(
                     Path(result["matchup_dir"]) / "posterior_samples.json",
                     root=output_dir,
                 ),
+                "matrix_cells": _covered_matrix_cells(
+                    focal_index=int(result["focal_index"]),
+                    opponent_index=int(result["opponent_index"]),
+                ),
                 "paired_seed_count": result["summary"]["paired_seeds"],
                 "observed_paired_seed_count": result["summary"]["observed_paired_seeds"],
                 "excluded_paired_seed_count": result["summary"]["excluded_paired_seeds"],
@@ -527,12 +540,17 @@ def _build_final_eval_payload(
 def _build_matrix(
     *,
     policy_ids: Sequence[str],
-    results_by_key: Mapping[tuple[int, int], dict[str, Any]],
+    canonical_results_by_key: Mapping[tuple[int, int], dict[str, Any]],
     field: str,
 ) -> dict[str, Any]:
     values = [
         [
-            _matrix_value(results_by_key[(focal_index, opponent_index)]["summary"], field=field)
+            _matrix_cell_value(
+                canonical_results_by_key=canonical_results_by_key,
+                focal_index=focal_index,
+                opponent_index=opponent_index,
+                field=field,
+            )
             for opponent_index, _opponent_policy_id in enumerate(policy_ids)
         ]
         for focal_index, _focal_policy_id in enumerate(policy_ids)
@@ -543,9 +561,27 @@ def _build_matrix(
     }
 
 
-def _matrix_value(payload: Mapping[str, Any], *, field: str) -> Any:
+def _matrix_cell_value(
+    *,
+    canonical_results_by_key: Mapping[tuple[int, int], dict[str, Any]],
+    focal_index: int,
+    opponent_index: int,
+    field: str,
+) -> Any:
+    result, reverse = _canonical_result_for_cell(
+        canonical_results_by_key=canonical_results_by_key,
+        focal_index=focal_index,
+        opponent_index=opponent_index,
+    )
+    payload = cast(Mapping[str, Any], result["summary"])
+    return _matrix_value(payload, field=field, reverse=reverse)
+
+
+def _matrix_value(payload: Mapping[str, Any], *, field: str, reverse: bool = False) -> Any:
     summary = cast(Mapping[str, Any], payload["summary"])
     uncertainty = cast(Mapping[str, Any], payload["uncertainty"])
+    if reverse:
+        return _reverse_matrix_value(payload=payload, summary=summary, uncertainty=uncertainty, field=field)
     if field in uncertainty:
         return uncertainty[field]
     if field in summary:
@@ -553,6 +589,76 @@ def _matrix_value(payload: Mapping[str, Any], *, field: str) -> Any:
     if field == "paired_seed_count":
         return uncertainty["paired_seed_count"]
     return payload[field]
+
+
+def _reverse_matrix_value(
+    *,
+    payload: Mapping[str, Any],
+    summary: Mapping[str, Any],
+    uncertainty: Mapping[str, Any],
+    field: str,
+) -> Any:
+    if field == "mean":
+        return _invert_optional_float(uncertainty["mean"])
+    if field == "ci_low":
+        return _invert_optional_float(uncertainty["ci_high"])
+    if field == "ci_high":
+        return _invert_optional_float(uncertainty["ci_low"])
+    if field == "prob_gt_half":
+        return uncertainty["prob_lt_half"]
+    if field == "prob_lt_half":
+        return uncertainty["prob_gt_half"]
+    if field == "wins":
+        return summary["losses"]
+    if field == "losses":
+        return summary["wins"]
+    if field in uncertainty:
+        return uncertainty[field]
+    if field in summary:
+        return summary[field]
+    if field == "paired_seed_count":
+        return uncertainty["paired_seed_count"]
+    return payload[field]
+
+
+def _invert_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return 1.0 - float(value)
+
+
+def _canonical_result_for_cell(
+    *,
+    canonical_results_by_key: Mapping[tuple[int, int], dict[str, Any]],
+    focal_index: int,
+    opponent_index: int,
+) -> tuple[dict[str, Any], bool]:
+    canonical_key = (min(focal_index, opponent_index), max(focal_index, opponent_index))
+    return canonical_results_by_key[canonical_key], focal_index > opponent_index
+
+
+def _posterior_samples_cell(
+    *,
+    canonical_results_by_key: Mapping[tuple[int, int], dict[str, Any]],
+    focal_index: int,
+    opponent_index: int,
+) -> list[float]:
+    result, reverse = _canonical_result_for_cell(
+        canonical_results_by_key=canonical_results_by_key,
+        focal_index=focal_index,
+        opponent_index=opponent_index,
+    )
+    samples = cast(Sequence[float], result["posterior_samples"])
+    if not reverse:
+        return [float(sample) for sample in samples]
+    return [1.0 - float(sample) for sample in samples]
+
+
+def _covered_matrix_cells(*, focal_index: int, opponent_index: int) -> list[dict[str, int]]:
+    cells = [{"focal_policy_index": focal_index, "opponent_policy_index": opponent_index}]
+    if focal_index != opponent_index:
+        cells.append({"focal_policy_index": opponent_index, "opponent_policy_index": focal_index})
+    return cells
 
 
 def _write_final_eval_artifacts(

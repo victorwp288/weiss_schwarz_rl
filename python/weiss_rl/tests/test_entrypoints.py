@@ -1077,6 +1077,8 @@ def test_train_entrypoint_public_demo_stages_public_safe_catalog_without_weiss_s
         "toy_policy_000200",
     ]
     assert len(scalars_lines) == 1
+    assert "Loaded synthetic public-demo spec bundle" in result.stdout
+    assert "Verified runtime spec bundle" not in result.stdout
     assert "Staged public-demo toy catalog and policy bundle" in result.stdout
     assert "demo-only" in result.stdout
 
@@ -1117,7 +1119,8 @@ def test_eval_entrypoint_public_demo_generates_demo_only_final_eval_artifacts(tm
     assert metadata["catalog_path"] == "public_demo/catalog.json"
     assert metadata["policy_manifest_path"] == "public_demo/policy_manifest.json"
     assert metadata["paired_seed_budget"] == 4
-    assert len(summary["matchups"]) == 16
+    assert metadata["recommended_focal_policy_id"] == "toy_policy_000200"
+    assert len(summary["matchups"]) == 10
     assert "Public-demo final_eval summary JSON" in result.stdout
 
 

@@ -1948,10 +1948,12 @@ def main() -> None:
         run_dir_name=run_dir_name,
         spec_mismatch_policy=_spec_mismatch_policy(stack),
     )
-    print(
-        "Verified runtime spec bundle: "
-        f"compat={simulator_info.get('compatibility_hash', '')} sha256={spec_hash256}"
+    spec_bundle_message = (
+        "Loaded synthetic public-demo spec bundle: "
+        if public_demo_enabled
+        else "Verified runtime spec bundle: "
     )
+    print(spec_bundle_message + f"compat={simulator_info.get('compatibility_hash', '')} sha256={spec_hash256}")
     print(f"Loaded stack config with {len(stack.components)} components")
 
     policy_set_selection, policy_set_selection_details = _resolve_policy_set_selection(
