@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 from weiss_rl.eval.paper_readiness import (
     DEFAULT_BASELINE_POLICY_ID,
@@ -14,6 +15,28 @@ from weiss_rl.eval.paper_readiness import (
     build_paper_readiness_summary,
     write_paper_readiness_json,
 )
+
+
+def _closed_interval(*, lower: float, upper: float, label: str):
+    def _parse(value: str) -> float:
+        parsed = float(value)
+        if parsed < lower or parsed > upper:
+            raise argparse.ArgumentTypeError(f"{label} must be in [{lower}, {upper}]")
+        return parsed
+
+    return _parse
+
+
+def _format_alarm(name: str, check: Any) -> str:
+    detail = str(name)
+    if isinstance(check, dict):
+        message = check.get("message")
+        reason = check.get("reason")
+        if isinstance(message, str) and message.strip():
+            return f"{detail} ({message.strip()})"
+        if isinstance(reason, str) and reason.strip():
+            return f"{detail} ({reason.strip()})"
+    return detail
 
 
 def main() -> None:
@@ -34,7 +57,11 @@ def main() -> None:
         "--focal-policy-id",
         type=str,
         default="",
-        help="Policy to check against the B0 baseline (default: first non-baseline policy in policy_ids)",
+        help=(
+            "Policy to check against the B0 baseline "
+            "(default: auto-resolve only when exactly one eligible non-baseline policy exists, "
+            "or metadata names the focal policy explicitly)"
+        ),
     )
     parser.add_argument(
         "--baseline-policy-id",
@@ -44,31 +71,31 @@ def main() -> None:
     )
     parser.add_argument(
         "--max-truncation-rate",
-        type=float,
+        type=_closed_interval(lower=0.0, upper=1.0, label="--max-truncation-rate"),
         default=DEFAULT_TRUNCATION_MAX_RATE,
-        help="Maximum allowed aggregate truncation rate across final_eval",
+        help="Maximum allowed aggregate truncation rate across canonical unordered final_eval matchups",
     )
     parser.add_argument(
         "--seat-bias-max-abs-delta",
-        type=float,
+        type=_closed_interval(lower=0.0, upper=0.5, label="--seat-bias-max-abs-delta"),
         default=DEFAULT_SEAT_BIAS_MAX_ABS_DELTA,
         help="Seat-bias alarm margin around 0.5 for the global decisive seat0 win rate",
     )
     parser.add_argument(
         "--seat-bias-posterior-min",
-        type=float,
+        type=_closed_interval(lower=0.0, upper=1.0, label="--seat-bias-posterior-min"),
         default=DEFAULT_SEAT_BIAS_POSTERIOR_MIN,
         help="Posterior probability threshold for triggering the seat-bias alarm",
     )
     parser.add_argument(
         "--baseline-win-rate-threshold",
-        type=float,
+        type=_closed_interval(lower=0.0, upper=1.0, label="--baseline-win-rate-threshold"),
         default=DEFAULT_BASELINE_WIN_RATE_THRESHOLD,
         help="Minimum posterior win-rate threshold for the focal policy versus the baseline",
     )
     parser.add_argument(
         "--baseline-posterior-min",
-        type=float,
+        type=_closed_interval(lower=0.0, upper=1.0, label="--baseline-posterior-min"),
         default=DEFAULT_BASELINE_POSTERIOR_MIN,
         help="Required posterior probability of exceeding the baseline win-rate threshold",
     )
@@ -92,7 +119,8 @@ def main() -> None:
         print("Paper readiness checks passed.")
         return
 
-    alarms = ", ".join(str(alarm) for alarm in payload["alarms"])
+    checks = payload.get("checks", {})
+    alarms = ", ".join(_format_alarm(str(alarm), checks.get(alarm)) for alarm in payload["alarms"])
     print(f"Paper readiness checks failed: {alarms}", file=sys.stderr)
     raise SystemExit(1)
 

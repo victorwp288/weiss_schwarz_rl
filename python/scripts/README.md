@@ -94,12 +94,14 @@ What it does today:
 
 - reads the approved `final_eval/summary.json` plus per-matchup `diagnostics.json` files
 - writes a single `paper_readiness_summary.json` artifact
-- checks aggregate truncation rate, global seat-bias alarm, and focal-policy win rate versus `B0 RandomLegal`
+- checks aggregate truncation rate and seat-bias over canonical unordered matchups, plus focal-policy win rate versus `B0 RandomLegal`
 - exits non-zero when any readiness guardrail fails
 
 Default focal-policy behavior:
 
-- if you do not pass `--focal-policy-id`, the script uses the first non-baseline policy in `policy_ids`
+- if you do not pass `--focal-policy-id`, the script auto-resolves only when exactly one eligible non-baseline policy exists
+- if final-eval metadata explicitly names the focal policy, that metadata is used
+- otherwise the script fails clearly and requires `--focal-policy-id`
 
 ### `make_figures.py`
 

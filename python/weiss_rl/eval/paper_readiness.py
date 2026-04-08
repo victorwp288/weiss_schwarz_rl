@@ -49,14 +49,15 @@ def build_paper_readiness_summary(
     payload = _load_json_object(summary_path)
     policy_ids = _policy_ids(payload)
     matchups = _matchups(payload)
+    canonical_matchups = _canonical_unordered_matchups(matchups, policy_ids=policy_ids)
+    matchup_diagnostics = _load_matchup_diagnostics(final_eval_dir=final_eval_dir, matchups=canonical_matchups)
 
     truncation = _build_truncation_check(
-        payload,
+        matchup_diagnostics,
         max_truncation_rate=max_truncation_rate,
     )
     seat_bias = _build_seat_bias_check(
-        final_eval_dir=final_eval_dir,
-        matchups=matchups,
+        matchup_diagnostics=matchup_diagnostics,
         max_abs_delta=seat_bias_max_abs_delta,
         posterior_min=seat_bias_posterior_min,
     )
@@ -96,9 +97,13 @@ def write_paper_readiness_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(dict(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _build_truncation_check(payload: Mapping[str, Any], *, max_truncation_rate: float) -> dict[str, Any]:
-    total_games = _sum_matrix_ints(payload, field="games")
-    truncated_games = _sum_matrix_ints(payload, field="truncations")
+def _build_truncation_check(
+    matchup_diagnostics: Sequence[Mapping[str, Any]],
+    *,
+    max_truncation_rate: float,
+) -> dict[str, Any]:
+    total_games = sum(_as_int(matchup["total_games"], context="total_games") for matchup in matchup_diagnostics)
+    truncated_games = sum(_as_int(matchup["truncations"], context="truncations") for matchup in matchup_diagnostics)
     rate = (truncated_games / total_games) if total_games else None
     passed = total_games > 0 and rate is not None and rate <= max_truncation_rate
     result: dict[str, Any] = {
@@ -115,8 +120,7 @@ def _build_truncation_check(payload: Mapping[str, Any], *, max_truncation_rate: 
 
 def _build_seat_bias_check(
     *,
-    final_eval_dir: Path,
-    matchups: Sequence[Mapping[str, Any]],
+    matchup_diagnostics: Sequence[Mapping[str, Any]],
     max_abs_delta: float,
     posterior_min: float,
 ) -> dict[str, Any]:
@@ -127,19 +131,13 @@ def _build_seat_bias_check(
     truncations = 0
     engine_errors = 0
 
-    for matchup in matchups:
-        diagnostics_path = final_eval_dir / str(matchup["diagnostics_path"])
-        diagnostics = _load_json_object(diagnostics_path)
-        seat_results = _mapping(diagnostics.get("seat_results"), context=f"{diagnostics_path}:seat_results")
-        matchup_seat0_wins = _as_int(seat_results.get("seat0_wins"), context=f"{diagnostics_path}:seat0_wins")
-        matchup_seat1_wins = _as_int(seat_results.get("seat1_wins"), context=f"{diagnostics_path}:seat1_wins")
-        matchup_draws = _as_int(seat_results.get("draws"), context=f"{diagnostics_path}:draws")
-        matchup_truncations = _as_int(seat_results.get("truncations"), context=f"{diagnostics_path}:truncations")
-        matchup_engine_errors = _as_int(
-            seat_results.get("engine_errors"),
-            context=f"{diagnostics_path}:engine_errors",
-        )
-        decisive_games = matchup_seat0_wins + matchup_seat1_wins
+    for matchup in matchup_diagnostics:
+        matchup_seat0_wins = _as_int(matchup["seat0_wins"], context="seat0_wins")
+        matchup_seat1_wins = _as_int(matchup["seat1_wins"], context="seat1_wins")
+        matchup_draws = _as_int(matchup["draws"], context="draws")
+        matchup_truncations = _as_int(matchup["truncations"], context="truncations")
+        matchup_engine_errors = _as_int(matchup["engine_errors"], context="engine_errors")
+        decisive_games = _as_int(matchup["decisive_games"], context="decisive_games")
 
         seat0_wins += matchup_seat0_wins
         seat1_wins += matchup_seat1_wins
@@ -214,23 +212,43 @@ def _build_baseline_check(
     win_rate_threshold: float,
     posterior_min: float,
 ) -> dict[str, Any]:
-    resolved_focal_policy_id = focal_policy_id or _infer_focal_policy_id(
-        policy_ids,
-        baseline_policy_id=baseline_policy_id,
-    )
+    resolved_focal_policy_id = focal_policy_id
+    focal_policy_source = "explicit_arg" if focal_policy_id is not None else None
+    inferred_eligible_policy_ids: list[str] | None = None
+
+    if resolved_focal_policy_id is None:
+        inferred = _infer_focal_policy_id(
+            payload,
+            policy_ids,
+            baseline_policy_id=baseline_policy_id,
+        )
+        resolved_focal_policy_id = cast(str | None, inferred["focal_policy_id"])
+        focal_policy_source = cast(str | None, inferred["source"])
+        inferred_eligible_policy_ids = cast(list[str] | None, inferred.get("eligible_non_baseline_policy_ids"))
+
     result: dict[str, Any] = {
         "passed": False,
         "baseline_policy_id": baseline_policy_id,
         "focal_policy_id": resolved_focal_policy_id,
+        "focal_policy_source": focal_policy_source,
         "win_rate_threshold": win_rate_threshold,
         "posterior_probability_threshold": posterior_min,
     }
+    if inferred_eligible_policy_ids is not None:
+        result["eligible_non_baseline_policy_ids"] = inferred_eligible_policy_ids
 
     if baseline_policy_id not in policy_ids:
         result["reason"] = "baseline_policy_missing_from_final_eval"
         return result
     if resolved_focal_policy_id is None:
-        result["reason"] = "could_not_infer_non_baseline_focal_policy"
+        if inferred_eligible_policy_ids:
+            result["reason"] = "ambiguous_non_baseline_focal_policy"
+            result["message"] = (
+                "multiple eligible non-baseline policies found; "
+                "pass --focal-policy-id to choose the focal policy explicitly"
+            )
+        else:
+            result["reason"] = "could_not_infer_non_baseline_focal_policy"
         return result
     if resolved_focal_policy_id not in policy_ids:
         result["reason"] = "focal_policy_missing_from_final_eval"
@@ -278,20 +296,36 @@ def _build_baseline_check(
     return result
 
 
-def _infer_focal_policy_id(policy_ids: Sequence[str], *, baseline_policy_id: str) -> str | None:
+def _infer_focal_policy_id(
+    payload: Mapping[str, Any],
+    policy_ids: Sequence[str],
+    *,
+    baseline_policy_id: str,
+) -> dict[str, Any]:
+    metadata_focal_policy_id = _metadata_focal_policy_id(payload)
+    if metadata_focal_policy_id is not None:
+        return {
+            "focal_policy_id": metadata_focal_policy_id,
+            "source": "metadata",
+        }
+
     baseline_ids = {
         RANDOM_LEGAL_POLICY_ID,
         NO_LEAGUE_POLICY_ID,
         HEURISTIC_PUBLIC_POLICY_ID,
         baseline_policy_id,
     }
-    for policy_id in policy_ids:
-        if policy_id not in baseline_ids:
-            return policy_id
-    for policy_id in policy_ids:
-        if policy_id != baseline_policy_id:
-            return policy_id
-    return None
+    eligible_policy_ids = [policy_id for policy_id in policy_ids if policy_id not in baseline_ids]
+    if len(eligible_policy_ids) == 1:
+        return {
+            "focal_policy_id": eligible_policy_ids[0],
+            "source": "sole_eligible_non_baseline",
+        }
+    return {
+        "focal_policy_id": None,
+        "source": None,
+        "eligible_non_baseline_policy_ids": eligible_policy_ids,
+    }
 
 
 def _policy_ids(payload: Mapping[str, Any]) -> list[str]:
@@ -309,6 +343,110 @@ def _matchups(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     for index, matchup in enumerate(raw_matchups):
         matchups.append(_mapping(matchup, context=f"matchups[{index}]"))
     return matchups
+
+
+def _canonical_unordered_matchups(
+    matchups: Sequence[Mapping[str, Any]],
+    *,
+    policy_ids: Sequence[str],
+) -> list[Mapping[str, Any]]:
+    selected: dict[tuple[int, int], tuple[int, Mapping[str, Any]]] = {}
+    for index, matchup in enumerate(matchups):
+        focal_index = _matchup_policy_index(
+            matchup,
+            index_field="focal_policy_index",
+            policy_field="focal_policy_id",
+            policy_ids=policy_ids,
+            context=f"matchups[{index}]",
+        )
+        opponent_index = _matchup_policy_index(
+            matchup,
+            index_field="opponent_policy_index",
+            policy_field="opponent_policy_id",
+            policy_ids=policy_ids,
+            context=f"matchups[{index}]",
+        )
+        key = (min(focal_index, opponent_index), max(focal_index, opponent_index))
+        rank = 0 if focal_index <= opponent_index else 1
+        if key not in selected or rank < selected[key][0]:
+            selected[key] = (rank, matchup)
+    return [selected[key][1] for key in sorted(selected)]
+
+
+def _load_matchup_diagnostics(
+    *,
+    final_eval_dir: Path,
+    matchups: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for matchup in matchups:
+        diagnostics_path = final_eval_dir / str(matchup["diagnostics_path"])
+        diagnostics = _load_json_object(diagnostics_path)
+        seat_results = _mapping(diagnostics.get("seat_results"), context=f"{diagnostics_path}:seat_results")
+        seat0_wins = _as_int(seat_results.get("seat0_wins"), context=f"{diagnostics_path}:seat0_wins")
+        seat1_wins = _as_int(seat_results.get("seat1_wins"), context=f"{diagnostics_path}:seat1_wins")
+        draws = _as_int(seat_results.get("draws"), context=f"{diagnostics_path}:draws")
+        truncations = _as_int(seat_results.get("truncations"), context=f"{diagnostics_path}:truncations")
+        engine_errors = _as_int(seat_results.get("engine_errors"), context=f"{diagnostics_path}:engine_errors")
+        decisive_games = seat0_wins + seat1_wins
+        payloads.append(
+            {
+                "focal_policy_id": str(matchup["focal_policy_id"]),
+                "opponent_policy_id": str(matchup["opponent_policy_id"]),
+                "diagnostics_path": str(matchup["diagnostics_path"]),
+                "seat0_wins": seat0_wins,
+                "seat1_wins": seat1_wins,
+                "draws": draws,
+                "truncations": truncations,
+                "engine_errors": engine_errors,
+                "decisive_games": decisive_games,
+                "total_games": decisive_games + draws + truncations,
+            }
+        )
+    return payloads
+
+
+def _matchup_policy_index(
+    matchup: Mapping[str, Any],
+    *,
+    index_field: str,
+    policy_field: str,
+    policy_ids: Sequence[str],
+    context: str,
+) -> int:
+    raw_index = matchup.get(index_field)
+    if raw_index is not None:
+        return _as_int(raw_index, context=f"{context}.{index_field}")
+    policy_id = str(matchup[policy_field])
+    try:
+        return policy_ids.index(policy_id)
+    except ValueError as exc:
+        raise ValueError(f"{context}.{policy_field}={policy_id!r} is missing from policy_ids") from exc
+
+
+def _metadata_focal_policy_id(payload: Mapping[str, Any]) -> str | None:
+    metadata = _mapping(payload.get("metadata", {}), context="metadata")
+    for path in (
+        ("focal_policy_id",),
+        ("focal_policy", "policy_id"),
+        ("selection", "focal_policy_id"),
+    ):
+        value = _nested_optional_string(metadata, path=path)
+        if value is not None:
+            return value
+    return None
+
+
+def _nested_optional_string(payload: Mapping[str, Any], *, path: Sequence[str]) -> str | None:
+    current: Any = payload
+    for key in path:
+        if not isinstance(current, Mapping) or key not in current:
+            return None
+        current = current[key]
+    if isinstance(current, str):
+        normalized = current.strip()
+        return normalized or None
+    return None
 
 
 def _sum_matrix_ints(payload: Mapping[str, Any], *, field: str) -> int:
