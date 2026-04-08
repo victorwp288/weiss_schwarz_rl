@@ -9,10 +9,13 @@ from typing import Literal
 from weiss_rl.eval.harness import EvalGameRecord
 
 PayoffFoldScheme = Literal["S0", "S1", "S2"]
+PairedSeedGroupKey = tuple[str, str, str, str, int]
 
 __all__ = [
+    "PairedSeedGroupKey",
     "PayoffFoldScheme",
     "fold_game_payoff",
+    "paired_seed_group_key",
     "paired_seed_mean_score",
     "paired_seed_score",
     "paired_seed_scores",
@@ -49,13 +52,13 @@ def paired_seed_scores(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldS
     if not records:
         raise ValueError("paired_seed_scores requires at least one record")
 
-    pair_groups: dict[int, list[EvalGameRecord]] = defaultdict(list)
+    pair_groups: dict[PairedSeedGroupKey, list[EvalGameRecord]] = defaultdict(list)
     for record in records:
-        pair_groups[int(record.pair_index)].append(record)
+        pair_groups[paired_seed_group_key(record)].append(record)
 
     pair_scores: list[float] = []
-    for pair_index in sorted(pair_groups):
-        score = paired_seed_score(pair_groups[pair_index], scheme=normalized_scheme)
+    for group_key in sorted(pair_groups):
+        score = paired_seed_score(pair_groups[group_key], scheme=normalized_scheme)
         if score is not None:
             pair_scores.append(score)
     return tuple(pair_scores)
@@ -66,6 +69,16 @@ def paired_seed_mean_score(records: Sequence[EvalGameRecord], *, scheme: PayoffF
     if pair_scores:
         return _mean(pair_scores)
     raise ValueError("S2 excluded all paired seeds")
+
+
+def paired_seed_group_key(record: EvalGameRecord) -> PairedSeedGroupKey:
+    return (
+        record.focal_policy_id,
+        record.opponent_policy_id,
+        record.config_hash256,
+        record.spec_hash256,
+        int(record.episode_seed),
+    )
 
 
 def _validate_pair_records(records: Sequence[EvalGameRecord]) -> tuple[EvalGameRecord, EvalGameRecord]:

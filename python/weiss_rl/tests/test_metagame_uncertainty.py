@@ -93,6 +93,20 @@ def test_paired_seed_uncertainty_summary_computes_from_records() -> None:
     assert summary.sample_count == 8
 
 
+def test_paired_seed_uncertainty_summary_splits_reused_pair_index_by_episode_seed() -> None:
+    records = [
+        *_pair(0, "W", "L"),
+        _record(0, 0, "W", episode_seed=250),
+        _record(0, 1, "W", episode_seed=250),
+    ]
+
+    summary = paired_seed_uncertainty_summary(records, scheme="S0", sample_count=8, seed=42)
+
+    assert summary.paired_seed_count == 2
+    assert summary.mean == pytest.approx(0.75)
+    assert summary.sample_count == 8
+
+
 def test_write_posterior_samples_and_summary_json_directly(tmp_path: Path) -> None:
     samples = posterior_samples([0.0, 1.0], sample_count=4, seed=7)
     summary = bayesian_bootstrap_summary([0.0, 1.0], sample_count=4, seed=7)

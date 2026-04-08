@@ -78,6 +78,16 @@ def test_paired_seed_scores_are_sorted_by_pair_index() -> None:
     assert paired_seed_scores(shuffled, scheme="S0") == (0.5, 1.0, 0.25)
 
 
+def test_paired_seed_scores_split_reused_pair_index_by_episode_seed() -> None:
+    records = [
+        *_pair(0, "W", "L"),
+        _record(0, 0, "W", episode_seed=250),
+        _record(0, 1, "W", episode_seed=250),
+    ]
+
+    assert paired_seed_scores(records, scheme="S0") == (0.5, 1.0)
+
+
 def test_bayesian_bootstrap_summary_reports_exact_arithmetic_mean() -> None:
     summary = bayesian_bootstrap_summary([0.0, 1.0], sample_count=1, seed=7)
 
