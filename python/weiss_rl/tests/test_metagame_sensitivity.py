@@ -5,8 +5,11 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
+
+import pytest
 
 from weiss_rl.config import load_stack_config
 from weiss_rl.config.models import StopRulesConfig
@@ -62,6 +65,10 @@ def _write_final_eval_fixture(tmp_path: Path) -> Path:
     return final_eval_dir
 
 
+def _write_final_eval_summary(final_eval_dir: Path, payload: dict[str, Any]) -> None:
+    (final_eval_dir / "summary.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def test_build_sensitivity_report_writes_case_artifacts_and_deltas(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
     stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
@@ -79,6 +86,8 @@ def test_build_sensitivity_report_writes_case_artifacts_and_deltas(tmp_path: Pat
     assert payload["policy_ids"] == ["policy_gamma", "policy_alpha", "policy_beta"]
     assert sorted(payload["cases"]) == ["S0", "S1", "S2"]
     assert sorted(payload["deltas"]) == ["S1", "S2"]
+    assert payload["deltas"]["S1"]["summary_json"] == "deltas/S1/summary.json"
+    assert payload["deltas"]["S2"]["largest_matchup_pij_shifts"] == "deltas/S2/largest_matchup_pij_shifts.csv"
     assert (out_dir / "S0" / "payoff" / "matchups.csv").is_file()
     assert (out_dir / "S2" / "nash" / "mixture_mean.csv").is_file()
     assert (out_dir / "deltas" / "S2" / "summary.json").is_file()
@@ -109,6 +118,89 @@ def test_build_sensitivity_report_writes_case_artifacts_and_deltas(tmp_path: Pat
     assert summary["top_matchup_pij_shifts"][0]["focal_policy_id"] == "policy_gamma"
     assert summary["top_nash_mixture_deltas"]
     assert summary["top_alpharank_mass_deltas"]
+
+
+def test_build_sensitivity_report_rejects_unsupported_case_config(tmp_path: Path) -> None:
+    final_eval_dir = _write_final_eval_fixture(tmp_path)
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    assert stack.config.metagame is not None
+    assert stack.config.sensitivity is not None
+
+    bad_sensitivity = replace(
+        stack.config.sensitivity,
+        cases={
+            **stack.config.sensitivity.cases,
+            "S1": replace(stack.config.sensitivity.cases["S1"], draw_score=0.25),
+        },
+    )
+
+    with pytest.raises(ValueError, match=r"S1 must set draw_score=0\.5"):
+        build_sensitivity_report(
+            final_eval_dir=final_eval_dir,
+            out_dir=tmp_path / "sensitivity",
+            metagame_config=stack.config.metagame,
+            sensitivity_config=bad_sensitivity,
+        )
+
+
+def test_build_sensitivity_report_rejects_unsupported_nash_contract(tmp_path: Path) -> None:
+    final_eval_dir = _write_final_eval_fixture(tmp_path)
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    assert stack.config.metagame is not None
+    assert stack.config.sensitivity is not None
+
+    bad_metagame = replace(
+        stack.config.metagame,
+        nash=replace(stack.config.metagame.nash, threads=2),
+    )
+
+    with pytest.raises(ValueError, match=r"metagame\.nash\.threads=1"):
+        build_sensitivity_report(
+            final_eval_dir=final_eval_dir,
+            out_dir=tmp_path / "sensitivity",
+            metagame_config=bad_metagame,
+            sensitivity_config=stack.config.sensitivity,
+        )
+
+
+def test_build_sensitivity_report_rejects_mismatched_final_eval_policy_index(tmp_path: Path) -> None:
+    final_eval_dir = _write_final_eval_fixture(tmp_path)
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    assert stack.config.metagame is not None
+    assert stack.config.sensitivity is not None
+
+    summary_path = final_eval_dir / "summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload["matchups"][0]["focal_policy_index"] = 2
+    _write_final_eval_summary(final_eval_dir, payload)
+
+    with pytest.raises(ValueError, match=r"focal_policy_index=2 does not match policy_ids position"):
+        build_sensitivity_report(
+            final_eval_dir=final_eval_dir,
+            out_dir=tmp_path / "sensitivity",
+            metagame_config=stack.config.metagame,
+            sensitivity_config=stack.config.sensitivity,
+        )
+
+
+def test_build_sensitivity_report_rejects_duplicate_final_eval_matchup(tmp_path: Path) -> None:
+    final_eval_dir = _write_final_eval_fixture(tmp_path)
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    assert stack.config.metagame is not None
+    assert stack.config.sensitivity is not None
+
+    summary_path = final_eval_dir / "summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload["matchups"][-1] = dict(payload["matchups"][0])
+    _write_final_eval_summary(final_eval_dir, payload)
+
+    with pytest.raises(ValueError, match=r"duplicate canonical matchup"):
+        build_sensitivity_report(
+            final_eval_dir=final_eval_dir,
+            out_dir=tmp_path / "sensitivity",
+            metagame_config=stack.config.metagame,
+            sensitivity_config=stack.config.sensitivity,
+        )
 
 
 def test_metagame_entrypoint_writes_sensitivity_tree(tmp_path: Path) -> None:

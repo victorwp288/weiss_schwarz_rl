@@ -22,6 +22,9 @@ from weiss_rl.repro import canonical_json_bytes, stable_hash64
 
 _SUPPORT_PROBABILITY_THRESHOLD = 0.05
 _TOP_SHIFT_LIMIT = 10
+_SUPPORTED_SENSITIVITY_CASES = frozenset({"S0", "S1", "S2"})
+_SUPPORTED_NASH_IMPL = "weiss_rl_nash_lp_v1"
+_SUPPORTED_NASH_TIE_BREAK = "deterministic_secondary_lp_by_policy_id"
 
 __all__ = [
     "build_sensitivity_report",
@@ -67,6 +70,7 @@ def build_sensitivity_report(
 ) -> dict[str, Any]:
     context = _load_final_eval_context(final_eval_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    _validate_supported_nash_config(metagame_config)
 
     if "S0" not in sensitivity_config.cases:
         raise ValueError("sensitivity config must define S0 for delta baselines")
@@ -96,6 +100,7 @@ def build_sensitivity_report(
 
     delta_paths = _write_delta_artifacts(
         out_dir=out_dir / "deltas",
+        summary_root=out_dir,
         baseline=case_artifacts["S0"],
         cases=case_artifacts,
     )
@@ -116,19 +121,52 @@ def _load_final_eval_context(final_eval_dir: Path) -> FinalEvalContext:
     summary_path = final_eval_dir / "summary.json"
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     policy_ids = tuple(_require_str_list(payload.get("policy_ids"), field_name="policy_ids"))
+    if len(set(policy_ids)) != len(policy_ids):
+        raise ValueError("final_eval policy_ids must be unique")
     policy_index = {policy_id: index for index, policy_id in enumerate(policy_ids)}
     raw_matchups = payload.get("matchups")
     if not isinstance(raw_matchups, list):
         raise ValueError("final_eval summary must include a matchups list")
 
     matchups: list[FinalEvalMatchup] = []
+    canonical_keys: set[tuple[int, int]] = set()
     for item in raw_matchups:
         if not isinstance(item, dict):
             raise ValueError("final_eval matchups must contain objects")
-        focal_policy_id = str(item["focal_policy_id"])
-        opponent_policy_id = str(item["opponent_policy_id"])
-        focal_index = int(item.get("focal_policy_index", policy_index[focal_policy_id]))
-        opponent_index = int(item.get("opponent_policy_index", policy_index[opponent_policy_id]))
+        focal_policy_id = _require_matchup_policy_id(
+            item,
+            field_name="focal_policy_id",
+            policy_index=policy_index,
+        )
+        opponent_policy_id = _require_matchup_policy_id(
+            item,
+            field_name="opponent_policy_id",
+            policy_index=policy_index,
+        )
+        focal_index = _require_matchup_policy_index(
+            item,
+            index_field="focal_policy_index",
+            policy_id=focal_policy_id,
+            policy_index=policy_index,
+        )
+        opponent_index = _require_matchup_policy_index(
+            item,
+            index_field="opponent_policy_index",
+            policy_id=opponent_policy_id,
+            policy_index=policy_index,
+        )
+        if focal_index > opponent_index:
+            raise ValueError(
+                "final_eval matchups must be canonical with "
+                "focal_policy_index <= opponent_policy_index"
+            )
+        canonical_key = (focal_index, opponent_index)
+        if canonical_key in canonical_keys:
+            raise ValueError(
+                "final_eval summary contains duplicate canonical matchup: "
+                f"({focal_policy_id!r}, {opponent_policy_id!r})"
+            )
+        canonical_keys.add(canonical_key)
         episodes_path = final_eval_dir / str(item["episodes_path"])
         matchups.append(
             FinalEvalMatchup(
@@ -141,22 +179,19 @@ def _load_final_eval_context(final_eval_dir: Path) -> FinalEvalContext:
             )
         )
     expected_matchups = (len(policy_ids) * (len(policy_ids) + 1)) // 2
-    if len(matchups) != expected_matchups:
+    if len(canonical_keys) != expected_matchups:
         raise ValueError(
             "final_eval summary is missing canonical matchups: "
-            f"expected {expected_matchups}, found {len(matchups)}"
+            f"expected {expected_matchups}, found {len(canonical_keys)}"
         )
     return FinalEvalContext(policy_ids=policy_ids, matchups=tuple(matchups))
 
 
 def _resolve_scheme(*, case_id: str, case_config: SensitivityCaseConfig) -> PayoffFoldScheme:
     normalized = case_id.strip().upper()
-    if normalized not in {"S0", "S1", "S2"}:
+    if normalized not in _SUPPORTED_SENSITIVITY_CASES:
         raise ValueError(f"unsupported sensitivity case: {case_id!r}")
-    if normalized == "S2":
-        handling = (case_config.truncation_handling or "").strip()
-        if handling != "exclude_from_payoff_aggregation":
-            raise ValueError("S2 must set truncation_handling=exclude_from_payoff_aggregation")
+    _validate_supported_case_config(case_id=normalized, case_config=case_config)
     return normalized  # type: ignore[return-value]
 
 
@@ -367,6 +402,7 @@ def _write_case_artifacts(
 def _write_delta_artifacts(
     *,
     out_dir: Path,
+    summary_root: Path,
     baseline: CaseArtifacts,
     cases: Mapping[str, CaseArtifacts],
 ) -> dict[str, dict[str, str]]:
@@ -466,15 +502,104 @@ def _write_delta_artifacts(
             },
         )
         payload[case_id] = {
-            "nash_sensitivity_delta_vs_s0": _relative_to(case_dir / "nash_sensitivity_delta_vs_s0.csv", root=out_dir),
+            "nash_sensitivity_delta_vs_s0": _relative_to(
+                case_dir / "nash_sensitivity_delta_vs_s0.csv",
+                root=summary_root,
+            ),
             "alpharank_sensitivity_delta_vs_s0": _relative_to(
                 case_dir / "alpharank_sensitivity_delta_vs_s0.csv",
-                root=out_dir,
+                root=summary_root,
             ),
-            "largest_matchup_pij_shifts": _relative_to(case_dir / "largest_matchup_pij_shifts.csv", root=out_dir),
-            "summary_json": _relative_to(case_dir / "summary.json", root=out_dir),
+            "largest_matchup_pij_shifts": _relative_to(case_dir / "largest_matchup_pij_shifts.csv", root=summary_root),
+            "summary_json": _relative_to(case_dir / "summary.json", root=summary_root),
         }
     return payload
+
+
+def _validate_supported_nash_config(metagame_config: MetagameConfig) -> None:
+    nash_config = metagame_config.nash
+    if nash_config.impl != _SUPPORTED_NASH_IMPL:
+        raise ValueError(f"unsupported metagame.nash.impl for sensitivity reporting: {nash_config.impl!r}")
+    if nash_config.threads != 1:
+        raise ValueError(
+            "sensitivity reporting requires metagame.nash.threads=1, "
+            f"got {nash_config.threads}"
+        )
+    if nash_config.tie_break != _SUPPORTED_NASH_TIE_BREAK:
+        raise ValueError(
+            "sensitivity reporting requires metagame.nash.tie_break="
+            f"{_SUPPORTED_NASH_TIE_BREAK!r}, got {nash_config.tie_break!r}"
+        )
+
+
+def _validate_supported_case_config(*, case_id: str, case_config: SensitivityCaseConfig) -> None:
+    _require_case_float(
+        case_id=case_id,
+        field_name="draw_score",
+        value=case_config.draw_score,
+        expected=0.5,
+    )
+
+    if case_id in {"S0", "S1"}:
+        if case_config.truncation_score is None:
+            raise ValueError(f"{case_id} must set truncation_score=0.5")
+        _require_case_float(
+            case_id=case_id,
+            field_name="truncation_score",
+            value=case_config.truncation_score,
+            expected=0.5,
+        )
+        if case_config.truncation_handling is not None:
+            raise ValueError(
+                f"{case_id} must not set truncation_handling, got {case_config.truncation_handling!r}"
+            )
+        return
+
+    if case_config.truncation_score is not None:
+        raise ValueError(f"{case_id} must not set truncation_score, got {case_config.truncation_score}")
+    if case_config.truncation_handling != "exclude_from_payoff_aggregation":
+        raise ValueError(f"{case_id} must set truncation_handling='exclude_from_payoff_aggregation'")
+
+
+def _require_case_float(*, case_id: str, field_name: str, value: float, expected: float, tol: float = 1.0e-12) -> None:
+    if abs(float(value) - expected) > tol:
+        raise ValueError(f"{case_id} must set {field_name}={expected}, got {value}")
+
+
+def _require_matchup_policy_id(
+    item: Mapping[str, Any],
+    *,
+    field_name: str,
+    policy_index: Mapping[str, int],
+) -> str:
+    value = item.get(field_name)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"final_eval matchup {field_name} must be a non-empty string")
+    if value not in policy_index:
+        raise ValueError(f"final_eval matchup {field_name}={value!r} is missing from policy_ids")
+    return value
+
+
+def _require_matchup_policy_index(
+    item: Mapping[str, Any],
+    *,
+    index_field: str,
+    policy_id: str,
+    policy_index: Mapping[str, int],
+) -> int:
+    if index_field not in item:
+        raise ValueError(f"final_eval matchup missing {index_field}")
+    raw_value = item[index_field]
+    if isinstance(raw_value, bool) or not isinstance(raw_value, int):
+        raise ValueError(f"final_eval matchup {index_field} must be an integer")
+    index = int(raw_value)
+    expected_index = policy_index[policy_id]
+    if index != expected_index:
+        raise ValueError(
+            f"final_eval matchup {index_field}={index} does not match policy_ids position "
+            f"for {policy_id!r} (expected {expected_index})"
+        )
+    return index
 
 
 def _observed_pair_count(records: Sequence[EvalGameRecord]) -> int:
