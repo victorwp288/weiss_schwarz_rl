@@ -44,8 +44,6 @@ def build_p_mean_and_counts(
             *{record.opponent_policy_id for record in records},
         }
     )
-    policy_index = {policy_id: index for index, policy_id in enumerate(policy_ids)}
-
     pair_groups: dict[tuple[str, str, int], list[EvalGameRecord]] = defaultdict(list)
     for record in records:
         pair_groups[(record.focal_policy_id, record.opponent_policy_id, int(record.pair_index))].append(record)
@@ -53,7 +51,7 @@ def build_p_mean_and_counts(
     directed_scores: dict[tuple[str, str], list[float]] = defaultdict(list)
     directed_counts: dict[tuple[str, str], int] = defaultdict(int)
 
-    for (focal_policy_id, opponent_policy_id, pair_index), group in pair_groups.items():
+    for (focal_policy_id, opponent_policy_id, _pair_index), group in pair_groups.items():
         score = paired_seed_score(group, scheme=scheme)
         if score is None:
             continue
@@ -83,6 +81,7 @@ def build_p_mean_and_counts(
             mean_ji = _mean(scores_ji) if count_ji else None
 
             if mean_ij is None:
+                assert mean_ji is not None
                 combined_mean = 1.0 - mean_ji
                 combined_count = count_ji
             elif mean_ji is None:

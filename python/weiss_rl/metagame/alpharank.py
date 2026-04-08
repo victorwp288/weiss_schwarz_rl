@@ -99,7 +99,7 @@ def write_stationary_mean_csv(
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["policy_id", "stationary_probability"])
-        for policy_id, prob in zip(policy_ids, stationary_arr.tolist()):
+        for policy_id, prob in zip(policy_ids, stationary_arr.tolist(), strict=True):
             writer.writerow([policy_id, f"{float(prob):.12g}"])
 
 
