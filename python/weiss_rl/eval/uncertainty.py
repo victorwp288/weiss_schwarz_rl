@@ -16,6 +16,7 @@ _DECISIVE_THRESHOLD = 0.5
 
 __all__ = [
     "EvalUncertaintySummary",
+    "bayesian_bootstrap_posterior_samples",
     "bayesian_bootstrap_summary",
     "paired_seed_uncertainty_summary",
 ]
@@ -33,6 +34,17 @@ class EvalUncertaintySummary:
     sample_count: int
 
 
+def bayesian_bootstrap_posterior_samples(
+    scores: Sequence[float],
+    *,
+    sample_count: int = _DEFAULT_SAMPLE_COUNT,
+    seed: int | None = None,
+) -> tuple[float, ...]:
+    score_array = _coerce_scores(scores)
+    posterior_samples = _sample_posterior_means(score_array, sample_count=sample_count, seed=seed)
+    return tuple(float(sample) for sample in posterior_samples)
+
+
 def bayesian_bootstrap_summary(
     scores: Sequence[float],
     *,
@@ -41,7 +53,10 @@ def bayesian_bootstrap_summary(
     seed: int | None = None,
 ) -> EvalUncertaintySummary:
     score_array = _coerce_scores(scores)
-    posterior_samples = _sample_posterior_means(score_array, sample_count=sample_count, seed=seed)
+    posterior_samples = np.asarray(
+        bayesian_bootstrap_posterior_samples(score_array.tolist(), sample_count=sample_count, seed=seed),
+        dtype=np.float64,
+    )
     ci_low, ci_high = _credible_interval(posterior_samples, ci_level=ci_level)
     mean = _mean(score_array)
     return EvalUncertaintySummary(
