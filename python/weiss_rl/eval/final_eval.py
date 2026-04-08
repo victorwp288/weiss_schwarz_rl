@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -39,6 +40,9 @@ _MATRIX_FIELDS: tuple[str, ...] = (
     "prob_gt_half",
     "prob_lt_half",
     "paired_seed_count",
+    "observed_paired_seeds",
+    "excluded_paired_seeds",
+    "has_payoff_samples",
     "games",
     "wins",
     "losses",
@@ -188,6 +192,7 @@ def _resolve_policy_ids(
         resolved = [str(policy_id) for policy_id in policy_ids]
         if not resolved:
             raise ValueError("policy_ids must contain at least one policy")
+        _validate_policy_ids(resolved, context="policy_ids")
         return resolved, {"mode": "explicit", "policy_count": len(resolved)}
 
     missing: list[str] = []
@@ -212,6 +217,12 @@ def _resolve_policy_ids(
         config=selection_config,
         final_policy_set_size=final_policy_set_size,
     )
+    _validate_policy_ids(resolved, context="resolved final policy set")
+    if len(resolved) < int(final_policy_set_size):
+        raise ValueError(
+            "resolved final policy set is underfilled: "
+            f"expected {int(final_policy_set_size)} policies, found {len(resolved)}"
+        )
     return resolved, {
         "mode": "deterministic_v1",
         "policy_count": len(resolved),
@@ -219,6 +230,13 @@ def _resolve_policy_ids(
         "dev_eval_summaries_path": dev_eval_summaries_path.as_posix(),
         "final_policy_set_size": int(final_policy_set_size),
     }
+
+
+def _validate_policy_ids(policy_ids: Sequence[str], *, context: str) -> None:
+    duplicates = sorted(policy_id for policy_id, count in Counter(policy_ids).items() if count > 1)
+    if duplicates:
+        duplicate_list = ", ".join(repr(policy_id) for policy_id in duplicates)
+        raise ValueError(f"{context} must be unique, duplicate entries: {duplicate_list}")
 
 
 def _validate_seed_budget(*, paired_seeds: Sequence[int], stage1_paired_seeds: int, max_paired_seeds: int) -> None:
@@ -328,7 +346,9 @@ def _run_matchup(
             {
                 "focal_policy_id": focal_policy_id,
                 "opponent_policy_id": opponent_policy_id,
-                "sample_count": sample_count,
+                "requested_sample_count": sample_count,
+                "sample_count": len(posterior_samples),
+                "has_payoff_samples": summary_payload["has_payoff_samples"],
                 "samples": list(posterior_samples),
             },
             indent=2,
@@ -408,6 +428,8 @@ def _matchup_posterior_samples(
     seed: int,
 ) -> tuple[float, ...]:
     scores = paired_seed_scores(records, scheme=scheme)
+    if not scores:
+        return ()
     return bayesian_bootstrap_posterior_samples(scores, sample_count=sample_count, seed=seed)
 
 
@@ -427,7 +449,7 @@ def _build_final_eval_payload(
     seed_file_path: Path | None,
 ) -> dict[str, Any]:
     results_by_key = {
-        (str(result["focal_policy_id"]), str(result["opponent_policy_id"])): result for result in matchup_results
+        (int(result["focal_index"]), int(result["opponent_index"])): result for result in matchup_results
     }
     matrices = {
         field: _build_matrix(
@@ -439,10 +461,10 @@ def _build_final_eval_payload(
     }
     posterior_matrix = [
         [
-            list(results_by_key[(focal_policy_id, opponent_policy_id)]["posterior_samples"])
-            for opponent_policy_id in policy_ids
+            list(results_by_key[(focal_index, opponent_index)]["posterior_samples"])
+            for opponent_index, _opponent_policy_id in enumerate(policy_ids)
         ]
-        for focal_policy_id in policy_ids
+        for focal_index, _focal_policy_id in enumerate(policy_ids)
     ]
     top_level_metadata = dict(metadata or {})
     top_level_metadata.update(
@@ -492,6 +514,9 @@ def _build_final_eval_payload(
                     root=output_dir,
                 ),
                 "paired_seed_count": result["summary"]["paired_seeds"],
+                "observed_paired_seed_count": result["summary"]["observed_paired_seeds"],
+                "excluded_paired_seed_count": result["summary"]["excluded_paired_seeds"],
+                "has_payoff_samples": result["summary"]["has_payoff_samples"],
                 "stop_reason": result["summary"]["stop_reason"],
             }
             for result in matchup_results
@@ -502,15 +527,15 @@ def _build_final_eval_payload(
 def _build_matrix(
     *,
     policy_ids: Sequence[str],
-    results_by_key: Mapping[tuple[str, str], dict[str, Any]],
+    results_by_key: Mapping[tuple[int, int], dict[str, Any]],
     field: str,
 ) -> dict[str, Any]:
     values = [
         [
-            _matrix_value(results_by_key[(focal_policy_id, opponent_policy_id)]["summary"], field=field)
-            for opponent_policy_id in policy_ids
+            _matrix_value(results_by_key[(focal_index, opponent_index)]["summary"], field=field)
+            for opponent_index, _opponent_policy_id in enumerate(policy_ids)
         ]
-        for focal_policy_id in policy_ids
+        for focal_index, _focal_policy_id in enumerate(policy_ids)
     ]
     return {
         "policy_ids": list(policy_ids),
@@ -565,6 +590,9 @@ def _write_final_eval_artifacts(
             "opponent_policy_id": result["opponent_policy_id"],
             "matchup_dir": _relative_to(Path(result["matchup_dir"]), root=output_dir),
             "paired_seed_count": result["summary"]["paired_seeds"],
+            "observed_paired_seed_count": result["summary"]["observed_paired_seeds"],
+            "excluded_paired_seed_count": result["summary"]["excluded_paired_seeds"],
+            "has_payoff_samples": result["summary"]["has_payoff_samples"],
             "stop_reason": result["summary"]["stop_reason"],
         }
         for result in matchup_results

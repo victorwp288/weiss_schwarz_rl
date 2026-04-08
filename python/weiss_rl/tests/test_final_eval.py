@@ -6,6 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
+import pytest
+
 from weiss_rl.config import load_stack_config
 from weiss_rl.config.models import StopRulesConfig
 from weiss_rl.eval import resolve_final_policy_set, run_final_eval
@@ -242,6 +244,9 @@ def test_run_final_eval_writes_matrix_exports_and_posterior_samples(tmp_path: Pa
     assert matchup_rows[0]["matchup_dir"] == "matchups/00_policy_beta__vs__00_policy_beta"
     assert matchup_rows[1]["matchup_dir"] == "matchups/00_policy_beta__vs__01_policy_alpha"
     assert matchup_rows[1]["paired_seed_count"] == "3"
+    assert matchup_rows[1]["observed_paired_seed_count"] == "3"
+    assert matchup_rows[1]["excluded_paired_seed_count"] == "0"
+    assert matchup_rows[1]["has_payoff_samples"] == "True"
     assert matchup_rows[2]["stop_reason"] == "decisive"
 
     decisive_summary = json.loads(
@@ -264,9 +269,126 @@ def test_run_final_eval_writes_matrix_exports_and_posterior_samples(tmp_path: Pa
     assert decisive_summary["summary"]["losses"] == 4
     assert decisive_summary["evaluation_context"]["used_paired_seeds"] == [11, 22]
     assert budget_summary["stop_reason"] == "budget"
+    assert budget_summary["observed_paired_seeds"] == 3
+    assert budget_summary["excluded_paired_seeds"] == 0
+    assert budget_summary["has_payoff_samples"] is True
     assert budget_summary["evaluation_context"]["used_paired_seeds"] == [11, 22, 33]
     assert matchup_samples["sample_count"] == 16
     assert len(matchup_samples["samples"]) == 16
     assert (output_dir / "matchups" / "00_policy_beta__vs__01_policy_alpha" / "diagnostics.json").is_file()
     assert (output_dir / "matchups" / "00_policy_beta__vs__01_policy_alpha" / "episodes.jsonl").is_file()
     assert len(runner.calls) == 18
+
+
+def test_run_final_eval_rejects_duplicate_explicit_policy_ids(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="policy_ids must be unique"):
+        run_final_eval(
+            output_dir=tmp_path / "final_eval",
+            runner=_FakeMatrixRunner({}),
+            policy_ids=["policy_dup", "policy_dup"],
+            paired_seeds=[11],
+            stage1_paired_seeds=1,
+            max_paired_seeds=1,
+            stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+            run_id256=_RUN_ID256,
+            config_hash256=_CONFIG_HASH256,
+            spec_hash256=_SPEC_HASH256,
+        )
+
+
+def test_run_final_eval_rejects_underfilled_deterministic_selection(tmp_path: Path) -> None:
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    config = _selection_config(
+        include_random_legal_baseline_b0=False,
+        include_no_league_baseline_b1=False,
+        include_heuristic_public_b2_if_exists=False,
+        include_final_champion_snapshot=False,
+        include_spaced_snapshots_near_percent_updates=(),
+    )
+
+    with pytest.raises(ValueError, match="underfilled"):
+        run_final_eval(
+            output_dir=tmp_path / "final_eval",
+            runner=_FakeMatrixRunner({}),
+            paired_seeds=[11],
+            stage1_paired_seeds=1,
+            max_paired_seeds=1,
+            stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+            run_id256=_RUN_ID256,
+            config_hash256=_CONFIG_HASH256,
+            spec_hash256=_SPEC_HASH256,
+            snapshot_registry_path=snapshot_registry_path,
+            dev_eval_summaries_path=dev_eval_summaries_path,
+            selection_config=config,
+            final_policy_set_size=3,
+        )
+
+
+def test_run_final_eval_emits_explicit_s2_no_included_pair_artifacts(tmp_path: Path) -> None:
+    output_dir = tmp_path / "final_eval"
+    policies = ["policy_alpha", "policy_beta"]
+    outcomes: dict[tuple[str, str, int, int], OutcomeToken] = {
+        (focal_policy_id, opponent_policy_id, pair_index, swap_index): "T"
+        for focal_policy_id in policies
+        for opponent_policy_id in policies
+        for pair_index in range(2)
+        for swap_index in (0, 1)
+    }
+    runner = _FakeMatrixRunner(outcomes)
+
+    payload = run_final_eval(
+        output_dir=output_dir,
+        runner=runner,
+        policy_ids=policies,
+        paired_seeds=[11, 22],
+        stage1_paired_seeds=1,
+        max_paired_seeds=2,
+        stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+        run_id256=_RUN_ID256,
+        config_hash256=_CONFIG_HASH256,
+        spec_hash256=_SPEC_HASH256,
+        scheme="S2",
+        sample_count=16,
+    )
+
+    assert payload["matrices"]["paired_seed_count"]["values"] == [[0, 0], [0, 0]]
+    assert payload["matrices"]["observed_paired_seeds"]["values"] == [[2, 2], [2, 2]]
+    assert payload["matrices"]["excluded_paired_seeds"]["values"] == [[2, 2], [2, 2]]
+    assert payload["matrices"]["has_payoff_samples"]["values"] == [[False, False], [False, False]]
+    assert payload["matrices"]["stop_reason"]["values"] == [
+        ["no_included_pairs", "no_included_pairs"],
+        ["no_included_pairs", "no_included_pairs"],
+    ]
+    assert payload["posterior_samples"]["values"] == [[[], []], [[], []]]
+
+    matchup_summary = json.loads(
+        (output_dir / "matchups" / "00_policy_alpha__vs__01_policy_beta" / "matchup_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    matchup_samples = json.loads(
+        (output_dir / "matchups" / "00_policy_alpha__vs__01_policy_beta" / "posterior_samples.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert matchup_summary["summary"]["truncations"] == 4
+    assert matchup_summary["paired_seeds"] == 0
+    assert matchup_summary["observed_paired_seeds"] == 2
+    assert matchup_summary["excluded_paired_seeds"] == 2
+    assert matchup_summary["has_payoff_samples"] is False
+    assert matchup_summary["stop_reason"] == "no_included_pairs"
+    assert matchup_summary["uncertainty"] == {
+        "mean": None,
+        "ci_low": None,
+        "ci_high": None,
+        "ci_half_width": None,
+        "prob_gt_half": None,
+        "prob_lt_half": None,
+        "paired_seed_count": 0,
+        "sample_count": 0,
+    }
+    assert matchup_samples["requested_sample_count"] == 16
+    assert matchup_samples["sample_count"] == 0
+    assert matchup_samples["has_payoff_samples"] is False
+    assert matchup_samples["samples"] == []
