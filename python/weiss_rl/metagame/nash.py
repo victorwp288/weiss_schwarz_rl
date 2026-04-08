@@ -195,7 +195,7 @@ def write_mixture_mean_csv(path: Path, policy_ids: Sequence[str], mixture: np.nd
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["policy_id", "mixture"])
-        for policy_id, weight in zip(policy_ids, mixture_arr.tolist()):
+        for policy_id, weight in zip(policy_ids, mixture_arr.tolist(), strict=True):
             writer.writerow([policy_id, f"{float(weight):.12g}"])
 
 

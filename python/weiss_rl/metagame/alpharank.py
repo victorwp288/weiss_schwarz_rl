@@ -8,12 +8,16 @@ from typing import Sequence
 
 import numpy as np
 
+_STATIONARY_TOL = 1e-15
+_STATIONARY_MAX_ITERS = 100_000
+_TRANSITION_ATOL = 1e-12
+
 
 def normalize_stationary(scores: np.ndarray) -> np.ndarray:
     arr = np.asarray(scores, dtype=np.float64)
     if np.any(arr < 0):
         raise ValueError("scores must be non-negative")
-    total = float(np.sum(arr))
+    total = float(np.sum(arr, dtype=np.float64))
     if total <= 0:
         raise ValueError("sum(scores) must be > 0")
     return arr / total
@@ -29,19 +33,19 @@ def compute_alpharank_stationary(
     use_inf_alpha: bool = False,
     inf_alpha_eps: float = 0.01,
 ) -> np.ndarray:
-    """Compute the AlphaRank stationary distribution for policy ranking.
+    """Compute the single-population AlphaRank stationary distribution.
 
     Args:
-        p_mean: Payoff mean matrix (n x n).
+        p_mean: Pairwise payoff-probability matrix (n x n).
         policy_ids: Optional policy identifiers.
-        m: Number of iterations.
-        alpha: Selection strength parameter.
-        local_selection: Whether to use local selection model.
-        use_inf_alpha: Whether to use infinite alpha approximation.
-        inf_alpha_eps: Epsilon for infinite alpha approximation.
+        m: Population size.
+        alpha: Ranking intensity / selection strength.
+        local_selection: Whether to use the pinned local-selection model.
+        use_inf_alpha: Whether to use the infinite-alpha fixation limit.
+        inf_alpha_eps: Tie tolerance used only for infinite-alpha comparisons.
 
     Returns:
-        Stationary distribution as numpy array.
+        Stationary distribution as a numpy array.
     """
     p_mean_arr = np.asarray(p_mean, dtype=np.float64)
     if p_mean_arr.ndim != 2 or p_mean_arr.shape[0] != p_mean_arr.shape[1]:
@@ -52,55 +56,48 @@ def compute_alpharank_stationary(
         raise ValueError("p_mean must contain at least one policy")
     if policy_ids is not None and len(policy_ids) != n:
         raise ValueError("policy_ids length must match p_mean dimensions")
-    if np.isnan(p_mean_arr).any():
-        raise ValueError("p_mean must not contain NaN values")
+    if not np.isfinite(p_mean_arr).all():
+        raise ValueError("p_mean must contain only finite values")
+    if m < 1:
+        raise ValueError("m must be >= 1")
+    if alpha < 1:
+        raise ValueError("alpha must be >= 1")
+    if inf_alpha_eps < 0.0:
+        raise ValueError("inf_alpha_eps must be >= 0")
     if not local_selection:
         raise NotImplementedError("Global selection not implemented")
+    if n == 1:
+        return np.ones(1, dtype=np.float64)
 
-    # Initialize uniform distribution
-    pi = np.ones(n, dtype=np.float64) / n
-
-    for _ in range(m):
-        # Compute fitness: expected payoff against current population
-        fitness = p_mean_arr @ pi
-
-        # Compute transition probabilities P[j,i] = prob that i beats j
-        diff = fitness[:, None] - fitness[None, :]
-        
-        if use_inf_alpha:
-            # Infinite alpha: i beats j if fitness_i > fitness_j - eps
-            P = (diff > -inf_alpha_eps).astype(np.float64)
-        else:
-            # Sigmoid with selection strength alpha
-            P = 1.0 / (1.0 + np.exp(-alpha * diff))
-
-        # Update distribution: π_{t+1} = π_t @ P^T
-        pi = pi @ P.T
-        
-        # Normalize to ensure it's a valid distribution
-        pi = normalize_stationary(pi)
-
-    return pi
+    transition_matrix = _build_transition_matrix(
+        p_mean_arr,
+        m=m,
+        alpha=alpha,
+        use_inf_alpha=use_inf_alpha,
+        tie_tolerance=inf_alpha_eps,
+    )
+    return _solve_stationary_distribution(transition_matrix)
 
 
-def write_stationary_mean_csv(
-    path: Path, 
-    policy_ids: Sequence[str], 
-    stationary: np.ndarray
-) -> None:
-    """Write the AlphaRank stationary distribution to a CSV file."""
+def write_stationary_mean_csv(path: Path, policy_ids: Sequence[str], stationary: np.ndarray) -> None:
+    """Write the AlphaRank stationary distribution to a ranked CSV file."""
     stationary_arr = np.asarray(stationary, dtype=np.float64)
     if stationary_arr.ndim != 1:
         raise ValueError("stationary must be a one-dimensional array")
     if len(policy_ids) != stationary_arr.shape[0]:
         raise ValueError("policy_ids length must match stationary length")
 
+    ranked_rows = sorted(
+        zip(policy_ids, stationary_arr.tolist(), strict=True),
+        key=lambda item: (-item[1], item[0]),
+    )
+
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["policy_id", "stationary_probability"])
-        for policy_id, prob in zip(policy_ids, stationary_arr.tolist()):
-            writer.writerow([policy_id, f"{float(prob):.12g}"])
+        writer.writerow(["rank", "policy_id", "stationary_probability"])
+        for rank, (policy_id, prob) in enumerate(ranked_rows, start=1):
+            writer.writerow([rank, policy_id, f"{float(prob):.12g}"])
 
 
 def write_alpharank_artifacts(
@@ -110,3 +107,107 @@ def write_alpharank_artifacts(
 ) -> None:
     """Write AlphaRank artifacts to files."""
     write_stationary_mean_csv(stationary_mean_csv, policy_ids, stationary)
+
+
+def _build_transition_matrix(
+    p_mean: np.ndarray,
+    *,
+    m: int,
+    alpha: int,
+    use_inf_alpha: bool,
+    tie_tolerance: float,
+) -> np.ndarray:
+    num_policies = p_mean.shape[0]
+    transition_matrix = np.zeros((num_policies, num_policies), dtype=np.float64)
+    mutation_mass = 1.0 / float(num_policies - 1)
+
+    for resident_index in range(num_policies):
+        row_mass = 0.0
+        for mutant_index in range(num_policies):
+            if mutant_index == resident_index:
+                continue
+            delta = _local_selection_delta(p_mean, resident_index=resident_index, mutant_index=mutant_index)
+            fixation = _pairwise_fixation_probability(
+                delta=delta,
+                m=m,
+                alpha=alpha,
+                use_inf_alpha=use_inf_alpha,
+                tie_tolerance=tie_tolerance,
+            )
+            transition_probability = mutation_mass * fixation
+            transition_matrix[resident_index, mutant_index] = transition_probability
+            row_mass += transition_probability
+
+        self_loop = 1.0 - row_mass
+        if self_loop < 0.0 and self_loop > -_TRANSITION_ATOL:
+            self_loop = 0.0
+        if self_loop < 0.0:
+            raise RuntimeError("AlphaRank transition row mass exceeded 1")
+        transition_matrix[resident_index, resident_index] = self_loop
+
+    row_sums = np.sum(transition_matrix, axis=1, dtype=np.float64)
+    if not np.allclose(row_sums, 1.0, atol=_TRANSITION_ATOL, rtol=0.0):
+        raise RuntimeError("AlphaRank transition matrix must be row-stochastic")
+    return transition_matrix
+
+
+def _local_selection_delta(p_mean: np.ndarray, *, resident_index: int, mutant_index: int) -> float:
+    return float(p_mean[mutant_index, resident_index] - p_mean[resident_index, mutant_index])
+
+
+def _pairwise_fixation_probability(
+    *,
+    delta: float,
+    m: int,
+    alpha: int,
+    use_inf_alpha: bool,
+    tie_tolerance: float,
+) -> float:
+    if m == 1:
+        return 1.0
+
+    if use_inf_alpha:
+        if delta > tie_tolerance:
+            return 1.0
+        if delta < -tie_tolerance:
+            return 0.0
+        return 1.0 / float(m)
+
+    if delta == 0.0:
+        return 1.0 / float(m)
+
+    exponents = -(float(alpha) * delta) * np.arange(m, dtype=np.float64)
+    max_exponent = float(np.max(exponents))
+    shifted_sum = float(np.sum(np.exp(exponents - max_exponent), dtype=np.float64))
+    log_denom = max_exponent + float(np.log(shifted_sum))
+    return float(np.exp(-log_denom))
+
+
+def _solve_stationary_distribution(transition_matrix: np.ndarray) -> np.ndarray:
+    num_policies = transition_matrix.shape[0]
+    system: np.ndarray = transition_matrix.T - np.eye(num_policies, dtype=np.float64)
+    system[-1, :] = 1.0
+    rhs: np.ndarray = np.zeros(num_policies, dtype=np.float64)
+    rhs[-1] = 1.0
+
+    try:
+        stationary = np.linalg.solve(system, rhs)
+    except np.linalg.LinAlgError:
+        stationary = _power_iteration_stationary(transition_matrix)
+    else:
+        if not np.isfinite(stationary).all() or np.any(stationary < -_TRANSITION_ATOL):
+            stationary = _power_iteration_stationary(transition_matrix)
+
+    clipped = np.clip(stationary, a_min=0.0, a_max=None)
+    return normalize_stationary(clipped)
+
+
+def _power_iteration_stationary(transition_matrix: np.ndarray) -> np.ndarray:
+    num_policies = transition_matrix.shape[0]
+    stationary = np.full(num_policies, 1.0 / float(num_policies), dtype=np.float64)
+    for _ in range(_STATIONARY_MAX_ITERS):
+        next_stationary = stationary @ transition_matrix
+        if float(np.linalg.norm(next_stationary - stationary, ord=1)) <= _STATIONARY_TOL:
+            return next_stationary
+        stationary = next_stationary
+    raise RuntimeError("AlphaRank stationary distribution failed to converge")

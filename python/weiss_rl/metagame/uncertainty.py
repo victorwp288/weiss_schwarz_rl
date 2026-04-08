@@ -87,7 +87,7 @@ def paired_seed_uncertainty_summary(
 
 
 def posterior_samples(
-    scores: Sequence[float], *, sample_count: int = _DEFAULT_SAMPLE_COUNT, seed: int | None = None
+    scores: Sequence[float] | np.ndarray, *, sample_count: int = _DEFAULT_SAMPLE_COUNT, seed: int | None = None
 ) -> np.ndarray:
     score_array = _coerce_scores(scores)
     if sample_count <= 0:
@@ -120,7 +120,7 @@ def write_uncertainty_artifacts(
     write_uncertainty_summary_json(summary_path, summary)
 
 
-def _coerce_scores(scores: Sequence[float]) -> np.ndarray:
+def _coerce_scores(scores: Sequence[float] | np.ndarray) -> np.ndarray:
     score_array = np.asarray(scores, dtype=np.float64)
     if score_array.ndim != 1 or score_array.size == 0:
         raise ValueError("scores must be a non-empty 1D sequence")
