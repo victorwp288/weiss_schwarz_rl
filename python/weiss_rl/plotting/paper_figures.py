@@ -5,9 +5,10 @@ from __future__ import annotations
 import csv
 import json
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import matplotlib
 import numpy as np
@@ -20,15 +21,9 @@ from matplotlib.figure import Figure
 
 from weiss_rl.training_logger import TrainingLogger
 
-__all__ = ["render_paper_figures"]
+__all__ = ["PAPER_FIGURE_IDS", "PAPER_FIGURE_STEMS", "render_paper_figures"]
 
 SUPPORTED_FORMATS = frozenset({"pdf", "png"})
-PAPER_FIGURE_STEMS = (
-    "fig_matchup_heatmap",
-    "fig_truncation_heatmap",
-    "fig_seat_bias",
-    "fig_learning_curves",
-)
 PREFERRED_LEARNING_CURVE_FIELDS = (
     ("loss", "Loss"),
     ("value_loss", "Value loss"),
@@ -64,73 +59,160 @@ class LearningCurveArtifact:
     series: tuple[tuple[str, FloatArray], ...]
 
 
-def render_paper_figures(run_dir: Path, *, formats: Sequence[str] = ("pdf", "png")) -> tuple[Path, ...]:
-    """Render the paper figures for a run directory.
+@dataclass(frozen=True)
+class PaperFigureSpec:
+    fig_id: str
+    stem: str
+    required_inputs: tuple[Path, ...]
+    render: Callable[[Path], Figure]
 
-    Expected inputs:
-      - eval/final_eval/payoff_matrices/p_mean.csv
-      - eval/diagnostics/truncation_heatmap_data.csv
-      - eval/diagnostics/seat_bias.json
-      - training/logs/training_metrics.jsonl
-    """
 
-    normalized_formats = _normalize_formats(formats)
-    run_root = Path(run_dir)
-
+def _render_matchup_heatmap(run_root: Path) -> Figure:
     payoff_matrix = _load_square_matrix_csv(
         run_root / "eval" / "final_eval" / "payoff_matrices" / "p_mean.csv",
         artifact_name="payoff matrix",
         minimum=0.0,
         maximum=1.0,
     )
+    return _build_heatmap_figure(
+        payoff_matrix,
+        title="Final evaluation payoff matrix (p_mean)",
+        colorbar_label="Mean score",
+        cmap_name="coolwarm",
+        vmin=0.0,
+        vmax=1.0,
+        value_format="{value:.2f}",
+    )
+
+
+def _render_truncation_heatmap(run_root: Path) -> Figure:
     truncation_matrix = _load_square_matrix_csv(
         run_root / "eval" / "diagnostics" / "truncation_heatmap_data.csv",
         artifact_name="truncation heatmap",
         minimum=0.0,
         maximum=1.0,
     )
+    return _build_heatmap_figure(
+        truncation_matrix,
+        title="Final evaluation truncation heatmap",
+        colorbar_label="Truncation rate",
+        cmap_name="magma",
+        vmin=0.0,
+        vmax=1.0,
+        value_format="{value:.3f}",
+    )
+
+
+def _render_seat_bias(run_root: Path) -> Figure:
     seat_bias = _load_seat_bias_json(run_root / "eval" / "diagnostics" / "seat_bias.json")
+    return _build_seat_bias_figure(seat_bias)
+
+
+def _render_learning_curves(run_root: Path) -> Figure:
     learning_curves = _load_learning_curves(run_root / "training" / "logs" / "training_metrics.jsonl")
+    return _build_learning_curves_figure(learning_curves)
+
+
+def _paper_figure_specs() -> tuple[PaperFigureSpec, ...]:
+    return (
+        PaperFigureSpec(
+            fig_id="matchup_heatmap",
+            stem="fig_matchup_heatmap",
+            required_inputs=(Path("eval/final_eval/payoff_matrices/p_mean.csv"),),
+            render=_render_matchup_heatmap,
+        ),
+        PaperFigureSpec(
+            fig_id="truncation_heatmap",
+            stem="fig_truncation_heatmap",
+            required_inputs=(Path("eval/diagnostics/truncation_heatmap_data.csv"),),
+            render=_render_truncation_heatmap,
+        ),
+        PaperFigureSpec(
+            fig_id="seat_bias",
+            stem="fig_seat_bias",
+            required_inputs=(Path("eval/diagnostics/seat_bias.json"),),
+            render=_render_seat_bias,
+        ),
+        PaperFigureSpec(
+            fig_id="learning_curves",
+            stem="fig_learning_curves",
+            required_inputs=(Path("training/logs/training_metrics.jsonl"),),
+            render=_render_learning_curves,
+        ),
+    )
+
+
+PAPER_FIGURE_IDS = tuple(spec.fig_id for spec in _paper_figure_specs())
+PAPER_FIGURE_STEMS = tuple(spec.stem for spec in _paper_figure_specs())
+
+
+def render_paper_figures(
+    run_dir: Path,
+    *,
+    formats: Sequence[str] = ("pdf", "png"),
+    fig_id: str | None = None,
+) -> tuple[Path, ...]:
+    """Render paper figures for a run directory.
+
+    When ``fig_id`` is supplied, only that stable figure ID is rendered.
+    Otherwise all registered paper figures are rendered.
+    """
+
+    normalized_formats = _normalize_formats(formats)
+    run_root = Path(run_dir)
+    figure_specs = _resolve_figure_specs(fig_id)
+    _validate_required_inputs(run_root, figure_specs)
 
     out_dir = run_root / "figures" / "paper"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    figures = (
-        (
-            PAPER_FIGURE_STEMS[0],
-            _build_heatmap_figure(
-                payoff_matrix,
-                title="Final evaluation payoff matrix (p_mean)",
-                colorbar_label="Mean score",
-                cmap_name="coolwarm",
-                vmin=0.0,
-                vmax=1.0,
-                value_format="{value:.2f}",
-            ),
-        ),
-        (
-            PAPER_FIGURE_STEMS[1],
-            _build_heatmap_figure(
-                truncation_matrix,
-                title="Final evaluation truncation heatmap",
-                colorbar_label="Truncation rate",
-                cmap_name="magma",
-                vmin=0.0,
-                vmax=1.0,
-                value_format="{value:.3f}",
-            ),
-        ),
-        (PAPER_FIGURE_STEMS[2], _build_seat_bias_figure(seat_bias)),
-        (PAPER_FIGURE_STEMS[3], _build_learning_curves_figure(learning_curves)),
-    )
-
     outputs: list[Path] = []
-    for stem, figure in figures:
+    for spec in figure_specs:
+        figure = spec.render(run_root)
         try:
-            outputs.extend(_save_figure(figure, out_dir=out_dir, stem=stem, formats=normalized_formats))
+            outputs.extend(_save_figure(figure, out_dir=out_dir, stem=spec.stem, formats=normalized_formats))
         finally:
             plt.close(figure)
     return tuple(outputs)
+
+
+def _resolve_figure_specs(fig_id: str | None) -> tuple[PaperFigureSpec, ...]:
+    specs = _paper_figure_specs()
+    if fig_id is None:
+        return specs
+
+    candidate = str(fig_id).strip().lower()
+    if not candidate:
+        raise ValueError("fig_id must be a non-empty string")
+
+    for spec in specs:
+        if spec.fig_id == candidate:
+            return (spec,)
+
+    allowed = ", ".join(PAPER_FIGURE_IDS)
+    raise ValueError(f"unknown fig_id {fig_id!r}; expected one of: {allowed}")
+
+
+def _validate_required_inputs(run_root: Path, figure_specs: Sequence[PaperFigureSpec]) -> None:
+    missing: list[Path] = []
+    seen: set[Path] = set()
+    for spec in figure_specs:
+        for relative_path in spec.required_inputs:
+            artifact_path = run_root / relative_path
+            if artifact_path in seen:
+                continue
+            seen.add(artifact_path)
+            if not artifact_path.is_file():
+                missing.append(artifact_path)
+
+    if not missing:
+        return
+
+    selected_ids = ", ".join(spec.fig_id for spec in figure_specs)
+    missing_lines = "\n".join(f"- {path}" for path in missing)
+    raise FileNotFoundError(
+        f"missing required input artifact(s) for fig-id selection {selected_ids}:\n{missing_lines}"
+    )
 
 
 def _normalize_formats(formats: Sequence[str]) -> tuple[str, ...]:

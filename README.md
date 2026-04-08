@@ -14,7 +14,7 @@ Today this repo is strongest at config, contracts, provenance, and small standal
   - If the active interpreter can only expose `weiss_sim.export_spec_bundle()` but not the stepping runtime, the script falls back to manifest-only mode and prints the reason.
 - `python/scripts/eval.py` performs contract checks and can summarize an existing seat-swapped `episodes.jsonl` file into JSON, CSV, and optional diagnostics.
   - It does **not** launch evaluation rollouts or generate episodes from policies.
-- `python/scripts/make_figures.py` renders paper figures from completed run artifacts under `runs/.../figures/paper/`.
+- `python/scripts/make_figures.py` renders paper figures from completed run artifacts under `runs/.../figures/paper/`, either all at once or by stable `--fig-id`.
 - `examples/run_loop_example.py` exercises the `weiss_sim` stepping API only. It is a simulator smoke example, not RL training.
 
 ## Not implemented end-to-end yet
@@ -71,6 +71,7 @@ make train-min
 make train-inline-smoke   # uses the standard sibling simulator checkout when present
 uv run python python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
+uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
 ```
 
 Then read:

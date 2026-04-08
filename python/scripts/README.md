@@ -87,10 +87,14 @@ Paper figure renderer for completed run artifacts.
 
 ```bash
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
+uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
 ```
 
 Current behavior:
 
+- renders all paper figures by default, or a single figure when `--fig-id` is set
+- stable figure IDs: `matchup_heatmap`, `truncation_heatmap`, `seat_bias`, `learning_curves`
+- checks that the selected figure's required input artifacts exist before rendering
 - reads `eval/final_eval/payoff_matrices/p_mean.csv`
 - reads `eval/diagnostics/truncation_heatmap_data.csv`
 - reads `eval/diagnostics/seat_bias.json`
