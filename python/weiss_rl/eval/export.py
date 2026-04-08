@@ -33,6 +33,7 @@ def load_eval_game_records(path: Path) -> tuple[EvalGameRecord, ...]:
                 outcome = str(payload["outcome"])
                 if outcome not in {"W", "L", "D", "T"}:
                     raise ValueError(f"invalid outcome {outcome!r} on line {line_number}")
+                raw_run_id256 = payload.get("run_id256")
                 record = EvalGameRecord(
                     pair_index=int(payload["pair_index"]),
                     swap_index=int(payload["swap_index"]),
@@ -51,6 +52,7 @@ def load_eval_game_records(path: Path) -> tuple[EvalGameRecord, ...]:
                     terminated=bool(payload["terminated"]),
                     truncated=bool(payload["truncated"]),
                     engine_status=int(payload["engine_status"]),
+                    run_id256=_normalize_optional_hash256(raw_run_id256, name="run_id256"),
                 )
             except KeyError as exc:
                 raise ValueError(f"missing required field {exc.args[0]!r} on line {line_number}") from exc
@@ -160,3 +162,13 @@ def _require_single_contract(records: tuple[EvalGameRecord, ...] | list[EvalGame
     spec_hashes = {record.spec_hash256 for record in records}
     if len(config_hashes) != 1 or len(spec_hashes) != 1:
         raise ValueError("summary export expects records for exactly one config/spec contract")
+
+
+def _normalize_optional_hash256(value: object, *, name: str) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if len(normalized) != 64:
+        raise ValueError(f"{name} must be 64 hex chars, got {len(normalized)}")
+    bytes.fromhex(normalized)
+    return normalized

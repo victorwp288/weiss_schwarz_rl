@@ -67,7 +67,7 @@ def build_seat_advantage_diagnostics(records: tuple[EvalGameRecord, ...] | list[
     return {
         "focal_policy_id": focal_policy_id,
         "opponent_policy_id": opponent_policy_id,
-        "pair_count": len({int(record.pair_index) for record in records}),
+        "pair_count": len({(record.run_id256, int(record.pair_index)) for record in records}),
         "seat_results": {
             "seat0_wins": seat0_wins,
             "seat1_wins": seat1_wins,

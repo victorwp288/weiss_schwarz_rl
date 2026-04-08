@@ -50,7 +50,7 @@ def bayesian_bootstrap_summary(
     seed: int | None = None,
 ) -> PayoffUncertaintySummary:
     score_array = _coerce_scores(scores)
-    posterior = posterior_samples(score_array, sample_count=sample_count, seed=seed)
+    posterior = posterior_samples(score_array.tolist(), sample_count=sample_count, seed=seed)
     ci_low, ci_high = _credible_interval(posterior, ci_level=ci_level)
     mean = float(np.mean(score_array))
     return PayoffUncertaintySummary(

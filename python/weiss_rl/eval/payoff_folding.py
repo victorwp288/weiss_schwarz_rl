@@ -49,13 +49,13 @@ def paired_seed_scores(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldS
     if not records:
         raise ValueError("paired_seed_scores requires at least one record")
 
-    pair_groups: dict[int, list[EvalGameRecord]] = defaultdict(list)
+    pair_groups: dict[tuple[str | None, int], list[EvalGameRecord]] = defaultdict(list)
     for record in records:
-        pair_groups[int(record.pair_index)].append(record)
+        pair_groups[_pair_group_key(record)].append(record)
 
     pair_scores: list[float] = []
-    for pair_index in sorted(pair_groups):
-        score = paired_seed_score(pair_groups[pair_index], scheme=normalized_scheme)
+    for pair_key in sorted(pair_groups, key=_pair_group_sort_key):
+        score = paired_seed_score(pair_groups[pair_key], scheme=normalized_scheme)
         if score is not None:
             pair_scores.append(score)
     return tuple(pair_scores)
@@ -72,10 +72,11 @@ def _validate_pair_records(records: Sequence[EvalGameRecord]) -> tuple[EvalGameR
     if len(records) != 2:
         raise ValueError(f"paired seed group must contain exactly 2 records, got {len(records)}")
 
-    if len({int(record.pair_index) for record in records}) != 1:
-        raise ValueError("paired seed records must share pair_index")
+    if len({_pair_group_key(record) for record in records}) != 1:
+        raise ValueError("paired seed records must share pair_index within one run_id256")
     pair_index = int(records[0].pair_index)
 
+    _require_shared_value(records, selector=lambda record: record.run_id256, name="run_id256")
     _require_shared_value(records, selector=lambda record: int(record.episode_seed), name="episode_seed")
     _require_shared_value(records, selector=lambda record: record.focal_policy_id, name="focal_policy_id")
     _require_shared_value(records, selector=lambda record: record.opponent_policy_id, name="opponent_policy_id")
@@ -133,6 +134,15 @@ def _normalize_scheme(scheme: str) -> PayoffFoldScheme:
     if normalized == "S2":
         return "S2"
     raise ValueError(f"unknown payoff fold scheme: {scheme!r}")
+
+
+def _pair_group_key(record: EvalGameRecord) -> tuple[str | None, int]:
+    return (record.run_id256, int(record.pair_index))
+
+
+def _pair_group_sort_key(pair_key: tuple[str | None, int]) -> tuple[str, int]:
+    run_id256, pair_index = pair_key
+    return ("" if run_id256 is None else run_id256, pair_index)
 
 
 def _mean(values: Sequence[float]) -> float:

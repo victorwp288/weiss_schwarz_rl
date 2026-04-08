@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Sequence
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -66,6 +66,27 @@ def test_solve_nash_mixture_deterministic_tie_break_by_policy_id() -> None:
     assert report.policy_ids == tuple(policy_ids)
     assert mixture.tolist() == pytest.approx([0.0, 1.0], abs=1e-8)
     assert report.message
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected_message"),
+    [
+        ({"p_mean": np.array([[0.5, np.inf], [0.0, 0.5]], dtype=np.float64)}, "finite values"),
+        ({"p_mean": np.array([[0.5, 1.2], [-0.2, 0.5]], dtype=np.float64)}, "lie within \\[0, 1\\]"),
+        ({"p_mean": np.array([[0.4, 0.5], [0.5, 0.5]], dtype=np.float64)}, "diagonal must be 0.5"),
+        ({"p_mean": np.array([[0.5, 0.8], [0.3, 0.5]], dtype=np.float64)}, "sum to 1"),
+        ({"p_mean": np.full((2, 2), 0.5, dtype=np.float64), "policy_ids": ["dup", "dup"]}, "must be unique"),
+        ({"p_mean": np.full((2, 2), 0.5, dtype=np.float64), "threads": 0}, "positive finite integer"),
+        ({"p_mean": np.full((2, 2), 0.5, dtype=np.float64), "threads": 1.5}, "positive finite integer"),
+        ({"p_mean": np.full((2, 2), 0.5, dtype=np.float64), "value_tolerance": -1e-9}, "nonnegative and finite"),
+        ({"p_mean": np.full((2, 2), 0.5, dtype=np.float64), "value_tolerance": np.inf}, "nonnegative and finite"),
+    ],
+)
+def test_solve_nash_mixture_rejects_invalid_inputs(kwargs: dict[str, object], expected_message: str) -> None:
+    kwargs.setdefault("policy_ids", ["alpha", "beta"])
+
+    with pytest.raises(ValueError, match=expected_message):
+        solve_nash_mixture(**cast(dict[str, Any], kwargs))
 
 
 def test_write_nash_artifacts_writes_csv_and_json(tmp_path: Path) -> None:

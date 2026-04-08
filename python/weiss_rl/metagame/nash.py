@@ -61,25 +61,27 @@ def solve_nash_mixture(
 ) -> tuple[np.ndarray, NashSolverReport]:
     """Solve the symmetric zero-sum Nash mixture for a payoff mean matrix."""
     p_mean_arr = np.asarray(p_mean, dtype=np.float64)
-    if p_mean_arr.ndim != 2 or p_mean_arr.shape[0] != p_mean_arr.shape[1]:
-        raise ValueError("p_mean must be a square matrix")
+    normalized_policy_ids = None if policy_ids is None else tuple(str(policy_id) for policy_id in policy_ids)
+    normalized_value_tolerance = _validate_value_tolerance(value_tolerance)
+    normalized_threads = _validate_threads(threads)
+    _validate_payoff_matrix(p_mean_arr, value_tolerance=normalized_value_tolerance)
 
     n = p_mean_arr.shape[0]
     if n == 0:
         raise ValueError("p_mean must contain at least one policy")
-    if policy_ids is not None and len(policy_ids) != n:
+    if normalized_policy_ids is not None and len(normalized_policy_ids) != n:
         raise ValueError("policy_ids length must match p_mean dimensions")
-    if np.isnan(p_mean_arr).any():
-        raise ValueError("p_mean must not contain NaN values")
+    if normalized_policy_ids is not None and len(set(normalized_policy_ids)) != len(normalized_policy_ids):
+        raise ValueError("policy_ids must be unique")
     if tie_break not in {"lowest_policy_id", "policy_index"}:
         raise ValueError(f"unsupported tie_break: {tie_break!r}")
-    if tie_break == "lowest_policy_id" and policy_ids is None:
+    if tie_break == "lowest_policy_id" and normalized_policy_ids is None:
         raise ValueError("policy_ids must be provided for lowest_policy_id tie-break")
 
     if tie_break == "lowest_policy_id":
-        if policy_ids is None:
+        if normalized_policy_ids is None:
             raise RuntimeError("policy_ids unexpectedly None for lowest_policy_id tie_break")
-        lexical_order = np.argsort(np.asarray(policy_ids, dtype=object), kind="stable")
+        lexical_order = np.argsort(np.asarray(normalized_policy_ids, dtype=object), kind="stable")
         inverse_rank = np.empty(n, dtype=np.int64)
         inverse_rank[lexical_order] = np.arange(n, dtype=np.int64)
         bias = inverse_rank.astype(np.float64)
@@ -105,14 +107,14 @@ def solve_nash_mixture(
             b_eq=b_eq,
             bounds=bounds,
             method="highs",
-            options={"threads": int(threads)},
+            options={"threads": normalized_threads},
         )
 
     if not primary_result.success:
         raise ValueError(
             "Nash solver failed: "
             + primary_result.message
-            + f" (status={primary_result.status}, thread_count={threads})"
+            + f" (status={primary_result.status}, thread_count={normalized_threads})"
         )
 
     primary_solution = np.asarray(primary_result.x, dtype=np.float64)
@@ -121,7 +123,7 @@ def solve_nash_mixture(
     if tie_break in {"lowest_policy_id", "policy_index"}:
         c_secondary = bias
         A_ub_secondary = -p_mean_arr.T
-        b_ub_secondary = np.full((n,), -(value - float(value_tolerance)), dtype=np.float64)
+        b_ub_secondary = np.full((n,), -(value - normalized_value_tolerance), dtype=np.float64)
         A_eq_secondary = np.ones((1, n), dtype=np.float64)
         b_eq_secondary = np.array([1.0], dtype=np.float64)
         bounds_secondary = [(0.0, None)] * n
@@ -136,14 +138,14 @@ def solve_nash_mixture(
                 b_eq=b_eq_secondary,
                 bounds=bounds_secondary,
                 method="highs",
-                options={"threads": int(threads)},
+                options={"threads": normalized_threads},
             )
 
         if not secondary_result.success:
             raise ValueError(
                 "Nash tie-break LP failed: "
                 + secondary_result.message
-                + f" (status={secondary_result.status}, thread_count={threads})"
+                + f" (status={secondary_result.status}, thread_count={normalized_threads})"
             )
 
         solution = np.asarray(secondary_result.x, dtype=np.float64)
@@ -172,10 +174,10 @@ def solve_nash_mixture(
         value=value,
         actual_game_value=actual_game_value,
         mixture=tuple(float(x) for x in mixture.tolist()),
-        policy_ids=tuple(policy_ids) if policy_ids is not None else None,
-        threads=int(threads),
+        policy_ids=normalized_policy_ids,
+        threads=normalized_threads,
         tie_break=tie_break,
-        value_tolerance=float(value_tolerance),
+        value_tolerance=normalized_value_tolerance,
         bias_scale=float(bias_scale),
         max_inequality_violation=max_ineq,
         max_equality_violation=max_eq,
@@ -195,8 +197,45 @@ def write_mixture_mean_csv(path: Path, policy_ids: Sequence[str], mixture: np.nd
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["policy_id", "mixture"])
-        for policy_id, weight in zip(policy_ids, mixture_arr.tolist()):
+        for policy_id, weight in zip(policy_ids, mixture_arr.tolist(), strict=True):
             writer.writerow([policy_id, f"{float(weight):.12g}"])
+
+
+def _validate_payoff_matrix(p_mean: np.ndarray, *, value_tolerance: float) -> None:
+    if p_mean.ndim != 2 or p_mean.shape[0] != p_mean.shape[1]:
+        raise ValueError("p_mean must be a square matrix")
+    if not np.isfinite(p_mean).all():
+        raise ValueError("p_mean must contain only finite values")
+    if np.any((p_mean < 0.0) | (p_mean > 1.0)):
+        raise ValueError("p_mean entries must lie within [0, 1]")
+    if p_mean.size == 0:
+        return
+    if not np.allclose(np.diag(p_mean), 0.5, atol=value_tolerance, rtol=0.0):
+        raise ValueError("p_mean diagonal must be 0.5")
+
+    off_diagonal = ~np.eye(p_mean.shape[0], dtype=bool)
+    reciprocal_sums = p_mean + p_mean.T
+    if not np.allclose(reciprocal_sums[off_diagonal], 1.0, atol=value_tolerance, rtol=0.0):
+        raise ValueError("p_mean off-diagonal entries must be reciprocal and sum to 1")
+
+
+def _validate_threads(threads: int) -> int:
+    if isinstance(threads, bool):
+        raise ValueError("threads must be a positive finite integer")
+    try:
+        numeric = float(threads)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("threads must be a positive finite integer") from exc
+    if not np.isfinite(numeric) or numeric < 1.0 or not numeric.is_integer():
+        raise ValueError("threads must be a positive finite integer")
+    return int(numeric)
+
+
+def _validate_value_tolerance(value_tolerance: float) -> float:
+    normalized = float(value_tolerance)
+    if not np.isfinite(normalized) or normalized < 0.0:
+        raise ValueError("value_tolerance must be nonnegative and finite")
+    return normalized
 
 
 def write_solver_report_json(path: Path, report: NashSolverReport) -> None:

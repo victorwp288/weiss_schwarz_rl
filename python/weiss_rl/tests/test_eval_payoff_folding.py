@@ -4,18 +4,30 @@ from typing import Literal
 
 import pytest
 
-from weiss_rl.eval import EvalGameRecord, fold_game_payoff, paired_seed_mean_score, paired_seed_score
+from weiss_rl.eval import (
+    EvalGameRecord,
+    fold_game_payoff,
+    paired_seed_mean_score,
+    paired_seed_score,
+    paired_seed_scores,
+)
 
 _CONFIG_HASH256 = "ab" * 32
 _SPEC_HASH256 = "cd" * 32
 OutcomeToken = Literal["W", "L", "D", "T"]
 
 
-def _pair(pair_index: int, outcome_a: OutcomeToken, outcome_b: OutcomeToken) -> list[EvalGameRecord]:
+def _pair(
+    pair_index: int,
+    outcome_a: OutcomeToken,
+    outcome_b: OutcomeToken,
+    *,
+    run_id256: str | None = None,
+) -> list[EvalGameRecord]:
     episode_seed = pair_index + 100
     return [
-        _record(pair_index, 0, outcome_a, episode_seed=episode_seed),
-        _record(pair_index, 1, outcome_b, episode_seed=episode_seed),
+        _record(pair_index, 0, outcome_a, episode_seed=episode_seed, run_id256=run_id256),
+        _record(pair_index, 1, outcome_b, episode_seed=episode_seed, run_id256=run_id256),
     ]
 
 
@@ -27,6 +39,7 @@ def _record(
     episode_seed: int | None = None,
     focal_policy_id: str = "champion",
     opponent_policy_id: str = "baseline",
+    run_id256: str | None = None,
 ) -> EvalGameRecord:
     normalized_swap_index = int(swap_index)
     if normalized_swap_index == 0:
@@ -59,6 +72,7 @@ def _record(
         terminated=outcome != "T",
         truncated=outcome == "T",
         engine_status=0,
+        run_id256=run_id256,
     )
 
 
@@ -113,6 +127,16 @@ def test_paired_seed_mean_score_is_order_independent() -> None:
 
     assert paired_seed_mean_score(shuffled, scheme="S0") == paired_seed_mean_score(records, scheme="S0")
     assert paired_seed_mean_score(shuffled, scheme="S2") == paired_seed_mean_score(records, scheme="S2")
+
+
+def test_paired_seed_scores_group_same_pair_index_by_run_identity() -> None:
+    records = [
+        *_pair(0, "W", "W", run_id256="11" * 32),
+        *_pair(0, "L", "L", run_id256="22" * 32),
+    ]
+
+    assert paired_seed_scores(records, scheme="S0") == pytest.approx((1.0, 0.0))
+    assert paired_seed_mean_score(records, scheme="S0") == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize(

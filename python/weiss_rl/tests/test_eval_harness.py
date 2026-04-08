@@ -127,6 +127,7 @@ def test_run_seat_swapped_matchup_emits_per_game_records_jsonl(tmp_path: Path) -
     assert [payload["engine_status"] for payload in payloads] == [0, 5]
     assert [payload["config_hash256"] for payload in payloads] == [_CONFIG_HASH256, _CONFIG_HASH256]
     assert [payload["spec_hash256"] for payload in payloads] == [_SPEC_HASH256, _SPEC_HASH256]
+    assert [payload["run_id256"] for payload in payloads] == [_RUN_ID256, _RUN_ID256]
     assert [payload["episode_key64"] for payload in payloads] == [record.episode_key64 for record in result.records]
     assert [call.swap_index for call in runner.calls] == [0, 1]
 
@@ -168,6 +169,7 @@ def test_record_completed_game_stores_required_reproducibility_fields() -> None:
     assert record.episode_key64 == key256_to_short64(bytes.fromhex(expected_episode_key))
     assert record.config_hash256 == _CONFIG_HASH256
     assert record.spec_hash256 == _SPEC_HASH256
+    assert record.run_id256 == _RUN_ID256
 
 
 @pytest.mark.parametrize(
