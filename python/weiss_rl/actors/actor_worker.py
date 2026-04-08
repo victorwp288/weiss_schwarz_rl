@@ -18,7 +18,14 @@ from weiss_rl.masking import (
     sample_actions_from_mask,
 )
 from weiss_rl.league.outcomes import OnlineOutcomeTracker
-from weiss_rl.replay.bundles import write_fault_bundle
+
+from weiss_rl.replay.bundles import (
+    ReplayStep,
+    compute_legal_fingerprint64,
+    make_replay_bundle_meta,
+    write_fault_bundle,
+    write_replay_bundle,
+)
 
 torch: ModuleType | None
 try:
@@ -110,6 +117,19 @@ class ActorWorker:
     _current_opponent_policy_ids: np.ndarray | None = field(default=None, init=False)
     outcomes: OnlineOutcomeTracker = field(default_factory=OnlineOutcomeTracker)
     opponent_id_by_env: np.ndarray | None = field(default=None, init=False)
+    
+    # Replay capture (M5-07)
+    # Note: replay bundles require run_id256 and spec_hash256 to be set by the caller.
+    # If they are None, replay capture stays disabled (flush is a no-op).
+    episode_index_by_env: np.ndarray | None = field(default=None, init=False) 
+    episode_seed64_by_env: np.ndarray | None = field(default=None, init=False)
+    run_id256: bytes | None = None
+    spec_hash256: bytes | None = None
+    replay_dir: Path | None = None  # defaults to checkpoint_dir/../replays if None
+    env_id_base: int = 0  # offset if you shard env ids across actors
+    capture_replays_on_done: bool = False  # keep False by default to avoid huge output
+
+    _episode_steps_by_env: list[list[ReplayStep]] = field(default_factory=list, init=False)
 
     def run_once(
         self,
@@ -150,6 +170,16 @@ class ActorWorker:
 
         if self._rng is None:
             self._rng = np.random.default_rng(self.seed + self.actor_id)
+
+        if self.episode_index_by_env is None:
+            self.episode_index_by_env = np.zeros((N,), dtype=np.int64)
+        
+        self._ensure_episode_buffers()
+
+        if self.episode_seed64_by_env is None:
+            # Deterministic per-(actor_id, env_id) seed base.
+            base = np.uint64(self.seed) ^ (np.uint64(self.actor_id) << np.uint64(32))
+            self.episode_seed64_by_env = (base + np.arange(N, dtype=np.uint64)).astype(np.uint64, copy=False)
 
         pass_action_id = resolve_pass_action_id()
         anomaly = MaskingAnomalyCounters()
@@ -213,6 +243,13 @@ class ActorWorker:
                     counters=anomaly,
                     pass_action_id=pass_action_id,
                 )
+                # Keep per-env legal slices for replay fingerprinting (pre-step legality).
+                legal_slices: list[np.ndarray] = []
+                for i in range(N):
+                    start = int(legal_offsets[i])
+                    end = int(legal_offsets[i + 1])
+                    legal_slices.append(np.asarray(legal_ids[start:end], dtype=np.uint16))
+
                 legal_ids_prefix = _packed_legal_ids_prefix(legal_ids, legal_offsets)
                 base = int(packed_legal_offsets[-1][-1])
                 packed_legal_ids.append(legal_ids_prefix.astype(np.int32, copy=False))
@@ -302,6 +339,22 @@ class ActorWorker:
             truncated = np.asarray(next_batch.truncated)
             engine_status = np.asarray(next_batch.engine_status)
 
+            # Replay capture: append post-step signals using pre-step legality.
+            if self.layout_name == "i16_legal_ids":
+                for i in range(N):
+                    self._append_replay_step(
+                        env_index=int(i),
+                        t=int(t),
+                        decision_id=int(decision_id[i]),
+                        actor=int(to_play[i]),
+                        action=int(actions[i]),
+                        reward=float(reward[i]),
+                        terminated=bool(terminated[i]),
+                        truncated=bool(truncated[i]),
+                        engine_status=int(engine_status[i]),
+                        legal_ids=legal_slices[i],
+                    )
+
             obs_buf[t] = obs
             to_play_buf[t] = to_play.astype(np.int8, copy=False)
             decision_id_buf[t] = decision_id.astype(np.int32, copy=False)
@@ -318,6 +371,7 @@ class ActorWorker:
             done = np.logical_or(terminated, truncated)
             if np.any(done):
                 done_mask = done.astype(np.bool_, copy=False)
+                
                 _update_outcomes(
                     self.outcomes,
                     opponent_ids=self.opponent_id_by_env,
@@ -325,6 +379,19 @@ class ActorWorker:
                     engine_status=engine_status,
                     done=done_mask,
                 )
+
+                if self.capture_replays_on_done:
+                    for env_index in np.flatnonzero(done_mask):
+                        # Only capture clean episodes by default.
+                        if int(engine_status[int(env_index)]) == 0:
+                            self._flush_replay_for_env(env_index=int(env_index))
+
+                # Advance episode identity for rows that finished (regardless of w/l/d).
+                if self.episode_index_by_env is not None:
+                    self.episode_index_by_env[done] += 1
+                if self.episode_seed64_by_env is not None:
+                    self.episode_seed64_by_env[done] += np.uint64(1)
+
                 reset_done = getattr(env, "reset_done", None)
                 if callable(reset_done):
                     self._resample_opponents(done_mask)
@@ -411,6 +478,80 @@ class ActorWorker:
             return self.checkpoint_dir / "faults"
         return Path("faults")
 
+
+    def _replay_dir_path(self) -> Path:
+        if self.replay_dir is not None:
+            return self.replay_dir
+        if self.checkpoint_dir is not None:
+            # runs/.../training/checkpoints -> runs/.../replays/regression
+            return self.checkpoint_dir.parent.parent / "replays" / "regression"
+        return Path("replays") / "regression"
+
+    def _ensure_episode_buffers(self) -> None:
+        if not self._episode_steps_by_env:
+            self._episode_steps_by_env = [[] for _ in range(self.num_envs)]
+
+    def _append_replay_step(
+        self,
+        *,
+        env_index: int,
+        t: int,
+        decision_id: int,
+        actor: int,
+        action: int,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        engine_status: int,
+        legal_ids: np.ndarray,
+    ) -> None:
+        fp = compute_legal_fingerprint64(decision_id=int(decision_id), legal_ids=legal_ids)
+        self._episode_steps_by_env[env_index].append(
+            ReplayStep(
+                t=int(t),
+                decision_id=int(decision_id),
+                actor=int(actor),
+                action=int(action),
+                reward=float(reward),
+                terminated=bool(terminated),
+                truncated=bool(truncated),
+                engine_status=int(engine_status),
+                legal_fingerprint64=int(fp),
+            )
+        )
+
+    def _flush_replay_for_env(self, *, env_index: int, fault_payload: dict[str, Any] | None = None) -> None:
+        # Cannot write deterministic replay bundle without stable IDs.
+        if self.run_id256 is None or self.spec_hash256 is None:
+            return
+        if self.episode_index_by_env is None or self.episode_seed64_by_env is None:
+            return
+        if not self._episode_steps_by_env:
+            return
+
+        steps = self._episode_steps_by_env[env_index]
+        if not steps:
+            return
+
+        meta = make_replay_bundle_meta(
+            simulator_episode_key=None,  # simulator does not provide it
+            run_id256=self.run_id256,
+            spec_hash256=self.spec_hash256,
+            actor_id=int(self.actor_id),
+            env_id=int(self.env_id_base + env_index),
+            episode_index=int(self.episode_index_by_env[env_index]),
+            episode_seed64=int(self.episode_seed64_by_env[env_index]),
+        )
+        write_replay_bundle(
+            out_dir=self._replay_dir_path(),
+            meta=meta,
+            steps=steps,
+            fault_payload=fault_payload,
+        )
+        # clear after flush
+        self._episode_steps_by_env[env_index] = []
+
+
     def _raise_numeric_fault(
         self,
         reason: str,
@@ -465,6 +606,13 @@ class ActorWorker:
             prefix="actor_numeric_fault",
             payload=payload,
         )
+        # Best-effort replay capture (uses per-env buffered steps).
+        try:
+            self._ensure_episode_buffers()
+            for env_index in range(self.num_envs):
+                self._flush_replay_for_env(env_index=env_index, fault_payload=payload)
+        except Exception:
+            pass
         raise RuntimeError(f"{reason}; wrote fault bundle to {fault_path}")
 
     @property
