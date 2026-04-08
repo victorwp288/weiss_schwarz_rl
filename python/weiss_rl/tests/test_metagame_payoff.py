@@ -16,24 +16,18 @@ _SPEC_HASH256 = "cd" * 32
 OutcomeToken = Literal["W", "L", "D", "T"]
 
 
-def _pair(pair_index: int, outcome_a: OutcomeToken, outcome_b: OutcomeToken) -> list[EvalGameRecord]:
+def _pair(
+    pair_index: int,
+    outcome_a: OutcomeToken,
+    outcome_b: OutcomeToken,
+    *,
+    run_id256: str | None = None,
+) -> list[EvalGameRecord]:
     episode_seed = pair_index + 100
     return [
-        _record(pair_index, 0, outcome_a, episode_seed=episode_seed),
-        _record(pair_index, 1, outcome_b, episode_seed=episode_seed),
+        _record(pair_index, 0, outcome_a, episode_seed=episode_seed, run_id256=run_id256),
+        _record(pair_index, 1, outcome_b, episode_seed=episode_seed, run_id256=run_id256),
     ]
-
-
-def _duplicate_seed_runs(episode_seed: int, *outcomes: tuple[OutcomeToken, OutcomeToken]) -> list[EvalGameRecord]:
-    records: list[EvalGameRecord] = []
-    for pair_index, (outcome_a, outcome_b) in enumerate(outcomes):
-        records.extend(
-            [
-                _record(pair_index, 0, outcome_a, episode_seed=episode_seed),
-                _record(pair_index, 1, outcome_b, episode_seed=episode_seed),
-            ]
-        )
-    return records
 
 
 def _record(
@@ -44,6 +38,7 @@ def _record(
     episode_seed: int | None = None,
     focal_policy_id: str = "champion",
     opponent_policy_id: str = "baseline",
+    run_id256: str | None = None,
 ) -> EvalGameRecord:
     normalized_swap_index = int(swap_index)
     if normalized_swap_index == 0:
@@ -76,6 +71,7 @@ def _record(
         terminated=outcome != "T",
         truncated=outcome == "T",
         engine_status=0,
+        run_id256=run_id256,
     )
 
 
@@ -119,34 +115,20 @@ def test_build_p_mean_and_counts_combines_bidirectional_evidence() -> None:
     assert counts[baseline, champion] == 2
 
 
-def test_build_p_mean_and_counts_uses_episode_seed_across_repeated_pair_indices() -> None:
+def test_build_p_mean_and_counts_keeps_same_pair_index_separate_across_runs() -> None:
     records = [
-        *_pair(0, "W", "W"),
-        _record(0, 0, "D", episode_seed=200),
-        _record(0, 1, "T", episode_seed=200),
+        *_pair(0, "W", "W", run_id256="11" * 32),
+        *_pair(0, "L", "L", run_id256="22" * 32),
     ]
 
     p_mean, counts, policy_ids = build_p_mean_and_counts(records, scheme="S0")
     champion = policy_ids.index("champion")
     baseline = policy_ids.index("baseline")
 
-    assert p_mean[champion, baseline] == pytest.approx(0.75)
-    assert p_mean[baseline, champion] == pytest.approx(0.25)
+    assert p_mean[champion, baseline] == pytest.approx(0.5)
+    assert p_mean[baseline, champion] == pytest.approx(0.5)
     assert counts[champion, baseline] == 2
     assert counts[baseline, champion] == 2
-
-
-def test_build_p_mean_and_counts_aggregates_duplicate_same_seed_runs() -> None:
-    records = _duplicate_seed_runs(250, ("W", "L"), ("W", "W"))
-
-    p_mean, counts, policy_ids = build_p_mean_and_counts(records, scheme="S0")
-    champion = policy_ids.index("champion")
-    baseline = policy_ids.index("baseline")
-
-    assert p_mean[champion, baseline] == pytest.approx(0.75)
-    assert p_mean[baseline, champion] == pytest.approx(0.25)
-    assert counts[champion, baseline] == 1
-    assert counts[baseline, champion] == 1
 
 
 @pytest.mark.parametrize(
@@ -170,7 +152,7 @@ def test_build_p_mean_and_counts_rejects_invalid_seed_bucket() -> None:
         _record(1, 0, "L", episode_seed=101),
     ]
 
-    with pytest.raises(ValueError, match="matching counts for swap_index 0 and 1"):
+    with pytest.raises(ValueError, match="exactly 2 records"):
         build_p_mean_and_counts(records, scheme="S0")
 
 

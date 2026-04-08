@@ -38,6 +38,7 @@ def _record(
     episode_seed: int,
     focal_policy_id: str = "champion",
     opponent_policy_id: str = "baseline",
+    run_id256: str | None = None,
 ) -> EvalGameRecord:
     if swap_index == 0:
         seat0_policy_id = focal_policy_id
@@ -68,6 +69,7 @@ def _record(
         terminated=outcome != "T",
         truncated=outcome == "T",
         engine_status=0,
+        run_id256=run_id256,
     )
 
 
@@ -81,6 +83,7 @@ def _write_jsonl(path: Path, records: list[EvalGameRecord]) -> None:
 def test_load_eval_game_records_round_trips_jsonl(tmp_path: Path) -> None:
     path = tmp_path / "episodes.jsonl"
     records = [*_pair(0, "W", "L"), *_pair(1, "D", "T")]
+    records[0] = replace(records[0], run_id256="12" * 32)
     _write_jsonl(path, records)
 
     loaded = load_eval_game_records(path)

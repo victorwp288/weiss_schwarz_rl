@@ -11,12 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from weiss_rl.eval import EvalGameRecord
-from weiss_rl.eval.payoff_folding import (
-    PairedSeedGroupKey,
-    PayoffFoldScheme,
-    paired_seed_group_key,
-    paired_seed_score,
-)
+from weiss_rl.eval.payoff_folding import PairedSeedGroupKey, PayoffFoldScheme, paired_seed_group_key, paired_seed_score
 
 __all__ = [
     "build_p_mean_and_counts",
@@ -60,8 +55,7 @@ def build_p_mean_and_counts(
     directed_scores: dict[tuple[str, str], list[float]] = defaultdict(list)
     directed_counts: dict[tuple[str, str], int] = defaultdict(int)
 
-    for group_key in sorted(pair_groups):
-        group = pair_groups[group_key]
+    for group in pair_groups.values():
         score = paired_seed_score(group, scheme=scheme)
         if score is None:
             continue
@@ -93,14 +87,14 @@ def build_p_mean_and_counts(
             mean_ji = _mean(scores_ji) if count_ji else None
 
             if mean_ij is None:
-                assert mean_ji is not None
+                if mean_ji is None:
+                    raise RuntimeError("expected one directed mean when directed counts are nonzero")
                 combined_mean = 1.0 - mean_ji
                 combined_count = count_ji
             elif mean_ji is None:
                 combined_mean = mean_ij
                 combined_count = count_ij
             else:
-                assert mean_ji is not None
                 combined_mean = (mean_ij * count_ij + (1.0 - mean_ji) * count_ji) / (count_ij + count_ji)
                 combined_count = count_ij + count_ji
 
@@ -134,8 +128,7 @@ def write_payoff_counts_json(path: Path, counts: np.ndarray, policy_ids: Sequenc
     payload: dict[str, dict[str, int]] = {}
     for row_index, policy_id in enumerate(policy_ids):
         payload[policy_id] = {
-            policy_ids[col_index]: int(counts[row_index, col_index])
-            for col_index in range(len(policy_ids))
+            policy_ids[col_index]: int(counts[row_index, col_index]) for col_index in range(len(policy_ids))
         }
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)

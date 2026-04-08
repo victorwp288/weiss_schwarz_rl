@@ -75,9 +75,10 @@ class EvalGameRecord:
     terminated: bool
     truncated: bool
     engine_status: int
+    run_id256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "config_hash256": self.config_hash256,
             "engine_status": self.engine_status,
             "episode_index": self.episode_index,
@@ -96,6 +97,9 @@ class EvalGameRecord:
             "terminated": self.terminated,
             "truncated": self.truncated,
         }
+        if self.run_id256 is not None:
+            payload["run_id256"] = self.run_id256
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +276,7 @@ def record_completed_game(
         terminated=bool(result.terminated),
         truncated=bool(result.truncated),
         engine_status=int(result.engine_status),
+        run_id256=key256_to_hex(_coerce_run_id256(run_id256)),
     )
 
 
