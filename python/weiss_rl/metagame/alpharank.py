@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import csv
+from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from scipy.special import logsumexp
 
 __all__ = [
     "AlphaRankResult",
+    "compute_alpharank_stationary",
     "compute_stationary_distribution",
     "normalize_stationary",
+    "write_alpharank_artifacts",
+    "write_stationary_mean_csv",
 ]
 
 
@@ -30,6 +36,76 @@ def normalize_stationary(scores: np.ndarray) -> np.ndarray:
     if total <= 0:
         raise ValueError("sum(scores) must be > 0")
     return arr / total
+
+
+def compute_alpharank_stationary(
+    p_mean: np.ndarray,
+    *,
+    policy_ids: Sequence[str] | None = None,
+    m: int = 50,
+    alpha: int = 100,
+    local_selection: bool = True,
+    use_inf_alpha: bool = False,
+    inf_alpha_eps: float = 0.01,
+) -> np.ndarray:
+    """Compute the AlphaRank stationary distribution for policy ranking."""
+
+    p_mean_arr = np.asarray(p_mean, dtype=np.float64)
+    if p_mean_arr.ndim != 2 or p_mean_arr.shape[0] != p_mean_arr.shape[1]:
+        raise ValueError("p_mean must be a square matrix")
+    if p_mean_arr.shape[0] == 0:
+        raise ValueError("p_mean must contain at least one policy")
+    if policy_ids is not None and len(policy_ids) != p_mean_arr.shape[0]:
+        raise ValueError("policy_ids length must match p_mean dimensions")
+    if not np.isfinite(p_mean_arr).all():
+        raise ValueError("p_mean must contain only finite values")
+    if m < 1:
+        raise ValueError("m must be >= 1")
+    if alpha < 1:
+        raise ValueError("alpha must be >= 1")
+    if inf_alpha_eps < 0.0:
+        raise ValueError("inf_alpha_eps must be >= 0")
+    if p_mean_arr.shape[0] == 1:
+        return np.ones(1, dtype=np.float64)
+
+    return compute_stationary_distribution(
+        p_mean_arr,
+        m=m,
+        alpha=alpha,
+        local_selection=local_selection,
+        use_inf_alpha=use_inf_alpha,
+        inf_alpha_eps=inf_alpha_eps,
+    ).stationary
+
+
+def write_stationary_mean_csv(path: Path, policy_ids: Sequence[str], stationary: np.ndarray) -> None:
+    """Write the AlphaRank stationary distribution to a ranked CSV file."""
+
+    stationary_arr = np.asarray(stationary, dtype=np.float64)
+    if stationary_arr.ndim != 1:
+        raise ValueError("stationary must be a one-dimensional array")
+    if len(policy_ids) != stationary_arr.shape[0]:
+        raise ValueError("policy_ids length must match stationary length")
+
+    ranked_rows = sorted(
+        zip(policy_ids, stationary_arr.tolist(), strict=True),
+        key=lambda item: (-item[1], item[0]),
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["rank", "policy_id", "stationary_probability"])
+        for rank, (policy_id, prob) in enumerate(ranked_rows, start=1):
+            writer.writerow([rank, policy_id, f"{float(prob):.12g}"])
+
+
+def write_alpharank_artifacts(
+    stationary_mean_csv: Path,
+    stationary: np.ndarray,
+    policy_ids: Sequence[str],
+) -> None:
+    write_stationary_mean_csv(stationary_mean_csv, policy_ids, stationary)
 
 
 def compute_stationary_distribution(
