@@ -203,6 +203,68 @@ def test_build_sensitivity_report_rejects_duplicate_final_eval_matchup(tmp_path:
         )
 
 
+def test_build_sensitivity_report_rejects_mismatched_matchup_episodes_path(tmp_path: Path) -> None:
+    final_eval_dir = _write_final_eval_fixture(tmp_path)
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    assert stack.config.metagame is not None
+    assert stack.config.sensitivity is not None
+
+    summary_path = final_eval_dir / "summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    target = payload["matchups"][0]
+    source = next(
+        matchup
+        for matchup in payload["matchups"][1:]
+        if (
+            matchup["focal_policy_id"],
+            matchup["opponent_policy_id"],
+        )
+        != (
+            target["focal_policy_id"],
+            target["opponent_policy_id"],
+        )
+    )
+    target["episodes_path"] = source["episodes_path"]
+    _write_final_eval_summary(final_eval_dir, payload)
+
+    with pytest.raises(ValueError, match=r"episodes do not match summary metadata"):
+        build_sensitivity_report(
+            final_eval_dir=final_eval_dir,
+            out_dir=tmp_path / "sensitivity",
+            metagame_config=stack.config.metagame,
+            sensitivity_config=stack.config.sensitivity,
+        )
+
+
+@pytest.mark.parametrize(
+    ("episodes_path", "message"),
+    [
+        ("../outside.jsonl", r"resolves outside the final_eval root"),
+        ("/tmp/outside.jsonl", r"must be relative to the final_eval root"),
+    ],
+)
+def test_build_sensitivity_report_rejects_unsafe_matchup_episodes_path(
+    tmp_path: Path, episodes_path: str, message: str
+) -> None:
+    final_eval_dir = _write_final_eval_fixture(tmp_path)
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    assert stack.config.metagame is not None
+    assert stack.config.sensitivity is not None
+
+    summary_path = final_eval_dir / "summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload["matchups"][0]["episodes_path"] = episodes_path
+    _write_final_eval_summary(final_eval_dir, payload)
+
+    with pytest.raises(ValueError, match=message):
+        build_sensitivity_report(
+            final_eval_dir=final_eval_dir,
+            out_dir=tmp_path / "sensitivity",
+            metagame_config=stack.config.metagame,
+            sensitivity_config=stack.config.sensitivity,
+        )
+
+
 def test_metagame_entrypoint_writes_sensitivity_tree(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
     out_dir = tmp_path / "custom_sensitivity"

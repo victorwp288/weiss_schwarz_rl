@@ -167,7 +167,17 @@ def _load_final_eval_context(final_eval_dir: Path) -> FinalEvalContext:
                 f"({focal_policy_id!r}, {opponent_policy_id!r})"
             )
         canonical_keys.add(canonical_key)
-        episodes_path = final_eval_dir / str(item["episodes_path"])
+        episodes_path = _resolve_final_eval_episodes_path(
+            final_eval_dir=final_eval_dir,
+            value=item.get("episodes_path"),
+        )
+        records = load_eval_game_records(episodes_path)
+        _validate_matchup_records(
+            records=records,
+            episodes_path=episodes_path,
+            focal_policy_id=focal_policy_id,
+            opponent_policy_id=opponent_policy_id,
+        )
         matchups.append(
             FinalEvalMatchup(
                 focal_policy_id=focal_policy_id,
@@ -175,7 +185,7 @@ def _load_final_eval_context(final_eval_dir: Path) -> FinalEvalContext:
                 focal_policy_index=focal_index,
                 opponent_policy_index=opponent_index,
                 episodes_path=episodes_path,
-                records=load_eval_game_records(episodes_path),
+                records=records,
             )
         )
     expected_matchups = (len(policy_ids) * (len(policy_ids) + 1)) // 2
@@ -600,6 +610,51 @@ def _require_matchup_policy_index(
             f"for {policy_id!r} (expected {expected_index})"
         )
     return index
+
+
+def _resolve_final_eval_episodes_path(*, final_eval_dir: Path, value: Any) -> Path:
+    if not isinstance(value, str) or not value:
+        raise ValueError("final_eval matchup episodes_path must be a non-empty string")
+    raw_path = Path(value)
+    if raw_path.is_absolute():
+        raise ValueError(
+            "final_eval matchup episodes_path must be relative to the final_eval root, "
+            f"got absolute path: {value!r}"
+        )
+    resolved_root = final_eval_dir.resolve()
+    resolved_path = (final_eval_dir / raw_path).resolve()
+    try:
+        resolved_path.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(
+            "final_eval matchup episodes_path resolves outside the final_eval root: "
+            f"{value!r}"
+        ) from exc
+    return resolved_path
+
+
+def _validate_matchup_records(
+    *,
+    records: Sequence[EvalGameRecord],
+    episodes_path: Path,
+    focal_policy_id: str,
+    opponent_policy_id: str,
+) -> None:
+    focal_ids = {record.focal_policy_id for record in records}
+    opponent_ids = {record.opponent_policy_id for record in records}
+    if len(focal_ids) != 1 or len(opponent_ids) != 1:
+        raise ValueError(
+            "final_eval matchup episodes must contain exactly one focal_policy_id and "
+            f"one opponent_policy_id: {episodes_path}"
+        )
+    actual_focal_policy_id = next(iter(focal_ids))
+    actual_opponent_policy_id = next(iter(opponent_ids))
+    if actual_focal_policy_id != focal_policy_id or actual_opponent_policy_id != opponent_policy_id:
+        raise ValueError(
+            "final_eval matchup episodes do not match summary metadata for "
+            f"{episodes_path}: summary expects ({focal_policy_id!r}, {opponent_policy_id!r}), "
+            f"loaded ({actual_focal_policy_id!r}, {actual_opponent_policy_id!r})"
+        )
 
 
 def _observed_pair_count(records: Sequence[EvalGameRecord]) -> int:
