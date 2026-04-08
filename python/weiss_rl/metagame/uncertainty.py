@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from weiss_rl.eval import EvalGameRecord
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme, paired_seed_scores
+from weiss_rl.eval.payoff_folding import PayoffFoldScheme, paired_seed_scores, validated_paired_seed_groups
 
 _DEFAULT_CI_LEVEL = 0.95
 _DEFAULT_SAMPLE_COUNT = 1000
@@ -54,7 +54,7 @@ def bayesian_bootstrap_summary(
     seed: int | None = None,
 ) -> PayoffUncertaintySummary:
     score_array = _coerce_scores(scores)
-    posterior = posterior_samples(score_array, sample_count=sample_count, seed=seed)
+    posterior = posterior_samples(score_array.tolist(), sample_count=sample_count, seed=seed)
     ci_low, ci_high = _credible_interval(posterior, ci_level=ci_level)
     mean = float(np.mean(score_array))
     return PayoffUncertaintySummary(
@@ -159,6 +159,8 @@ def dirichlet_wldt_posterior_samples(
     sample_count: int = _DEFAULT_SAMPLE_COUNT,
     seed: int | None = None,
 ) -> np.ndarray:
+    if not records:
+        raise ValueError("dirichlet_wldt_posterior_samples requires at least one record")
     if sample_count <= 0:
         raise ValueError("sample_count must be positive")
     if alpha <= 0.0:
@@ -184,18 +186,19 @@ def dirichlet_wldt_posterior_samples(
 
 def _count_wldt_outcomes(records: Sequence[EvalGameRecord]) -> np.ndarray:
     counts = np.zeros((4,), dtype=np.float64)
-    for record in records:
-        outcome = record.outcome.strip().upper()
-        if outcome == "W":
-            counts[0] += 1.0
-        elif outcome == "L":
-            counts[1] += 1.0
-        elif outcome == "D":
-            counts[2] += 1.0
-        elif outcome == "T":
-            counts[3] += 1.0
-        else:
-            raise ValueError(f"unknown outcome token: {record.outcome!r}")
+    for pair_records in validated_paired_seed_groups(records):
+        for record in pair_records:
+            outcome = record.outcome.strip().upper()
+            if outcome == "W":
+                counts[0] += 1.0
+            elif outcome == "L":
+                counts[1] += 1.0
+            elif outcome == "D":
+                counts[2] += 1.0
+            elif outcome == "T":
+                counts[3] += 1.0
+            else:
+                raise ValueError(f"unknown outcome token: {record.outcome!r}")
     return counts
 
 
