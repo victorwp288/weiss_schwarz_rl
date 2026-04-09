@@ -10,7 +10,7 @@ Before you sink time into the repo, here is the honest version:
 - `train.py` can also run a tiny inline M3-08 training smoke when you pass a full training stack and the active interpreter can step the simulator.
 - `eval.py` currently checks contracts and summarizes an already-produced `episodes.jsonl` file.
 - `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline that generates clearly-labeled demo artifacts without proprietary simulator assets.
-- `make_figures.py` otherwise writes placeholder artifacts.
+- `make_figures.py` otherwise renders paper figures from completed run artifacts.
 - None of those entrypoints are the full proprietary master-plan pipeline yet.
 
 Repo paths in this guide are relative to the repo root.
@@ -132,13 +132,15 @@ These are honest smoke checks for the other top-level entrypoints:
 
 ```bash
 uv run python python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml
-uv run python python/scripts/make_figures.py --out runs/figures/placeholder.txt
+uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
+uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
 ```
 
 Expected outcomes:
 
 - `eval.py` reports a contract check and seed-set summary when no `--episodes-jsonl` is supplied.
-- `make_figures.py` writes a placeholder artifact under `runs/figures/`.
+- `make_figures.py` renders all paper figures by default, or a selected figure via `--fig-id` (`matchup_heatmap`, `truncation_heatmap`, `seat_bias`, `learning_curves`).
+- `make_figures.py` checks the selected figure inputs before rendering and writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`.
 
 ### Public-safe toy/demo e2e path
 
