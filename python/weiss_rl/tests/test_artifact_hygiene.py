@@ -75,16 +75,30 @@ def test_scan_artifact_roots_scans_replay_bundle_members(tmp_path: Path) -> None
     assert any(finding.rule == "trademark_marker" for finding in findings)
 
 
-def test_scan_tracked_repo_tree_skips_docs_prose_but_scans_tracked_data(tmp_path: Path) -> None:
+def test_scan_artifact_roots_matches_path_markers_on_tokens_only(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "runs" / "bad"
+    artifact_root.mkdir(parents=True)
+    (artifact_root / "icon.png").write_bytes(b"png")
+    (artifact_root / "lexicon.png").write_bytes(b"png")
+
+    findings, _stats = scan_artifact_roots((artifact_root,))
+    flagged_names = {Path(finding.path).name for finding in findings if finding.rule == "suspicious_image_asset"}
+
+    assert "icon.png" in flagged_names
+    assert "lexicon.png" not in flagged_names
+
+
+def test_scan_tracked_repo_tree_skips_out_of_scope_doc_assets_but_scans_tracked_data(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
     docs_dir = tmp_path / "docs"
     data_dir = tmp_path / "bundles"
     docs_dir.mkdir()
     data_dir.mkdir()
     (docs_dir / "README.txt").write_text("Weiss Schwarz reference text\n", encoding="utf-8")
+    (docs_dir / "logo.png").write_bytes(b"png")
     (data_dir / "catalog.json").write_text(json.dumps({"series": "Weiss Schwarz"}) + "\n", encoding="utf-8")
     subprocess.run(
-        ["git", "add", "docs/README.txt", "bundles/catalog.json"],
+        ["git", "add", "docs/README.txt", "docs/logo.png", "bundles/catalog.json"],
         cwd=tmp_path,
         check=True,
         capture_output=True,
@@ -95,6 +109,7 @@ def test_scan_tracked_repo_tree_skips_docs_prose_but_scans_tracked_data(tmp_path
 
     assert "bundles/catalog.json" in finding_paths
     assert "docs/README.txt" not in finding_paths
+    assert "docs/logo.png" not in finding_paths
 
 
 def test_artifact_scan_entrypoint_returns_nonzero_on_findings(tmp_path: Path) -> None:
