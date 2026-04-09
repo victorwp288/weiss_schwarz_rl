@@ -283,8 +283,8 @@ def _write_run_dir_fixture(tmp_path: Path) -> Path:
     _write_json(run_dir / "spec_bundle.json", cast(dict[str, Any], manifest_payload["spec_bundle"]))
     _write_json(run_dir / "config_canonical.json", cast(dict[str, Any], manifest_payload["config_canonical"]))
     (run_dir / "spec_hash256.txt").parent.mkdir(parents=True, exist_ok=True)
-    (run_dir / "spec_hash256.txt").write_text(manifest_payload["spec_hash256"] + "\n", encoding="utf-8")
-    (run_dir / "config_hash256.txt").write_text(manifest_payload["config_hash256"] + "\n", encoding="utf-8")
+    (run_dir / "spec_hash256.txt").write_text(str(manifest_payload["spec_hash256"]) + "\n", encoding="utf-8")
+    (run_dir / "config_hash256.txt").write_text(str(manifest_payload["config_hash256"]) + "\n", encoding="utf-8")
 
     (run_dir / "training" / "logs").mkdir(parents=True, exist_ok=True)
     (run_dir / "training" / "logs" / "training_metrics.jsonl").write_text(
