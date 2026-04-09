@@ -17,6 +17,7 @@ from weiss_rl.masking import (
     resolve_pass_action_id,
     sample_actions_from_mask,
 )
+from weiss_rl.replay.bundles import load_replay_bundle
 
 OBS_LEN = 6
 ACTION_SPACE = 64
@@ -374,6 +375,217 @@ class PartialDoneResetMaskEnv:
         return batch
 
 
+class ReplayIdsAutoResetEnv:
+    def __init__(self) -> None:
+        self.step_index = 0
+        self.reset_done_calls: list[np.ndarray] = []
+
+    def reset(self) -> IdsBatch:
+        self.step_index = 0
+        return self._decision_batch(episode_seed=11, episode_key=111, decision_id=0, obs_value=1)
+
+    def step(self, actions: np.ndarray) -> IdsBatch:
+        assert actions.shape == (1,)
+        if self.step_index == 0:
+            self.step_index = 1
+            return self._transition_batch(
+                reward=1.0,
+                terminated=True,
+                truncated=False,
+                engine_status=0,
+                episode_seed=12,
+                episode_key=112,
+                decision_id=1,
+                obs_value=9,
+            )
+        if self.step_index == 1:
+            self.step_index = 2
+            return self._transition_batch(
+                reward=2.0,
+                terminated=False,
+                truncated=False,
+                engine_status=0,
+                episode_seed=22,
+                episode_key=222,
+                decision_id=6,
+                obs_value=20,
+            )
+        raise AssertionError("unexpected extra step")
+
+    def reset_done(self, done: np.ndarray) -> IdsBatch:
+        done_array = np.asarray(done, dtype=np.bool_)
+        self.reset_done_calls.append(done_array.copy())
+        assert np.array_equal(done_array, np.array([True], dtype=np.bool_))
+        return self._decision_batch(episode_seed=22, episode_key=222, decision_id=5, obs_value=12)
+
+    def _decision_batch(self, *, episode_seed: int, episode_key: int, decision_id: int, obs_value: int) -> IdsBatch:
+        batch = IdsBatch(1)
+        batch.obs[:] = obs_value
+        batch.decision_id[:] = decision_id
+        batch.to_play[:] = 0
+        batch.actor[:] = 0
+        batch.episode_seed[:] = np.uint64(episode_seed)
+        batch.episode_key[:] = np.uint64(episode_key)
+        batch.ids_offsets = (np.array([1, 3, 5], dtype=np.int32), np.array([0, 3], dtype=np.uint32))
+        return batch
+
+    def _transition_batch(
+        self,
+        *,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        engine_status: int,
+        episode_seed: int,
+        episode_key: int,
+        decision_id: int,
+        obs_value: int,
+    ) -> IdsBatch:
+        batch = self._decision_batch(
+            episode_seed=episode_seed,
+            episode_key=episode_key,
+            decision_id=decision_id,
+            obs_value=obs_value,
+        )
+        batch.reward[:] = np.float32(reward)
+        batch.terminated[:] = terminated
+        batch.truncated[:] = truncated
+        batch.engine_status[:] = engine_status
+        return batch
+
+
+class NoIdentityIdsBatch:
+    def __init__(self, num_envs: int) -> None:
+        self.obs = np.zeros((num_envs, OBS_LEN), dtype=np.int16)
+        self.reward = np.zeros((num_envs,), dtype=np.float32)
+        self.terminated = np.zeros((num_envs,), dtype=np.bool_)
+        self.truncated = np.zeros((num_envs,), dtype=np.bool_)
+        self.engine_status = np.zeros((num_envs,), dtype=np.int32)
+        self.decision_id = np.zeros((num_envs,), dtype=np.int32)
+        self.to_play = np.zeros((num_envs,), dtype=np.int8)
+        self.actor = self.to_play
+        self.ids_offsets: tuple[np.ndarray, np.ndarray] | None = None
+
+
+class ReplayIdsMissingIdentityAutoResetEnv:
+    def __init__(self) -> None:
+        self.step_index = 0
+        self.reset_done_calls: list[np.ndarray] = []
+
+    def reset(self) -> NoIdentityIdsBatch:
+        self.step_index = 0
+        return self._decision_batch(decision_id=0, obs_value=1)
+
+    def step(self, actions: np.ndarray) -> NoIdentityIdsBatch:
+        assert actions.shape == (1,)
+        if self.step_index == 0:
+            self.step_index = 1
+            return self._transition_batch(
+                reward=1.0,
+                terminated=True,
+                truncated=False,
+                engine_status=0,
+                decision_id=1,
+                obs_value=9,
+            )
+        if self.step_index == 1:
+            self.step_index = 2
+            return self._transition_batch(
+                reward=2.0,
+                terminated=True,
+                truncated=False,
+                engine_status=0,
+                decision_id=6,
+                obs_value=20,
+            )
+        raise AssertionError("unexpected extra step")
+
+    def reset_done(self, done: np.ndarray) -> NoIdentityIdsBatch:
+        done_array = np.asarray(done, dtype=np.bool_)
+        self.reset_done_calls.append(done_array.copy())
+        assert np.array_equal(done_array, np.array([True], dtype=np.bool_))
+        return self._decision_batch(decision_id=5, obs_value=12)
+
+    def _decision_batch(self, *, decision_id: int, obs_value: int) -> NoIdentityIdsBatch:
+        batch = NoIdentityIdsBatch(1)
+        batch.obs[:] = obs_value
+        batch.decision_id[:] = decision_id
+        batch.to_play[:] = 0
+        batch.actor[:] = 0
+        batch.ids_offsets = (np.array([1, 3, 5], dtype=np.int32), np.array([0, 3], dtype=np.uint32))
+        return batch
+
+    def _transition_batch(
+        self,
+        *,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        engine_status: int,
+        decision_id: int,
+        obs_value: int,
+    ) -> NoIdentityIdsBatch:
+        batch = self._decision_batch(decision_id=decision_id, obs_value=obs_value)
+        batch.reward[:] = np.float32(reward)
+        batch.terminated[:] = terminated
+        batch.truncated[:] = truncated
+        batch.engine_status[:] = engine_status
+        return batch
+
+
+class EngineFaultIdsEnv:
+    def reset(self) -> IdsBatch:
+        return self._decision_batch(episode_seed=77, episode_key=777, decision_id=0, obs_value=4)
+
+    def step(self, actions: np.ndarray) -> IdsBatch:
+        assert actions.shape == (1,)
+        return self._transition_batch(
+            reward=-1.0,
+            terminated=True,
+            truncated=False,
+            engine_status=17,
+            episode_seed=78,
+            episode_key=778,
+            decision_id=1,
+            obs_value=8,
+        )
+
+    def _decision_batch(self, *, episode_seed: int, episode_key: int, decision_id: int, obs_value: int) -> IdsBatch:
+        batch = IdsBatch(1)
+        batch.obs[:] = obs_value
+        batch.decision_id[:] = decision_id
+        batch.to_play[:] = 0
+        batch.actor[:] = 0
+        batch.episode_seed[:] = np.uint64(episode_seed)
+        batch.episode_key[:] = np.uint64(episode_key)
+        batch.ids_offsets = (np.array([2, 4, 6], dtype=np.int32), np.array([0, 3], dtype=np.uint32))
+        return batch
+
+    def _transition_batch(
+        self,
+        *,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        engine_status: int,
+        episode_seed: int,
+        episode_key: int,
+        decision_id: int,
+        obs_value: int,
+    ) -> IdsBatch:
+        batch = self._decision_batch(
+            episode_seed=episode_seed,
+            episode_key=episode_key,
+            decision_id=decision_id,
+            obs_value=obs_value,
+        )
+        batch.reward[:] = np.float32(reward)
+        batch.terminated[:] = terminated
+        batch.truncated[:] = truncated
+        batch.engine_status[:] = engine_status
+        return batch
+
+
 def _policy_logits(obs: np.ndarray, to_play: np.ndarray) -> np.ndarray:
     logits = np.zeros((obs.shape[0], ACTION_SPACE), dtype=np.float32)
     base = obs[:, 0].astype(np.float32) + to_play.astype(np.float32)
@@ -713,6 +925,100 @@ def test_actor_worker_preserves_rng_stream_across_run_once_calls() -> None:
 
     assert np.array_equal(first.action, expected_chunks[0])
     assert np.array_equal(second.action, expected_chunks[1])
+
+
+def test_actor_worker_clears_replay_buffer_on_episode_boundary(tmp_path: Path) -> None:
+    replay_dir = tmp_path / "replays"
+    worker = ActorWorker(
+        actor_id=12,
+        unroll_length=2,
+        num_envs=1,
+        action_space=ACTION_SPACE,
+        layout_name="i16_legal_ids",
+        seed=101,
+        replay_dir=replay_dir,
+        run_id256=b"r" * 32,
+        spec_hash256=bytes.fromhex("ab" * 32),
+    )
+
+    worker.run_once(env=ReplayIdsAutoResetEnv(), policy_logits_fn=_uniform_policy_logits)
+    worker._flush_replay_for_env(env_index=0)
+
+    [bundle_path] = sorted(replay_dir.glob("replay_*.zip"))
+    meta, steps, fault = load_replay_bundle(bundle_path)
+
+    assert fault is None
+    assert meta.episode_identity_source == "simulator"
+    assert meta.simulator_episode_key_u64 == 222
+    assert meta.episode_seed64 == 22
+    assert [step.decision_id for step in steps] == [5]
+    assert [step.t for step in steps] == [1]
+
+
+def test_actor_worker_keeps_derived_replay_identity_distinct_without_simulator_episode_ids(tmp_path: Path) -> None:
+    replay_dir = tmp_path / "replays"
+    worker = ActorWorker(
+        actor_id=14,
+        unroll_length=2,
+        num_envs=1,
+        action_space=ACTION_SPACE,
+        layout_name="i16_legal_ids",
+        seed=303,
+        replay_dir=replay_dir,
+        run_id256=b"s" * 32,
+        spec_hash256=bytes.fromhex("ef" * 32),
+        capture_replays_on_done=True,
+    )
+
+    worker.run_once(env=ReplayIdsMissingIdentityAutoResetEnv(), policy_logits_fn=_uniform_policy_logits)
+
+    bundle_paths = sorted(replay_dir.glob("replay_*.zip"))
+    assert len(bundle_paths) == 2
+    assert bundle_paths[0].name != bundle_paths[1].name
+
+    bundle_payloads = [load_replay_bundle(path) for path in bundle_paths]
+    metas = sorted((meta for meta, _, _ in bundle_payloads), key=lambda meta: meta.episode_index)
+    steps_by_episode = {meta.episode_index: steps for meta, steps, _ in bundle_payloads}
+    faults = [fault for _, _, fault in bundle_payloads]
+
+    assert faults == [None, None]
+    assert [meta.episode_index for meta in metas] == [0, 1]
+    assert all(meta.episode_identity_source == "derived" for meta in metas)
+    assert all(meta.simulator_episode_key_kind is None for meta in metas)
+    assert all(meta.simulator_episode_key_u64 is None for meta in metas)
+    assert metas[0].episode_seed64 != metas[1].episode_seed64
+    assert [step.decision_id for step in steps_by_episode[0]] == [0]
+    assert [step.decision_id for step in steps_by_episode[1]] == [5]
+
+
+def test_actor_worker_captures_engine_error_replay_with_actual_episode_identity(tmp_path: Path) -> None:
+    replay_dir = tmp_path / "replays"
+    worker = ActorWorker(
+        actor_id=13,
+        unroll_length=1,
+        num_envs=1,
+        action_space=ACTION_SPACE,
+        layout_name="i16_legal_ids",
+        seed=202,
+        replay_dir=replay_dir,
+        run_id256=b"r" * 32,
+        spec_hash256=bytes.fromhex("cd" * 32),
+        capture_replays_on_done=False,
+    )
+
+    worker.run_once(env=EngineFaultIdsEnv(), policy_logits_fn=_uniform_policy_logits)
+
+    [bundle_path] = sorted(replay_dir.glob("replay_*.zip"))
+    meta, steps, fault = load_replay_bundle(bundle_path)
+
+    assert meta.episode_identity_source == "simulator"
+    assert meta.simulator_episode_key_u64 == 777
+    assert meta.episode_seed64 == 77
+    assert len(steps) == 1
+    assert steps[0].engine_status == 17
+    assert fault is not None
+    assert fault["engine_status"] == 17
+    assert fault["simulator_episode_key"] == 777
 
 
 def test_actor_worker_writes_fault_bundle_on_nonfinite_logits(tmp_path: Path) -> None:
