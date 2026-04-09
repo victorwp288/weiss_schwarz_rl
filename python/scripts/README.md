@@ -129,20 +129,28 @@ Default focal-policy behavior:
 
 ### `make_figures.py`
 
-Placeholder figure writer.
+Paper figure renderer for completed run artifacts.
 
 ```bash
-uv run python python/scripts/make_figures.py --out runs/figures/placeholder.txt
+uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
+uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
 ```
 
 Current behavior:
 
-- writes a placeholder artifact
+- renders all paper figures by default, or a single figure when `--fig-id` is set
+- stable figure IDs: `matchup_heatmap`, `truncation_heatmap`, `seat_bias`, `learning_curves`
+- checks that the selected figure's required input artifacts exist before rendering
+- reads `eval/final_eval/payoff_matrices/p_mean.csv`
+- reads `eval/diagnostics/truncation_heatmap_data.csv`
+- reads `eval/diagnostics/seat_bias.json`
+- reads `training/logs/training_metrics.jsonl`
+- writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`
 - with `--public-demo`, renders a clearly-labeled demo-only placeholder bundle from `final_eval/summary.json`
 
 Current non-claim:
 
-- not a paper-ready figure pipeline yet
+- does not generate evaluation artifacts itself; it only renders figures from an existing run directory
 
 Public-safe toy/demo figures:
 
