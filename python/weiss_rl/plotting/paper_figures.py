@@ -21,7 +21,13 @@ from matplotlib.figure import Figure
 
 from weiss_rl.training_logger import TrainingLogger
 
-__all__ = ["PAPER_FIGURE_IDS", "PAPER_FIGURE_STEMS", "render_paper_figures"]
+__all__ = [
+    "PAPER_FIGURE_IDS",
+    "PAPER_FIGURE_STEMS",
+    "render_paper_figures",
+    "render_placeholder_figure",
+    "render_public_demo_figures",
+]
 
 SUPPORTED_FORMATS = frozenset({"pdf", "png"})
 PREFERRED_LEARNING_CURVE_FIELDS = (
@@ -35,6 +41,89 @@ PREFERRED_LEARNING_CURVE_FIELDS = (
 
 FloatArray = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
+
+
+def render_placeholder_figure(out_path: Path) -> None:
+    """Write a simple placeholder artifact until plotting is implemented."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("placeholder_figure\n", encoding="utf-8")
+
+
+def render_public_demo_figures(*, final_eval_dir: Path, out_dir: Path) -> dict[str, Path]:
+    """Render clearly-labeled demo-only figure placeholders from public toy eval artifacts."""
+    summary_path = final_eval_dir / "summary.json"
+    if not summary_path.is_file():
+        raise FileNotFoundError(f"missing final_eval summary.json: {summary_path}")
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"expected JSON object in {summary_path}")
+
+    metadata = payload.get("metadata", {})
+    if not isinstance(metadata, dict) or not bool(metadata.get("demo_only", False)):
+        raise ValueError("public-demo figure rendering requires final_eval metadata.demo_only=true")
+
+    policy_ids_raw = payload.get("policy_ids", [])
+    if not isinstance(policy_ids_raw, list):
+        raise ValueError("final_eval summary policy_ids must be a list")
+    policy_ids = [str(policy_id) for policy_id in policy_ids_raw]
+
+    matrices = payload.get("matrices", {})
+    if not isinstance(matrices, dict):
+        raise ValueError("final_eval summary matrices must be an object")
+    mean_matrix = matrices.get("mean", {})
+    if not isinstance(mean_matrix, dict):
+        raise ValueError("final_eval summary mean matrix must be an object")
+    mean_values = mean_matrix.get("values", [])
+    if not isinstance(mean_values, list):
+        raise ValueError("final_eval summary mean.values must be a list")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    placeholder_path = out_dir / "toy_demo_placeholder.txt"
+    placeholder_path.write_text(
+        "\n".join(
+            (
+                "toy_public_demo_placeholder_figure",
+                str(metadata.get("warning", "demo-only artifact")),
+                f"source_final_eval_dir={final_eval_dir.as_posix()}",
+                f"policy_count={len(policy_ids)}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    matrix_csv_path = out_dir / "toy_demo_mean_matrix.csv"
+    with matrix_csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["focal_policy_id", *policy_ids])
+        for focal_policy_id, row in zip(policy_ids, mean_values, strict=True):
+            if not isinstance(row, list):
+                raise ValueError("final_eval summary mean.values rows must be lists")
+            writer.writerow([focal_policy_id, *row])
+
+    manifest_path = out_dir / "toy_demo_manifest.json"
+    manifest_payload = {
+        "kind": "toy_public_demo_figures_v1",
+        "demo_only": True,
+        "public_safe": True,
+        "warning": metadata.get("warning", "demo-only artifact"),
+        "source_final_eval_dir": final_eval_dir.as_posix(),
+        "source_summary_path": summary_path.as_posix(),
+        "policy_ids": policy_ids,
+        "artifacts": {
+            "placeholder": placeholder_path.name,
+            "mean_matrix_csv": matrix_csv_path.name,
+        },
+    }
+    manifest_path.write_text(json.dumps(manifest_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    return {
+        "placeholder": placeholder_path,
+        "mean_matrix_csv": matrix_csv_path,
+        "manifest": manifest_path,
+    }
 
 
 @dataclass(frozen=True)

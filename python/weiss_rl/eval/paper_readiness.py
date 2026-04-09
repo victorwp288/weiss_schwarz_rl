@@ -428,6 +428,7 @@ def _metadata_focal_policy_id(payload: Mapping[str, Any]) -> str | None:
     metadata = _mapping(payload.get("metadata", {}), context="metadata")
     for path in (
         ("focal_policy_id",),
+        ("recommended_focal_policy_id",),
         ("focal_policy", "policy_id"),
         ("selection", "focal_policy_id"),
     ):

@@ -28,9 +28,10 @@ PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.
 What it does today:
 
 - loads the stack config
-- probes `weiss_sim.export_spec_bundle()` and verifies the runtime contract
+- probes `weiss_sim.export_spec_bundle()` and verifies the runtime contract, unless you use `--public-demo`
 - computes run IDs and writes `manifest.json`, `spec_bundle.json`, `config_canonical.json`, and scaffold directories under `runs/`
 - when the active interpreter can import a simulator runtime with stepping APIs and the stack contains the training/model/environment blocks, it runs a tiny inline training smoke and writes training artifacts under `runs/<run>/training/`
+- with `--public-demo`, stages a built-in public-safe toy catalog and deterministic toy policy bundle under `runs/<run>/public_demo/`
 
 What it does **not** do today:
 
@@ -45,6 +46,17 @@ What it does **not** do today:
 If `weiss_sim` is not installed in the active interpreter, the script still tries to collect provenance through a working local simulator interpreter/check-out when available. Configure `WEISS_SIM_PYTHONPATH` and optionally `WEISS_SIM_PYTHON` if your simulator lives elsewhere.
 
 Important: the **inline training smoke path** requires the active interpreter itself to import a simulator runtime with stepping APIs. `make train-inline-smoke` handles the usual sibling-checkout case by prepending `../weiss-schwarz-simulator/python` to `PYTHONPATH`. If only the provenance probe works, `train.py` falls back to manifest-only mode and prints why.
+
+Public-safe toy/demo staging:
+
+```bash
+uv run python python/scripts/train.py \
+  --stack-config configs/rl_stack_locked.yaml \
+  --public-demo \
+  --run-label toy_public_demo
+```
+
+That mode is explicitly synthetic. It writes demo-only catalog/policy artifacts and does not claim simulator training happened.
 
 ### `eval.py`
 
@@ -72,14 +84,26 @@ What it does today:
 - validates config-hash and optional simulator contract inputs
 - reports the evaluation config/contract surface
 - summarizes an existing seat-swapped `episodes.jsonl` file into JSON/CSV and optional diagnostics
+- with `--public-demo`, generates a deterministic demo-only `final_eval/` artifact tree from the staged toy catalog/policies
 
 What it does **not** do today:
 
-- no policy rollout execution
-- no simulator-driven episode generation
+- outside `--public-demo`, no policy rollout execution
+- outside `--public-demo`, no simulator-driven episode generation
 - no hidden claim that a reported `run_label` is a computed run identity
 
 `--run-label` is just a human label for the startup banner/log output. Unlike `train.py`, this script does not compute a run directory identity or persist the label into summary exports.
+
+Public-safe toy/demo eval:
+
+```bash
+uv run python python/scripts/eval.py \
+  --stack-config configs/rl_stack_locked.yaml \
+  --public-demo \
+  --run-dir runs/toy_public_demo
+```
+
+That path writes demo-only `final_eval/` artifacts and labels them clearly in metadata.
 
 ### `paper_readiness_check.py`
 
@@ -122,7 +146,17 @@ Current behavior:
 - reads `eval/diagnostics/seat_bias.json`
 - reads `training/logs/training_metrics.jsonl`
 - writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`
+- with `--public-demo`, renders a clearly-labeled demo-only placeholder bundle from `final_eval/summary.json`
 
 Current non-claim:
 
 - does not generate evaluation artifacts itself; it only renders figures from an existing run directory
+
+Public-safe toy/demo figures:
+
+```bash
+uv run python python/scripts/make_figures.py \
+  --public-demo \
+  --final-eval-dir runs/toy_public_demo/eval/final_eval \
+  --out-dir runs/toy_public_demo/figures
+```

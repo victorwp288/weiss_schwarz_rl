@@ -53,6 +53,13 @@ from weiss_rl.repro import (
 )
 from weiss_rl.simulator_contract import SimulatorContract, load_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract
+from weiss_rl.toy_public_demo import (
+    PUBLIC_DEMO_MODE,
+    public_demo_simulator_info,
+    public_demo_spec_bundle,
+    public_demo_spec_hash256,
+    stage_public_demo_run,
+)
 from weiss_rl.league.registry import (
     REGISTRY_FILENAME,
     SNAPSHOT_METADATA_FILENAME,
@@ -1859,6 +1866,11 @@ def main() -> None:
     parser.add_argument("--stack-config", type=Path, required=True)
     parser.add_argument("--spec-hash", type=str, default="", help="Expected spec hash or spec bundle SHA-256")
     parser.add_argument(
+        "--public-demo",
+        action="store_true",
+        help="Stage the built-in public-safe toy catalog/policy bundle instead of probing weiss_sim.",
+    )
+    parser.add_argument(
         "--config-hash",
         type=str,
         default="",
@@ -1902,10 +1914,18 @@ def main() -> None:
     )
 
     stack = load_stack_config(args.stack_config)
-    simulator_contract = load_simulator_contract(stack.root)
-    assert_spec_bundle_contract(args.spec_hash, simulator_contract.spec_bundle)
 
-    spec_hash256 = simulator_contract.spec_hash256
+    public_demo_enabled = bool(args.public_demo)
+    if public_demo_enabled:
+        public_demo_bundle = public_demo_spec_bundle()
+        assert_spec_bundle_contract(args.spec_hash, public_demo_bundle)
+        spec_hash256 = public_demo_spec_hash256()
+        simulator_info = public_demo_simulator_info()
+    else:
+        simulator_contract = load_simulator_contract(stack.root)
+        assert_spec_bundle_contract(args.spec_hash, simulator_contract.spec_bundle)
+        spec_hash256 = simulator_contract.spec_hash256
+        simulator_info = simulator_contract.simulator
     config_hash256 = compute_config_hash256(stack)
     _require_matching_hash(
         flag_name="--config-hash",
@@ -1928,10 +1948,12 @@ def main() -> None:
         run_dir_name=run_dir_name,
         spec_mismatch_policy=_spec_mismatch_policy(stack),
     )
-    print(
-        "Verified runtime spec bundle: "
-        f"compat={simulator_contract.simulator.get('compatibility_hash', '')} sha256={spec_hash256}"
+    spec_bundle_message = (
+        "Loaded synthetic public-demo spec bundle: "
+        if public_demo_enabled
+        else "Verified runtime spec bundle: "
     )
+    print(spec_bundle_message + f"compat={simulator_info.get('compatibility_hash', '')} sha256={spec_hash256}")
     print(f"Loaded stack config with {len(stack.components)} components")
 
     policy_set_selection, policy_set_selection_details = _resolve_policy_set_selection(
@@ -1947,8 +1969,8 @@ def main() -> None:
         git_dirty=_git_dirty(),
         spec_hash256=spec_hash256,
         config_hash256=config_hash256,
-        simulator=simulator_contract.simulator,
-        spec_bundle=simulator_contract.spec_bundle,
+        simulator=simulator_info,
+        spec_bundle=public_demo_spec_bundle() if public_demo_enabled else simulator_contract.spec_bundle,
         config_canonical=canonical_config_dict(stack),
         seed_files=build_seed_file_manifest(stack.seed_sets, root=stack.root),
         hardware=_hardware_summary(),
@@ -1962,6 +1984,19 @@ def main() -> None:
         run_label=run_label or None,
     )
     print(f"Wrote manifest: {artifacts.manifest_path}")
+
+    if public_demo_enabled:
+        staged = stage_public_demo_run(artifacts.run_dir)
+        print(
+            "Staged public-demo toy catalog and policy bundle: "
+            f"mode={PUBLIC_DEMO_MODE} policy_count={len(staged.policy_ids)} "
+            f"catalog={staged.catalog_path}"
+        )
+        print(
+            "Public demo mode is intentionally synthetic and demo-only. "
+            "It does not execute simulator training or claim thesis-grade results."
+        )
+        return
 
     manifest_only_reason = _minimal_training_prerequisite_failure(stack)
     if manifest_only_reason is not None:

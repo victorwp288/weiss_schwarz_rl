@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import cast
@@ -18,6 +19,14 @@ from weiss_rl.eval import (
 from weiss_rl.eval.payoff_folding import PayoffFoldScheme
 from weiss_rl.simulator_contract import load_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract, should_verify_runtime_spec_bundle
+from weiss_rl.toy_public_demo import (
+    PUBLIC_DEMO_DEFAULT_BOOTSTRAP_SAMPLES,
+    PUBLIC_DEMO_DEFAULT_PAIRED_SEEDS,
+    public_demo_spec_bundle,
+    public_demo_spec_hash256,
+    public_demo_stop_rules,
+    run_public_demo_final_eval,
+)
 
 _SHA256_HEX_LENGTH = 64
 
@@ -78,6 +87,35 @@ def main() -> None:
     )
     parser.add_argument("--run-id", dest="run_id_alias", type=str, default="", help=argparse.SUPPRESS)
     parser.add_argument(
+        "--public-demo",
+        action="store_true",
+        help="Run the built-in public-safe toy final-eval path instead of summarizing an episodes file.",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        help="Run directory containing staged public-demo artifacts from train.py --public-demo",
+    )
+    parser.add_argument(
+        "--final-eval-dir",
+        type=Path,
+        default=None,
+        help="Output directory for public-demo final_eval artifacts (default: <run-dir>/eval/final_eval)",
+    )
+    parser.add_argument(
+        "--public-demo-paired-seeds",
+        type=int,
+        default=PUBLIC_DEMO_DEFAULT_PAIRED_SEEDS,
+        help="Paired seed count for public-demo final_eval generation",
+    )
+    parser.add_argument(
+        "--public-demo-bootstrap-samples",
+        type=int,
+        default=PUBLIC_DEMO_DEFAULT_BOOTSTRAP_SAMPLES,
+        help="Bootstrap sample count for public-demo final_eval generation",
+    )
+    parser.add_argument(
         "--episodes-jsonl",
         type=Path,
         default=None,
@@ -111,7 +149,12 @@ def main() -> None:
     args = parser.parse_args()
     run_label = _resolve_run_label(parser, args.run_label, args.run_id_alias)
 
-    if args.episodes_jsonl is None and (args.summary_json is not None or args.summary_csv is not None):
+    if args.public_demo:
+        if args.run_dir is None:
+            parser.error("--public-demo requires --run-dir")
+        if args.episodes_jsonl is not None:
+            parser.error("--public-demo cannot be combined with --episodes-jsonl")
+    elif args.episodes_jsonl is None and (args.summary_json is not None or args.summary_csv is not None):
         parser.error("--summary-json/--summary-csv require --episodes-jsonl")
 
     stack = load_stack_config(args.stack_config)
@@ -133,15 +176,19 @@ def main() -> None:
         persist_in_manifest = spec_bundle_policy.persist_in_manifest
 
     contract = None
-    if should_verify_runtime_spec_bundle(
-        expected_spec_hash=args.spec_hash,
-        require_export_spec_bundle=require_export_spec_bundle,
-        persist_in_manifest=persist_in_manifest,
-    ):
-        contract = load_simulator_contract(stack.root)
-        assert_spec_bundle_contract(args.spec_hash, contract.spec_bundle)
-
-    reported_spec_hash = contract.spec_hash256 if contract is not None else "(not checked)"
+    if args.public_demo:
+        public_demo_bundle = public_demo_spec_bundle()
+        assert_spec_bundle_contract(args.spec_hash, public_demo_bundle)
+        reported_spec_hash = public_demo_spec_hash256()
+    else:
+        if should_verify_runtime_spec_bundle(
+            expected_spec_hash=args.spec_hash,
+            require_export_spec_bundle=require_export_spec_bundle,
+            persist_in_manifest=persist_in_manifest,
+        ):
+            contract = load_simulator_contract(stack.root)
+            assert_spec_bundle_contract(args.spec_hash, contract.spec_bundle)
+        reported_spec_hash = contract.spec_hash256 if contract is not None else "(not checked)"
     print_startup_banner(
         reported_spec_hash,
         config_hash256,
@@ -153,6 +200,42 @@ def main() -> None:
             "Verified runtime spec bundle: "
             f"compat={contract.simulator.get('compatibility_hash', '')} sha256={contract.spec_hash256}"
         )
+    elif args.public_demo:
+        print(
+            "Verified public-demo spec bundle: "
+            f"compat={public_demo_spec_bundle()['spec_hash']} sha256={reported_spec_hash}"
+        )
+
+    if args.public_demo:
+        assert args.run_dir is not None
+        run_dir = args.run_dir.resolve()
+        final_eval_dir = args.final_eval_dir or (run_dir / "eval" / "final_eval")
+        manifest_path = run_dir / "manifest.json"
+        if not manifest_path.is_file():
+            raise FileNotFoundError(f"missing run manifest: {manifest_path}")
+        manifest = cast(dict[str, object], json.loads(manifest_path.read_text(encoding="utf-8")))
+        run_id256 = str(manifest.get("run_id256", ""))
+        if not run_id256:
+            raise ValueError(f"run manifest is missing run_id256: {manifest_path}")
+        evaluation = stack.config.evaluation
+        stop_rules = public_demo_stop_rules() if evaluation is None else evaluation.stop_rules
+        payload = run_public_demo_final_eval(
+            output_dir=final_eval_dir,
+            run_dir=run_dir,
+            paired_seed_file=stack.seed_sets["report_eval"],
+            paired_seed_limit=int(args.public_demo_paired_seeds),
+            sample_count=int(args.public_demo_bootstrap_samples),
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=reported_spec_hash,
+            stop_rules=stop_rules,
+        )
+        print(f"Public-demo final_eval summary JSON: {final_eval_dir / 'summary.json'}")
+        print(f"Public-demo policies: {payload['policy_ids']}")
+        print(
+            "Public demo evaluation completed. These artifacts are toy/demo only and do not represent thesis results."
+        )
+        return
 
     if args.episodes_jsonl is None:
         print(f"Evaluation contract check complete; no episodes were summarized. Seed sets: {sorted(stack.seed_sets)}")

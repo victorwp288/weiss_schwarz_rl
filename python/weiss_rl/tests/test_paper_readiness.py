@@ -363,3 +363,23 @@ def test_build_paper_readiness_summary_uses_metadata_named_focal_policy(tmp_path
     assert check["focal_policy_source"] == "metadata"
     assert check["passed"] is True
     assert check["prob_gt_threshold"] == 1.0
+
+
+
+def test_build_paper_readiness_summary_uses_recommended_focal_policy_metadata(tmp_path: Path) -> None:
+    final_eval_dir = _write_multi_policy_final_eval_fixture(
+        tmp_path,
+        metadata={
+            "selection": {"mode": "deterministic_v1"},
+            "recommended_focal_policy_id": "policy_000400",
+        },
+    )
+
+    payload = build_paper_readiness_summary(final_eval_dir=final_eval_dir)
+
+    check = payload["checks"]["baseline_win_rate_vs_b0"]
+    assert payload["passed"] is True
+    assert check["focal_policy_id"] == "policy_000400"
+    assert check["focal_policy_source"] == "metadata"
+    assert check["passed"] is True
+    assert check["prob_gt_threshold"] == 1.0
