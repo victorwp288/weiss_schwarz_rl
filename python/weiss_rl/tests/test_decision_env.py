@@ -604,6 +604,25 @@ def test_hard_fail_raises_and_counts_fault_rows(monkeypatch: pytest.MonkeyPatch)
     assert len(fake_weiss_sim.rl.step_calls) == 1
 
 
+def test_passthrough_preserves_faulted_step_without_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    counters = EngineStatusCounters()
+    pool = FakePool()
+    reset_step = _mask_step(engine_status=np.array([0], dtype=np.uint8))
+    step_result = _mask_step(engine_status=np.array([7], dtype=np.uint8))
+    fake_weiss_sim = FakeWeissSim(reset_result=reset_step, step_result=step_result)
+    monkeypatch.setattr(decision_env_module, "_load_weiss_sim", lambda: fake_weiss_sim)
+
+    env = DecisionBoundaryEnv(pool, engine_status_policy="passthrough", counters=counters)
+    env.reset()
+    returned = env.step(np.array([10], dtype=np.int64))
+
+    assert isinstance(returned, DecisionBoundaryBatch)
+    assert counters.fault_rows == 1
+    assert counters.best_effort_reset_rows == 0
+    assert pool.calls == []
+    npt.assert_array_equal(returned.engine_status, np.array([7], dtype=np.uint8))
+
+
 def test_best_effort_reset_mask_uses_pool_contract_and_counts_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     counters = EngineStatusCounters()
     mask_reset = _mask_step(engine_status=np.array([0], dtype=np.uint8))

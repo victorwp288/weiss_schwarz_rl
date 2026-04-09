@@ -10,7 +10,7 @@ from typing import Any, Literal, cast
 import numpy as np
 
 LegalMode = Literal["mask", "ids_offsets"]
-EngineStatusPolicy = Literal["best_effort_reset", "hard_fail"]
+EngineStatusPolicy = Literal["best_effort_reset", "hard_fail", "passthrough"]
 CopyCasting = Literal["no", "equiv", "safe", "same_kind", "unsafe"]
 
 _SIM_LAYOUTS: dict[LegalMode, str] = {
@@ -47,7 +47,7 @@ _COMMON_OUT_FIELDS = (
     "engine_status",
     "spec_hash",
 )
-_VALID_ENGINE_STATUS_POLICIES = frozenset({"best_effort_reset", "hard_fail"})
+_VALID_ENGINE_STATUS_POLICIES = frozenset({"best_effort_reset", "hard_fail", "passthrough"})
 _DEFAULT_PASS_ACTION_ID = 51
 _U64_MASK = np.uint64(0xFFFFFFFFFFFFFFFF)
 
@@ -247,6 +247,8 @@ class DecisionBoundaryEnv:
 
         if self.engine_status_policy == "hard_fail":
             raise RuntimeError(f"engine_status!=0 (fault_rows={fault_rows})")
+        if self.engine_status_policy == "passthrough":
+            return
 
         reset_rows = self._apply_best_effort_reset(engine_status, weiss_sim=weiss_sim)
         if self.counters is not None:

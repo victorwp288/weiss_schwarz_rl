@@ -20,6 +20,7 @@ from weiss_rl.masking import (
 from weiss_rl.league.outcomes import OnlineOutcomeTracker
 
 from weiss_rl.replay.bundles import (
+    ReplayRerunContract,
     ReplayStep,
     compute_legal_fingerprint64,
     make_replay_bundle_meta,
@@ -125,7 +126,7 @@ class ActorWorker:
     _current_opponent_policy_ids: np.ndarray | None = field(default=None, init=False)
     outcomes: OnlineOutcomeTracker = field(default_factory=OnlineOutcomeTracker)
     opponent_id_by_env: np.ndarray | None = field(default=None, init=False)
-    
+
     # Replay capture (M5-07)
     # Note: replay bundles require run_id256 and spec_hash256 to be set by the caller.
     # If they are None, replay capture stays disabled (flush is a no-op).
@@ -134,6 +135,7 @@ class ActorWorker:
     run_id256: bytes | None = None
     spec_hash256: bytes | None = None
     replay_dir: Path | None = None  # defaults to checkpoint_dir/../replays if None
+    replay_rerun_contract: ReplayRerunContract | None = None
     env_id_base: int = 0  # offset if you shard env ids across actors
     capture_replays_on_done: bool = False  # keep False by default to avoid huge output
 
@@ -384,7 +386,7 @@ class ActorWorker:
             done = np.logical_or(terminated, truncated)
             if np.any(done):
                 done_mask = done.astype(np.bool_, copy=False)
-                
+
                 _update_outcomes(
                     self.outcomes,
                     opponent_ids=self.opponent_id_by_env,
@@ -508,7 +510,6 @@ class ActorWorker:
             return self.checkpoint_dir / "faults"
         return Path("faults")
 
-
     def _replay_dir_path(self) -> Path:
         if self.replay_dir is not None:
             return self.replay_dir
@@ -526,9 +527,9 @@ class ActorWorker:
             return episode_seed
         if self.episode_seed64_by_env is None:
             base_seed64 = np.uint64(self.seed) ^ (np.uint64(self.actor_id) << np.uint64(32))
-            self.episode_seed64_by_env = (
-                base_seed64 + np.arange(num_envs, dtype=np.uint64)
-            ).astype(np.uint64, copy=False)
+            self.episode_seed64_by_env = (base_seed64 + np.arange(num_envs, dtype=np.uint64)).astype(
+                np.uint64, copy=False
+            )
         return self.episode_seed64_by_env
 
     def _sync_replay_episode_buffers(
@@ -619,6 +620,7 @@ class ActorWorker:
             env_id=int(self.env_id_base + env_index),
             episode_index=int(buffer.actor_episode_index),
             episode_seed64=int(buffer.episode_seed64),
+            rerun_contract=self.replay_rerun_contract,
         )
         write_replay_bundle(
             out_dir=self._replay_dir_path(),
@@ -627,7 +629,6 @@ class ActorWorker:
             fault_payload=fault_payload,
         )
         self._clear_replay_for_env(env_index=env_index)
-
 
     def _raise_numeric_fault(
         self,
