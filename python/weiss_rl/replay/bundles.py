@@ -10,7 +10,6 @@ Optional:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import time
@@ -26,6 +25,7 @@ from weiss_rl.repro import (
     derive_replay_key256,
     key256_to_hex,
     key256_to_short64,
+    legal_fingerprint_v1,
     resolve_episode_key256,
 )
 
@@ -97,21 +97,20 @@ def write_jsonl(records: list[ReplayRecord], path: Path) -> None:
 # ----------------------------
 # Fingerprinting (RL-layer)
 # ----------------------------
-_FINGERPRINT_PERSON = b"wslegal1"  # bump if algorithm changes
+def compute_legal_fingerprint64(*, spec_hash256: bytes, decision_id: int, legal_ids: np.ndarray) -> int:
+    """Compute the canonical replay/eval legality fingerprint.
 
-
-def compute_legal_fingerprint64(*, decision_id: int, legal_ids: np.ndarray) -> int:
-    """Compute legality fingerprint (u64) from decision_id + packed legal_ids.
-
-    This must be deterministic across platforms/runs for the same legality.
+    This is a thin wrapper around the normative ``legal_fingerprint_v1`` contract
+    so replay bundles stay aligned with the repo's paper-grade reproducibility
+    rules, including malformed-input rejection.
     """
-    did = int(decision_id) & 0xFFFF_FFFF
-    ids = np.asarray(legal_ids, dtype=np.uint16)
-    h = hashlib.blake2b(digest_size=8, person=_FINGERPRINT_PERSON)
-    h.update(did.to_bytes(4, byteorder="little", signed=False))
-    # Always little-endian bytes for stability.
-    h.update(ids.astype("<u2", copy=False).tobytes())
-    return int.from_bytes(h.digest(), byteorder="little", signed=False)
+    return int(
+        legal_fingerprint_v1(
+            spec_hash256=spec_hash256,
+            decision_id=int(decision_id),
+            legal_ids=np.asarray(legal_ids),
+        )
+    )
 
 
 def _legal_slice(legal_ids: np.ndarray, legal_offsets: np.ndarray, row: int) -> np.ndarray:
@@ -145,6 +144,12 @@ class ReplayBundleMeta:
     env_id: int
     episode_index: int
     episode_seed64: int
+    episode_identity_source: str
+    simulator_episode_key_kind: str | None = None
+    simulator_episode_key_u64: int | None = None
+    simulator_episode_key_hex: str | None = None
+    rerun_supported: bool = False
+    rerun_blocker: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,8 +187,11 @@ def make_replay_bundle_meta(
         episode_seed64=episode_seed64,
     )
     replay_key256_bytes = derive_replay_key256(episode_key256=episode_key256_bytes, spec_hash256=spec_hash256)
+    simulator_episode_key_kind, simulator_episode_key_u64, simulator_episode_key_hex = _describe_simulator_episode_key(
+        simulator_episode_key
+    )
     return ReplayBundleMeta(
-        schema_version=1,
+        schema_version=2,
         created_utc_ns=time.time_ns(),
         episode_key256=key256_to_hex(episode_key256_bytes),
         episode_key64=key256_to_short64(episode_key256_bytes),
@@ -195,6 +203,16 @@ def make_replay_bundle_meta(
         env_id=int(env_id),
         episode_index=int(episode_index),
         episode_seed64=int(episode_seed64),
+        episode_identity_source="simulator" if simulator_episode_key_kind is not None else "derived",
+        simulator_episode_key_kind=simulator_episode_key_kind,
+        simulator_episode_key_u64=simulator_episode_key_u64,
+        simulator_episode_key_hex=simulator_episode_key_hex,
+        rerun_supported=False,
+        rerun_blocker=(
+            "Replay bundle does not include the full deterministic rerun contract yet. "
+            "Stored identity is authoritative, but simulator config/spec inputs required "
+            "for reconstruction are intentionally not reconstructed from caller-supplied args."
+        ),
     )
 
 
@@ -247,77 +265,34 @@ def load_replay_bundle(path: Path) -> tuple[ReplayBundleMeta, list[ReplayStep], 
 def rerun_replay_bundle_fast(
     *,
     bundle_path: Path,
-    max_decisions: int,
-    max_ticks: int,
-    observation_visibility: str,
+    max_decisions: int | None = None,
+    max_ticks: int | None = None,
+    observation_visibility: str | None = None,
 ) -> None:
-    """Re-run a replay bundle deterministically and assert fingerprint matches.
+    """Fail fast until bundles carry a complete deterministic rerun contract.
 
-    Uses EnvPool fast layout i16_legal_ids:
-      reset_into_i16_legal_ids(out)
-      step_into_i16_legal_ids(actions, out)   # note arg order
+    Previous revisions accepted caller-supplied simulator args here, which made
+    the replay "rerun" path look deterministic while actually depending on
+    partial external configuration. Until replay bundles persist the full
+    simulator/config contract, this helper must refuse to pretend otherwise.
     """
-    meta, steps, _fault = load_replay_bundle(bundle_path)
-
-    # Use weiss_rl pool factory to get the EnvPool API that supports reset_into_*.
-    from weiss_rl.envs.pool_factory import make_env_pool_from_config
-    import weiss_sim
-
-    pool, layout = make_env_pool_from_config(
-        {
-            "max_decisions": int(max_decisions),
-            "max_ticks": int(max_ticks),
-            "observation_visibility": str(observation_visibility),
-            "seed": int(meta.episode_seed64 & 0xFFFF_FFFF),
-        },
-        profile="fast",
-        num_envs=1,
+    meta, _steps, _fault = load_replay_bundle(bundle_path)
+    _ = (max_decisions, max_ticks, observation_visibility)
+    blocker = meta.rerun_blocker or (
+        "Replay bundle is not rerunnable because the full simulator/config contract "
+        "is not stored in the bundle."
     )
-    if layout != "i16_legal_ids":
-        raise RuntimeError(f"rerun requires i16_legal_ids layout, got {layout!r}")
-
-    out = weiss_sim.BatchOutMinimalI16LegalIds(num_envs=1)
-    pool.reset_into_i16_legal_ids(out)
-
-    actions = np.ascontiguousarray(np.zeros((1,), dtype=np.uint32))
-
-    for t, s in enumerate(steps):
-        did = int(out.decision_id[0])
-        actor = int(out.actor[0])
-
-        if did != int(s.decision_id):
-            raise RuntimeError(f"decision_id mismatch at t={t}: sim={did} bundle={s.decision_id}")
-        if actor != int(s.actor):
-            raise RuntimeError(f"actor mismatch at t={t}: sim={actor} bundle={s.actor}")
-
-        row_legal = _legal_slice(out.legal_ids, out.legal_offsets, 0)
-        fp = compute_legal_fingerprint64(decision_id=did, legal_ids=row_legal)
-        if fp != int(s.legal_fingerprint64):
-            raise RuntimeError(f"legal_fingerprint64 mismatch at t={t}: sim={fp} bundle={s.legal_fingerprint64}")
-
-        actions[0] = np.uint32(int(s.action))
-        pool.step_into_i16_legal_ids(actions, out)  # IMPORTANT: (actions, out)
-
-        r = float(out.rewards[0])
-        term = bool(out.terminated[0])
-        trunc = bool(out.truncated[0])
-        eng = int(out.engine_status[0])
-
-        if not _close_float(r, float(s.reward)):
-            raise RuntimeError(f"reward mismatch at t={t}: sim={r} bundle={s.reward}")
-        if term != bool(s.terminated):
-            raise RuntimeError(f"terminated mismatch at t={t}: sim={term} bundle={s.terminated}")
-        if trunc != bool(s.truncated):
-            raise RuntimeError(f"truncated mismatch at t={t}: sim={trunc} bundle={s.truncated}")
-        if eng != int(s.engine_status):
-            raise RuntimeError(f"engine_status mismatch at t={t}: sim={eng} bundle={s.engine_status}")
-
-        if term or trunc:
-            break
+    raise RuntimeError(blocker)
 
 
-def _close_float(a: float, b: float, *, atol: float = 1e-6, rtol: float = 1e-6) -> bool:
-    return abs(a - b) <= atol + rtol * max(abs(a), abs(b))
+def _describe_simulator_episode_key(
+    simulator_episode_key: int | bytes | None,
+) -> tuple[str | None, int | None, str | None]:
+    if simulator_episode_key is None or simulator_episode_key == b"":
+        return None, None, None
+    if isinstance(simulator_episode_key, bytes):
+        return "bytes", None, simulator_episode_key.hex()
+    return "u64", int(simulator_episode_key), None
 
 
 # ----------------------------
