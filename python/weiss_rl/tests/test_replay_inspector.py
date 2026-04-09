@@ -19,7 +19,11 @@ from weiss_rl.replay.bundles import (
     make_replay_bundle_meta,
     write_replay_bundle,
 )
-from weiss_rl.replay.inspector import format_replay_inspection_report, inspect_replay_bundle
+from weiss_rl.replay.inspector import (
+    _resolve_policy_weights_path,
+    format_replay_inspection_report,
+    inspect_replay_bundle,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -186,6 +190,37 @@ def test_inspect_replay_bundle_compares_policy_distributions_and_ranks_top_diffs
     assert "step=0 decision_id=10 actor=0" in text_report
     assert "policy_a" in text_report
     assert "policy_b" in text_report
+
+
+def test_resolve_policy_weights_path_prefers_run_dir_for_relative_specs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "run"
+    cwd_dir = tmp_path / "cwd"
+    run_dir.mkdir()
+    cwd_dir.mkdir()
+
+    relative_spec = Path("training/snapshots/policy_a/weights.pt")
+    cwd_weights_path = cwd_dir / relative_spec
+    cwd_weights_path.parent.mkdir(parents=True)
+    cwd_weights_path.write_bytes(b"cwd")
+
+    run_dir_weights_path = run_dir / relative_spec
+    run_dir_weights_path.parent.mkdir(parents=True)
+    run_dir_weights_path.write_bytes(b"run-dir")
+
+    monkeypatch.chdir(cwd_dir)
+
+    resolved_path, label = _resolve_policy_weights_path(
+        spec=relative_spec.as_posix(),
+        run_dir=run_dir,
+        registry=None,
+    )
+
+    assert label == relative_spec.as_posix()
+    assert resolved_path == run_dir_weights_path.resolve()
+
 
 
 def test_replay_inspector_cli_main_supports_json_stdout_and_report_file(
