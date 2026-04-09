@@ -24,6 +24,18 @@ def _pair(pair_index: int, outcome_a: OutcomeToken, outcome_b: OutcomeToken) -> 
     ]
 
 
+def _duplicate_seed_runs(episode_seed: int, *outcomes: tuple[OutcomeToken, OutcomeToken]) -> list[EvalGameRecord]:
+    records: list[EvalGameRecord] = []
+    for pair_index, (outcome_a, outcome_b) in enumerate(outcomes):
+        records.extend(
+            [
+                _record(pair_index, 0, outcome_a, episode_seed=episode_seed),
+                _record(pair_index, 1, outcome_b, episode_seed=episode_seed),
+            ]
+        )
+    return records
+
+
 def _record(
     pair_index: int,
     swap_index: int,
@@ -76,6 +88,23 @@ def test_paired_seed_scores_are_sorted_by_pair_index() -> None:
     shuffled = [records[1], records[4], records[5], records[0], records[3], records[2]]
 
     assert paired_seed_scores(shuffled, scheme="S0") == (0.5, 1.0, 0.25)
+
+
+def test_paired_seed_scores_split_reused_pair_index_by_episode_seed() -> None:
+    records = [
+        *_pair(0, "W", "L"),
+        _record(0, 0, "W", episode_seed=250),
+        _record(0, 1, "W", episode_seed=250),
+    ]
+
+    assert paired_seed_scores(records, scheme="S0") == (0.5, 1.0)
+
+
+def test_paired_seed_scores_aggregate_duplicate_same_seed_runs() -> None:
+    records = _duplicate_seed_runs(250, ("W", "L"), ("W", "W"))
+
+    assert paired_seed_scores(records, scheme="S0") == (0.75,)
+    assert paired_seed_scores(records, scheme="S2") == (0.75,)
 
 
 def test_bayesian_bootstrap_summary_reports_exact_arithmetic_mean() -> None:

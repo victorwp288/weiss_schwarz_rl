@@ -11,7 +11,12 @@ from pathlib import Path
 import numpy as np
 
 from weiss_rl.eval import EvalGameRecord
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme, paired_seed_score
+from weiss_rl.eval.payoff_folding import (
+    PairedSeedGroupKey,
+    PayoffFoldScheme,
+    paired_seed_group_key,
+    paired_seed_score,
+)
 
 __all__ = [
     "build_p_mean_and_counts",
@@ -48,23 +53,20 @@ def build_p_mean_and_counts(
         }
     )
 
-    seed_groups: dict[tuple[str, str, int], list[EvalGameRecord]] = defaultdict(list)
+    pair_groups: dict[PairedSeedGroupKey, list[EvalGameRecord]] = defaultdict(list)
     for record in records:
-        seed_groups[(record.focal_policy_id, record.opponent_policy_id, int(record.episode_seed))].append(record)
+        pair_groups[paired_seed_group_key(record)].append(record)
 
     directed_scores: dict[tuple[str, str], list[float]] = defaultdict(list)
     directed_counts: dict[tuple[str, str], int] = defaultdict(int)
 
-    for (focal_policy_id, opponent_policy_id, episode_seed), group in seed_groups.items():
-        _validate_seed_bucket(
-            group,
-            focal_policy_id=focal_policy_id,
-            opponent_policy_id=opponent_policy_id,
-            episode_seed=episode_seed,
-        )
+    for group_key in sorted(pair_groups):
+        group = pair_groups[group_key]
         score = paired_seed_score(group, scheme=scheme)
         if score is None:
             continue
+        focal_policy_id = group[0].focal_policy_id
+        opponent_policy_id = group[0].opponent_policy_id
         directed_scores[(focal_policy_id, opponent_policy_id)].append(score)
         directed_counts[(focal_policy_id, opponent_policy_id)] += 1
 
@@ -98,6 +100,7 @@ def build_p_mean_and_counts(
                 combined_mean = mean_ij
                 combined_count = count_ij
             else:
+                assert mean_ji is not None
                 combined_mean = (mean_ij * count_ij + (1.0 - mean_ji) * count_ji) / (count_ij + count_ji)
                 combined_count = count_ij + count_ji
 
@@ -153,29 +156,6 @@ def _mean(values: Sequence[float]) -> float:
     if not values:
         raise ValueError("mean requires at least one value")
     return sum(values) / len(values)
-
-
-def _validate_seed_bucket(
-    records: Sequence[EvalGameRecord],
-    *,
-    focal_policy_id: str,
-    opponent_policy_id: str,
-    episode_seed: int,
-) -> None:
-    if len(records) != 2:
-        raise ValueError(
-            "matchup "
-            f"{focal_policy_id!r} vs {opponent_policy_id!r} at episode_seed {episode_seed} "
-            "must contain exactly one seat-swapped pair"
-        )
-
-    swap_indices = sorted(int(record.swap_index) for record in records)
-    if swap_indices != [0, 1]:
-        raise ValueError(
-            "matchup "
-            f"{focal_policy_id!r} vs {opponent_policy_id!r} at episode_seed {episode_seed} "
-            "must contain swap_index 0 and 1 exactly once"
-        )
 
 
 def _require_single_shared_value(

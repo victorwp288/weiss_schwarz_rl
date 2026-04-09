@@ -53,6 +53,7 @@ from weiss_rl.eval.uncertainty import (
     bayesian_bootstrap_posterior_samples,
     bayesian_bootstrap_summary,
     paired_seed_uncertainty_summary,
+    posterior_samples,
 )
 
 __all__ = [
@@ -87,6 +88,7 @@ __all__ = [
     "load_dev_eval_summaries",
     "parse_training_policy_id",
     "paired_seed_uncertainty_summary",
+    "posterior_samples",
     "resolve_final_policy_set",
     "run_final_eval",
     "select_final_policy_set_deterministic_v1",

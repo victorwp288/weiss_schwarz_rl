@@ -19,6 +19,7 @@ __all__ = [
     "bayesian_bootstrap_posterior_samples",
     "bayesian_bootstrap_summary",
     "paired_seed_uncertainty_summary",
+    "posterior_samples",
 ]
 
 
@@ -41,7 +42,7 @@ def bayesian_bootstrap_posterior_samples(
     seed: int | None = None,
 ) -> tuple[float, ...]:
     score_array = _coerce_scores(scores)
-    posterior_samples = _sample_posterior_means(score_array, sample_count=sample_count, seed=seed)
+    posterior_samples = _posterior_samples_from_array(score_array, sample_count=sample_count, seed=seed)
     return tuple(float(sample) for sample in posterior_samples)
 
 
@@ -53,19 +54,16 @@ def bayesian_bootstrap_summary(
     seed: int | None = None,
 ) -> EvalUncertaintySummary:
     score_array = _coerce_scores(scores)
-    posterior_samples = np.asarray(
-        bayesian_bootstrap_posterior_samples(score_array.tolist(), sample_count=sample_count, seed=seed),
-        dtype=np.float64,
-    )
-    ci_low, ci_high = _credible_interval(posterior_samples, ci_level=ci_level)
+    samples = _posterior_samples_from_array(score_array, sample_count=sample_count, seed=seed)
+    ci_low, ci_high = _credible_interval(samples, ci_level=ci_level)
     mean = _mean(score_array)
     return EvalUncertaintySummary(
         mean=mean,
         ci_low=ci_low,
         ci_high=ci_high,
         ci_half_width=(ci_high - ci_low) / 2.0,
-        prob_gt_half=float(np.mean(posterior_samples > _DECISIVE_THRESHOLD)),
-        prob_lt_half=float(np.mean(posterior_samples < _DECISIVE_THRESHOLD)),
+        prob_gt_half=float(np.mean(samples > _DECISIVE_THRESHOLD)),
+        prob_lt_half=float(np.mean(samples < _DECISIVE_THRESHOLD)),
         paired_seed_count=int(score_array.size),
         sample_count=sample_count,
     )
@@ -100,10 +98,17 @@ def _coerce_scores(scores: Sequence[float]) -> np.ndarray:
     return score_array
 
 
-def _sample_posterior_means(scores: np.ndarray, *, sample_count: int, seed: int | None) -> np.ndarray:
+def posterior_samples(
+    scores: Sequence[float], *, sample_count: int = _DEFAULT_SAMPLE_COUNT, seed: int | None = None
+) -> np.ndarray:
+    score_array = _coerce_scores(scores)
     if sample_count <= 0:
         raise ValueError("sample_count must be positive")
 
+    return _posterior_samples_from_array(score_array, sample_count=sample_count, seed=seed)
+
+
+def _posterior_samples_from_array(scores: np.ndarray, *, sample_count: int, seed: int | None) -> np.ndarray:
     rng = np.random.default_rng(seed)
     weights = rng.exponential(scale=1.0, size=(sample_count, scores.size))
     weights /= np.sum(weights, axis=1, keepdims=True)
