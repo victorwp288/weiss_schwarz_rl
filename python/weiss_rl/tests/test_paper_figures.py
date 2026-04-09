@@ -5,13 +5,20 @@ from pathlib import Path
 
 import pytest
 
-from weiss_rl.plotting.paper_figures import PAPER_FIGURE_STEMS, render_paper_figures
+from weiss_rl.plotting.paper_figures import PAPER_FIGURE_IDS, PAPER_FIGURE_STEMS, render_paper_figures
 
 
 POLICIES = ("alpha", "beta", "gamma")
 
 
 def _write_run_artifacts(run_dir: Path) -> None:
+    _write_payoff_matrix(run_dir)
+    _write_truncation_heatmap(run_dir)
+    _write_seat_bias_artifact(run_dir)
+    _write_training_metrics_artifact(run_dir)
+
+
+def _write_payoff_matrix(run_dir: Path) -> None:
     _write_matrix(
         run_dir / "eval" / "final_eval" / "payoff_matrices" / "p_mean.csv",
         header=POLICIES,
@@ -21,6 +28,9 @@ def _write_run_artifacts(run_dir: Path) -> None:
             ("gamma", (0.27, 0.43, 0.50)),
         ),
     )
+
+
+def _write_truncation_heatmap(run_dir: Path) -> None:
     _write_matrix(
         run_dir / "eval" / "diagnostics" / "truncation_heatmap_data.csv",
         header=POLICIES,
@@ -30,6 +40,9 @@ def _write_run_artifacts(run_dir: Path) -> None:
             ("gamma", (0.020, 0.018, 0.000)),
         ),
     )
+
+
+def _write_seat_bias_artifact(run_dir: Path) -> None:
     (run_dir / "eval" / "diagnostics").mkdir(parents=True, exist_ok=True)
     (run_dir / "eval" / "diagnostics" / "seat_bias.json").write_text(
         json.dumps(
@@ -70,6 +83,9 @@ def _write_run_artifacts(run_dir: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+
+
+def _write_training_metrics_artifact(run_dir: Path) -> None:
     (run_dir / "training" / "logs").mkdir(parents=True, exist_ok=True)
     records = [
         {
@@ -133,6 +149,29 @@ def test_render_paper_figures_writes_all_expected_outputs(tmp_path: Path) -> Non
     assert all(path.stat().st_size > 0 for path in outputs)
 
 
+def test_render_paper_figures_can_target_single_figure_by_id(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "seat-bias-only"
+    _write_seat_bias_artifact(run_dir)
+
+    outputs = render_paper_figures(run_dir, fig_id="seat_bias")
+
+    assert {path.name for path in outputs} == {"fig_seat_bias.pdf", "fig_seat_bias.png"}
+    assert all(path.is_file() for path in outputs)
+    assert not (run_dir / "figures" / "paper" / "fig_matchup_heatmap.pdf").exists()
+
+
+def test_render_paper_figures_rejects_unknown_fig_id(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown fig_id 'unknown'"):
+        render_paper_figures(tmp_path / "runs" / "unknown-figure", fig_id="unknown")
+
+    assert PAPER_FIGURE_IDS == (
+        "matchup_heatmap",
+        "truncation_heatmap",
+        "seat_bias",
+        "learning_curves",
+    )
+
+
 def test_render_paper_figures_fails_fast_when_required_artifact_is_missing(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "missing-seat-bias"
     _write_run_artifacts(run_dir)
@@ -140,6 +179,15 @@ def test_render_paper_figures_fails_fast_when_required_artifact_is_missing(tmp_p
 
     with pytest.raises(FileNotFoundError, match="seat_bias.json"):
         render_paper_figures(run_dir)
+
+
+def test_render_paper_figures_checks_only_selected_figure_inputs(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "missing-learning-curves"
+    _write_run_artifacts(run_dir)
+    (run_dir / "training" / "logs" / "training_metrics.jsonl").unlink()
+
+    with pytest.raises(FileNotFoundError, match="training_metrics.jsonl"):
+        render_paper_figures(run_dir, fig_id="learning_curves")
 
 
 def test_render_paper_figures_rejects_malformed_heatmap_csv(tmp_path: Path) -> None:

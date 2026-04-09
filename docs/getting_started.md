@@ -132,12 +132,14 @@ These are honest smoke checks for the other top-level entrypoints:
 ```bash
 uv run python python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
+uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
 ```
 
 Expected outcomes:
 
 - `eval.py` reports a contract check and seed-set summary when no `--episodes-jsonl` is supplied.
-- `make_figures.py` reads the paper-figure artifacts from the run directory and writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`.
+- `make_figures.py` renders all paper figures by default, or a selected figure via `--fig-id` (`matchup_heatmap`, `truncation_heatmap`, `seat_bias`, `learning_curves`).
+- `make_figures.py` checks the selected figure inputs before rendering and writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`.
 
 ## Examples
 
