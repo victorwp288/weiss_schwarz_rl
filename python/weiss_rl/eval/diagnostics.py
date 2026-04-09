@@ -11,7 +11,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from weiss_rl.eval.harness import EvalGameRecord
-from weiss_rl.eval.payoff_folding import paired_seed_scores
+from weiss_rl.eval.payoff_folding import paired_seed_group_key, paired_seed_scores
 from weiss_rl.masking import masked_log_softmax
 
 __all__ = [
@@ -91,7 +91,7 @@ def build_seat_advantage_diagnostics(records: tuple[EvalGameRecord, ...] | list[
     return {
         "focal_policy_id": focal_policy_id,
         "opponent_policy_id": opponent_policy_id,
-        "pair_count": len({int(record.pair_index) for record in records}),
+        "pair_count": len({paired_seed_group_key(record) for record in records}),
         "seat_results": {
             "seat0_wins": seat0_wins,
             "seat1_wins": seat1_wins,

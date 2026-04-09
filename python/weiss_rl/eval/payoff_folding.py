@@ -9,7 +9,7 @@ from typing import Literal
 from weiss_rl.eval.harness import EvalGameRecord
 
 PayoffFoldScheme = Literal["S0", "S1", "S2"]
-PairedSeedGroupKey = tuple[str, str, str, str, int]
+PairedSeedGroupKey = tuple[str, str, str, str, str | None, int]
 
 __all__ = [
     "PairedSeedGroupKey",
@@ -57,7 +57,7 @@ def paired_seed_scores(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldS
         pair_groups[paired_seed_group_key(record)].append(record)
 
     pair_scores: list[float] = []
-    for group_key in sorted(pair_groups):
+    for group_key in sorted(pair_groups, key=_paired_seed_group_sort_key):
         score = paired_seed_score(pair_groups[group_key], scheme=normalized_scheme)
         if score is not None:
             pair_scores.append(score)
@@ -77,6 +77,7 @@ def paired_seed_group_key(record: EvalGameRecord) -> PairedSeedGroupKey:
         record.opponent_policy_id,
         record.config_hash256,
         record.spec_hash256,
+        record.run_id256,
         int(record.episode_seed),
     )
 
@@ -85,6 +86,7 @@ def _validate_pair_records(records: Sequence[EvalGameRecord]) -> None:
     if len(records) < 2:
         raise ValueError(f"paired seed group must contain at least 2 records, got {len(records)}")
 
+    _require_shared_value(records, selector=lambda record: record.run_id256, name="run_id256")
     _require_shared_value(records, selector=lambda record: int(record.episode_seed), name="episode_seed")
     _require_shared_value(records, selector=lambda record: record.focal_policy_id, name="focal_policy_id")
     _require_shared_value(records, selector=lambda record: record.opponent_policy_id, name="opponent_policy_id")
@@ -141,6 +143,18 @@ def _normalize_scheme(scheme: str) -> PayoffFoldScheme:
     if normalized == "S2":
         return "S2"
     raise ValueError(f"unknown payoff fold scheme: {scheme!r}")
+
+
+def _paired_seed_group_sort_key(group_key: PairedSeedGroupKey) -> tuple[str, str, str, str, str, int]:
+    focal_policy_id, opponent_policy_id, config_hash256, spec_hash256, run_id256, episode_seed = group_key
+    return (
+        focal_policy_id,
+        opponent_policy_id,
+        config_hash256,
+        spec_hash256,
+        "" if run_id256 is None else run_id256,
+        episode_seed,
+    )
 
 
 def _mean(values: Sequence[float]) -> float:
