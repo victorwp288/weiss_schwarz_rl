@@ -375,9 +375,163 @@ def test_verify_replay_bundle_hard_fails_on_mismatch_and_writes_report(tmp_path:
     assert report["mismatch"]["field"] == "legal_fingerprint64"
 
 
-def _rerun_contract() -> ReplayRerunContract:
+@pytest.mark.parametrize(
+    ("batch_kwargs", "error_match", "mismatch_field", "expected_value", "observed_value"),
+    [
+        (
+            {"episode_seed": 45, "episode_key": 555},
+            "Replay reset seed mismatch",
+            "episode_seed64",
+            44,
+            45,
+        ),
+        (
+            {"episode_seed": 44, "episode_key": 556},
+            "Replay reset episode_key mismatch",
+            "simulator_episode_key_u64",
+            555,
+            556,
+        ),
+    ],
+)
+def test_verify_replay_bundle_reports_reset_identity_mismatches_as_structured_mismatches(
+    tmp_path: Path,
+    batch_kwargs: dict[str, int],
+    error_match: str,
+    mismatch_field: str,
+    expected_value: int,
+    observed_value: int,
+) -> None:
+    contract = _rerun_contract()
+    bundle_path = _write_bundle(tmp_path, contract=contract, steps=[])
+    report_path = tmp_path / "replay_verification.json"
+    env = FakeReplayEnv(
+        _ids_batch(
+            decision_id=10,
+            actor=0,
+            reward=0.0,
+            terminated=False,
+            truncated=False,
+            engine_status=0,
+            legal_ids=np.array([1, 4, 9], dtype=np.uint16),
+            episode_seed=batch_kwargs["episode_seed"],
+            episode_key=batch_kwargs["episode_key"],
+        ),
+        transitions=[],
+    )
+
+    with pytest.raises(RuntimeError, match=error_match):
+        replay_runner.verify_replay_bundle(
+            bundle_path=bundle_path,
+            report_path=report_path,
+            env_factory=lambda observed_contract: _return_fake_env(observed_contract, contract, env),
+        )
+
+    assert env.actions == []
+    assert env.closed is True
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "mismatch"
+    assert report["matched"] is False
+    assert report["compared_steps"] == 0
+    assert report["mismatch"] == {
+        "field": mismatch_field,
+        "expected": expected_value,
+        "observed": observed_value,
+    }
+
+
+def test_verify_replay_bundle_rejects_unsupported_rerun_contract_versions_before_running_env(
+    tmp_path: Path,
+) -> None:
+    contract = _rerun_contract(version=99)
+    bundle_path = _write_bundle(tmp_path, contract=contract, steps=[])
+    report_path = tmp_path / "replay_verification.json"
+    env_factory_called = False
+
+    def unexpected_env_factory(_: ReplayRerunContract) -> FakeReplayEnv:
+        nonlocal env_factory_called
+        env_factory_called = True
+        raise AssertionError("env_factory should not be called for unsupported rerun contract versions")
+
+    with pytest.raises(RuntimeError, match="unsupported: expected version 1, got 99"):
+        replay_runner.verify_replay_bundle(
+            bundle_path=bundle_path,
+            report_path=report_path,
+            env_factory=unexpected_env_factory,
+        )
+
+    assert env_factory_called is False
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "unsupported"
+    assert report["matched"] is False
+    assert report["compared_steps"] == 0
+    assert report["unsupported_rerun_contract_version"] == 99
+
+
+def test_verify_replay_bundle_verifies_recorded_step_index(tmp_path: Path) -> None:
+    contract = _rerun_contract()
+    spec_hash256 = bytes.fromhex("ab" * 32)
+    legal_ids = np.array([1, 4, 9], dtype=np.uint16)
+    bundle_path = _write_bundle(
+        tmp_path,
+        contract=contract,
+        steps=[
+            ReplayStep(
+                t=7,
+                decision_id=10,
+                actor=0,
+                action=4,
+                reward=0.25,
+                terminated=False,
+                truncated=False,
+                engine_status=0,
+                legal_fingerprint64=compute_legal_fingerprint64(
+                    spec_hash256=spec_hash256,
+                    decision_id=10,
+                    legal_ids=legal_ids,
+                ),
+            )
+        ],
+    )
+    report_path = tmp_path / "replay_verification.json"
+    env = FakeReplayEnv(
+        _ids_batch(
+            decision_id=10,
+            actor=0,
+            reward=0.0,
+            terminated=False,
+            truncated=False,
+            engine_status=0,
+            legal_ids=legal_ids,
+            episode_seed=44,
+            episode_key=555,
+        ),
+        transitions=[],
+    )
+
+    with pytest.raises(RuntimeError, match="Replay step index mismatch"):
+        replay_runner.verify_replay_bundle(
+            bundle_path=bundle_path,
+            report_path=report_path,
+            env_factory=lambda observed_contract: _return_fake_env(observed_contract, contract, env),
+        )
+
+    assert env.actions == []
+    assert env.closed is True
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "mismatch"
+    assert report["matched"] is False
+    assert report["compared_steps"] == 0
+    assert report["mismatch"] == {
+        "field": "t",
+        "expected": 7,
+        "observed": 0,
+    }
+
+
+def _rerun_contract(*, version: int = 1) -> ReplayRerunContract:
     return ReplayRerunContract(
-        version=1,
+        version=version,
         observation_visibility="public",
         max_decisions=200,
         max_ticks=10_000,
