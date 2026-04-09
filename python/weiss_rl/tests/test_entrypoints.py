@@ -966,8 +966,8 @@ def _write_paper_readiness_run_dir_fixture(tmp_path: Path) -> Path:
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (run_dir / "spec_hash256.txt").write_text(manifest["spec_hash256"] + "\n", encoding="utf-8")
-    (run_dir / "config_hash256.txt").write_text(manifest["config_hash256"] + "\n", encoding="utf-8")
+    (run_dir / "spec_hash256.txt").write_text(str(manifest["spec_hash256"]) + "\n", encoding="utf-8")
+    (run_dir / "config_hash256.txt").write_text(str(manifest["config_hash256"]) + "\n", encoding="utf-8")
     (run_dir / "training" / "logs").mkdir(parents=True, exist_ok=True)
     (run_dir / "training" / "logs" / "training_metrics.jsonl").write_text(
         json.dumps({"loss": 0.8, "policy_version": 1, "update_count": 1}, sort_keys=True) + "\n",
