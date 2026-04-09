@@ -96,9 +96,9 @@ def paired_seed_uncertainty_summary(
 
 
 def posterior_samples(
-    scores: Sequence[float], *, sample_count: int = _DEFAULT_SAMPLE_COUNT, seed: int | None = None
+    scores: Sequence[float] | np.ndarray, *, sample_count: int = _DEFAULT_SAMPLE_COUNT, seed: int | None = None
 ) -> np.ndarray:
-    score_array = _coerce_scores(scores)
+    score_array = _coerce_scores(scores.tolist() if isinstance(scores, np.ndarray) else scores)
     if sample_count <= 0:
         raise ValueError("sample_count must be positive")
 
