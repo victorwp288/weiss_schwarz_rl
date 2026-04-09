@@ -10,6 +10,7 @@ from weiss_rl.eval.export import (
     write_matchup_summary_csv,
     write_matchup_summary_json,
 )
+from weiss_rl.eval.final_eval import load_dev_eval_summaries, resolve_final_policy_set, run_final_eval
 from weiss_rl.eval.harness import (
     EvalGameRecord,
     EvalRunResult,
@@ -42,6 +43,7 @@ from weiss_rl.eval.policy_set import (
 from weiss_rl.eval.stage2 import Stage2Decision, Stage2StopReason, summarize_stage2_records
 from weiss_rl.eval.uncertainty import (
     EvalUncertaintySummary,
+    bayesian_bootstrap_posterior_samples,
     bayesian_bootstrap_summary,
     paired_seed_uncertainty_summary,
 )
@@ -61,6 +63,7 @@ __all__ = [
     "ScheduledGame",
     "Stage2Decision",
     "Stage2StopReason",
+    "bayesian_bootstrap_posterior_samples",
     "bayesian_bootstrap_summary",
     "build_matchup_export",
     "build_seat_advantage_diagnostics",
@@ -71,8 +74,11 @@ __all__ = [
     "paired_seed_mean_score",
     "paired_seed_score",
     "paired_seed_scores",
+    "load_dev_eval_summaries",
     "parse_training_policy_id",
     "paired_seed_uncertainty_summary",
+    "resolve_final_policy_set",
+    "run_final_eval",
     "select_final_policy_set_deterministic_v1",
     "record_completed_game",
     "run_seat_swapped_matchup",

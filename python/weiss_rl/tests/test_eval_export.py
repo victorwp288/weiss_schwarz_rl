@@ -110,6 +110,9 @@ def test_build_matchup_export_and_write_outputs(tmp_path: Path) -> None:
     }
     assert payload["stop_reason"] == "decisive"
     assert payload["should_stop"] is True
+    assert payload["observed_paired_seeds"] == 2
+    assert payload["excluded_paired_seeds"] == 0
+    assert payload["has_payoff_samples"] is True
     assert payload["uncertainty"]["paired_seed_count"] == 2
 
     json_path = tmp_path / "summary.json"
@@ -129,6 +132,9 @@ def test_build_matchup_export_and_write_outputs(tmp_path: Path) -> None:
             "scheme": "S0",
             "paired_seeds": "2",
             "max_paired_seeds": "8",
+            "observed_paired_seeds": "2",
+            "excluded_paired_seeds": "0",
+            "has_payoff_samples": "True",
             "stop_reason": "decisive",
             "should_stop": "True",
             "games": "4",
