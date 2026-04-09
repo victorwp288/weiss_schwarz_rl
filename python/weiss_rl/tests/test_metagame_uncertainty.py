@@ -195,14 +195,14 @@ def test_dirichlet_wldt_posterior_samples_rejects_empty_records() -> None:
 
 
 def test_dirichlet_wldt_posterior_samples_rejects_incomplete_pair_groups() -> None:
-    with pytest.raises(ValueError, match="exactly 2 records"):
+    with pytest.raises(ValueError, match="at least 2 records"):
         dirichlet_wldt_posterior_samples([_record(0, 0, "W")], scheme="S0")
 
 
 def test_dirichlet_wldt_posterior_samples_rejects_duplicate_swap_indices() -> None:
     records = [_record(0, 0, "W"), _record(0, 0, "L")]
 
-    with pytest.raises(ValueError, match="swap_index 0 and 1 exactly once"):
+    with pytest.raises(ValueError, match="matching counts for swap_index 0 and 1"):
         dirichlet_wldt_posterior_samples(records, scheme="S0")
 
 

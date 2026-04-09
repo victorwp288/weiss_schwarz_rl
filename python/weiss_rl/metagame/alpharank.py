@@ -123,15 +123,9 @@ def write_stationary_mean_csv(path: Path, policy_ids: Sequence[str], stationary:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-<<<<<<< HEAD
         writer.writerow(["rank", "policy_id", "stationary_probability"])
         for rank, (policy_id, prob) in enumerate(ranked_rows, start=1):
             writer.writerow([rank, policy_id, f"{float(prob):.12g}"])
-=======
-        writer.writerow(["policy_id", "stationary_probability"])
-        for policy_id, prob in zip(policy_ids, stationary_arr.tolist(), strict=True):
-            writer.writerow([policy_id, f"{float(prob):.12g}"])
->>>>>>> 9ed06a5 (fix: satisfy metagame lint contract)
 
 
 def write_alpharank_artifacts(
