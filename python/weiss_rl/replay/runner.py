@@ -21,6 +21,8 @@ from weiss_rl.replay.bundles import (
 
 ReplayEnvFactory = Callable[[ReplayRerunContract], Any]
 
+_SUPPORTED_RERUN_CONTRACT_VERSION = 1
+
 
 def verify_replay_bundle(
     *,
@@ -52,12 +54,23 @@ def verify_replay_bundle(
         _write_report(resolved_report_path, report)
         raise RuntimeError(message)
 
+    _validate_rerun_contract(
+        contract=contract,
+        report=report,
+        report_path=resolved_report_path,
+    )
+
     env = None
     compared_steps = 0
     try:
         env = _build_env(contract, env_factory=env_factory)
         current_batch = _require_single_env_batch(env.reset(seed=meta.episode_seed64), context="reset")
-        _verify_initial_identity(meta=meta, batch=current_batch, report=report)
+        _verify_initial_identity(
+            meta=meta,
+            batch=current_batch,
+            report=report,
+            report_path=resolved_report_path,
+        )
 
         spec_hash256 = bytes.fromhex(meta.spec_hash256)
         for step_index, expected_step in enumerate(steps):
@@ -120,6 +133,32 @@ def verify_replay_bundle(
             close()
 
 
+def _validate_rerun_contract(
+    *,
+    contract: ReplayRerunContract,
+    report: dict[str, Any],
+    report_path: Path,
+) -> None:
+    if int(contract.version) == _SUPPORTED_RERUN_CONTRACT_VERSION:
+        return
+
+    message = (
+        "Replay bundle rerun contract version is unsupported: "
+        f"expected version {_SUPPORTED_RERUN_CONTRACT_VERSION}, got {int(contract.version)}"
+    )
+    report.update(
+        {
+            "status": "unsupported",
+            "matched": False,
+            "compared_steps": 0,
+            "error": message,
+            "unsupported_rerun_contract_version": int(contract.version),
+        }
+    )
+    _write_report(report_path, report)
+    raise RuntimeError(message)
+
+
 def _build_env(contract: ReplayRerunContract, *, env_factory: ReplayEnvFactory | None) -> Any:
     if env_factory is not None:
         return env_factory(contract)
@@ -139,22 +178,40 @@ def _require_single_env_batch(batch: DecisionBoundaryBatch, *, context: str) -> 
     return batch
 
 
-def _verify_initial_identity(*, meta: ReplayBundleMeta, batch: DecisionBoundaryBatch, report: dict[str, Any]) -> None:
+def _verify_initial_identity(
+    *,
+    meta: ReplayBundleMeta,
+    batch: DecisionBoundaryBatch,
+    report: dict[str, Any],
+    report_path: Path,
+) -> None:
     observed_seed = int(batch.episode_seed[0])
-    if observed_seed != meta.episode_seed64:
-        raise RuntimeError(
-            f"Replay reset seed mismatch: expected episode_seed64={meta.episode_seed64}, got {observed_seed}"
-        )
+    _expect_equal(
+        report=report,
+        report_path=report_path,
+        compared_steps=0,
+        field="episode_seed64",
+        expected=int(meta.episode_seed64),
+        observed=observed_seed,
+        message=f"Replay reset seed mismatch: expected episode_seed64={meta.episode_seed64}, got {observed_seed}",
+    )
 
     if meta.simulator_episode_key_u64 is None:
         return
 
     observed_episode_key = int(batch.episode_key[0])
-    if observed_episode_key != meta.simulator_episode_key_u64:
-        raise RuntimeError(
+    _expect_equal(
+        report=report,
+        report_path=report_path,
+        compared_steps=0,
+        field="simulator_episode_key_u64",
+        expected=int(meta.simulator_episode_key_u64),
+        observed=observed_episode_key,
+        message=(
             "Replay reset episode_key mismatch: "
             f"expected simulator episode key {meta.simulator_episode_key_u64}, got {observed_episode_key}"
-        )
+        ),
+    )
     report["verified_simulator_episode_key_u64"] = observed_episode_key
 
 
@@ -167,6 +224,20 @@ def _verify_pre_step(
     report: dict[str, Any],
     report_path: Path,
 ) -> None:
+    observed_t = step_index
+    batch_t = getattr(current_batch, "t", None)
+    if batch_t is not None:
+        observed_t = int(np.asarray(batch_t).reshape(-1)[0])
+    _expect_equal(
+        report=report,
+        report_path=report_path,
+        compared_steps=step_index,
+        field="t",
+        expected=int(expected_step.t),
+        observed=int(observed_t),
+        message=f"Replay step index mismatch at step {step_index}",
+    )
+
     actual_decision_id = int(current_batch.decision_id[0])
     _expect_equal(
         report=report,
