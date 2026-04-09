@@ -130,6 +130,7 @@ class ActorWorker:
     # Note: replay bundles require run_id256 and spec_hash256 to be set by the caller.
     # If they are None, replay capture stays disabled (flush is a no-op).
     episode_index_by_env: np.ndarray | None = field(default=None, init=False)
+    episode_seed64_by_env: np.ndarray | None = field(default=None, init=False)
     run_id256: bytes | None = None
     spec_hash256: bytes | None = None
     replay_dir: Path | None = None  # defaults to checkpoint_dir/../replays if None
@@ -180,6 +181,9 @@ class ActorWorker:
 
         if self.episode_index_by_env is None:
             self.episode_index_by_env = np.zeros((N,), dtype=np.int64)
+        if self.episode_seed64_by_env is None:
+            base_seed64 = np.uint64(self.seed) ^ (np.uint64(self.actor_id) << np.uint64(32))
+            self.episode_seed64_by_env = (base_seed64 + np.arange(N, dtype=np.uint64)).astype(np.uint64, copy=False)
 
         self._ensure_episode_buffers()
 
@@ -215,8 +219,14 @@ class ActorWorker:
             obs = np.asarray(batch.obs)
             to_play = _batch_to_play(batch)
             decision_id = np.asarray(batch.decision_id)
-            episode_seed, episode_key = _batch_episode_identity(batch, num_envs=N)
-            self._sync_replay_episode_buffers(episode_seed=episode_seed, episode_key=episode_key)
+            batch_episode_seed, batch_episode_key = _batch_episode_identity(batch)
+            episode_seed = _episode_identity_or_zeros(batch_episode_seed, num_envs=N)
+            episode_key = _episode_identity_or_zeros(batch_episode_key, num_envs=N)
+            replay_episode_seed64 = self._resolve_replay_episode_seed64(batch_episode_seed, num_envs=N)
+            self._sync_replay_episode_buffers(
+                episode_seed64=replay_episode_seed64,
+                simulator_episode_key=batch_episode_key,
+            )
 
             if obs.shape != (N, obs_buf.shape[2]):
                 raise ValueError("batch.obs shape changed within unroll")
@@ -254,9 +264,9 @@ class ActorWorker:
                     legal_slices.append(np.asarray(legal_ids[start:end], dtype=np.uint16))
 
                 legal_ids_prefix = _packed_legal_ids_prefix(legal_ids, legal_offsets)
-                base = int(packed_legal_offsets[-1][-1])
+                offset_base = int(packed_legal_offsets[-1][-1])
                 packed_legal_ids.append(legal_ids_prefix.astype(np.int32, copy=False))
-                packed_legal_offsets.append((legal_offsets[1:] + base).astype(np.uint32, copy=False))
+                packed_legal_offsets.append((legal_offsets[1:] + offset_base).astype(np.uint32, copy=False))
 
                 if not np.all(np.isfinite(logp)):
                     self._raise_numeric_fault(
@@ -396,8 +406,10 @@ class ActorWorker:
                             "engine_status": int(engine_status[env_index_int]),
                             "terminated": bool(terminated[env_index_int]),
                             "truncated": bool(truncated[env_index_int]),
-                            "episode_seed64": int(episode_seed[env_index_int]),
-                            "simulator_episode_key": int(episode_key[env_index_int]),
+                            "episode_seed64": int(replay_episode_seed64[env_index_int]),
+                            "simulator_episode_key": (
+                                None if batch_episode_key is None else int(batch_episode_key[env_index_int])
+                            ),
                         }
                     if self.capture_replays_on_done or env_fault_payload is not None:
                         self._flush_replay_for_env(env_index=env_index_int, fault_payload=env_fault_payload)
@@ -407,6 +419,8 @@ class ActorWorker:
                 # Advance actor-local episode counters for rows that finished.
                 if self.episode_index_by_env is not None:
                     self.episode_index_by_env[done] += 1
+                if self.episode_seed64_by_env is not None:
+                    self.episode_seed64_by_env[done] += np.uint64(1)
 
                 reset_done = getattr(env, "reset_done", None)
                 if callable(reset_done):
@@ -507,13 +521,28 @@ class ActorWorker:
         if not self._episode_buffers_by_env:
             self._episode_buffers_by_env = [None for _ in range(self.num_envs)]
 
-    def _sync_replay_episode_buffers(self, *, episode_seed: np.ndarray, episode_key: np.ndarray) -> None:
+    def _resolve_replay_episode_seed64(self, episode_seed: np.ndarray | None, *, num_envs: int) -> np.ndarray:
+        if episode_seed is not None:
+            return episode_seed
+        if self.episode_seed64_by_env is None:
+            base_seed64 = np.uint64(self.seed) ^ (np.uint64(self.actor_id) << np.uint64(32))
+            self.episode_seed64_by_env = (
+                base_seed64 + np.arange(num_envs, dtype=np.uint64)
+            ).astype(np.uint64, copy=False)
+        return self.episode_seed64_by_env
+
+    def _sync_replay_episode_buffers(
+        self,
+        *,
+        episode_seed64: np.ndarray,
+        simulator_episode_key: np.ndarray | None,
+    ) -> None:
         self._ensure_episode_buffers()
         if self.episode_index_by_env is None:
             self.episode_index_by_env = np.zeros((self.num_envs,), dtype=np.int64)
         for env_index in range(self.num_envs):
-            next_seed = int(episode_seed[env_index])
-            next_key = int(episode_key[env_index])
+            next_seed = int(episode_seed64[env_index])
+            next_key = None if simulator_episode_key is None else int(simulator_episode_key[env_index])
             current = self._episode_buffers_by_env[env_index]
             if current is not None:
                 same_seed = int(current.episode_seed64) == next_seed
@@ -828,13 +857,18 @@ def _batch_reward(batch: Any) -> np.ndarray:
     raise AttributeError("batch must expose .reward or .rewards")
 
 
-def _batch_episode_identity(batch: Any, *, num_envs: int) -> tuple[np.ndarray, np.ndarray]:
+def _batch_episode_identity(batch: Any) -> tuple[np.ndarray | None, np.ndarray | None]:
     episode_seed = getattr(batch, "episode_seed", None)
     episode_key = getattr(batch, "episode_key", None)
-    if episode_seed is None or episode_key is None:
-        zeros = np.zeros((num_envs,), dtype=np.uint64)
-        return zeros, zeros.copy()
-    return np.asarray(episode_seed, dtype=np.uint64), np.asarray(episode_key, dtype=np.uint64)
+    seed_array = None if episode_seed is None else np.asarray(episode_seed, dtype=np.uint64)
+    key_array = None if episode_key is None else np.asarray(episode_key, dtype=np.uint64)
+    return seed_array, key_array
+
+
+def _episode_identity_or_zeros(identity: np.ndarray | None, *, num_envs: int) -> np.ndarray:
+    if identity is None:
+        return np.zeros((num_envs,), dtype=np.uint64)
+    return identity
 
 
 def _batch_legal_mask(batch: Any) -> np.ndarray:
