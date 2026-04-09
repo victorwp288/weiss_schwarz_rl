@@ -24,6 +24,32 @@ ReplayEnvFactory = Callable[[ReplayRerunContract], Any]
 _SUPPORTED_RERUN_CONTRACT_VERSION = 1
 
 
+def require_supported_rerun_contract(meta: ReplayBundleMeta) -> ReplayRerunContract:
+    contract = meta.rerun_contract
+    if not meta.rerun_supported or contract is None:
+        message = meta.rerun_blocker or "Replay bundle is not rerunnable because the bundle has no rerun contract"
+        raise RuntimeError(message)
+    if int(contract.version) != _SUPPORTED_RERUN_CONTRACT_VERSION:
+        raise RuntimeError(
+            "Replay bundle rerun contract version is unsupported: "
+            f"expected version {_SUPPORTED_RERUN_CONTRACT_VERSION}, got {int(contract.version)}"
+        )
+    return contract
+
+
+def build_replay_env(contract: ReplayRerunContract, *, env_factory: ReplayEnvFactory | None = None) -> Any:
+    if env_factory is not None:
+        return env_factory(contract)
+    return DecisionBoundaryEnv.create(
+        legality="ids_offsets",
+        engine_status_policy="passthrough",
+        num_envs=1,
+        max_decisions=int(contract.max_decisions),
+        max_ticks=int(contract.max_ticks),
+        observation_visibility=contract.observation_visibility,
+    )
+
+
 def verify_replay_bundle(
     *,
     bundle_path: Path,
@@ -40,9 +66,10 @@ def verify_replay_bundle(
         fault=fault,
     )
 
-    contract = meta.rerun_contract
-    if not meta.rerun_supported or contract is None:
-        message = meta.rerun_blocker or "Replay bundle is not rerunnable because the bundle has no rerun contract"
+    try:
+        contract = require_supported_rerun_contract(meta)
+    except RuntimeError as exc:
+        message = str(exc)
         report.update(
             {
                 "status": "unsupported",
@@ -51,19 +78,15 @@ def verify_replay_bundle(
                 "error": message,
             }
         )
+        if meta.rerun_contract is not None and int(meta.rerun_contract.version) != _SUPPORTED_RERUN_CONTRACT_VERSION:
+            report["unsupported_rerun_contract_version"] = int(meta.rerun_contract.version)
         _write_report(resolved_report_path, report)
-        raise RuntimeError(message)
-
-    _validate_rerun_contract(
-        contract=contract,
-        report=report,
-        report_path=resolved_report_path,
-    )
+        raise RuntimeError(message) from exc
 
     env = None
     compared_steps = 0
     try:
-        env = _build_env(contract, env_factory=env_factory)
+        env = build_replay_env(contract, env_factory=env_factory)
         current_batch = _require_single_env_batch(env.reset(seed=meta.episode_seed64), context="reset")
         _verify_initial_identity(
             meta=meta,
@@ -131,45 +154,6 @@ def verify_replay_bundle(
         close = getattr(env, "close", None)
         if callable(close):
             close()
-
-
-def _validate_rerun_contract(
-    *,
-    contract: ReplayRerunContract,
-    report: dict[str, Any],
-    report_path: Path,
-) -> None:
-    if int(contract.version) == _SUPPORTED_RERUN_CONTRACT_VERSION:
-        return
-
-    message = (
-        "Replay bundle rerun contract version is unsupported: "
-        f"expected version {_SUPPORTED_RERUN_CONTRACT_VERSION}, got {int(contract.version)}"
-    )
-    report.update(
-        {
-            "status": "unsupported",
-            "matched": False,
-            "compared_steps": 0,
-            "error": message,
-            "unsupported_rerun_contract_version": int(contract.version),
-        }
-    )
-    _write_report(report_path, report)
-    raise RuntimeError(message)
-
-
-def _build_env(contract: ReplayRerunContract, *, env_factory: ReplayEnvFactory | None) -> Any:
-    if env_factory is not None:
-        return env_factory(contract)
-    return DecisionBoundaryEnv.create(
-        legality="ids_offsets",
-        engine_status_policy="passthrough",
-        num_envs=1,
-        max_decisions=int(contract.max_decisions),
-        max_ticks=int(contract.max_ticks),
-        observation_visibility=contract.observation_visibility,
-    )
 
 
 def _require_single_env_batch(batch: DecisionBoundaryBatch, *, context: str) -> DecisionBoundaryBatch:
