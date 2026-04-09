@@ -650,6 +650,73 @@ def test_build_paper_readiness_summary_audits_run_directory_artifacts(tmp_path: 
 
 
 
+def test_build_paper_readiness_summary_accepts_documented_unresolved_manifest_policy_selection(tmp_path: Path) -> None:
+    run_dir = _write_run_dir_fixture(tmp_path)
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["policy_set_selection"] = []
+    manifest["policy_set_selection_details"] = {
+        "status": "unresolved",
+        "version": "deterministic_v1",
+        "final_policy_set_size": 10,
+        "source_paths": {
+            "snapshot_registry_json": None,
+            "dev_eval_summaries_json": None,
+        },
+        "missing_inputs": ["snapshot_registry_json", "dev_eval_summaries_json"],
+        "reason": "deterministic final policy set inputs were not provided",
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    payload = build_paper_readiness_summary(run_dir=run_dir)
+
+    assert payload["passed"] is True
+    assert payload["alarms"] == []
+    assert payload["manifest_contract"]["passed"] is True
+    assert payload["manifest_contract"]["fields"]["policy_set_selection"]["passed"] is True
+
+
+
+def test_build_paper_readiness_summary_reports_out_of_range_matchup_indices(tmp_path: Path) -> None:
+    run_dir = _write_run_dir_fixture(tmp_path)
+    summary_path = run_dir / "eval" / "final_eval" / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["matchups"][0]["focal_policy_index"] = len(summary["policy_ids"])
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    payload = build_paper_readiness_summary(run_dir=run_dir)
+    contract = payload["final_eval_artifact_contract"]
+
+    assert payload["passed"] is False
+    assert payload["alarms"] == ["final_eval_artifact_contract", "final_eval_guardrails"]
+    assert contract["passed"] is False
+    assert contract["reason"] == "invalid_matchup_index"
+    assert contract["reference_failures"] == [
+        "matchups[0].focal_policy_index=2 is out of range for policy_ids with length 2"
+    ]
+
+
+
+def test_build_paper_readiness_summary_reports_negative_matchup_indices(tmp_path: Path) -> None:
+    run_dir = _write_run_dir_fixture(tmp_path)
+    summary_path = run_dir / "eval" / "final_eval" / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["matchups"][0]["opponent_policy_index"] = -1
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    payload = build_paper_readiness_summary(run_dir=run_dir)
+    contract = payload["final_eval_artifact_contract"]
+
+    assert payload["passed"] is False
+    assert payload["alarms"] == ["final_eval_artifact_contract", "final_eval_guardrails"]
+    assert contract["passed"] is False
+    assert contract["reason"] == "invalid_matchup_index"
+    assert contract["reference_failures"] == [
+        "matchups[0].opponent_policy_index=-1 is out of range for policy_ids with length 2"
+    ]
+
+
+
 def test_build_paper_readiness_summary_flags_run_directory_gaps(tmp_path: Path) -> None:
     run_dir = _write_run_dir_fixture(tmp_path)
     (run_dir / "eval" / "diagnostics" / "replay_verification.json").unlink()

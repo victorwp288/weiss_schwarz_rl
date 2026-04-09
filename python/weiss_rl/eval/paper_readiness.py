@@ -453,9 +453,9 @@ def _build_manifest_contract(run_dir: Path) -> dict[str, Any]:
         "seed_files": _validate_seed_files_field(manifest.get("seed_files")),
         "hardware": _validate_object_field(manifest.get("hardware"), require_non_empty=True),
         "evaluation_pinning": _validate_object_field(manifest.get("evaluation_pinning"), require_non_empty=True),
-        "policy_set_selection": _validate_string_list_field(
+        "policy_set_selection": _validate_manifest_policy_set_selection(
             manifest.get("policy_set_selection"),
-            require_non_empty=True,
+            details=manifest.get("policy_set_selection_details"),
         ),
     }
     missing_fields = [name for name, result in field_checks.items() if result["reason"] == "missing"]
@@ -544,61 +544,78 @@ def _build_final_eval_artifact_contract(final_eval_dir: Path) -> dict[str, Any]:
     duplicate_matchups: list[str] = []
     noncanonical_matchups: list[str] = []
     reference_failures: list[str] = []
+    policy_set_check = _validate_final_eval_policy_set(final_eval_dir=final_eval_dir, policy_ids=policy_ids)
+    sensitivity_check = _validate_sensitivity_summary(final_eval_dir=final_eval_dir, policy_ids=policy_ids)
 
-    for index, matchup in enumerate(_matchups(payload)):
-        focal_index = _matchup_policy_index(
-            matchup,
-            index_field="focal_policy_index",
-            policy_field="focal_policy_id",
-            policy_ids=policy_ids,
-            context=f"matchups[{index}]",
-        )
-        opponent_index = _matchup_policy_index(
-            matchup,
-            index_field="opponent_policy_index",
-            policy_field="opponent_policy_id",
-            policy_ids=policy_ids,
-            context=f"matchups[{index}]",
-        )
-        pair_label = f"{policy_ids[focal_index]}__vs__{policy_ids[opponent_index]}"
-        if focal_index > opponent_index:
-            noncanonical_matchups.append(pair_label)
-        key = (min(focal_index, opponent_index), max(focal_index, opponent_index))
-        if key in observed_keys:
-            duplicate_matchups.append(pair_label)
-        else:
-            observed_keys[key] = pair_label
+    try:
+        for index, matchup in enumerate(_matchups(payload)):
+            focal_index = _matchup_policy_index(
+                matchup,
+                index_field="focal_policy_index",
+                policy_field="focal_policy_id",
+                policy_ids=policy_ids,
+                context=f"matchups[{index}]",
+            )
+            opponent_index = _matchup_policy_index(
+                matchup,
+                index_field="opponent_policy_index",
+                policy_field="opponent_policy_id",
+                policy_ids=policy_ids,
+                context=f"matchups[{index}]",
+            )
+            pair_label = f"{policy_ids[focal_index]}__vs__{policy_ids[opponent_index]}"
+            if focal_index > opponent_index:
+                noncanonical_matchups.append(pair_label)
+            key = (min(focal_index, opponent_index), max(focal_index, opponent_index))
+            if key in observed_keys:
+                duplicate_matchups.append(pair_label)
+            else:
+                observed_keys[key] = pair_label
 
-        for field_name, expected_kind in (
-            ("matchup_dir", "directory"),
-            ("episodes_path", "file"),
-            ("summary_path", "file"),
-            ("diagnostics_path", "file"),
-            ("posterior_samples_path", "file"),
-        ):
-            try:
-                artifact_path = _require_relative_artifact_path(
-                    final_eval_dir,
-                    value=matchup.get(field_name),
-                    field_name=f"matchups[{index}].{field_name}",
-                )
-            except ValueError as exc:
-                reference_failures.append(str(exc))
-                continue
-            exists = artifact_path.is_dir() if expected_kind == "directory" else artifact_path.is_file()
-            if not exists:
-                reference_failures.append(
-                    "matchups["
-                    f"{index}].{field_name} missing {expected_kind}: "
-                    f"{artifact_path.relative_to(final_eval_dir).as_posix()}"
-                )
+            for field_name, expected_kind in (
+                ("matchup_dir", "directory"),
+                ("episodes_path", "file"),
+                ("summary_path", "file"),
+                ("diagnostics_path", "file"),
+                ("posterior_samples_path", "file"),
+            ):
+                try:
+                    artifact_path = _require_relative_artifact_path(
+                        final_eval_dir,
+                        value=matchup.get(field_name),
+                        field_name=f"matchups[{index}].{field_name}",
+                    )
+                except ValueError as exc:
+                    reference_failures.append(str(exc))
+                    continue
+                exists = artifact_path.is_dir() if expected_kind == "directory" else artifact_path.is_file()
+                if not exists:
+                    reference_failures.append(
+                        "matchups["
+                        f"{index}].{field_name} missing {expected_kind}: "
+                        f"{artifact_path.relative_to(final_eval_dir).as_posix()}"
+                    )
+    except ValueError as exc:
+        return {
+            "passed": False,
+            "summary_path": summary_path.as_posix(),
+            "policy_ids": list(policy_ids),
+            "expected_matchup_count": len(expected_keys),
+            "observed_matchup_count": len(observed_keys),
+            "missing_matchups": [],
+            "duplicate_matchups": duplicate_matchups,
+            "noncanonical_matchups": noncanonical_matchups,
+            "reference_failures": [str(exc)],
+            "policy_set": policy_set_check,
+            "sensitivity_summary": sensitivity_check,
+            "reason": "invalid_matchup_index",
+            "message": str(exc),
+        }
 
     missing_matchups = [
         f"{policy_ids[left]}__vs__{policy_ids[right]}"
         for left, right in sorted(expected_keys - set(observed_keys))
     ]
-    policy_set_check = _validate_final_eval_policy_set(final_eval_dir=final_eval_dir, policy_ids=policy_ids)
-    sensitivity_check = _validate_sensitivity_summary(final_eval_dir=final_eval_dir, policy_ids=policy_ids)
 
     passed = not duplicate_matchups and not noncanonical_matchups and not missing_matchups and not reference_failures
     passed = passed and bool(policy_set_check["passed"]) and bool(sensitivity_check["passed"])
@@ -1071,8 +1088,15 @@ def _matchup_policy_index(
 ) -> int:
     raw_index = matchup.get(index_field)
     if raw_index is not None:
-        return _as_int(raw_index, context=f"{context}.{index_field}")
-    policy_id = str(matchup[policy_field])
+        index = _as_int(raw_index, context=f"{context}.{index_field}")
+        if index < 0 or index >= len(policy_ids):
+            raise ValueError(
+                f"{context}.{index_field}={index} is out of range for policy_ids with length {len(policy_ids)}"
+            )
+        return index
+    policy_id = matchup.get(policy_field)
+    if not isinstance(policy_id, str) or not policy_id.strip():
+        raise ValueError(f"{context}.{policy_field} must be a non-empty string")
     try:
         return policy_ids.index(policy_id)
     except ValueError as exc:
@@ -1216,6 +1240,41 @@ def _validate_string_list_field(value: Any, *, require_non_empty: bool) -> dict[
     if require_non_empty and not value:
         return {"passed": False, "reason": "empty", "message": "field must not be empty"}
     return {"passed": True, "reason": None, "message": "ok"}
+
+
+def _validate_manifest_policy_set_selection(value: Any, *, details: Any) -> dict[str, Any]:
+    selection_check = _validate_string_list_field(value, require_non_empty=False)
+    if not selection_check["passed"]:
+        return selection_check
+    if value:
+        return {"passed": True, "reason": None, "message": "ok"}
+    if _documents_unresolved_policy_set_selection(details):
+        return {
+            "passed": True,
+            "reason": None,
+            "message": "ok (policy_set_selection is unresolved but documented)",
+        }
+    return {
+        "passed": False,
+        "reason": "empty",
+        "message": (
+            "field must not be empty unless policy_set_selection_details documents an unresolved selection"
+        ),
+    }
+
+
+def _documents_unresolved_policy_set_selection(details: Any) -> bool:
+    if not isinstance(details, dict):
+        return False
+    if details.get("status") != "unresolved":
+        return False
+    reason = details.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        return True
+    missing_inputs = details.get("missing_inputs")
+    return isinstance(missing_inputs, list) and any(
+        isinstance(item, str) and item.strip() for item in missing_inputs
+    )
 
 
 def _validate_seed_files_field(value: Any) -> dict[str, Any]:
