@@ -134,6 +134,32 @@ Default focal-policy behavior:
 - if final-eval metadata explicitly names the focal policy, that metadata is used
 - otherwise the script fails clearly and requires `--focal-policy-id`
 
+### `replay_inspector.py`
+
+Compare two policies on the recorded states from a deterministic replay bundle.
+
+```bash
+uv run python python/scripts/replay_inspector.py \
+  --bundle runs/some_run/replays/regression/replay_deadbeef.zip \
+  --stack-config configs/rl_stack_locked.yaml \
+  --run-dir runs/some_run \
+  --policy-a policy_000123 \
+  --policy-b policy_000456 \
+  --report-json runs/some_run/replays/replay_inspection.json
+```
+
+What it does today:
+
+- reconstructs the replay environment from the bundle's persisted rerun contract
+- resolves policy specs as either direct weights paths or snapshot-registry policy IDs
+- evaluates both policies on each recorded replay state while advancing the env with the recorded action sequence
+- prints a readable top-k diff summary and can persist a structured JSON report
+
+What it does **not** do today:
+
+- it does not branch the replay by executing each policy's sampled actions
+- it does not search multiple replay bundles for you, pass one bundle per invocation
+
 ### `metagame.py`
 
 Metagame sensitivity reporting over an existing `final_eval/` artifact tree.
