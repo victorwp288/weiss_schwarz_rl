@@ -107,7 +107,14 @@ That path writes demo-only `final_eval/` artifacts and labels them clearly in me
 
 ### `paper_readiness_check.py`
 
-Paper-readiness guardrails over an existing `final_eval/` artifact tree.
+Paper-readiness audit over a full run directory, with compatibility support for direct `final_eval/` guardrail checks.
+
+```bash
+uv run python python/scripts/paper_readiness_check.py \
+  --run-dir runs/some_run
+```
+
+Compatibility mode:
 
 ```bash
 uv run python python/scripts/paper_readiness_check.py \
@@ -116,10 +123,10 @@ uv run python python/scripts/paper_readiness_check.py \
 
 What it does today:
 
-- reads the approved `final_eval/summary.json` plus per-matchup `diagnostics.json` files
-- writes a single `paper_readiness_summary.json` artifact
-- checks aggregate truncation rate and seat-bias over canonical unordered matchups, plus focal-policy win rate versus `B0 RandomLegal`
-- exits non-zero when any readiness guardrail fails
+- with `--run-dir`, audits the broader paper-grade artifact contract under the run directory and writes one `paper_readiness_summary.json` at the run root
+- validates key required artifact families, manifest completeness and consistency, and `final_eval` artifact references
+- keeps the existing `final_eval` guardrails as a sub-check: aggregate truncation rate, seat-bias, and focal-policy win rate versus `B0 RandomLegal`
+- exits non-zero when required artifacts are missing or any readiness guardrail fails
 
 Default focal-policy behavior:
 

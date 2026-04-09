@@ -39,19 +39,61 @@ def _format_alarm(name: str, check: Any) -> str:
     return detail
 
 
+def _default_readiness_json(*, run_dir: Path | None, final_eval_dir: Path | None) -> Path:
+    if run_dir is not None:
+        return run_dir / "paper_readiness_summary.json"
+    assert final_eval_dir is not None
+    return final_eval_dir / "paper_readiness_summary.json"
+
+
+def _format_alarm_detail(payload: dict[str, Any], alarm: str) -> str:
+    if alarm in payload.get("checks", {}):
+        return _format_alarm(alarm, payload["checks"].get(alarm))
+    section = payload.get(alarm)
+    if isinstance(section, dict):
+        message = section.get("message")
+        if isinstance(message, str) and message.strip():
+            return f"{alarm} ({message.strip()})"
+        reason = section.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            return f"{alarm} ({reason.strip()})"
+    guardrails = payload.get("final_eval_guardrails")
+    if alarm == "final_eval_guardrails" and isinstance(guardrails, dict):
+        message = guardrails.get("message")
+        if isinstance(message, str) and message.strip():
+            return f"{alarm} ({message.strip()})"
+        reason = guardrails.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            return f"{alarm} ({reason.strip()})"
+    return alarm
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Paper-readiness guardrails over final_eval artifacts")
-    parser.add_argument(
+    parser = argparse.ArgumentParser(description="Paper-readiness audit over run directories and final_eval artifacts")
+    target_group = parser.add_mutually_exclusive_group(required=True)
+    target_group.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        help="Path to a run directory to audit for paper-grade submission artifacts",
+    )
+    target_group.add_argument(
         "--final-eval-dir",
         type=Path,
-        required=True,
-        help="Path to a final_eval artifact directory containing summary.json and matchup diagnostics",
+        default=None,
+        help=(
+            "Compatibility mode, path to a final_eval artifact directory "
+            "containing summary.json and matchup diagnostics"
+        ),
     )
     parser.add_argument(
         "--readiness-json",
         type=Path,
         default=None,
-        help="Output path for the readiness summary JSON (default: <final-eval-dir>/paper_readiness_summary.json)",
+        help=(
+            "Output path for the readiness summary JSON "
+            "(default: <run-dir>/paper_readiness_summary.json or <final-eval-dir>/paper_readiness_summary.json)"
+        ),
     )
     parser.add_argument(
         "--focal-policy-id",
@@ -101,8 +143,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    readiness_json = args.readiness_json or (args.final_eval_dir / "paper_readiness_summary.json")
+    readiness_json = args.readiness_json or _default_readiness_json(
+        run_dir=args.run_dir,
+        final_eval_dir=args.final_eval_dir,
+    )
     payload = build_paper_readiness_summary(
+        run_dir=args.run_dir,
         final_eval_dir=args.final_eval_dir,
         focal_policy_id=args.focal_policy_id.strip() or None,
         baseline_policy_id=args.baseline_policy_id,
@@ -119,8 +165,7 @@ def main() -> None:
         print("Paper readiness checks passed.")
         return
 
-    checks = payload.get("checks", {})
-    alarms = ", ".join(_format_alarm(str(alarm), checks.get(alarm)) for alarm in payload["alarms"])
+    alarms = ", ".join(_format_alarm_detail(payload, str(alarm)) for alarm in payload["alarms"])
     print(f"Paper readiness checks failed: {alarms}", file=sys.stderr)
     raise SystemExit(1)
 
