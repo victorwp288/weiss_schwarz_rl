@@ -81,6 +81,28 @@ What it does **not** do today:
 
 `--run-label` is just a human label for the startup banner/log output. Unlike `train.py`, this script does not compute a run directory identity or persist the label into summary exports.
 
+### `paper_readiness_check.py`
+
+Paper-readiness guardrails over an existing `final_eval/` artifact tree.
+
+```bash
+uv run python python/scripts/paper_readiness_check.py \
+  --final-eval-dir runs/some_run/eval/final_eval
+```
+
+What it does today:
+
+- reads the approved `final_eval/summary.json` plus per-matchup `diagnostics.json` files
+- writes a single `paper_readiness_summary.json` artifact
+- checks aggregate truncation rate and seat-bias over canonical unordered matchups, plus focal-policy win rate versus `B0 RandomLegal`
+- exits non-zero when any readiness guardrail fails
+
+Default focal-policy behavior:
+
+- if you do not pass `--focal-policy-id`, the script auto-resolves only when exactly one eligible non-baseline policy exists
+- if final-eval metadata explicitly names the focal policy, that metadata is used
+- otherwise the script fails clearly and requires `--focal-policy-id`
+
 ### `make_figures.py`
 
 Paper figure renderer for completed run artifacts.

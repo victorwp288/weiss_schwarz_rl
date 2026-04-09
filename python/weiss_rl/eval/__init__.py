@@ -14,6 +14,10 @@ from weiss_rl.eval.export import (
     write_matchup_summary_json,
 )
 from weiss_rl.eval.final_eval import load_dev_eval_summaries, resolve_final_policy_set, run_final_eval
+from weiss_rl.eval.paper_readiness import (
+    build_paper_readiness_summary,
+    write_paper_readiness_json,
+)
 from weiss_rl.eval.harness import (
     EvalGameRecord,
     EvalRunResult,
@@ -71,6 +75,7 @@ __all__ = [
     "bayesian_bootstrap_summary",
     "build_hidden_info_leakage_diagnostics",
     "build_matchup_export",
+    "build_paper_readiness_summary",
     "build_seat_advantage_diagnostics",
     "build_seat_swapped_schedule",
     "fold_game_payoff",
@@ -96,4 +101,5 @@ __all__ = [
     "write_matchup_diagnostics_json",
     "write_matchup_summary_csv",
     "write_matchup_summary_json",
+    "write_paper_readiness_json",
 ]
