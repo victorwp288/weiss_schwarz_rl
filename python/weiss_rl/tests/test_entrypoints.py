@@ -939,6 +939,256 @@ def test_paper_readiness_entrypoint_requires_explicit_focal_policy_for_ambiguous
     ]
 
 
+def _write_paper_readiness_run_dir_fixture(tmp_path: Path) -> Path:
+    run_dir = tmp_path / "run_ready"
+    policies = ["B0 RandomLegal", "policy_000300"]
+    manifest = {
+        "run_id256": "ab" * 32,
+        "run_id64": "0123456789abcdef",
+        "start_nonce": 7,
+        "git_commit": "deadbeef" * 5,
+        "git_dirty": False,
+        "spec_hash256": "cd" * 32,
+        "config_hash256": "ef" * 32,
+        "simulator": {"version": "0.7.0", "compatibility_hash": "feedfacecafebeef"},
+        "spec_bundle": {"version": 1, "cards": []},
+        "config_canonical": {"stack": {"name": "synthetic"}},
+        "seed_files": {"final_eval": {"path": "configs/seeds/report_eval_seeds.txt", "sha256": "12" * 32}},
+        "hardware": {"platform": "test", "cpu": "synthetic"},
+        "evaluation_pinning": {"eval_sampling_algorithm": "pinned_cdf_pcg_v1"},
+        "policy_set_selection": list(policies),
+        "policy_set_selection_details": {"mode": "deterministic_v1"},
+    }
+    for path, payload in (
+        (run_dir / "manifest.json", manifest),
+        (run_dir / "spec_bundle.json", manifest["spec_bundle"]),
+        (run_dir / "config_canonical.json", manifest["config_canonical"]),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (run_dir / "spec_hash256.txt").write_text(manifest["spec_hash256"] + "\n", encoding="utf-8")
+    (run_dir / "config_hash256.txt").write_text(manifest["config_hash256"] + "\n", encoding="utf-8")
+    (run_dir / "training" / "logs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "training" / "logs" / "training_metrics.jsonl").write_text(
+        json.dumps({"loss": 0.8, "policy_version": 1, "update_count": 1}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    final_eval_dir = run_dir / "eval" / "final_eval"
+    canonical_matchups = [
+        (0, 0, policies[0], policies[0]),
+        (0, 1, policies[0], policies[1]),
+        (1, 1, policies[1], policies[1]),
+    ]
+    matchups: list[dict[str, object]] = []
+    matchup_rows = [
+        "focal_policy_id,opponent_policy_id,matchup_dir,paired_seed_count,observed_paired_seed_count,excluded_paired_seed_count,has_payoff_samples,stop_reason"
+    ]
+    for focal_index, opponent_index, focal_policy_id, opponent_policy_id in canonical_matchups:
+        prefix = (
+            f"matchups/{focal_index:02d}_{focal_policy_id.lower().replace(' ', '_')}__vs__"
+            f"{opponent_index:02d}_{opponent_policy_id.lower().replace(' ', '_')}"
+        )
+        matchup_dir = final_eval_dir / prefix
+        matchup_dir.mkdir(parents=True, exist_ok=True)
+        (matchup_dir / "episodes.jsonl").write_text(
+            json.dumps({"episode_seed": 11}, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (matchup_dir / "matchup_summary.json").write_text(
+            json.dumps(
+                {
+                    "has_payoff_samples": True,
+                    "observed_paired_seeds": 2,
+                    "paired_seeds": 2,
+                    "stop_reason": "precision",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (matchup_dir / "diagnostics.json").write_text(
+            json.dumps(
+                {
+                    "seat_results": {
+                        "seat0_wins": 1,
+                        "seat1_wins": 1,
+                        "draws": 0,
+                        "truncations": 0,
+                        "engine_errors": 0,
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (matchup_dir / "posterior_samples.json").write_text(
+            json.dumps(
+                {"sample_count": 4, "samples": [0.88, 0.91, 0.93, 0.95]},
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        matchups.append(
+            {
+                "focal_policy_id": focal_policy_id,
+                "opponent_policy_id": opponent_policy_id,
+                "focal_policy_index": focal_index,
+                "opponent_policy_index": opponent_index,
+                "matchup_dir": prefix,
+                "episodes_path": prefix + "/episodes.jsonl",
+                "summary_path": prefix + "/matchup_summary.json",
+                "diagnostics_path": prefix + "/diagnostics.json",
+                "posterior_samples_path": prefix + "/posterior_samples.json",
+            }
+        )
+        matchup_rows.append(
+            ",".join((focal_policy_id, opponent_policy_id, prefix, "2", "2", "0", "True", "precision"))
+        )
+
+    (final_eval_dir / "policy_set.json").write_text(
+        json.dumps({"policy_ids": policies}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (final_eval_dir / "posterior_samples.json").write_text(
+        json.dumps(
+            {
+                "policy_ids": policies,
+                "sample_count": 4,
+                "values": [[[], []], [[0.88, 0.91, 0.93, 0.95], []]],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (final_eval_dir / "matchups.csv").write_text("\n".join(matchup_rows) + "\n", encoding="utf-8")
+    (final_eval_dir / "matrices").mkdir(parents=True, exist_ok=True)
+    (final_eval_dir / "matrices" / "mean.csv").write_text(
+        "focal_policy_id,B0 RandomLegal,policy_000300\nB0 RandomLegal,0.5,0.0\npolicy_000300,0.9,0.5\n",
+        encoding="utf-8",
+    )
+    (final_eval_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "policy_ids": policies,
+                "metadata": {"selection": {"mode": "deterministic_v1"}},
+                "matrices": {
+                    "games": {"policy_ids": policies, "values": [[2, 2], [2, 2]]},
+                    "truncations": {"policy_ids": policies, "values": [[0, 0], [0, 0]]},
+                    "mean": {"policy_ids": policies, "values": [[0.5, 0.0], [0.9, 0.5]]},
+                    "ci_low": {"policy_ids": policies, "values": [[0.5, 0.0], [0.88, 0.5]]},
+                    "ci_high": {"policy_ids": policies, "values": [[0.5, 0.0], [0.95, 0.5]]},
+                    "has_payoff_samples": {"policy_ids": policies, "values": [[True, True], [True, True]]},
+                    "paired_seed_count": {"policy_ids": policies, "values": [[1, 1], [2, 1]]},
+                    "stop_reason": {
+                        "policy_ids": policies,
+                        "values": [["precision", "precision"], ["precision", "precision"]],
+                    },
+                },
+                "posterior_samples": {
+                    "policy_ids": policies,
+                    "sample_count": 4,
+                    "values": [[[], []], [[0.88, 0.91, 0.93, 0.95], []]],
+                },
+                "matchups": matchups,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "eval" / "diagnostics").mkdir(parents=True, exist_ok=True)
+    (run_dir / "eval" / "diagnostics" / "seat_bias.json").write_text(
+        json.dumps(
+            {"global": {"seat0_win_rate": 0.5, "ci_low": 0.4, "ci_high": 0.6, "decisive_games": 6}},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "eval" / "diagnostics" / "truncation_heatmap_data.csv").write_text(
+        ",B0 RandomLegal,policy_000300\nB0 RandomLegal,0.0,0.0\npolicy_000300,0.0,0.0\n",
+        encoding="utf-8",
+    )
+    (run_dir / "eval" / "diagnostics" / "replay_verification.json").write_text(
+        json.dumps({"status": "ok"}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (final_eval_dir / "sensitivity").mkdir(parents=True, exist_ok=True)
+    (final_eval_dir / "sensitivity" / "summary.json").write_text(
+        json.dumps(
+            {"policy_ids": policies, "cases": {case_id: {} for case_id in ("S0", "S1", "S2")}},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for case_id in ("S0", "S1", "S2"):
+        case_dir = final_eval_dir / "sensitivity" / case_id
+        (case_dir / "payoff").mkdir(parents=True, exist_ok=True)
+        (case_dir / "nash").mkdir(parents=True, exist_ok=True)
+        (case_dir / "alpharank").mkdir(parents=True, exist_ok=True)
+        (case_dir / "summary.json").write_text(
+            json.dumps({"case_id": case_id}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (case_dir / "payoff" / "matchups.csv").write_text(
+            "focal_policy_id,opponent_policy_id,p_mean\nB0 RandomLegal,policy_000300,0.1\n",
+            encoding="utf-8",
+        )
+        (case_dir / "nash" / "mixture_mean.csv").write_text(
+            "policy_id,mean_mixture\nB0 RandomLegal,0.5\npolicy_000300,0.5\n",
+            encoding="utf-8",
+        )
+        (case_dir / "alpharank" / "stationary_mean.csv").write_text(
+            "policy_id,mean_stationary_mass\nB0 RandomLegal,0.5\npolicy_000300,0.5\n",
+            encoding="utf-8",
+        )
+    (run_dir / "figures" / "paper").mkdir(parents=True, exist_ok=True)
+    (run_dir / "figures" / "paper" / "fig_matchup_heatmap.pdf").write_text("pdf\n", encoding="utf-8")
+    (run_dir / "figures" / "paper" / "fig_matchup_heatmap.png").write_text("png\n", encoding="utf-8")
+    return run_dir
+
+
+def test_paper_readiness_entrypoint_accepts_run_dir_and_writes_run_summary(tmp_path: Path) -> None:
+    run_dir = _write_paper_readiness_run_dir_fixture(tmp_path)
+    readiness_json = run_dir / "paper_readiness_summary.json"
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT / "python")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "paper_readiness_check.py"),
+            "--run-dir",
+            str(run_dir),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(readiness_json.read_text(encoding="utf-8"))
+    assert payload["scope"] == "run_dir"
+    assert payload["passed"] is True
+    assert payload["run_directory_audit"]["passed"] is True
+    assert payload["manifest_contract"]["passed"] is True
+    assert payload["final_eval_artifact_contract"]["passed"] is True
+
+
 def test_train_entrypoint_runs_periodic_dev_eval_and_handles_empty_ids_pass_fallback(tmp_path: Path) -> None:
     bundle = _write_runtime_weiss_sim(
         tmp_path,
