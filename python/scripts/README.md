@@ -127,6 +127,26 @@ Default focal-policy behavior:
 - if final-eval metadata explicitly names the focal policy, that metadata is used
 - otherwise the script fails clearly and requires `--focal-policy-id`
 
+### `metagame.py`
+
+Metagame sensitivity reporting over an existing `final_eval/` artifact tree.
+
+```bash
+uv run python python/scripts/metagame.py \
+  --stack-config configs/rl_stack_locked.yaml \
+  --final-eval-dir runs/some_run/eval/final_eval
+```
+
+What it does today:
+
+- replays the actual final-eval matchup episodes through the metagame reporting pipeline for each configured sensitivity case (`S0`, `S1`, `S2`)
+- writes `sensitivity/` artifacts with per-case payoff, Nash, and AlphaRank outputs
+- exports delta tables versus `S0` for matchup `p_ij`, Nash mixture mass, and AlphaRank stationary mass
+
+Default output location:
+
+- `runs/some_run/eval/final_eval/sensitivity/`
+
 ### `make_figures.py`
 
 Paper figure renderer for completed run artifacts.
