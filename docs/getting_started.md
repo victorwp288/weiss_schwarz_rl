@@ -9,7 +9,7 @@ Before you sink time into the repo, here is the honest version:
 - `make train-min` / `train.py --stack-config configs/stack_smoke.yaml` prove config loading, simulator provenance capture, and run-manifest writing.
 - `train.py` can also run a tiny inline M3-08 training smoke when you pass a full training stack and the active interpreter can step the simulator.
 - `eval.py` currently checks contracts and summarizes an already-produced `episodes.jsonl` file.
-- `make_figures.py` currently writes a placeholder artifact.
+- `make_figures.py` renders paper figures from completed run artifacts.
 - None of those entrypoints are the full master-plan pipeline yet.
 
 Repo paths in this guide are relative to the repo root.
@@ -131,13 +131,13 @@ These are honest smoke checks for the other top-level entrypoints:
 
 ```bash
 uv run python python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml
-uv run python python/scripts/make_figures.py --out runs/figures/placeholder.txt
+uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
 ```
 
 Expected outcomes:
 
 - `eval.py` reports a contract check and seed-set summary when no `--episodes-jsonl` is supplied.
-- `make_figures.py` writes a placeholder artifact under `runs/figures/`.
+- `make_figures.py` reads the paper-figure artifacts from the run directory and writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`.
 
 ## Examples
 

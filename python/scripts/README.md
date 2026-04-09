@@ -83,16 +83,20 @@ What it does **not** do today:
 
 ### `make_figures.py`
 
-Placeholder figure writer.
+Paper figure renderer for completed run artifacts.
 
 ```bash
-uv run python python/scripts/make_figures.py --out runs/figures/placeholder.txt
+uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
 ```
 
 Current behavior:
 
-- writes a placeholder artifact
+- reads `eval/final_eval/payoff_matrices/p_mean.csv`
+- reads `eval/diagnostics/truncation_heatmap_data.csv`
+- reads `eval/diagnostics/seat_bias.json`
+- reads `training/logs/training_metrics.jsonl`
+- writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`
 
 Current non-claim:
 
-- not a paper-ready figure pipeline yet
+- does not generate evaluation artifacts itself; it only renders figures from an existing run directory
