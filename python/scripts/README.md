@@ -147,6 +147,24 @@ Default output location:
 
 - `runs/some_run/eval/final_eval/sensitivity/`
 
+### `artifact_scan.py`
+
+Artifact hygiene gate over tracked data-like files plus generated artifact trees.
+
+```bash
+uv run python python/scripts/artifact_scan.py --artifact-root runs/toy_public_demo_ci
+# or regenerate the built-in demo tree and scan it in one step
+make artifact-hygiene
+```
+
+What it does today:
+
+- scans tracked repo files via `git ls-files`
+- scans text-like files (`.json`, `.jsonl`, `.csv`, `.txt`, `.yaml`, `.yml`) under selected artifact roots
+- inspects suspicious file paths, narrow forbidden binary asset types, and replay-bundle zip members
+- exits non-zero on likely bundled logo/art assets, card-text payload surfaces, or explicit franchise markers in artifact/data files
+- intentionally skips markdown/docs prose surfaces for trademark matching to avoid documentation false positives
+
 ### `make_figures.py`
 
 Paper figure renderer for completed run artifacts.

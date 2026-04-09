@@ -7,6 +7,27 @@ on:
       - main
 
 jobs:
+  artifact-hygiene:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync --extra dev
+
+      - name: Artifact hygiene gate
+        run: make artifact-hygiene
+
   lint-type-test:
     runs-on: ubuntu-latest
 

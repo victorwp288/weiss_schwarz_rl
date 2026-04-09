@@ -16,6 +16,7 @@ Today this repo is strongest at config, contracts, provenance, and small standal
   - Outside `--public-demo`, it still does **not** launch evaluation rollouts or generate episodes from policies.
 - `python/scripts/make_figures.py` renders paper figures from completed run artifacts under `runs/.../figures/paper/`, either all at once or by stable `--fig-id`.
   - It can also render a clearly-labeled **toy/demo figure bundle** from public-demo final-eval artifacts.
+- `python/scripts/artifact_scan.py` scans tracked data-like files plus generated artifact trees and fails fast on likely bundled logos, card-text payloads, or franchise markers.
 - `examples/run_loop_example.py` exercises the `weiss_sim` stepping API only. It is a simulator smoke example, not RL training.
 
 ## Not implemented end-to-end yet
@@ -75,6 +76,7 @@ uv run python python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
 make toy-public-e2e       # built-in public-safe toy/demo artifacts only
+make artifact-hygiene     # regenerate the toy/demo bundle and run the artifact gate
 ```
 
 Then read:
@@ -118,6 +120,7 @@ uv run python -c "import weiss_rl; print(weiss_rl.__all__)"
 uv run pytest -q python/weiss_rl/tests
 make train-min
 make toy-public-e2e
+make artifact-hygiene
 ```
 
 ## Schema validation line

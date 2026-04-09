@@ -16,7 +16,7 @@ PYRUN := uv run --extra dev python
 SYNC_MSG := "[make] using uv"
 endif
 
-.PHONY: sync lint fmt type test check check-placeholders train-min train-inline-smoke toy-public-e2e eval-dev figures clean
+.PHONY: sync lint fmt type test check check-placeholders train-min train-inline-smoke toy-public-e2e artifact-hygiene eval-dev figures clean
 
 FIGURE_FORMAT_ARGS = $(foreach fmt,$(FORMATS),--format $(fmt))
 FIGURE_ID_ARG = $(if $(FIG_ID),--fig-id "$(FIG_ID)")
@@ -59,6 +59,10 @@ toy-public-e2e:
 	@$(PYRUN) python/scripts/train.py --stack-config configs/rl_stack_locked.yaml --public-demo --run-label toy_public_demo_ci
 	@$(PYRUN) python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml --public-demo --run-dir runs/toy_public_demo_ci
 	@$(PYRUN) python/scripts/make_figures.py --public-demo --final-eval-dir runs/toy_public_demo_ci/eval/final_eval --out-dir runs/toy_public_demo_ci/figures
+
+artifact-hygiene:
+	@$(MAKE) toy-public-e2e
+	@$(PYRUN) python/scripts/artifact_scan.py --artifact-root runs/toy_public_demo_ci
 
 eval-dev:
 	@$(PYRUN) python/scripts/eval.py --stack-config configs/stack_smoke.yaml
