@@ -10,11 +10,16 @@ from pathlib import Path
 import numpy as np
 
 from weiss_rl.eval import EvalGameRecord
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme, paired_seed_scores
+from weiss_rl.eval.payoff_folding import PayoffFoldScheme
+from weiss_rl.eval.uncertainty import (
+    EvalUncertaintySummary,
+    bayesian_bootstrap_summary as eval_bayesian_bootstrap_summary,
+    paired_seed_uncertainty_summary as eval_paired_seed_uncertainty_summary,
+    posterior_samples as eval_posterior_samples,
+)
 
 _DEFAULT_CI_LEVEL = 0.95
 _DEFAULT_SAMPLE_COUNT = 1000
-_DECISIVE_THRESHOLD = 0.5
 
 __all__ = [
     "PayoffUncertaintySummary",
@@ -49,19 +54,13 @@ def bayesian_bootstrap_summary(
     ci_level: float = _DEFAULT_CI_LEVEL,
     seed: int | None = None,
 ) -> PayoffUncertaintySummary:
-    score_array = _coerce_scores(scores)
-    posterior = posterior_samples(score_array, sample_count=sample_count, seed=seed)
-    ci_low, ci_high = _credible_interval(posterior, ci_level=ci_level)
-    mean = float(np.mean(score_array))
-    return PayoffUncertaintySummary(
-        mean=mean,
-        ci_low=ci_low,
-        ci_high=ci_high,
-        ci_half_width=(ci_high - ci_low) / 2.0,
-        prob_gt_half=float(np.mean(posterior > _DECISIVE_THRESHOLD)),
-        prob_lt_half=float(np.mean(posterior < _DECISIVE_THRESHOLD)),
-        paired_seed_count=int(score_array.size),
-        sample_count=sample_count,
+    return _from_eval_summary(
+        eval_bayesian_bootstrap_summary(
+            scores,
+            sample_count=sample_count,
+            ci_level=ci_level,
+            seed=seed,
+        )
     )
 
 
@@ -73,31 +72,21 @@ def paired_seed_uncertainty_summary(
     ci_level: float = _DEFAULT_CI_LEVEL,
     seed: int | None = None,
 ) -> PayoffUncertaintySummary:
-    if not records:
-        raise ValueError("paired_seed_uncertainty_summary requires at least one record")
-    pair_scores = paired_seed_scores(records, scheme=scheme)
-    if not pair_scores:
-        raise ValueError(f"{scheme} excluded all paired seeds")
-    return bayesian_bootstrap_summary(
-        pair_scores,
-        sample_count=sample_count,
-        ci_level=ci_level,
-        seed=seed,
+    return _from_eval_summary(
+        eval_paired_seed_uncertainty_summary(
+            records,
+            scheme=scheme,
+            sample_count=sample_count,
+            ci_level=ci_level,
+            seed=seed,
+        )
     )
 
 
 def posterior_samples(
     scores: Sequence[float], *, sample_count: int = _DEFAULT_SAMPLE_COUNT, seed: int | None = None
 ) -> np.ndarray:
-    score_array = _coerce_scores(scores)
-    if sample_count <= 0:
-        raise ValueError("sample_count must be positive")
-
-    rng = np.random.default_rng(seed)
-    weights = rng.exponential(scale=1.0, size=(sample_count, score_array.size))
-    weights /= np.sum(weights, axis=1, keepdims=True)
-    baseline = float(score_array[0])
-    return baseline + (weights @ (score_array - baseline))
+    return eval_posterior_samples(scores, sample_count=sample_count, seed=seed)
 
 
 def write_posterior_samples(path: Path, samples: np.ndarray) -> None:
@@ -120,19 +109,14 @@ def write_uncertainty_artifacts(
     write_uncertainty_summary_json(summary_path, summary)
 
 
-def _coerce_scores(scores: Sequence[float]) -> np.ndarray:
-    score_array = np.asarray(scores, dtype=np.float64)
-    if score_array.ndim != 1 or score_array.size == 0:
-        raise ValueError("scores must be a non-empty 1D sequence")
-    if not np.isfinite(score_array).all():
-        raise ValueError("scores must be finite")
-    return score_array
-
-
-def _credible_interval(samples: np.ndarray, *, ci_level: float) -> tuple[float, float]:
-    if not 0.0 < ci_level < 1.0:
-        raise ValueError("ci_level must be between 0 and 1")
-    alpha = 1.0 - ci_level
-    ci_low = float(np.quantile(samples, alpha / 2.0))
-    ci_high = float(np.quantile(samples, 1.0 - (alpha / 2.0)))
-    return ci_low, ci_high
+def _from_eval_summary(summary: EvalUncertaintySummary) -> PayoffUncertaintySummary:
+    return PayoffUncertaintySummary(
+        mean=summary.mean,
+        ci_low=summary.ci_low,
+        ci_high=summary.ci_high,
+        ci_half_width=summary.ci_half_width,
+        prob_gt_half=summary.prob_gt_half,
+        prob_lt_half=summary.prob_lt_half,
+        paired_seed_count=summary.paired_seed_count,
+        sample_count=summary.sample_count,
+    )

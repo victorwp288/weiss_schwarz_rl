@@ -27,6 +27,18 @@ def _pair(pair_index: int, outcome_a: OutcomeToken, outcome_b: OutcomeToken) -> 
     ]
 
 
+def _duplicate_seed_runs(episode_seed: int, *outcomes: tuple[OutcomeToken, OutcomeToken]) -> list[EvalGameRecord]:
+    records: list[EvalGameRecord] = []
+    for pair_index, (outcome_a, outcome_b) in enumerate(outcomes):
+        records.extend(
+            [
+                _record(pair_index, 0, outcome_a, episode_seed=episode_seed),
+                _record(pair_index, 1, outcome_b, episode_seed=episode_seed),
+            ]
+        )
+    return records
+
+
 def _record(
     pair_index: int,
     swap_index: int,
@@ -108,6 +120,36 @@ def test_build_p_mean_and_counts_combines_bidirectional_evidence() -> None:
     assert p_mean[baseline, champion] == pytest.approx(0.0)
     assert counts[champion, baseline] == 2
     assert counts[baseline, champion] == 2
+
+
+def test_build_p_mean_and_counts_splits_reused_pair_index_by_episode_seed() -> None:
+    records = [
+        *_pair(0, "W", "L"),
+        _record(0, 0, "W", episode_seed=250),
+        _record(0, 1, "W", episode_seed=250),
+    ]
+
+    p_mean, counts, policy_ids = build_p_mean_and_counts(records, scheme="S0")
+    champion = policy_ids.index("champion")
+    baseline = policy_ids.index("baseline")
+
+    assert p_mean[champion, baseline] == pytest.approx(0.75)
+    assert p_mean[baseline, champion] == pytest.approx(0.25)
+    assert counts[champion, baseline] == 2
+    assert counts[baseline, champion] == 2
+
+
+def test_build_p_mean_and_counts_aggregates_duplicate_same_seed_runs() -> None:
+    records = _duplicate_seed_runs(250, ("W", "L"), ("W", "W"))
+
+    p_mean, counts, policy_ids = build_p_mean_and_counts(records, scheme="S0")
+    champion = policy_ids.index("champion")
+    baseline = policy_ids.index("baseline")
+
+    assert p_mean[champion, baseline] == pytest.approx(0.75)
+    assert p_mean[baseline, champion] == pytest.approx(0.25)
+    assert counts[champion, baseline] == 1
+    assert counts[baseline, champion] == 1
 
 
 def test_write_payoff_artifacts(tmp_path: Path) -> None:

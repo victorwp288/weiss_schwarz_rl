@@ -44,6 +44,7 @@ from weiss_rl.eval.uncertainty import (
     EvalUncertaintySummary,
     bayesian_bootstrap_summary,
     paired_seed_uncertainty_summary,
+    posterior_samples,
 )
 
 __all__ = [
@@ -73,6 +74,7 @@ __all__ = [
     "paired_seed_scores",
     "parse_training_policy_id",
     "paired_seed_uncertainty_summary",
+    "posterior_samples",
     "select_final_policy_set_deterministic_v1",
     "record_completed_game",
     "run_seat_swapped_matchup",
