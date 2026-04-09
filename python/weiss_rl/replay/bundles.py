@@ -49,6 +49,54 @@ class ReplayRecord:
     truncated: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ReplayRerunContract:
+    version: int
+    observation_visibility: str
+    max_decisions: int
+    max_ticks: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayBundleMeta:
+    schema_version: int
+    created_utc_ns: int
+
+    # IDs
+    episode_key256: str
+    episode_key64: int
+    replay_key256: str
+    replay_key64: int
+
+    # Provenance
+    run_id256: str
+    spec_hash256: str
+    actor_id: int
+    env_id: int
+    episode_index: int
+    episode_seed64: int
+    episode_identity_source: str
+    simulator_episode_key_kind: str | None = None
+    simulator_episode_key_u64: int | None = None
+    simulator_episode_key_hex: str | None = None
+    rerun_contract: ReplayRerunContract | None = None
+    rerun_supported: bool = False
+    rerun_blocker: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayStep:
+    t: int
+    decision_id: int
+    actor: int
+    action: int
+    reward: float
+    terminated: bool
+    truncated: bool
+    engine_status: int
+    legal_fingerprint64: int
+
+
 def make_replay_record(
     *,
     simulator_episode_key: int | bytes | None,
@@ -124,48 +172,6 @@ def _legal_slice(legal_ids: np.ndarray, legal_offsets: np.ndarray, row: int) -> 
 
 
 # ----------------------------
-# Bundle schema
-# ----------------------------
-@dataclass(frozen=True, slots=True)
-class ReplayBundleMeta:
-    schema_version: int
-    created_utc_ns: int
-
-    # IDs
-    episode_key256: str
-    episode_key64: int
-    replay_key256: str
-    replay_key64: int
-
-    # Provenance
-    run_id256: str
-    spec_hash256: str
-    actor_id: int
-    env_id: int
-    episode_index: int
-    episode_seed64: int
-    episode_identity_source: str
-    simulator_episode_key_kind: str | None = None
-    simulator_episode_key_u64: int | None = None
-    simulator_episode_key_hex: str | None = None
-    rerun_supported: bool = False
-    rerun_blocker: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ReplayStep:
-    t: int
-    decision_id: int
-    actor: int
-    action: int
-    reward: float
-    terminated: bool
-    truncated: bool
-    engine_status: int
-    legal_fingerprint64: int
-
-
-# ----------------------------
 # High-level helpers
 # ----------------------------
 def make_replay_bundle_meta(
@@ -177,6 +183,7 @@ def make_replay_bundle_meta(
     env_id: int,
     episode_index: int,
     episode_seed64: int,
+    rerun_contract: ReplayRerunContract | None = None,
 ) -> ReplayBundleMeta:
     episode_key256_bytes = resolve_episode_key256(
         simulator_episode_key=simulator_episode_key,
@@ -190,8 +197,9 @@ def make_replay_bundle_meta(
     simulator_episode_key_kind, simulator_episode_key_u64, simulator_episode_key_hex = _describe_simulator_episode_key(
         simulator_episode_key
     )
+    rerun_supported = rerun_contract is not None
     return ReplayBundleMeta(
-        schema_version=2,
+        schema_version=3 if rerun_supported else 2,
         created_utc_ns=time.time_ns(),
         episode_key256=key256_to_hex(episode_key256_bytes),
         episode_key64=key256_to_short64(episode_key256_bytes),
@@ -207,12 +215,9 @@ def make_replay_bundle_meta(
         simulator_episode_key_kind=simulator_episode_key_kind,
         simulator_episode_key_u64=simulator_episode_key_u64,
         simulator_episode_key_hex=simulator_episode_key_hex,
-        rerun_supported=False,
-        rerun_blocker=(
-            "Replay bundle does not include the full deterministic rerun contract yet. "
-            "Stored identity is authoritative, but simulator config/spec inputs required "
-            "for reconstruction are intentionally not reconstructed from caller-supplied args."
-        ),
+        rerun_contract=rerun_contract,
+        rerun_supported=rerun_supported,
+        rerun_blocker=None if rerun_supported else _missing_rerun_contract_blocker(),
     )
 
 
@@ -254,7 +259,7 @@ def load_replay_bundle(path: Path) -> tuple[ReplayBundleMeta, list[ReplayStep], 
         if "fault.json" in zf.namelist():
             fault = json.loads(zf.read("fault.json").decode("utf-8"))
 
-    meta = ReplayBundleMeta(**meta_raw)
+    meta = _parse_replay_bundle_meta(meta_raw)
     steps: list[ReplayStep] = [ReplayStep(**json.loads(line)) for line in steps_raw if line.strip()]
     return meta, steps, fault
 
@@ -268,21 +273,22 @@ def rerun_replay_bundle_fast(
     max_decisions: int | None = None,
     max_ticks: int | None = None,
     observation_visibility: str | None = None,
+    report_path: Path | None = None,
 ) -> None:
-    """Fail fast until bundles carry a complete deterministic rerun contract.
+    """Rerun replay verification using the contract persisted in the bundle.
 
-    Previous revisions accepted caller-supplied simulator args here, which made
-    the replay "rerun" path look deterministic while actually depending on
-    partial external configuration. Until replay bundles persist the full
-    simulator/config contract, this helper must refuse to pretend otherwise.
+    Caller-supplied simulator reconstruction args are rejected. Replay
+    verification must use the bundle's persisted rerun contract or fail fast.
     """
-    meta, _steps, _fault = load_replay_bundle(bundle_path)
-    _ = (max_decisions, max_ticks, observation_visibility)
-    blocker = meta.rerun_blocker or (
-        "Replay bundle is not rerunnable because the full simulator/config contract "
-        "is not stored in the bundle."
-    )
-    raise RuntimeError(blocker)
+    from weiss_rl.replay.runner import verify_replay_bundle
+
+    if any(value is not None for value in (max_decisions, max_ticks, observation_visibility)):
+        raise TypeError(
+            "rerun_replay_bundle_fast() no longer accepts simulator override args; "
+            "persist the rerun contract in the replay bundle instead"
+        )
+
+    verify_replay_bundle(bundle_path=bundle_path, report_path=report_path)
 
 
 def _describe_simulator_episode_key(
@@ -293,6 +299,22 @@ def _describe_simulator_episode_key(
     if isinstance(simulator_episode_key, bytes):
         return "bytes", None, simulator_episode_key.hex()
     return "u64", int(simulator_episode_key), None
+
+
+def _parse_replay_bundle_meta(meta_raw: dict[str, Any]) -> ReplayBundleMeta:
+    parsed = dict(meta_raw)
+    contract_raw = parsed.get("rerun_contract")
+    if isinstance(contract_raw, dict):
+        parsed["rerun_contract"] = ReplayRerunContract(**contract_raw)
+    return ReplayBundleMeta(**parsed)
+
+
+def _missing_rerun_contract_blocker() -> str:
+    return (
+        "Replay bundle does not include the full deterministic rerun contract yet. "
+        "Stored identity is authoritative, but simulator config/spec inputs required "
+        "for reconstruction are intentionally not reconstructed from caller-supplied args."
+    )
 
 
 # ----------------------------
