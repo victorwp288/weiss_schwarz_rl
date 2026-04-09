@@ -2,17 +2,14 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
 import pytest
 
 from weiss_rl.eval import EvalGameRecord
-from weiss_rl.metagame.payoff import (
-    build_p_mean_and_counts,
-    write_p_mean_csv,
-    write_payoff_counts_json,
-)
+from weiss_rl.metagame.payoff import build_p_mean_and_counts, write_payoff_artifacts
 
 _CONFIG_HASH256 = "ab" * 32
 _SPEC_HASH256 = "cd" * 32
@@ -110,6 +107,48 @@ def test_build_p_mean_and_counts_combines_bidirectional_evidence() -> None:
     assert counts[baseline, champion] == 2
 
 
+def test_build_p_mean_and_counts_uses_episode_seed_across_repeated_pair_indices() -> None:
+    records = [
+        *_pair(0, "W", "W"),
+        _record(0, 0, "D", episode_seed=200),
+        _record(0, 1, "T", episode_seed=200),
+    ]
+
+    p_mean, counts, policy_ids = build_p_mean_and_counts(records, scheme="S0")
+    champion = policy_ids.index("champion")
+    baseline = policy_ids.index("baseline")
+
+    assert p_mean[champion, baseline] == pytest.approx(0.75)
+    assert p_mean[baseline, champion] == pytest.approx(0.25)
+    assert counts[champion, baseline] == 2
+    assert counts[baseline, champion] == 2
+
+
+@pytest.mark.parametrize(
+    ("field_name", "record"),
+    [
+        ("config_hash256", replace(_pair(0, "W", "L")[1], config_hash256="ef" * 32)),
+        ("spec_hash256", replace(_pair(0, "W", "L")[1], spec_hash256="12" * 32)),
+    ],
+)
+def test_build_p_mean_and_counts_rejects_mixed_eval_hashes(field_name: str, record: EvalGameRecord) -> None:
+    records = [*_pair(0, "W", "L")]
+    records[1] = record
+
+    with pytest.raises(ValueError, match=field_name):
+        build_p_mean_and_counts(records, scheme="S0")
+
+
+def test_build_p_mean_and_counts_rejects_invalid_seed_bucket() -> None:
+    records = [
+        _record(0, 0, "W", episode_seed=101),
+        _record(1, 0, "L", episode_seed=101),
+    ]
+
+    with pytest.raises(ValueError, match="episode_seed 101"):
+        build_p_mean_and_counts(records, scheme="S0")
+
+
 def test_write_payoff_artifacts(tmp_path: Path) -> None:
     records = [*_pair(0, "W", "L")]
     p_mean, counts, policy_ids = build_p_mean_and_counts(records, scheme="S0")
@@ -117,8 +156,7 @@ def test_write_payoff_artifacts(tmp_path: Path) -> None:
     p_mean_path = tmp_path / "p_mean.csv"
     counts_path = tmp_path / "payoff_counts.json"
 
-    write_p_mean_csv(p_mean_path, p_mean, policy_ids)
-    write_payoff_counts_json(counts_path, counts, policy_ids)
+    write_payoff_artifacts(p_mean_path, counts_path, p_mean, counts, policy_ids)
 
     with p_mean_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.reader(handle)

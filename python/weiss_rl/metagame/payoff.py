@@ -5,8 +5,8 @@ from __future__ import annotations
 import csv
 import json
 from collections import defaultdict
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -38,22 +38,30 @@ def build_p_mean_and_counts(
     if not records:
         raise ValueError("records must contain at least one EvalGameRecord")
 
+    _require_single_shared_value(records, selector=lambda record: record.config_hash256, name="config_hash256")
+    _require_single_shared_value(records, selector=lambda record: record.spec_hash256, name="spec_hash256")
+
     policy_ids = sorted(
         {
             *{record.focal_policy_id for record in records},
             *{record.opponent_policy_id for record in records},
         }
     )
-    policy_index = {policy_id: index for index, policy_id in enumerate(policy_ids)}
 
-    pair_groups: dict[tuple[str, str, int], list[EvalGameRecord]] = defaultdict(list)
+    seed_groups: dict[tuple[str, str, int], list[EvalGameRecord]] = defaultdict(list)
     for record in records:
-        pair_groups[(record.focal_policy_id, record.opponent_policy_id, int(record.pair_index))].append(record)
+        seed_groups[(record.focal_policy_id, record.opponent_policy_id, int(record.episode_seed))].append(record)
 
     directed_scores: dict[tuple[str, str], list[float]] = defaultdict(list)
     directed_counts: dict[tuple[str, str], int] = defaultdict(int)
 
-    for (focal_policy_id, opponent_policy_id, pair_index), group in pair_groups.items():
+    for (focal_policy_id, opponent_policy_id, episode_seed), group in seed_groups.items():
+        _validate_seed_bucket(
+            group,
+            focal_policy_id=focal_policy_id,
+            opponent_policy_id=opponent_policy_id,
+            episode_seed=episode_seed,
+        )
         score = paired_seed_score(group, scheme=scheme)
         if score is None:
             continue
@@ -83,6 +91,7 @@ def build_p_mean_and_counts(
             mean_ji = _mean(scores_ji) if count_ji else None
 
             if mean_ij is None:
+                assert mean_ji is not None
                 combined_mean = 1.0 - mean_ji
                 combined_count = count_ji
             elif mean_ji is None:
@@ -144,3 +153,37 @@ def _mean(values: Sequence[float]) -> float:
     if not values:
         raise ValueError("mean requires at least one value")
     return sum(values) / len(values)
+
+
+def _validate_seed_bucket(
+    records: Sequence[EvalGameRecord],
+    *,
+    focal_policy_id: str,
+    opponent_policy_id: str,
+    episode_seed: int,
+) -> None:
+    if len(records) != 2:
+        raise ValueError(
+            "matchup "
+            f"{focal_policy_id!r} vs {opponent_policy_id!r} at episode_seed {episode_seed} "
+            "must contain exactly one seat-swapped pair"
+        )
+
+    swap_indices = sorted(int(record.swap_index) for record in records)
+    if swap_indices != [0, 1]:
+        raise ValueError(
+            "matchup "
+            f"{focal_policy_id!r} vs {opponent_policy_id!r} at episode_seed {episode_seed} "
+            "must contain swap_index 0 and 1 exactly once"
+        )
+
+
+def _require_single_shared_value(
+    records: Sequence[EvalGameRecord],
+    *,
+    selector: Callable[[EvalGameRecord], str],
+    name: str,
+) -> None:
+    values = {selector(record) for record in records}
+    if len(values) != 1:
+        raise ValueError(f"records must share exactly one {name}")
