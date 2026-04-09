@@ -53,7 +53,10 @@ def validated_paired_seed_groups(
     for record in records:
         pair_groups[paired_seed_group_key(record)].append(record)
 
-    return tuple(_validate_pair_records(pair_groups[group_key]) for group_key in sorted(pair_groups, key=_paired_seed_group_sort_key))
+    return tuple(
+        _validate_pair_records(pair_groups[group_key])
+        for group_key in sorted(pair_groups, key=_paired_seed_group_sort_key)
+    )
 
 
 def paired_seed_scores(records: Sequence[EvalGameRecord], *, scheme: PayoffFoldScheme) -> tuple[float, ...]:
