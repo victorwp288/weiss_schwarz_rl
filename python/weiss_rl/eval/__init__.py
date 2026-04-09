@@ -1,7 +1,10 @@
 """Evaluation harness entry points."""
 
 from weiss_rl.eval.diagnostics import (
+    HiddenInfoLeakagePair,
+    build_hidden_info_leakage_diagnostics,
     build_seat_advantage_diagnostics,
+    write_leakage_diagnostics_json,
     write_matchup_diagnostics_json,
 )
 from weiss_rl.eval.export import (
@@ -55,6 +58,7 @@ __all__ = [
     "EvalSamplerAnomalies",
     "EvalUncertaintySummary",
     "GameResult",
+    "HiddenInfoLeakagePair",
     "MatchupSummary",
     "NEXT_U64_ORDER",
     "PCG32_XSH_RR_V1",
@@ -65,6 +69,7 @@ __all__ = [
     "Stage2StopReason",
     "bayesian_bootstrap_posterior_samples",
     "bayesian_bootstrap_summary",
+    "build_hidden_info_leakage_diagnostics",
     "build_matchup_export",
     "build_seat_advantage_diagnostics",
     "build_seat_swapped_schedule",
@@ -87,6 +92,7 @@ __all__ = [
     "summarize_pair_outcomes",
     "summarize_stage2_records",
     "write_episodes_jsonl",
+    "write_leakage_diagnostics_json",
     "write_matchup_diagnostics_json",
     "write_matchup_summary_csv",
     "write_matchup_summary_json",
