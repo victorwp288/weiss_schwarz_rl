@@ -11,7 +11,7 @@ from typing import Iterable, Sequence
 TEXT_FILE_SUFFIXES = frozenset({".json", ".jsonl", ".csv", ".txt", ".yaml", ".yml"})
 IMAGE_FILE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tif", ".tiff"})
 FORBIDDEN_BINARY_SUFFIXES = frozenset({".psd", ".ai", ".eps"})
-REPO_TEXT_SCAN_SKIP_DIRS = frozenset({".git", ".github", "docs"})
+REPO_SCAN_SKIP_DIRS = frozenset({".git", ".github", "docs"})
 SUSPICIOUS_IMAGE_PATH_MARKERS = (
     "logo",
     "logos",
@@ -32,13 +32,18 @@ SUSPICIOUS_IMAGE_PATH_MARKERS = (
 )
 SUSPICIOUS_TEXT_PATH_MARKERS = (
     "card_text",
+    "card_texts",
     "card-text",
     "effect_text",
+    "effect_texts",
     "effect-text",
     "ability_text",
+    "ability_texts",
     "ability-text",
     "flavor_text",
+    "flavor_texts",
     "flavour_text",
+    "flavour_texts",
     "card_names",
     "card-names",
 )
@@ -184,8 +189,9 @@ def _scan_path(*, surface: str, path: Path, repo_root: Path | None, is_repo_scan
     display_path = _display_path(path, repo_root=repo_root)
     suffix = path.suffix.lower()
     normalized_path = _normalize_path(path)
+    should_scan_path = _should_scan_path(path=path, is_repo_scan=is_repo_scan)
 
-    if suffix in FORBIDDEN_BINARY_SUFFIXES:
+    if should_scan_path and suffix in FORBIDDEN_BINARY_SUFFIXES:
         findings.append(
             Finding(
                 surface=surface,
@@ -195,7 +201,11 @@ def _scan_path(*, surface: str, path: Path, repo_root: Path | None, is_repo_scan
             )
         )
 
-    if suffix in IMAGE_FILE_SUFFIXES and _contains_marker(normalized_path, SUSPICIOUS_IMAGE_PATH_MARKERS):
+    if (
+        should_scan_path
+        and suffix in IMAGE_FILE_SUFFIXES
+        and _contains_marker(normalized_path, SUSPICIOUS_IMAGE_PATH_MARKERS)
+    ):
         findings.append(
             Finding(
                 surface=surface,
@@ -205,7 +215,11 @@ def _scan_path(*, surface: str, path: Path, repo_root: Path | None, is_repo_scan
             )
         )
 
-    if suffix in TEXT_FILE_SUFFIXES and _contains_marker(normalized_path, SUSPICIOUS_TEXT_PATH_MARKERS):
+    if (
+        should_scan_path
+        and suffix in TEXT_FILE_SUFFIXES
+        and _contains_marker(normalized_path, SUSPICIOUS_TEXT_PATH_MARKERS)
+    ):
         findings.append(
             Finding(
                 surface=surface,
@@ -356,11 +370,13 @@ def _read_zip_text_payload(archive: zipfile.ZipFile, member_name: str) -> _TextP
 def _should_scan_text(*, path: Path, is_repo_scan: bool) -> bool:
     if path.suffix.lower() not in TEXT_FILE_SUFFIXES:
         return False
+    return _should_scan_path(path=path, is_repo_scan=is_repo_scan)
+
+
+def _should_scan_path(*, path: Path, is_repo_scan: bool) -> bool:
     if not is_repo_scan:
         return True
-    if any(part in REPO_TEXT_SCAN_SKIP_DIRS for part in path.parts):
-        return False
-    return True
+    return not any(part in REPO_SCAN_SKIP_DIRS for part in path.parts)
 
 
 def _git_ls_files(repo_root: Path) -> tuple[Path, ...]:
@@ -392,7 +408,22 @@ def _normalize_field_name(value: str) -> str:
 
 
 def _contains_marker(value: str, markers: Sequence[str]) -> bool:
-    return any(marker in value for marker in markers)
+    tokens = tuple(re.findall(r"[a-z0-9]+", value.lower()))
+    return any(_contains_token_sequence(tokens, _marker_tokens(marker)) for marker in markers)
+
+
+def _contains_token_sequence(tokens: Sequence[str], marker_tokens: Sequence[str]) -> bool:
+    marker_length = len(marker_tokens)
+    if marker_length == 0 or marker_length > len(tokens):
+        return False
+    return any(
+        tokens[index : index + marker_length] == tuple(marker_tokens)
+        for index in range(len(tokens) - marker_length + 1)
+    )
+
+
+def _marker_tokens(marker: str) -> tuple[str, ...]:
+    return tuple(re.findall(r"[a-z0-9]+", marker.lower()))
 
 
 def _find_trademark_marker(value: str) -> str | None:
