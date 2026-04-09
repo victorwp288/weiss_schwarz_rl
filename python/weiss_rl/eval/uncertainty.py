@@ -16,6 +16,7 @@ _DECISIVE_THRESHOLD = 0.5
 
 __all__ = [
     "EvalUncertaintySummary",
+    "bayesian_bootstrap_posterior_samples",
     "bayesian_bootstrap_summary",
     "paired_seed_uncertainty_summary",
     "posterior_samples",
@@ -32,6 +33,17 @@ class EvalUncertaintySummary:
     prob_lt_half: float
     paired_seed_count: int
     sample_count: int
+
+
+def bayesian_bootstrap_posterior_samples(
+    scores: Sequence[float],
+    *,
+    sample_count: int = _DEFAULT_SAMPLE_COUNT,
+    seed: int | None = None,
+) -> tuple[float, ...]:
+    score_array = _coerce_scores(scores)
+    posterior_samples = _posterior_samples_from_array(score_array, sample_count=sample_count, seed=seed)
+    return tuple(float(sample) for sample in posterior_samples)
 
 
 def bayesian_bootstrap_summary(

@@ -72,7 +72,10 @@ def test_summarize_stage2_records_reports_summary_and_continue_state() -> None:
     )
 
     assert decision.summary == MatchupSummary(games=6, wins=3, losses=2, draws=1, truncations=0, engine_errors=0)
+    assert decision.uncertainty is not None
     assert decision.uncertainty.paired_seed_count == 3
+    assert decision.observed_paired_seeds == 3
+    assert decision.excluded_paired_seeds == 0
     assert decision.stop_reason == "continue"
     assert decision.should_stop is False
 
@@ -106,19 +109,6 @@ def test_summarize_stage2_records_reports_summary_and_continue_state() -> None:
             ),
             "precision",
         ),
-        (
-            EvalUncertaintySummary(
-                mean=0.55,
-                ci_low=0.4,
-                ci_high=0.7,
-                ci_half_width=0.15,
-                prob_gt_half=0.6,
-                prob_lt_half=0.0,
-                paired_seed_count=4,
-                sample_count=16,
-            ),
-            "budget",
-        ),
     ],
 )
 def test_summarize_stage2_records_selects_stop_reason_by_priority(
@@ -129,7 +119,7 @@ def test_summarize_stage2_records_selects_stop_reason_by_priority(
     def _fake_uncertainty(*args, **kwargs):
         return uncertainty
 
-    monkeypatch.setattr("weiss_rl.eval.stage2.paired_seed_uncertainty_summary", _fake_uncertainty)
+    monkeypatch.setattr("weiss_rl.eval.stage2.bayesian_bootstrap_summary", _fake_uncertainty)
 
     decision = summarize_stage2_records(
         [*_pair(0, "W", "L")],
@@ -157,7 +147,7 @@ def test_summarize_stage2_records_uses_stop_confidence_as_default_ci_level(monke
             sample_count=8,
         )
 
-    monkeypatch.setattr("weiss_rl.eval.stage2.paired_seed_uncertainty_summary", _fake_uncertainty)
+    monkeypatch.setattr("weiss_rl.eval.stage2.bayesian_bootstrap_summary", _fake_uncertainty)
 
     summarize_stage2_records(
         [*_pair(0, "W", "L")],
@@ -166,6 +156,73 @@ def test_summarize_stage2_records_uses_stop_confidence_as_default_ci_level(monke
     )
 
     assert captured["ci_level"] == 0.9
+
+
+def test_summarize_stage2_records_handles_all_excluded_s2_pairs_before_budget() -> None:
+    decision = summarize_stage2_records(
+        [*_pair(0, "T", "T")],
+        stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+        max_paired_seeds=2,
+        scheme="S2",
+    )
+
+    assert decision.uncertainty is None
+    assert decision.paired_seed_count == 0
+    assert decision.observed_paired_seeds == 1
+    assert decision.excluded_paired_seeds == 1
+    assert decision.has_payoff_samples is False
+    assert decision.stop_reason == "continue"
+    assert decision.should_stop is False
+
+
+def test_summarize_stage2_records_marks_budgeted_all_excluded_s2_pairs_explicitly() -> None:
+    decision = summarize_stage2_records(
+        [*_pair(0, "T", "T"), *_pair(1, "T", "T")],
+        stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+        max_paired_seeds=2,
+        scheme="S2",
+    )
+
+    assert decision.uncertainty is None
+    assert decision.paired_seed_count == 0
+    assert decision.observed_paired_seeds == 2
+    assert decision.excluded_paired_seeds == 2
+    assert decision.stop_reason == "no_included_pairs"
+    assert decision.should_stop is True
+
+
+def test_summarize_stage2_records_uses_observed_pairs_for_budget_under_s2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_uncertainty(*args, **kwargs):
+        return EvalUncertaintySummary(
+            mean=0.5,
+            ci_low=0.25,
+            ci_high=0.75,
+            ci_half_width=0.25,
+            prob_gt_half=0.4,
+            prob_lt_half=0.4,
+            paired_seed_count=1,
+            sample_count=32,
+        )
+
+    monkeypatch.setattr("weiss_rl.eval.stage2.bayesian_bootstrap_summary", _fake_uncertainty)
+
+    decision = summarize_stage2_records(
+        [*_pair(0, "W", "L"), *_pair(1, "T", "T")],
+        stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.001, stop_confidence=0.999),
+        max_paired_seeds=2,
+        scheme="S2",
+        sample_count=32,
+        seed=7,
+    )
+
+    assert decision.uncertainty is not None
+    assert decision.paired_seed_count == 1
+    assert decision.observed_paired_seeds == 2
+    assert decision.excluded_paired_seeds == 1
+    assert decision.stop_reason == "budget"
+    assert decision.should_stop is True
 
 
 def test_summarize_stage2_records_rejects_non_positive_budget() -> None:

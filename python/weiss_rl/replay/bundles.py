@@ -1,10 +1,19 @@
-"""Replay bundle serialization scaffold."""
+"""Replay bundle serialization (deterministic replay zip).
+
+M5-07: save deterministic replay zip (actions + legal_fingerprint + episode keys).
+Minimum bundle:
+  - meta.json (episode identity + spec hash + replay key)
+  - steps.jsonl (action sequence + actor seat + decision_id + engine_status + legality fingerprint)
+Optional:
+  - fault.json (invariant / engine fault metadata)
+"""
 
 from __future__ import annotations
 
 import json
 import math
 import time
+import zipfile
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from types import ModuleType
@@ -16,6 +25,7 @@ from weiss_rl.repro import (
     derive_replay_key256,
     key256_to_hex,
     key256_to_short64,
+    legal_fingerprint_v1,
     resolve_episode_key256,
 )
 
@@ -69,11 +79,11 @@ def make_replay_record(
         episode_key64=key256_to_short64(episode_key256),
         replay_key256=key256_to_hex(replay_key256),
         replay_key64=key256_to_short64(replay_key256),
-        decision_id=decision_id,
-        action=action,
-        reward=reward,
-        terminated=terminated,
-        truncated=truncated,
+        decision_id=int(decision_id),
+        action=int(action),
+        reward=float(reward),
+        terminated=bool(terminated),
+        truncated=bool(truncated),
     )
 
 
@@ -84,6 +94,210 @@ def write_jsonl(records: list[ReplayRecord], path: Path) -> None:
             fh.write(json.dumps(asdict(record), separators=(",", ":")) + "\n")
 
 
+# ----------------------------
+# Fingerprinting (RL-layer)
+# ----------------------------
+def compute_legal_fingerprint64(*, spec_hash256: bytes, decision_id: int, legal_ids: np.ndarray) -> int:
+    """Compute the canonical replay/eval legality fingerprint.
+
+    This is a thin wrapper around the normative ``legal_fingerprint_v1`` contract
+    so replay bundles stay aligned with the repo's paper-grade reproducibility
+    rules, including malformed-input rejection.
+    """
+    return int(
+        legal_fingerprint_v1(
+            spec_hash256=spec_hash256,
+            decision_id=int(decision_id),
+            legal_ids=np.asarray(legal_ids),
+        )
+    )
+
+
+def _legal_slice(legal_ids: np.ndarray, legal_offsets: np.ndarray, row: int) -> np.ndarray:
+    offs = np.asarray(legal_offsets, dtype=np.uint32)
+    ids = np.asarray(legal_ids, dtype=np.uint16)
+    start = int(offs[row])
+    end = int(offs[row + 1])
+    if start < 0 or end < start or end > ids.shape[0]:
+        raise ValueError("legal_offsets out of bounds for legal_ids")
+    return ids[start:end]
+
+
+# ----------------------------
+# Bundle schema
+# ----------------------------
+@dataclass(frozen=True, slots=True)
+class ReplayBundleMeta:
+    schema_version: int
+    created_utc_ns: int
+
+    # IDs
+    episode_key256: str
+    episode_key64: int
+    replay_key256: str
+    replay_key64: int
+
+    # Provenance
+    run_id256: str
+    spec_hash256: str
+    actor_id: int
+    env_id: int
+    episode_index: int
+    episode_seed64: int
+    episode_identity_source: str
+    simulator_episode_key_kind: str | None = None
+    simulator_episode_key_u64: int | None = None
+    simulator_episode_key_hex: str | None = None
+    rerun_supported: bool = False
+    rerun_blocker: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayStep:
+    t: int
+    decision_id: int
+    actor: int
+    action: int
+    reward: float
+    terminated: bool
+    truncated: bool
+    engine_status: int
+    legal_fingerprint64: int
+
+
+# ----------------------------
+# High-level helpers
+# ----------------------------
+def make_replay_bundle_meta(
+    *,
+    simulator_episode_key: int | bytes | None,
+    run_id256: bytes,
+    spec_hash256: bytes,
+    actor_id: int,
+    env_id: int,
+    episode_index: int,
+    episode_seed64: int,
+) -> ReplayBundleMeta:
+    episode_key256_bytes = resolve_episode_key256(
+        simulator_episode_key=simulator_episode_key,
+        run_id256=run_id256,
+        actor_id=actor_id,
+        env_id=env_id,
+        episode_index=episode_index,
+        episode_seed64=episode_seed64,
+    )
+    replay_key256_bytes = derive_replay_key256(episode_key256=episode_key256_bytes, spec_hash256=spec_hash256)
+    simulator_episode_key_kind, simulator_episode_key_u64, simulator_episode_key_hex = _describe_simulator_episode_key(
+        simulator_episode_key
+    )
+    return ReplayBundleMeta(
+        schema_version=2,
+        created_utc_ns=time.time_ns(),
+        episode_key256=key256_to_hex(episode_key256_bytes),
+        episode_key64=key256_to_short64(episode_key256_bytes),
+        replay_key256=key256_to_hex(replay_key256_bytes),
+        replay_key64=key256_to_short64(replay_key256_bytes),
+        run_id256=key256_to_hex(run_id256),
+        spec_hash256=key256_to_hex(spec_hash256),
+        actor_id=int(actor_id),
+        env_id=int(env_id),
+        episode_index=int(episode_index),
+        episode_seed64=int(episode_seed64),
+        episode_identity_source="simulator" if simulator_episode_key_kind is not None else "derived",
+        simulator_episode_key_kind=simulator_episode_key_kind,
+        simulator_episode_key_u64=simulator_episode_key_u64,
+        simulator_episode_key_hex=simulator_episode_key_hex,
+        rerun_supported=False,
+        rerun_blocker=(
+            "Replay bundle does not include the full deterministic rerun contract yet. "
+            "Stored identity is authoritative, but simulator config/spec inputs required "
+            "for reconstruction are intentionally not reconstructed from caller-supplied args."
+        ),
+    )
+
+
+def write_replay_bundle(
+    *,
+    out_dir: Path,
+    meta: ReplayBundleMeta,
+    steps: list[ReplayStep],
+    fault_payload: dict[str, Any] | None = None,
+) -> Path:
+    """Write replay bundle zip and return its path."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = out_dir / f"replay_{meta.replay_key64:016x}.zip"
+
+    meta_bytes = (json.dumps(asdict(meta), sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+
+    def iter_steps_jsonl() -> bytes:
+        lines = []
+        for s in steps:
+            lines.append(json.dumps(asdict(s), sort_keys=True, separators=(",", ":")))
+        return ("\n".join(lines) + "\n").encode("utf-8")
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("meta.json", meta_bytes)
+        zf.writestr("steps.jsonl", iter_steps_jsonl())
+        if fault_payload is not None:
+            fault_text = json.dumps(_json_ready(fault_payload), allow_nan=False, sort_keys=True) + "\n"
+            zf.writestr("fault.json", fault_text.encode("utf-8"))
+
+    return zip_path
+
+
+def load_replay_bundle(path: Path) -> tuple[ReplayBundleMeta, list[ReplayStep], dict[str, Any] | None]:
+    """Load meta + steps (+ optional fault) from replay zip."""
+    with zipfile.ZipFile(path, "r") as zf:
+        meta_raw = json.loads(zf.read("meta.json").decode("utf-8"))
+        steps_raw = zf.read("steps.jsonl").decode("utf-8").splitlines()
+        fault = None
+        if "fault.json" in zf.namelist():
+            fault = json.loads(zf.read("fault.json").decode("utf-8"))
+
+    meta = ReplayBundleMeta(**meta_raw)
+    steps: list[ReplayStep] = [ReplayStep(**json.loads(line)) for line in steps_raw if line.strip()]
+    return meta, steps, fault
+
+
+# ----------------------------
+# Deterministic rerun (fast layout)
+# ----------------------------
+def rerun_replay_bundle_fast(
+    *,
+    bundle_path: Path,
+    max_decisions: int | None = None,
+    max_ticks: int | None = None,
+    observation_visibility: str | None = None,
+) -> None:
+    """Fail fast until bundles carry a complete deterministic rerun contract.
+
+    Previous revisions accepted caller-supplied simulator args here, which made
+    the replay "rerun" path look deterministic while actually depending on
+    partial external configuration. Until replay bundles persist the full
+    simulator/config contract, this helper must refuse to pretend otherwise.
+    """
+    meta, _steps, _fault = load_replay_bundle(bundle_path)
+    _ = (max_decisions, max_ticks, observation_visibility)
+    blocker = meta.rerun_blocker or (
+        "Replay bundle is not rerunnable because the full simulator/config contract "
+        "is not stored in the bundle."
+    )
+    raise RuntimeError(blocker)
+
+
+def _describe_simulator_episode_key(
+    simulator_episode_key: int | bytes | None,
+) -> tuple[str | None, int | None, str | None]:
+    if simulator_episode_key is None or simulator_episode_key == b"":
+        return None, None, None
+    if isinstance(simulator_episode_key, bytes):
+        return "bytes", None, simulator_episode_key.hex()
+    return "u64", int(simulator_episode_key), None
+
+
+# ----------------------------
+# Existing fault JSON helper
+# ----------------------------
 def write_fault_bundle(*, fault_dir: Path, prefix: str, payload: dict[str, Any]) -> Path:
     fault_dir.mkdir(parents=True, exist_ok=True)
     path = fault_dir / f"{prefix}_{time.time_ns()}.json"

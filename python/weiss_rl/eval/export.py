@@ -81,11 +81,35 @@ def build_matchup_export(
     )
     summary = decision.summary
     uncertainty = decision.uncertainty
+    uncertainty_payload: dict[str, Any] = {
+        "mean": None,
+        "ci_low": None,
+        "ci_high": None,
+        "ci_half_width": None,
+        "prob_gt_half": None,
+        "prob_lt_half": None,
+        "paired_seed_count": decision.paired_seed_count,
+        "sample_count": 0,
+    }
+    if uncertainty is not None:
+        uncertainty_payload = {
+            "mean": uncertainty.mean,
+            "ci_low": uncertainty.ci_low,
+            "ci_high": uncertainty.ci_high,
+            "ci_half_width": uncertainty.ci_half_width,
+            "prob_gt_half": uncertainty.prob_gt_half,
+            "prob_lt_half": uncertainty.prob_lt_half,
+            "paired_seed_count": uncertainty.paired_seed_count,
+            "sample_count": uncertainty.sample_count,
+        }
     return {
         "focal_policy_id": focal_policy_id,
         "opponent_policy_id": opponent_policy_id,
         "scheme": scheme,
-        "paired_seeds": uncertainty.paired_seed_count,
+        "paired_seeds": decision.paired_seed_count,
+        "observed_paired_seeds": decision.observed_paired_seeds,
+        "excluded_paired_seeds": decision.excluded_paired_seeds,
+        "has_payoff_samples": decision.has_payoff_samples,
         "max_paired_seeds": decision.max_paired_seeds,
         "stop_reason": decision.stop_reason,
         "should_stop": decision.should_stop,
@@ -97,16 +121,7 @@ def build_matchup_export(
             "truncations": summary.truncations,
             "engine_errors": summary.engine_errors,
         },
-        "uncertainty": {
-            "mean": uncertainty.mean,
-            "ci_low": uncertainty.ci_low,
-            "ci_high": uncertainty.ci_high,
-            "ci_half_width": uncertainty.ci_half_width,
-            "prob_gt_half": uncertainty.prob_gt_half,
-            "prob_lt_half": uncertainty.prob_lt_half,
-            "paired_seed_count": uncertainty.paired_seed_count,
-            "sample_count": uncertainty.sample_count,
-        },
+        "uncertainty": uncertainty_payload,
     }
 
 
@@ -124,6 +139,9 @@ def write_matchup_summary_csv(path: Path, payload: dict[str, Any]) -> None:
         "scheme": payload["scheme"],
         "paired_seeds": payload["paired_seeds"],
         "max_paired_seeds": payload["max_paired_seeds"],
+        "observed_paired_seeds": payload["observed_paired_seeds"],
+        "excluded_paired_seeds": payload["excluded_paired_seeds"],
+        "has_payoff_samples": payload["has_payoff_samples"],
         "stop_reason": payload["stop_reason"],
         "should_stop": payload["should_stop"],
         "games": summary["games"],

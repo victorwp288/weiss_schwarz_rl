@@ -5,8 +5,8 @@ from __future__ import annotations
 import csv
 import json
 from collections import defaultdict
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -43,12 +43,16 @@ def build_p_mean_and_counts(
     if not records:
         raise ValueError("records must contain at least one EvalGameRecord")
 
+    _require_single_shared_value(records, selector=lambda record: record.config_hash256, name="config_hash256")
+    _require_single_shared_value(records, selector=lambda record: record.spec_hash256, name="spec_hash256")
+
     policy_ids = sorted(
         {
             *{record.focal_policy_id for record in records},
             *{record.opponent_policy_id for record in records},
         }
     )
+
     pair_groups: dict[PairedSeedGroupKey, list[EvalGameRecord]] = defaultdict(list)
     for record in records:
         pair_groups[paired_seed_group_key(record)].append(record)
@@ -152,3 +156,14 @@ def _mean(values: Sequence[float]) -> float:
     if not values:
         raise ValueError("mean requires at least one value")
     return sum(values) / len(values)
+
+
+def _require_single_shared_value(
+    records: Sequence[EvalGameRecord],
+    *,
+    selector: Callable[[EvalGameRecord], str],
+    name: str,
+) -> None:
+    values = {selector(record) for record in records}
+    if len(values) != 1:
+        raise ValueError(f"records must share exactly one {name}")

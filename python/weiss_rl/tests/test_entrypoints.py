@@ -11,6 +11,7 @@ import torch
 
 from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.spec import spec_bundle_hash
+from weiss_rl.toy_public_demo import public_demo_spec_hash256
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -693,6 +694,251 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
     assert summary_csv.read_text(encoding="utf-8").splitlines()[0].startswith("focal_policy_id,")
 
 
+def test_paper_readiness_entrypoint_writes_summary_json(tmp_path: Path) -> None:
+    final_eval_dir = tmp_path / "final_eval"
+    summary_path = final_eval_dir / "summary.json"
+    readiness_json = final_eval_dir / "paper_readiness_summary.json"
+    diagnostics_paths = [
+        final_eval_dir / "matchups" / "00_b0_randomlegal__vs__00_b0_randomlegal" / "diagnostics.json",
+        final_eval_dir / "matchups" / "00_b0_randomlegal__vs__01_policy_000300" / "diagnostics.json",
+        final_eval_dir / "matchups" / "01_policy_000300__vs__00_b0_randomlegal" / "diagnostics.json",
+        final_eval_dir / "matchups" / "01_policy_000300__vs__01_policy_000300" / "diagnostics.json",
+    ]
+    for diagnostics_path in diagnostics_paths:
+        diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics_path.write_text(
+            json.dumps(
+                {
+                    "seat_results": {
+                        "seat0_wins": 1,
+                        "seat1_wins": 1,
+                        "draws": 0,
+                        "truncations": 0,
+                        "engine_errors": 0,
+                        "decisive_games": 2,
+                        "total_games": 2,
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                "metadata": {"selection": {"mode": "deterministic_v1"}},
+                "matrices": {
+                    "games": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[2, 2], [2, 2]]},
+                    "truncations": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[0, 0], [0, 0]]},
+                    "mean": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[0.5, 0.0], [0.9, 0.5]]},
+                    "ci_low": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[0.5, 0.0], [0.88, 0.5]]},
+                    "ci_high": {"policy_ids": ["B0 RandomLegal", "policy_000300"], "values": [[0.5, 0.0], [0.95, 0.5]]},
+                    "has_payoff_samples": {
+                        "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                        "values": [[True, True], [True, True]],
+                    },
+                    "paired_seed_count": {
+                        "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                        "values": [[1, 1], [2, 1]],
+                    },
+                    "stop_reason": {
+                        "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                        "values": [["precision", "precision"], ["precision", "precision"]],
+                    },
+                },
+                "posterior_samples": {
+                    "policy_ids": ["B0 RandomLegal", "policy_000300"],
+                    "sample_count": 4,
+                    "values": [[[], []], [[0.88, 0.9, 0.92, 0.95], []]],
+                },
+                "matchups": [
+                    {
+                        "focal_policy_id": "B0 RandomLegal",
+                        "opponent_policy_id": "B0 RandomLegal",
+                        "diagnostics_path": "matchups/00_b0_randomlegal__vs__00_b0_randomlegal/diagnostics.json",
+                    },
+                    {
+                        "focal_policy_id": "B0 RandomLegal",
+                        "opponent_policy_id": "policy_000300",
+                        "diagnostics_path": "matchups/00_b0_randomlegal__vs__01_policy_000300/diagnostics.json",
+                    },
+                    {
+                        "focal_policy_id": "policy_000300",
+                        "opponent_policy_id": "B0 RandomLegal",
+                        "diagnostics_path": "matchups/01_policy_000300__vs__00_b0_randomlegal/diagnostics.json",
+                    },
+                    {
+                        "focal_policy_id": "policy_000300",
+                        "opponent_policy_id": "policy_000300",
+                        "diagnostics_path": "matchups/01_policy_000300__vs__01_policy_000300/diagnostics.json",
+                    },
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT / "python")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "paper_readiness_check.py"),
+            "--final-eval-dir",
+            str(final_eval_dir),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(readiness_json.read_text(encoding="utf-8"))
+    assert payload["passed"] is True
+    assert payload["checks"]["baseline_win_rate_vs_b0"]["focal_policy_id"] == "policy_000300"
+
+
+def test_paper_readiness_entrypoint_requires_explicit_focal_policy_for_ambiguous_multi_policy_artifacts(
+    tmp_path: Path,
+) -> None:
+    final_eval_dir = tmp_path / "final_eval"
+    summary_path = final_eval_dir / "summary.json"
+    readiness_json = final_eval_dir / "paper_readiness_summary.json"
+    policies = ["B0 RandomLegal", "policy_000300", "policy_000400"]
+    matchups: list[dict[str, object]] = []
+
+    for focal_index, focal_policy_id in enumerate(policies):
+        for opponent_index, opponent_policy_id in enumerate(policies):
+            diagnostics_path = (
+                final_eval_dir
+                / "matchups"
+                / f"{focal_index:02d}_{focal_policy_id.lower().replace(' ', '_')}__vs__"
+                / f"{opponent_index:02d}_{opponent_policy_id.lower().replace(' ', '_')}"
+                / "diagnostics.json"
+            )
+            diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+            diagnostics_path.write_text(
+                json.dumps(
+                    {
+                        "seat_results": {
+                            "seat0_wins": 1,
+                            "seat1_wins": 1,
+                            "draws": 0,
+                            "truncations": 0,
+                            "engine_errors": 0,
+                            "decisive_games": 2,
+                            "total_games": 2,
+                        }
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            matchups.append(
+                {
+                    "focal_policy_id": focal_policy_id,
+                    "opponent_policy_id": opponent_policy_id,
+                    "focal_policy_index": focal_index,
+                    "opponent_policy_index": opponent_index,
+                    "diagnostics_path": (
+                        f"matchups/{focal_index:02d}_{focal_policy_id.lower().replace(' ', '_')}__vs__/"
+                        f"{opponent_index:02d}_{opponent_policy_id.lower().replace(' ', '_')}/diagnostics.json"
+                    ),
+                }
+            )
+
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "policy_ids": policies,
+                "metadata": {"selection": {"mode": "deterministic_v1"}},
+                "matrices": {
+                    "games": {"policy_ids": policies, "values": [[2, 2, 2], [2, 2, 2], [2, 2, 2]]},
+                    "truncations": {"policy_ids": policies, "values": [[0, 0, 0], [0, 0, 0], [0, 0, 0]]},
+                    "mean": {
+                        "policy_ids": policies,
+                        "values": [[0.5, 0.0, 0.0], [0.9, 0.5, 0.49], [0.94, 0.51, 0.5]],
+                    },
+                    "ci_low": {
+                        "policy_ids": policies,
+                        "values": [[0.5, 0.0, 0.0], [0.88, 0.5, 0.45], [0.9, 0.5, 0.5]],
+                    },
+                    "ci_high": {
+                        "policy_ids": policies,
+                        "values": [[0.5, 0.0, 0.0], [0.95, 0.5, 0.53], [0.97, 0.54, 0.5]],
+                    },
+                    "has_payoff_samples": {
+                        "policy_ids": policies,
+                        "values": [[True, True, True], [True, True, True], [True, True, True]],
+                    },
+                    "paired_seed_count": {
+                        "policy_ids": policies,
+                        "values": [[1, 1, 1], [2, 1, 1], [2, 1, 1]],
+                    },
+                    "stop_reason": {
+                        "policy_ids": policies,
+                        "values": [
+                            ["precision", "precision", "precision"],
+                            ["precision", "precision", "precision"],
+                            ["precision", "precision", "precision"],
+                        ],
+                    },
+                },
+                "posterior_samples": {
+                    "policy_ids": policies,
+                    "sample_count": 4,
+                    "values": [
+                        [[], [], []],
+                        [[0.88, 0.9, 0.92, 0.95], [], [0.45, 0.48, 0.5, 0.53]],
+                        [[0.9, 0.93, 0.95, 0.97], [0.5, 0.51, 0.52, 0.54], []],
+                    ],
+                },
+                "matchups": matchups,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT / "python")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "paper_readiness_check.py"),
+            "--final-eval-dir",
+            str(final_eval_dir),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "pass --focal-policy-id" in result.stderr
+    payload = json.loads(readiness_json.read_text(encoding="utf-8"))
+    assert payload["checks"]["baseline_win_rate_vs_b0"]["reason"] == "ambiguous_non_baseline_focal_policy"
+    assert payload["checks"]["baseline_win_rate_vs_b0"]["eligible_non_baseline_policy_ids"] == [
+        "policy_000300",
+        "policy_000400",
+    ]
+
+
 def test_train_entrypoint_runs_periodic_dev_eval_and_handles_empty_ids_pass_fallback(tmp_path: Path) -> None:
     bundle = _write_runtime_weiss_sim(
         tmp_path,
@@ -790,3 +1036,142 @@ def test_train_entrypoint_periodic_dev_eval_writes_exact_current_checkpoint(tmp_
     assert seed_usage["focal_policy"]["checkpoint_path"] == "training/checkpoints/checkpoint_1.pt"
     assert summary_payload["evaluation_context"]["checkpoint_path"] == "training/checkpoints/checkpoint_1.pt"
     assert checkpoint_payload["update_count"] == 1
+
+
+def _run_public_demo_train(
+    tmp_path: Path,
+    *,
+    run_label: str = "toy_public_demo",
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    stack_config = _copy_repo_configs(tmp_path)
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash=public_demo_spec_hash256(),
+        run_label=run_label,
+        extra_args=["--public-demo"],
+    )
+    return result, tmp_path / "runs" / run_label
+
+
+def test_train_entrypoint_public_demo_stages_public_safe_catalog_without_weiss_sim(tmp_path: Path) -> None:
+    result, run_dir = _run_public_demo_train(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    catalog = json.loads((run_dir / "public_demo" / "catalog.json").read_text(encoding="utf-8"))
+    policies = json.loads((run_dir / "public_demo" / "policy_manifest.json").read_text(encoding="utf-8"))
+    scalars_lines = (run_dir / "training" / "logs" / "scalars.jsonl").read_text(encoding="utf-8").splitlines()
+
+    assert manifest["simulator"]["runtime"] == "public_demo"
+    assert manifest["simulator"]["public_safe"] is True
+    assert manifest["spec_bundle"]["action"]["action_space_size"] == 9
+    assert catalog["public_safe"] is True
+    assert len(catalog["card_pool"]) == 12
+    assert len(catalog["decks"]) == 3
+    assert policies["policy_ids"] == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "toy_policy_000100",
+        "toy_policy_000200",
+    ]
+    assert len(scalars_lines) == 1
+    assert "Loaded synthetic public-demo spec bundle" in result.stdout
+    assert "Verified runtime spec bundle" not in result.stdout
+    assert "Staged public-demo toy catalog and policy bundle" in result.stdout
+    assert "demo-only" in result.stdout
+
+
+def test_eval_entrypoint_public_demo_generates_demo_only_final_eval_artifacts(tmp_path: Path) -> None:
+    train_result, run_dir = _run_public_demo_train(tmp_path, run_label="toy_public_demo_eval")
+    assert train_result.returncode == 0, train_result.stderr
+    stack_config = tmp_path / "configs" / "rl_stack_locked.yaml"
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="eval.py",
+        stack_config=stack_config,
+        spec_hash=public_demo_spec_hash256(),
+        extra_args=[
+            "--public-demo",
+            "--run-dir",
+            str(run_dir),
+            "--public-demo-paired-seeds",
+            "4",
+            "--public-demo-bootstrap-samples",
+            "8",
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    summary = json.loads((run_dir / "eval" / "final_eval" / "summary.json").read_text(encoding="utf-8"))
+    metadata = summary["metadata"]
+
+    assert summary["policy_ids"] == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "toy_policy_000100",
+        "toy_policy_000200",
+    ]
+    assert metadata["demo_only"] is True
+    assert metadata["public_safe"] is True
+    assert metadata["catalog_path"] == "public_demo/catalog.json"
+    assert metadata["policy_manifest_path"] == "public_demo/policy_manifest.json"
+    assert metadata["paired_seed_budget"] == 4
+    assert metadata["recommended_focal_policy_id"] == "toy_policy_000200"
+    assert len(summary["matchups"]) == 10
+    assert "Public-demo final_eval summary JSON" in result.stdout
+
+
+def test_make_figures_entrypoint_public_demo_writes_clearly_labeled_bundle(tmp_path: Path) -> None:
+    train_result, run_dir = _run_public_demo_train(tmp_path, run_label="toy_public_demo_figures")
+    assert train_result.returncode == 0, train_result.stderr
+    stack_config = tmp_path / "configs" / "rl_stack_locked.yaml"
+    eval_result = _run_entrypoint(
+        tmp_path,
+        script_name="eval.py",
+        stack_config=stack_config,
+        spec_hash=public_demo_spec_hash256(),
+        extra_args=[
+            "--public-demo",
+            "--run-dir",
+            str(run_dir),
+            "--public-demo-paired-seeds",
+            "4",
+            "--public-demo-bootstrap-samples",
+            "8",
+        ],
+    )
+    assert eval_result.returncode == 0, eval_result.stderr
+
+    figures_dir = run_dir / "figures"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT / "python")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "make_figures.py"),
+            "--public-demo",
+            "--final-eval-dir",
+            str(run_dir / "eval" / "final_eval"),
+            "--out-dir",
+            str(figures_dir),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    placeholder_path = figures_dir / "toy_demo_placeholder.txt"
+    manifest_path = figures_dir / "toy_demo_manifest.json"
+    assert placeholder_path.is_file()
+    assert manifest_path.is_file()
+    placeholder_text = placeholder_path.read_text(encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "toy_public_demo_placeholder_figure" in placeholder_text
+    assert manifest["demo_only"] is True
+    assert manifest["public_safe"] is True
+    assert "Wrote public-demo placeholder figure bundle" in result.stdout
