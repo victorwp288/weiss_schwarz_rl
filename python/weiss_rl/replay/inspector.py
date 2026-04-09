@@ -290,9 +290,14 @@ def _resolve_policy_weights_path(
     if not normalized_spec:
         raise ValueError("policy spec must be non-empty")
 
-    direct_candidates = [Path(normalized_spec)]
-    if run_dir is not None and not Path(normalized_spec).is_absolute():
-        direct_candidates.append(run_dir / normalized_spec)
+    spec_path = Path(normalized_spec)
+    direct_candidates: list[Path] = []
+    if spec_path.is_absolute():
+        direct_candidates.append(spec_path)
+    else:
+        if run_dir is not None:
+            direct_candidates.append(run_dir / spec_path)
+        direct_candidates.append(spec_path)
     for candidate in direct_candidates:
         if candidate.is_file():
             return candidate.resolve(), normalized_spec
