@@ -99,9 +99,7 @@ def test_build_sensitivity_report_writes_case_artifacts_and_deltas(tmp_path: Pat
 
     with (out_dir / "deltas" / "S2" / "nash_sensitivity_delta_vs_s0.csv").open("r", encoding="utf-8") as handle:
         s2_nash_rows = list(csv.DictReader(handle))
-    with (out_dir / "deltas" / "S2" / "alpharank_sensitivity_delta_vs_s0.csv").open(
-        "r", encoding="utf-8"
-    ) as handle:
+    with (out_dir / "deltas" / "S2" / "alpharank_sensitivity_delta_vs_s0.csv").open("r", encoding="utf-8") as handle:
         s2_alpharank_rows = list(csv.DictReader(handle))
     assert {row["policy_id"] for row in s2_nash_rows} == {"policy_gamma", "policy_alpha", "policy_beta"}
     assert {row["policy_id"] for row in s2_alpharank_rows} == {"policy_gamma", "policy_alpha", "policy_beta"}

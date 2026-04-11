@@ -14,6 +14,7 @@ from torch import Tensor, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim import Optimizer
 
+from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.learners.vtrace import VTraceTargets, VtraceMetrics, compute_vtrace_metrics
 from weiss_rl.masking import masked_logp_from_legal_ids, masked_logp_from_mask
 from weiss_rl.replay.bundles import write_fault_bundle
@@ -210,13 +211,13 @@ class ImpalaLearner:
 
         has_training_inputs = _batch_value(batch, "obs") is not None
         if has_training_inputs:
-            missing = [
-                key for key in ("obs", "actions", "legal_mask", "vtrace_result") if _batch_value(batch, key) is None
-            ]
+            missing = [key for key in ("obs", "actions", "vtrace_result") if _batch_value(batch, key) is None]
+            if not self._has_legal_actions(batch):
+                missing.append("legal_actions")
             if missing:
                 missing_fields = ", ".join(missing)
                 raise ValueError(
-                    "batch must include obs, actions, legal_mask, and vtrace_result for learner updates; "
+                    "batch must include obs, actions, legality, and vtrace_result for learner updates; "
                     f"missing {missing_fields}"
                 )
             if self.model is None:
@@ -262,13 +263,13 @@ class ImpalaLearner:
 
         obs = self._require_obs(_batch_value(batch, "obs"))
         actions = self._require_actions(_batch_value(batch, "actions"), expected_shape=obs.shape[:2])
-        legal_mask = self._require_legal_mask(_batch_value(batch, "legal_mask"), expected_shape=obs.shape[:2])
         logits, values = self._forward_time_major(
             obs,
             initial_hidden_state=_batch_value(batch, "initial_hidden_state"),
             to_play_seat=_batch_value(batch, "to_play_seat"),
             actor=_batch_value(batch, "actor"),
         )
+        legal_mask = self._resolve_legal_mask(batch, expected_shape=obs.shape[:2], action_dim=logits.shape[-1])
         if legal_mask.shape != logits.shape:
             raise ValueError("legal_mask must match learner logits on time, batch, and action dimensions")
 
@@ -294,10 +295,19 @@ class ImpalaLearner:
         advantages = self._float_target(vtrace_result.pg_advantages, expected_shape=values.shape, like=values)
         context["targets"] = targets.detach()
         context["advantages"] = advantages.detach()
+        loss_mask = self._optional_time_major_loss_mask(
+            _batch_value(batch, "policy_train_mask"),
+            expected_shape=values.shape,
+            like=values,
+        )
+        if loss_mask is None:
+            loss_mask = torch.ones_like(values)
+        context["policy_train_mask"] = loss_mask.detach()
+        loss_denominator = torch.clamp(loss_mask.sum(), min=1.0)
 
-        policy_loss = -(action_logp * advantages).mean()
-        value_loss = torch.mean((values - targets) ** 2)
-        entropy_mean = entropy.mean()
+        policy_loss = -((action_logp * advantages) * loss_mask).sum() / loss_denominator
+        value_loss = (((values - targets) ** 2) * loss_mask).sum() / loss_denominator
+        entropy_mean = (entropy * loss_mask).sum() / loss_denominator
         total_loss = policy_loss + (self.value_loss_coef * value_loss) - (self.entropy_coef * entropy_mean)
 
         context["policy_loss"] = policy_loss.detach()
@@ -314,6 +324,7 @@ class ImpalaLearner:
             "policy_loss": float(policy_loss.detach()),
             "value_loss": float(value_loss.detach()),
             "entropy": float(entropy_mean.detach()),
+            "policy_train_fraction": float(loss_mask.mean().detach()),
         }
         return total_loss, metrics, context
 
@@ -387,6 +398,36 @@ class ImpalaLearner:
             expected = (int(expected_shape[0]), int(expected_shape[1]), "action")
             raise ValueError(f"legal_mask must have shape {expected}, got {tuple(tensor.shape)}")
         return tensor
+
+    def _has_legal_actions(self, batch: Any) -> bool:
+        if _batch_value(batch, "legal_actions") is not None:
+            return True
+        if _batch_value(batch, "legal_mask") is not None:
+            return True
+        return _batch_value(batch, "legal_ids") is not None and _batch_value(batch, "legal_offsets") is not None
+
+    def _resolve_legal_mask(self, batch: Any, *, expected_shape: torch.Size, action_dim: int) -> Tensor:
+        legal_actions = _batch_value(batch, "legal_actions")
+        if isinstance(legal_actions, LegalActionBatch):
+            mask = legal_actions.to_mask(
+                expected_shape=(int(expected_shape[0]), int(expected_shape[1])),
+                action_space=action_dim,
+            )
+            return torch.as_tensor(mask, dtype=torch.bool, device=self._model_parameter().device)
+
+        legal_mask = _batch_value(batch, "legal_mask")
+        if legal_mask is not None:
+            return self._require_legal_mask(legal_mask, expected_shape=expected_shape)
+
+        legal_ids = _batch_value(batch, "legal_ids")
+        legal_offsets = _batch_value(batch, "legal_offsets")
+        if legal_ids is None or legal_offsets is None:
+            raise ValueError("batch must include either legal_actions, legal_mask, or legal_ids/legal_offsets")
+        mask = LegalActionBatch.from_packed(legal_ids, legal_offsets).to_mask(
+            expected_shape=(int(expected_shape[0]), int(expected_shape[1])),
+            action_space=action_dim,
+        )
+        return torch.as_tensor(mask, dtype=torch.bool, device=self._model_parameter().device)
 
     def _float_target(self, value: Any, *, expected_shape: torch.Size, like: Tensor) -> Tensor:
         tensor = self._tensor_on_model_device(value, dtype=like.dtype)
@@ -467,6 +508,20 @@ class ImpalaLearner:
         if bool(((tensor != 0) & (tensor != 1)).any().item()):
             raise ValueError(f"{field_name} values must be 0 or 1")
         return tensor
+
+    def _optional_time_major_loss_mask(
+        self,
+        value: Any,
+        *,
+        expected_shape: torch.Size,
+        like: Tensor,
+    ) -> Tensor | None:
+        if value is None:
+            return None
+        tensor = self._tensor_on_model_device(value, dtype=like.dtype)
+        if tensor.shape != expected_shape:
+            raise ValueError(f"policy_train_mask must have shape {tuple(expected_shape)}, got {tuple(tensor.shape)}")
+        return tensor.clamp(min=0.0, max=1.0)
 
     def _float_input(self, value: Any) -> Tensor:
         reference = self._model_parameter()

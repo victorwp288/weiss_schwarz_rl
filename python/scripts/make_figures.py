@@ -90,10 +90,7 @@ def main() -> None:
     if args.fig_id is None:
         print(f"Wrote {len(outputs)} paper figure files to {args.run_dir / 'figures' / 'paper'}")
     else:
-        print(
-            f"Wrote {len(outputs)} files for fig-id {args.fig_id!r} to "
-            f"{args.run_dir / 'figures' / 'paper'}"
-        )
+        print(f"Wrote {len(outputs)} files for fig-id {args.fig_id!r} to {args.run_dir / 'figures' / 'paper'}")
 
 
 if __name__ == "__main__":

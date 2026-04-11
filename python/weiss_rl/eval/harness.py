@@ -54,6 +54,23 @@ class GameResult:
     winner_seat: int | None
     engine_status: int = 0
     simulator_episode_key: int | bytes | None = None
+    replay_sample: "ReplaySampleResult | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReplaySampleResult:
+    pair_index: int
+    swap_index: int
+    episode_index: int
+    focal_policy_id: str
+    opponent_policy_id: str
+    raw_replay_path: str | None
+    bundle_path: str
+    verification_report_path: str
+    verification_status: str
+    replay_key64: str
+    matched: bool
+    error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

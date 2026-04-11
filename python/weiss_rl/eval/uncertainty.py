@@ -109,11 +109,14 @@ def posterior_samples(
 
 
 def _posterior_samples_from_array(scores: np.ndarray, *, sample_count: int, seed: int | None) -> np.ndarray:
+    baseline = float(scores[0])
+    if scores.size == 1 or np.all(scores == baseline):
+        return np.full((sample_count,), baseline, dtype=np.float64)
     rng = np.random.default_rng(seed)
     weights = rng.exponential(scale=1.0, size=(sample_count, scores.size))
     weights /= np.sum(weights, axis=1, keepdims=True)
-    baseline = float(scores[0])
-    return baseline + (weights @ (scores - baseline))
+    centered = np.asarray(scores - baseline, dtype=np.float64)
+    return baseline + np.sum(weights * centered[np.newaxis, :], axis=1, dtype=np.float64)
 
 
 def _credible_interval(samples: np.ndarray, *, ci_level: float) -> tuple[float, float]:

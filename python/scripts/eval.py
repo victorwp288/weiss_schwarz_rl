@@ -4,19 +4,28 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
+from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.eval import (
     build_matchup_export,
+    build_paper_readiness_summary,
     build_seat_advantage_diagnostics,
     load_eval_game_records,
+    resolve_final_policy_set,
+    run_final_eval,
     write_matchup_diagnostics_json,
     write_matchup_summary_csv,
     write_matchup_summary_json,
+    write_paper_readiness_json,
 )
 from weiss_rl.eval.payoff_folding import PayoffFoldScheme
+from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
+from weiss_rl.metagame import build_sensitivity_report
+from weiss_rl.plotting.paper_figures import render_paper_figures
+from weiss_rl.repro import parse_seed_file
 from weiss_rl.simulator_contract import load_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract, should_verify_runtime_spec_bundle
 from weiss_rl.toy_public_demo import (
@@ -64,13 +73,368 @@ def _resolve_run_label(parser: argparse.ArgumentParser, run_label: str, run_id_a
     return normalized_label or normalized_alias
 
 
+def _require_positive_int(parser: argparse.ArgumentParser, flag_name: str, value: int | None) -> int | None:
+    if value is None:
+        return None
+    normalized = int(value)
+    if normalized < 1:
+        parser.error(f"{flag_name} must be >= 1")
+    return normalized
+
+
+def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} JSON must contain an object at the top level")
+    return payload
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _persist_policy_selection_in_manifest(
+    *,
+    layout: ArtifactLayout,
+    manifest: dict[str, Any],
+    policy_ids: list[str],
+    selection_details: dict[str, Any],
+) -> None:
+    manifest["policy_set_selection"] = list(policy_ids)
+    merged_details = dict(selection_details)
+    merged_details.setdefault("status", "resolved")
+    merged_details["resolved_by"] = "canonical_eval_pipeline_v1"
+    merged_details["policy_count"] = len(policy_ids)
+    manifest["policy_set_selection_details"] = merged_details
+    _write_json(layout.manifest_path, manifest)
+
+
+def _resolve_selection_inputs_from_manifest(
+    *,
+    stack_root: Path,
+    manifest: dict[str, Any],
+) -> tuple[Path | None, Path | None]:
+    details = manifest.get("policy_set_selection_details")
+    if not isinstance(details, dict):
+        return None, None
+    source_paths = details.get("source_paths")
+    if not isinstance(source_paths, dict):
+        return None, None
+
+    def _resolve(path_value: Any) -> Path | None:
+        if not isinstance(path_value, str) or not path_value.strip():
+            return None
+        candidate = Path(path_value)
+        if not candidate.is_absolute():
+            candidate = stack_root / candidate
+        return candidate
+
+    return _resolve(source_paths.get("snapshot_registry_json")), _resolve(source_paths.get("dev_eval_summaries_json"))
+
+
+def _resolve_policy_ids_for_run(
+    *,
+    policy_ids: list[str],
+    stack: Any,
+    manifest: dict[str, Any],
+    layout: ArtifactLayout,
+    snapshot_registry_path: Path | None,
+    dev_eval_summaries_path: Path | None,
+) -> tuple[list[str], dict[str, Any], Path | None, Path | None]:
+    explicit_policy_ids = [policy_id.strip() for policy_id in policy_ids if policy_id.strip()]
+    if explicit_policy_ids:
+        return (
+            explicit_policy_ids,
+            {"mode": "explicit_cli", "policy_count": len(explicit_policy_ids)},
+            snapshot_registry_path,
+            dev_eval_summaries_path,
+        )
+
+    manifest_policy_ids = manifest.get("policy_set_selection")
+    if isinstance(manifest_policy_ids, list):
+        resolved_from_manifest = [str(policy_id).strip() for policy_id in manifest_policy_ids if str(policy_id).strip()]
+        if resolved_from_manifest:
+            return (
+                resolved_from_manifest,
+                {
+                    "mode": "manifest_policy_set_selection",
+                    "policy_count": len(resolved_from_manifest),
+                },
+                snapshot_registry_path,
+                dev_eval_summaries_path,
+            )
+
+    evaluation = stack.config.evaluation
+    if evaluation is None:
+        raise ValueError("stack config is missing evaluation settings")
+
+    manifest_snapshot_registry, manifest_dev_eval = _resolve_selection_inputs_from_manifest(
+        stack_root=stack.root,
+        manifest=manifest,
+    )
+    resolved_snapshot_registry = (
+        snapshot_registry_path or manifest_snapshot_registry or (layout.training_snapshots_dir / "registry.json")
+    )
+    resolved_dev_eval = dev_eval_summaries_path or manifest_dev_eval
+    if not resolved_snapshot_registry.is_file():
+        raise FileNotFoundError(
+            f"final policy-set resolution requires a snapshot registry; checked {resolved_snapshot_registry}"
+        )
+    if resolved_dev_eval is None or not resolved_dev_eval.is_file():
+        raise FileNotFoundError(f"final policy-set resolution requires dev-eval summaries; checked {resolved_dev_eval}")
+
+    resolved = resolve_final_policy_set(
+        snapshot_registry_path=resolved_snapshot_registry,
+        dev_eval_summaries_path=resolved_dev_eval,
+        config=evaluation.final_policy_set_selection,
+        final_policy_set_size=evaluation.final_policy_set_size,
+    )
+    return (
+        resolved,
+        {
+            "mode": "deterministic_v1",
+            "policy_count": len(resolved),
+            "snapshot_registry_path": resolved_snapshot_registry.as_posix(),
+            "dev_eval_summaries_path": resolved_dev_eval.as_posix(),
+            "final_policy_set_size": int(evaluation.final_policy_set_size),
+        },
+        resolved_snapshot_registry,
+        resolved_dev_eval,
+    )
+
+
+def _update_run_level_reports(
+    *,
+    layout: ArtifactLayout,
+    run_dir: Path,
+    policy_ids: list[str],
+    selection_details: dict[str, Any],
+    final_eval_payload: dict[str, Any],
+    metagame_payload: dict[str, Any] | None,
+    figure_paths: tuple[Path, ...],
+    readiness_payload: dict[str, Any] | None,
+) -> None:
+    run_summary = _load_json_object(layout.run_summary_path, label="run summary")
+    run_summary.update(
+        {
+            "final_eval_dir": layout.relative(layout.final_eval_dir),
+            "policy_ids": list(policy_ids),
+            "policy_set_selection_mode": selection_details.get("mode", "unknown"),
+            "metagame_dir": None if metagame_payload is None else layout.relative(layout.metagame_dir),
+            "figure_outputs": [layout.relative(path) for path in figure_paths],
+            "paper_readiness_summary_path": layout.relative(layout.paper_readiness_summary_path),
+            "paper_grade": bool(readiness_payload and readiness_payload.get("passed", False)),
+            "canonical_eval_completed": True,
+        }
+    )
+    _write_json(layout.run_summary_path, run_summary)
+
+    determinism_report = _load_json_object(layout.determinism_report_path, label="determinism report")
+    replay_verification = _load_json_object(layout.replay_verification_json(), label="replay verification summary")
+    artifact_hashes = _load_json_object(layout.final_eval_aggregate_hashes_json(), label="final eval artifact hashes")
+    determinism_report.update(
+        {
+            "run_dir": run_dir.as_posix(),
+            "policy_selection_mode": selection_details.get("mode", "unknown"),
+            "replay_verification": {
+                "path": layout.relative(layout.replay_verification_json()),
+                "status": replay_verification.get("status", "unknown"),
+                "sampled_episode_count": replay_verification.get("sampled_episode_count", 0),
+                "verified_episode_count": replay_verification.get("verified_episode_count", 0),
+                "failed_episode_count": replay_verification.get("failed_episode_count", 0),
+            },
+            "canonical_artifact_hashes": dict(cast(dict[str, Any], artifact_hashes.get("artifacts", {}))),
+            "final_eval": {
+                "path": layout.relative(layout.final_eval_summary_json()),
+                "policy_ids": list(policy_ids),
+                "selection": dict(selection_details),
+                "matchup_count": len(cast(list[Any], final_eval_payload.get("matchups", []))),
+            },
+        }
+    )
+    _write_json(layout.determinism_report_path, determinism_report)
+
+
+def _run_canonical_eval_pipeline(
+    *,
+    parser: argparse.ArgumentParser,
+    stack: Any,
+    run_dir: Path,
+    final_eval_dir: Path | None,
+    policy_ids: list[str],
+    snapshot_registry_path: Path | None,
+    dev_eval_summaries_path: Path | None,
+    b1_baseline_run_dir: Path | None,
+    bootstrap_samples: int,
+    paired_seed_limit: int | None,
+    stage1_paired_seeds: int | None,
+    max_paired_seeds: int | None,
+    skip_metagame: bool,
+    skip_figures: bool,
+    skip_readiness: bool,
+) -> int:
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.ensure_directories()
+    if final_eval_dir is not None and final_eval_dir.resolve() != layout.final_eval_dir.resolve():
+        parser.error(
+            f"--final-eval-dir must match the canonical run directory layout for non-demo runs: {layout.final_eval_dir}"
+        )
+
+    manifest = _load_json_object(layout.manifest_path, label="run manifest")
+    run_id256 = str(manifest.get("run_id256", "")).strip()
+    if len(run_id256) != 64:
+        raise ValueError(f"run manifest is missing a valid run_id256: {layout.manifest_path}")
+
+    evaluation = stack.config.evaluation
+    metagame_config = stack.config.metagame
+    sensitivity_config = stack.config.sensitivity
+    if evaluation is None:
+        raise ValueError("stack config is missing evaluation settings")
+
+    (
+        resolved_policy_ids,
+        selection_details,
+        resolved_registry_path,
+        resolved_dev_eval_path,
+    ) = _resolve_policy_ids_for_run(
+        policy_ids=policy_ids,
+        stack=stack,
+        manifest=manifest,
+        layout=layout,
+        snapshot_registry_path=snapshot_registry_path,
+        dev_eval_summaries_path=dev_eval_summaries_path,
+    )
+    _persist_policy_selection_in_manifest(
+        layout=layout,
+        manifest=manifest,
+        policy_ids=resolved_policy_ids,
+        selection_details=selection_details,
+    )
+
+    contract = load_simulator_contract(stack.root)
+    observation_dim = int(contract.spec_bundle["observation"]["obs_len"])
+    action_dim = int(contract.spec_bundle["action"]["action_space_size"])
+    pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
+    resolved_policies = resolve_eval_policies(
+        stack=stack,
+        policy_ids=resolved_policy_ids,
+        run_dir=run_dir,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        spec_bundle=contract.spec_bundle,
+        snapshot_registry_path=resolved_registry_path,
+        b1_baseline_run_dir=b1_baseline_run_dir,
+    )
+    runner = SimulatorEvalRunner(
+        stack=stack,
+        policies=resolved_policies,
+        artifact_layout=layout,
+        run_id256=run_id256,
+        spec_hash256=str(manifest["spec_hash256"]),
+        action_dim=action_dim,
+        pass_action_id=pass_action_id,
+        require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+        replay_capture_rate=float(evaluation.replay_capture_rate_eval),
+        regression_capture_count=int(evaluation.regression_capture_count),
+    )
+
+    seed_file_path = stack.seed_sets["report_eval"]
+    all_paired_seeds = parse_seed_file(seed_file_path)
+    if paired_seed_limit is not None:
+        all_paired_seeds = all_paired_seeds[: int(paired_seed_limit)]
+    if not all_paired_seeds:
+        raise ValueError(f"report_eval seed file produced no usable seeds: {seed_file_path}")
+
+    resolved_stage1 = int(
+        stage1_paired_seeds or min(evaluation.final_matrix_stage1_paired_seeds, len(all_paired_seeds))
+    )
+    resolved_max = int(
+        max_paired_seeds or min(evaluation.final_matrix_stage2_adaptive_max_paired_seeds, len(all_paired_seeds))
+    )
+    if resolved_stage1 > resolved_max:
+        raise ValueError(f"stage1 paired seeds ({resolved_stage1}) cannot exceed max paired seeds ({resolved_max})")
+
+    final_eval_payload = run_final_eval(
+        output_dir=layout.final_eval_dir,
+        runner=runner,
+        paired_seeds=all_paired_seeds,
+        stage1_paired_seeds=resolved_stage1,
+        max_paired_seeds=resolved_max,
+        stop_rules=evaluation.stop_rules,
+        run_id256=run_id256,
+        config_hash256=str(manifest["config_hash256"]),
+        spec_hash256=str(manifest["spec_hash256"]),
+        scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
+        sample_count=int(bootstrap_samples),
+        policy_ids=resolved_policy_ids,
+        snapshot_registry_path=resolved_registry_path,
+        dev_eval_summaries_path=resolved_dev_eval_path,
+        selection_config=evaluation.final_policy_set_selection,
+        final_policy_set_size=int(evaluation.final_policy_set_size),
+        metadata={
+            "pipeline": {
+                "kind": "canonical_eval_pipeline_v1",
+                "selection": dict(selection_details),
+                "seed_file": seed_file_path.as_posix(),
+                "paired_seed_limit": None if paired_seed_limit is None else int(paired_seed_limit),
+            }
+        },
+        seed_file_path=seed_file_path,
+    )
+
+    metagame_payload: dict[str, Any] | None = None
+    if not skip_metagame:
+        if metagame_config is None or sensitivity_config is None:
+            raise ValueError("stack config is missing metagame or sensitivity settings")
+        metagame_payload = build_sensitivity_report(
+            final_eval_dir=layout.final_eval_dir,
+            out_dir=layout.metagame_dir,
+            metagame_config=metagame_config,
+            sensitivity_config=sensitivity_config,
+        )
+
+    figure_paths: tuple[Path, ...] = ()
+    if not skip_figures:
+        figure_paths = render_paper_figures(run_dir)
+
+    readiness_payload: dict[str, Any] | None = None
+    if not skip_readiness:
+        readiness_payload = build_paper_readiness_summary(run_dir=run_dir)
+        write_paper_readiness_json(layout.paper_readiness_summary_path, readiness_payload)
+
+    _update_run_level_reports(
+        layout=layout,
+        run_dir=run_dir,
+        policy_ids=resolved_policy_ids,
+        selection_details=selection_details,
+        final_eval_payload=final_eval_payload,
+        metagame_payload=metagame_payload,
+        figure_paths=figure_paths,
+        readiness_payload=readiness_payload,
+    )
+
+    print(f"Canonical final_eval summary JSON: {layout.final_eval_summary_json()}")
+    print(f"Canonical replay verification JSON: {layout.replay_verification_json()}")
+    if metagame_payload is not None:
+        print(f"Canonical metagame summary JSON: {layout.metagame_dir / 'summary.json'}")
+    if figure_paths:
+        print(f"Rendered {len(figure_paths)} paper figure files to {layout.figures_paper_dir}")
+    if readiness_payload is not None:
+        print(f"Paper readiness summary JSON: {layout.paper_readiness_summary_path}")
+        print("Paper readiness: " + ("passed" if bool(readiness_payload.get("passed", False)) else "failed"))
+    print(f"Resolved policy set: {resolved_policy_ids}")
+    return 0
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluation reporting/contract entrypoint for pre-recorded episodes")
+    parser = argparse.ArgumentParser(
+        description="Evaluation entrypoint for canonical final_eval or summary-only reports"
+    )
     parser.add_argument(
         "--stack-config",
         type=Path,
         required=True,
-        help="Path to the stack config used for contract checks and summary settings",
+        help="Path to the stack config used for contract checks and evaluation settings",
     )
     parser.add_argument(
         "--spec-hash",
@@ -89,19 +453,81 @@ def main() -> None:
     parser.add_argument(
         "--public-demo",
         action="store_true",
-        help="Run the built-in public-safe toy final-eval path instead of summarizing an episodes file.",
+        help="Run the built-in public-safe toy final-eval path instead of canonical simulator-backed evaluation.",
     )
     parser.add_argument(
         "--run-dir",
         type=Path,
         default=None,
-        help="Run directory containing staged public-demo artifacts from train.py --public-demo",
+        help="Canonical run directory for simulator-backed evaluation or staged public-demo artifacts",
     )
     parser.add_argument(
         "--final-eval-dir",
         type=Path,
         default=None,
-        help="Output directory for public-demo final_eval artifacts (default: <run-dir>/eval/final_eval)",
+        help=(
+            "Output directory for public-demo artifacts, or the canonical "
+            "<run-dir>/eval/final_eval path for non-demo runs"
+        ),
+    )
+    parser.add_argument(
+        "--policy-id",
+        action="append",
+        default=None,
+        help="Explicit policy ID to evaluate in canonical non-demo mode (repeatable)",
+    )
+    parser.add_argument(
+        "--snapshot-registry-json",
+        type=Path,
+        default=None,
+        help="Optional snapshot registry JSON for deterministic policy-set resolution in canonical non-demo mode",
+    )
+    parser.add_argument(
+        "--dev-eval-summaries-json",
+        type=Path,
+        default=None,
+        help="Optional dev-eval summaries JSON for deterministic policy-set resolution in canonical non-demo mode",
+    )
+    parser.add_argument(
+        "--b1-baseline-run-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Run directory containing the real B1 no-league baseline artifacts when the selected policy set includes B1"
+        ),
+    )
+    parser.add_argument(
+        "--paired-seed-limit",
+        type=int,
+        default=None,
+        help="Optional cap on the number of report_eval paired seeds used in canonical non-demo mode",
+    )
+    parser.add_argument(
+        "--stage1-paired-seeds",
+        type=int,
+        default=None,
+        help="Optional override for stage-1 paired seeds in canonical non-demo mode",
+    )
+    parser.add_argument(
+        "--max-paired-seeds",
+        type=int,
+        default=None,
+        help="Optional override for stage-2 max paired seeds in canonical non-demo mode",
+    )
+    parser.add_argument(
+        "--skip-metagame",
+        action="store_true",
+        help="Skip metagame sensitivity generation in canonical non-demo mode",
+    )
+    parser.add_argument(
+        "--skip-figures",
+        action="store_true",
+        help="Skip paper figure rendering in canonical non-demo mode",
+    )
+    parser.add_argument(
+        "--skip-readiness",
+        action="store_true",
+        help="Skip paper-readiness auditing in canonical non-demo mode",
     )
     parser.add_argument(
         "--public-demo-paired-seeds",
@@ -125,19 +551,19 @@ def main() -> None:
         "--summary-json",
         type=Path,
         default=None,
-        help="Output path for summary JSON export",
+        help="Output path for summary JSON export in summary-only mode",
     )
     parser.add_argument(
         "--summary-csv",
         type=Path,
         default=None,
-        help="Output path for summary CSV export",
+        help="Output path for summary CSV export in summary-only mode",
     )
     parser.add_argument(
         "--diagnostics-json",
         type=Path,
         default=None,
-        help="Output path for seat diagnostics JSON export",
+        help="Output path for seat diagnostics JSON export in summary-only mode",
     )
     parser.add_argument(
         "--bootstrap-samples",
@@ -145,17 +571,28 @@ def main() -> None:
         default=1000,
         help="Bootstrap sample count for uncertainty",
     )
-    parser.add_argument("--bootstrap-seed", type=int, default=0, help="Bootstrap RNG seed")
+    parser.add_argument("--bootstrap-seed", type=int, default=0, help="Bootstrap RNG seed for summary-only mode")
     args = parser.parse_args()
     run_label = _resolve_run_label(parser, args.run_label, args.run_id_alias)
+
+    _require_positive_int(parser, "--bootstrap-samples", args.bootstrap_samples)
+    _require_positive_int(parser, "--public-demo-paired-seeds", args.public_demo_paired_seeds)
+    _require_positive_int(parser, "--public-demo-bootstrap-samples", args.public_demo_bootstrap_samples)
+    paired_seed_limit = _require_positive_int(parser, "--paired-seed-limit", args.paired_seed_limit)
+    stage1_paired_seeds = _require_positive_int(parser, "--stage1-paired-seeds", args.stage1_paired_seeds)
+    max_paired_seeds = _require_positive_int(parser, "--max-paired-seeds", args.max_paired_seeds)
 
     if args.public_demo:
         if args.run_dir is None:
             parser.error("--public-demo requires --run-dir")
         if args.episodes_jsonl is not None:
             parser.error("--public-demo cannot be combined with --episodes-jsonl")
-    elif args.episodes_jsonl is None and (args.summary_json is not None or args.summary_csv is not None):
-        parser.error("--summary-json/--summary-csv require --episodes-jsonl")
+    elif args.run_dir is not None and args.episodes_jsonl is not None:
+        parser.error("--run-dir cannot be combined with --episodes-jsonl outside --public-demo mode")
+    elif args.episodes_jsonl is None and (
+        args.summary_json is not None or args.summary_csv is not None or args.diagnostics_json is not None
+    ):
+        parser.error("--summary-json/--summary-csv/--diagnostics-json require --episodes-jsonl")
 
     stack = load_stack_config(args.stack_config)
     config_hash256 = compute_config_hash256(stack)
@@ -236,6 +673,31 @@ def main() -> None:
             "Public demo evaluation completed. These artifacts are toy/demo only and do not represent thesis results."
         )
         return
+
+    if args.run_dir is not None:
+        raise SystemExit(
+            _run_canonical_eval_pipeline(
+                parser=parser,
+                stack=stack,
+                run_dir=args.run_dir.resolve(),
+                final_eval_dir=None if args.final_eval_dir is None else args.final_eval_dir.resolve(),
+                policy_ids=list(args.policy_id or ()),
+                snapshot_registry_path=None
+                if args.snapshot_registry_json is None
+                else args.snapshot_registry_json.resolve(),
+                dev_eval_summaries_path=None
+                if args.dev_eval_summaries_json is None
+                else args.dev_eval_summaries_json.resolve(),
+                b1_baseline_run_dir=None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve(),
+                bootstrap_samples=int(args.bootstrap_samples),
+                paired_seed_limit=paired_seed_limit,
+                stage1_paired_seeds=stage1_paired_seeds,
+                max_paired_seeds=max_paired_seeds,
+                skip_metagame=bool(args.skip_metagame),
+                skip_figures=bool(args.skip_figures),
+                skip_readiness=bool(args.skip_readiness),
+            )
+        )
 
     if args.episodes_jsonl is None:
         print(f"Evaluation contract check complete; no episodes were summarized. Seed sets: {sorted(stack.seed_sets)}")

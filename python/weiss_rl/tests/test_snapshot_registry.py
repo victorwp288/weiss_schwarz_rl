@@ -52,6 +52,138 @@ def _retention_stack(*, recent_size: int, champion_size: int) -> SimpleNamespace
     )
 
 
+def _make_policy_value_model(stack: Any) -> PolicyValueModel:
+    assert stack.config.model is not None
+    return PolicyValueModel(
+        observation_dim=512,
+        config=stack.config.model,
+        action_dim=9,
+    )
+
+
+def _write_b1_baseline_run_fixture(
+    tmp_path: Path,
+    *,
+    update: int = 5,
+    policy_id: str = "b1_noleague_baseline",
+    config_hash256: str = "ab" * 32,
+    spec_hash256: str = "cd" * 32,
+    training_mode: str = "b1_no_league",
+) -> Path:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    run_dir = tmp_path / "b1_run"
+    training_paths = train_script._training_paths(run_dir)
+    checkpoint_path = training_paths.checkpoints_dir / f"checkpoint_{update}.pt"
+    torch.save({"format": "checkpoint_stub"}, checkpoint_path)
+
+    weights_path, weights_sha256 = train_script._write_snapshot_artifact(
+        snapshots_dir=training_paths.snapshots_dir,
+        run_dir=run_dir,
+        checkpoint_path=checkpoint_path,
+        policy_id=policy_id,
+        update=update,
+        config_hash256=config_hash256,
+        device=torch.device("cpu"),
+        model_state_dict=_make_policy_value_model(stack).state_dict(),
+    )
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    registry.add_snapshot(
+        policy_id=policy_id,
+        update=update,
+        weights_sha256=weights_sha256,
+        path=weights_path.relative_to(run_dir).as_posix(),
+    )
+    registry.pin_snapshot(policy_id)
+    registry.save(training_paths.snapshots_dir / "registry.json")
+    (run_dir / "config_hash256.txt").write_text(f"{config_hash256}\n", encoding="utf-8")
+    (run_dir / "spec_hash256.txt").write_text(f"{spec_hash256}\n", encoding="utf-8")
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "config_canonical": {
+                    "model": stack.component_docs["model"],
+                    "environment": stack.component_docs["environment"],
+                    "training_family_a": {
+                        **stack.component_docs["training_family_a"],
+                        "mode": training_mode,
+                    },
+                }
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return run_dir
+
+
+def _heuristic_public_contract_bundle() -> dict[str, object]:
+    return {
+        "observation": {
+            "obs_len": 512,
+            "self_first": True,
+            "header_fields": [
+                {"name": "active_player", "index": 0},
+                {"name": "phase", "index": 1},
+                {"name": "decision_kind", "index": 2},
+                {"name": "decision_player", "index": 3},
+                {"name": "terminal", "index": 4},
+                {"name": "last_action_kind", "index": 5},
+                {"name": "last_action_arg0", "index": 6},
+                {"name": "last_action_arg1", "index": 7},
+                {"name": "attack_slot", "index": 8},
+                {"name": "defender_slot", "index": 9},
+                {"name": "attack_type", "index": 10},
+                {"name": "attack_damage", "index": 11},
+                {"name": "attack_counter_power", "index": 12},
+                {"name": "focus_slot", "index": 13},
+                {"name": "choice_page_start", "index": 14},
+                {"name": "choice_total", "index": 15},
+            ],
+            "player_blocks": [
+                {
+                    "player_index": 0,
+                    "base": 16,
+                    "len": 42,
+                    "slices": [
+                        {"name": "level_count", "start": 0, "len": 1, "visibility": "public"},
+                        {"name": "clock_count", "start": 1, "len": 1, "visibility": "public"},
+                        {"name": "hand_count", "start": 2, "len": 1, "visibility": "private"},
+                        {"name": "stage", "start": 3, "len": 35, "visibility": "public"},
+                        {"name": "hand", "start": 38, "len": 4, "visibility": "private"},
+                    ],
+                },
+                {
+                    "player_index": 1,
+                    "base": 58,
+                    "len": 42,
+                    "slices": [
+                        {"name": "level_count", "start": 0, "len": 1, "visibility": "public"},
+                        {"name": "clock_count", "start": 1, "len": 1, "visibility": "public"},
+                        {"name": "hand_count", "start": 2, "len": 1, "visibility": "private"},
+                        {"name": "stage", "start": 3, "len": 35, "visibility": "public"},
+                        {"name": "hand", "start": 38, "len": 4, "visibility": "private"},
+                    ],
+                },
+            ],
+        },
+        "action": {
+            "action_space_size": 9,
+            "pass_action_id": 8,
+            "attack_type_encoding": [["frontal", 0], ["side", 1], ["direct", 2]],
+            "constants": [["MAX_HAND", 4], ["MAX_STAGE", 5], ["ATTACK_SLOT_COUNT", 1]],
+            "families": [
+                {"name": "mulligan_confirm", "base": 0, "count": 1},
+                {"name": "attack", "base": 1, "count": 3},
+                {"name": "main_play_character", "base": 4, "count": 5},
+                {"name": "pass", "base": 8, "count": 1},
+            ],
+        },
+    }
+
+
 def test_snapshot_registry_survives_restart_and_returns_latest_n(tmp_path: Path) -> None:
     registry_path = tmp_path / "training" / "snapshots" / "registry.json"
     registry = SnapshotRegistry(recent_size=3, champion_size=1)
@@ -278,20 +410,15 @@ def test_train_snapshot_retention_prunes_old_snapshot_artifacts(tmp_path: Path) 
     assert (training_paths.snapshots_dir / "policy_000003").is_dir()
 
 
-def test_ensure_noleague_baseline_anchor_bootstraps_frozen_snapshot_once(tmp_path: Path) -> None:
+def test_ensure_noleague_baseline_anchor_imports_frozen_snapshot_once(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
     stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.model is not None
+    baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, update=5)
 
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / "consumer_run"
     training_paths = train_script._training_paths(run_dir)
-    baseline_model = PolicyValueModel(
-        observation_dim=512,
-        config=stack.config.model,
-        action_dim=9,
-    )
     bootstrap_learner = SimpleNamespace(
-        model=baseline_model,
+        model=_make_policy_value_model(stack),
         update_count=0,
         optimizer=None,
         get_policy_version=lambda: 0,
@@ -304,6 +431,7 @@ def test_ensure_noleague_baseline_anchor_bootstraps_frozen_snapshot_once(tmp_pat
         learner=bootstrap_learner,
         device=torch.device("cpu"),
         config_hash256="ab" * 32,
+        baseline_run_dir=baseline_run_dir,
     )
 
     assert policy_id == "b1_noleague_baseline"
@@ -316,27 +444,29 @@ def test_ensure_noleague_baseline_anchor_bootstraps_frozen_snapshot_once(tmp_pat
     snapshot = registry.snapshots[0]
     weights_path = run_dir / snapshot_weights_relpath(policy_id)
     metadata_path = training_paths.snapshots_dir / policy_id / "policy_meta.json"
-    checkpoint_path = training_paths.checkpoints_dir / "baseline_checkpoint.pt"
 
-    assert snapshot.update == 0
-    assert checkpoint_path.is_file()
+    assert snapshot.update == 5
     assert weights_path.is_file()
     assert snapshot.weights_sha256 == train_script._sha256_file(weights_path)
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata == {
-        "format": "minimal_train_snapshot_metadata_v1",
+        "format": "imported_train_snapshot_metadata_v1",
+        "imported_from_policy_id": policy_id,
+        "imported_from_run_dir": baseline_run_dir.resolve().as_posix(),
+        "imported_from_snapshot_path": snapshot_weights_relpath(policy_id),
         "policy_id": policy_id,
-        "source_checkpoint_path": "training/checkpoints/baseline_checkpoint.pt",
-        "update": 0,
+        "update": 5,
         "weights_path": snapshot_weights_relpath(policy_id),
         "weights_sha256": snapshot.weights_sha256,
     }
 
     payload = torch.load(weights_path, map_location="cpu", weights_only=True)
     assert payload["policy_id"] == policy_id
-    assert payload["update"] == 0
-    assert payload["config_hash256"] == "ab" * 32
+    assert payload["update"] == 5
+    assert payload["imported_from_run_dir"] == baseline_run_dir.resolve().as_posix()
+    assert payload["imported_from_policy_id"] == policy_id
+    assert payload["imported_from_snapshot_path"] == snapshot_weights_relpath(policy_id)
 
     second_policy_id = train_script._ensure_noleague_baseline_anchor(
         stack=stack,
@@ -345,6 +475,7 @@ def test_ensure_noleague_baseline_anchor_bootstraps_frozen_snapshot_once(tmp_pat
         learner=bootstrap_learner,
         device=torch.device("cpu"),
         config_hash256="ff" * 32,
+        baseline_run_dir=baseline_run_dir,
     )
 
     assert second_policy_id == policy_id
@@ -353,6 +484,29 @@ def test_ensure_noleague_baseline_anchor_bootstraps_frozen_snapshot_once(tmp_pat
     assert reloaded.champion_snapshots == []
     assert reloaded.pinned_snapshots == [policy_id]
     assert reloaded.snapshots[0].weights_sha256 == snapshot.weights_sha256
+
+
+def test_ensure_noleague_baseline_anchor_rejects_non_b1_imported_run(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, training_mode="standard")
+
+    with pytest.raises(RuntimeError, match="must come from a dedicated b1_no_league run"):
+        train_script._ensure_noleague_baseline_anchor(
+            stack=stack,
+            training_paths=train_script._training_paths(tmp_path / "consumer_run"),
+            run_dir=tmp_path / "consumer_run",
+            learner=SimpleNamespace(
+                model=_make_policy_value_model(stack),
+                update_count=0,
+                optimizer=None,
+                get_policy_version=lambda: 0,
+            ),
+            device=torch.device("cpu"),
+            config_hash256="11" * 32,
+            spec_hash256="cd" * 32,
+            baseline_run_dir=baseline_run_dir,
+        )
 
 
 def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_path: Path, monkeypatch) -> None:
@@ -365,11 +519,11 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
         bootstrap_calls.append(kwargs)
         return "b1_noleague_baseline"
 
-    def stop_before_env(*args, **kwargs):
+    def stop_before_runtime(*args, **kwargs):
         raise RuntimeError("stop after bootstrap")
 
     monkeypatch.setattr(train_script, "_ensure_noleague_baseline_anchor", fake_ensure_noleague_baseline_anchor)
-    monkeypatch.setattr(train_script, "_build_env", stop_before_env)
+    monkeypatch.setattr(train_script, "QueueRuntime", stop_before_runtime)
 
     run_dir = tmp_path / "run"
     try:
@@ -392,11 +546,13 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
             run_id256="12" * 32,
             config_hash256="34" * 32,
             spec_hash256="56" * 32,
+            runtime_mode="train_ordered",
+            b1_baseline_run_dir=None,
         )
     except RuntimeError as exc:
         assert str(exc) == "stop after bootstrap"
     else:
-        raise AssertionError("expected _build_env to stop the test after baseline bootstrap")
+        raise AssertionError("expected QueueRuntime to stop the test after baseline bootstrap")
 
     assert len(bootstrap_calls) == 1
     bootstrap_call = bootstrap_calls[0]
@@ -405,41 +561,34 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
     assert training_paths_arg.snapshots_dir == run_dir / "training" / "snapshots"
     assert bootstrap_call["device"] == torch.device("cpu")
     assert bootstrap_call["config_hash256"] == train_script.compute_config_hash256(stack)
+    assert bootstrap_call["baseline_run_dir"] is None
 
 
 def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path: Path, monkeypatch) -> None:
     train_script = _load_train_script_module()
     stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.model is not None
+    baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, update=5)
 
     run_dir = tmp_path / "run"
     training_paths = train_script._training_paths(run_dir)
 
-    baseline_model = PolicyValueModel(
-        observation_dim=512,
-        config=stack.config.model,
-        action_dim=9,
-    )
     train_script._ensure_noleague_baseline_anchor(
         stack=stack,
         training_paths=training_paths,
         run_dir=run_dir,
         learner=SimpleNamespace(
-            model=baseline_model,
+            model=_make_policy_value_model(stack),
             update_count=0,
             optimizer=None,
             get_policy_version=lambda: 0,
         ),
         device=torch.device("cpu"),
         config_hash256="ab" * 32,
+        baseline_run_dir=baseline_run_dir,
     )
     registry_path = training_paths.snapshots_dir / "registry.json"
 
-    learner_model = PolicyValueModel(
-        observation_dim=512,
-        config=stack.config.model,
-        action_dim=9,
-    )
+    learner_model = _make_policy_value_model(stack)
     candidate_checkpoint_path = training_paths.checkpoints_dir / "checkpoint_7.pt"
     torch.save({"format": "checkpoint_stub"}, candidate_checkpoint_path)
     candidate_policy_id = train_script._persist_snapshot_registry_entry(
@@ -459,10 +608,11 @@ def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path
         assert kwargs["anchor_policy_ids"] == {
             "B0 RandomLegal": "b0_randomlegal",
             "B1 NoLeague baseline": "b1_noleague_baseline",
+            "B2 HeuristicPublic": "B2 HeuristicPublic",
         }
         return PromotionGateResult(
             focal_policy_id=candidate_policy_id,
-            ordered_opponents=("B0 RandomLegal", "B1 NoLeague baseline"),
+            ordered_opponents=("B0 RandomLegal", "B1 NoLeague baseline", "B2 HeuristicPublic"),
             record_path="promotion_gate.json",
             seed_file_path="configs/seeds/promotion_eval_seeds.txt",
             seed_file_sha256="ef" * 32,
@@ -492,12 +642,7 @@ def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path
 
     promoted = train_script._run_snapshot_promotion_gate(
         stack=stack,
-        contract=SimpleNamespace(
-            spec_bundle={
-                "observation": {"obs_len": 512},
-                "action": {"action_space_size": 9, "pass_action_id": 8},
-            }
-        ),
+        contract=SimpleNamespace(spec_bundle=_heuristic_public_contract_bundle()),
         artifacts=SimpleNamespace(run_dir=run_dir),
         training_paths=training_paths,
         learner=SimpleNamespace(model=learner_model),
@@ -622,6 +767,7 @@ def test_promotion_gate_runner_resets_env_with_scheduled_episode_seed(tmp_path: 
         focal_policy_id="candidate",
         focal_model=FakeModel(),
         anchor_models={},
+        heuristic_policies={},
         observation_dim=1,
         action_dim=1,
         pass_action_id=0,

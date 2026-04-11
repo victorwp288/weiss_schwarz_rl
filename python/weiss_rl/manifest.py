@@ -4,11 +4,18 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any
 import json
+import platform
+import sys
 
+from weiss_rl.artifacts import ArtifactLayout, default_run_dir_name
 from weiss_rl.repro import hash_seed_file
+
+
+ARTIFACT_SCHEMA_VERSION = "run_artifacts_v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,11 +57,17 @@ class RunManifest:
 class RunArtifacts:
     run_dir: Path
     run_dir_name: str
+    layout: ArtifactLayout
     manifest_path: Path
     spec_bundle_path: Path
     spec_hash_path: Path
     config_hash_path: Path
     config_json_path: Path
+    environment_path: Path
+    run_summary_path: Path
+    determinism_report_path: Path
+    paper_readiness_summary_path: Path
+    performance_log_path: Path
 
 
 def build_seed_file_manifest(seed_files: dict[str, Path], *, root: Path) -> dict[str, SeedFileManifest]:
@@ -68,36 +81,120 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def default_run_dir_name(run_id64: str) -> str:
-    return f"run_{run_id64}"
-
-
 def write_run_artifacts(base_dir: Path, manifest: RunManifest, *, run_label: str | None = None) -> RunArtifacts:
     directory_name = run_label or default_run_dir_name(manifest.run_id64)
     run_dir = base_dir / directory_name
-    run_dir.mkdir(parents=True, exist_ok=True)
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.ensure_directories()
+    for legacy_dir in ("checkpoints", "logs"):
+        (run_dir / legacy_dir).mkdir(parents=True, exist_ok=True)
 
-    for child in ("checkpoints", "eval", "figures", "logs", "replays"):
-        (run_dir / child).mkdir(exist_ok=True)
+    manifest.write_json(layout.manifest_path)
+    _write_json(layout.spec_bundle_path, manifest.spec_bundle)
+    _write_json(layout.config_json_path, manifest.config_canonical)
+    layout.spec_hash_path.write_text(f"{manifest.spec_hash256}\n", encoding="utf-8")
+    layout.config_hash_path.write_text(f"{manifest.config_hash256}\n", encoding="utf-8")
 
-    manifest_path = run_dir / "manifest.json"
-    spec_bundle_path = run_dir / "spec_bundle.json"
-    spec_hash_path = run_dir / "spec_hash256.txt"
-    config_hash_path = run_dir / "config_hash256.txt"
-    config_json_path = run_dir / "config_canonical.json"
-
-    manifest.write_json(manifest_path)
-    _write_json(spec_bundle_path, manifest.spec_bundle)
-    _write_json(config_json_path, manifest.config_canonical)
-    spec_hash_path.write_text(f"{manifest.spec_hash256}\n", encoding="utf-8")
-    config_hash_path.write_text(f"{manifest.config_hash256}\n", encoding="utf-8")
+    _write_json(layout.environment_path, default_environment_payload(manifest=manifest))
+    _write_json(layout.run_summary_path, default_run_summary_payload(manifest=manifest, layout=layout))
+    _write_json(layout.determinism_report_path, default_determinism_report_payload(manifest=manifest, layout=layout))
 
     return RunArtifacts(
         run_dir=run_dir,
         run_dir_name=directory_name,
-        manifest_path=manifest_path,
-        spec_bundle_path=spec_bundle_path,
-        spec_hash_path=spec_hash_path,
-        config_hash_path=config_hash_path,
-        config_json_path=config_json_path,
+        layout=layout,
+        manifest_path=layout.manifest_path,
+        spec_bundle_path=layout.spec_bundle_path,
+        spec_hash_path=layout.spec_hash_path,
+        config_hash_path=layout.config_hash_path,
+        config_json_path=layout.config_json_path,
+        environment_path=layout.environment_path,
+        run_summary_path=layout.run_summary_path,
+        determinism_report_path=layout.determinism_report_path,
+        paper_readiness_summary_path=layout.paper_readiness_summary_path,
+        performance_log_path=layout.performance_log_path,
     )
+
+
+def update_run_summary(path: Path, payload: dict[str, Any]) -> None:
+    _write_json(path, payload)
+
+
+def update_environment_payload(path: Path, payload: dict[str, Any]) -> None:
+    _write_json(path, payload)
+
+
+def update_determinism_report(path: Path, payload: dict[str, Any]) -> None:
+    _write_json(path, payload)
+
+
+def default_environment_payload(*, manifest: RunManifest) -> dict[str, Any]:
+    package_names = ("weiss-rl", "weiss-sim", "torch", "numpy", "scipy", "matplotlib")
+    return {
+        "kind": "environment_manifest_v1",
+        "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+        "run_id256": manifest.run_id256,
+        "run_id64": manifest.run_id64,
+        "python": {
+            "version": sys.version.split()[0],
+            "implementation": platform.python_implementation(),
+            "executable": sys.executable,
+        },
+        "platform": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+            "platform": platform.platform(),
+        },
+        "packages": {name: _safe_package_version(name) for name in package_names},
+    }
+
+
+def default_run_summary_payload(*, manifest: RunManifest, layout: ArtifactLayout) -> dict[str, Any]:
+    return {
+        "kind": "run_summary_v1",
+        "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+        "run_id256": manifest.run_id256,
+        "run_id64": manifest.run_id64,
+        "run_dir": layout.run_dir.as_posix(),
+        "artifact_roots": {
+            "training": layout.relative(layout.training_dir),
+            "eval": layout.relative(layout.eval_dir),
+            "replays": layout.relative(layout.replays_dir),
+            "figures": layout.relative(layout.figures_dir),
+        },
+        "manifest_path": layout.relative(layout.manifest_path),
+        "environment_path": layout.relative(layout.environment_path),
+        "determinism_report_path": layout.relative(layout.determinism_report_path),
+        "paper_readiness_summary_path": layout.relative(layout.paper_readiness_summary_path),
+        "runtime_mode": manifest.policy_set_selection_details.get("runtime_mode", "manifest_only"),
+        "paper_grade": False,
+    }
+
+
+def default_determinism_report_payload(*, manifest: RunManifest, layout: ArtifactLayout) -> dict[str, Any]:
+    return {
+        "kind": "determinism_report_v1",
+        "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+        "run_id256": manifest.run_id256,
+        "run_id64": manifest.run_id64,
+        "policy_selection_mode": manifest.policy_set_selection_details.get("mode", "unresolved"),
+        "evaluation_pinning": manifest.evaluation_pinning,
+        "seed_files": {key: asdict(value) for key, value in manifest.seed_files.items()},
+        "device_policy": {
+            "learner": manifest.hardware.get("learner_device", "unknown"),
+            "evaluation": manifest.evaluation_pinning.get("eval_device", "cpu"),
+        },
+        "replay_verification": {
+            "path": layout.relative(layout.replay_verification_json()),
+            "status": "pending",
+        },
+        "canonical_artifact_hashes": {},
+    }
+
+
+def _safe_package_version(name: str) -> str | None:
+    try:
+        return package_version(name)
+    except PackageNotFoundError:
+        return None

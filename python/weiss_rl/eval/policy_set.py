@@ -39,9 +39,7 @@ class DevEvalPolicySummary:
         missing = [policy_id for policy_id in anchor_policy_ids if policy_id not in self.anchor_scores]
         if missing:
             missing_text = ", ".join(missing)
-            raise ValueError(
-                f"dev-eval summary for {self.policy_id!r} is missing anchor scores for: {missing_text}"
-            )
+            raise ValueError(f"dev-eval summary for {self.policy_id!r} is missing anchor scores for: {missing_text}")
         total = sum(self.anchor_scores[policy_id] for policy_id in anchor_policy_ids)
         return total / len(anchor_policy_ids)
 
@@ -113,10 +111,7 @@ def parse_training_policy_id(policy_id: str) -> TrainingPolicyId:
     """Parse a legacy training snapshot policy ID like ``train_u50000_p3``."""
     match = _TRAINING_POLICY_ID_RE.fullmatch(policy_id)
     if match is None:
-        raise ValueError(
-            "training snapshot policy IDs must match 'train_u{update}_p{version}', "
-            f"got {policy_id!r}"
-        )
+        raise ValueError(f"training snapshot policy IDs must match 'train_u{{update}}_p{{version}}', got {policy_id!r}")
     return TrainingPolicyId(
         policy_id=policy_id,
         update=int(match.group("update")),

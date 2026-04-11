@@ -294,9 +294,7 @@ def test_run_final_eval_writes_matrix_exports_and_posterior_samples(tmp_path: Pa
     assert not (output_dir / "matchups" / "01_policy_alpha__vs__00_policy_beta").exists()
     assert (output_dir / "matchups" / "00_policy_beta__vs__01_policy_alpha" / "diagnostics.json").is_file()
     assert (output_dir / "matchups" / "00_policy_beta__vs__01_policy_alpha" / "episodes.jsonl").is_file()
-    assert {
-        (call.focal_policy_id, call.opponent_policy_id) for call in runner.calls
-    } == {
+    assert {(call.focal_policy_id, call.opponent_policy_id) for call in runner.calls} == {
         ("policy_beta", "policy_beta"),
         ("policy_beta", "policy_alpha"),
         ("policy_alpha", "policy_alpha"),

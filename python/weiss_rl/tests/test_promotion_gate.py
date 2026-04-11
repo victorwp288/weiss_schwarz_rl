@@ -241,12 +241,15 @@ def test_decision_reasons_allow_truncation_limit_and_reject_above() -> None:
     anchors = (_anchor_result("B0 RandomLegal", prob_lt_guardrail=0.04),)
     overall = _posterior(prob_gt_target=0.96)
 
-    assert _decision_reasons(
-        anchor_results=anchors,
-        overall=overall,
-        truncation=PromotionGateRate(numerator=1, denominator=20, rate=0.05),
-        stack=stack,
-    ) == []
+    assert (
+        _decision_reasons(
+            anchor_results=anchors,
+            overall=overall,
+            truncation=PromotionGateRate(numerator=1, denominator=20, rate=0.05),
+            stack=stack,
+        )
+        == []
+    )
 
     above_limit = _decision_reasons(
         anchor_results=anchors,

@@ -90,9 +90,7 @@ class OpponentPoolSampler:
             count=count,
             rng=rng,
             win_rates_by_snapshot_id=(
-                self.win_rates_by_snapshot_id
-                if win_rates_by_snapshot_id is None
-                else win_rates_by_snapshot_id
+                self.win_rates_by_snapshot_id if win_rates_by_snapshot_id is None else win_rates_by_snapshot_id
             ),
             power=self.power,
             eps_uniform=self.eps_uniform,

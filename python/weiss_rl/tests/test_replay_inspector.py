@@ -222,7 +222,6 @@ def test_resolve_policy_weights_path_prefers_run_dir_for_relative_specs(
     assert resolved_path == run_dir_weights_path.resolve()
 
 
-
 def test_replay_inspector_cli_main_supports_json_stdout_and_report_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1,0 +1,96 @@
+# Troubleshooting
+
+This page collects the most common installation and verification issues.
+
+## Python and packaging
+
+### Python 3.13 is not supported
+
+This repo is intentionally narrowed to Python 3.10, 3.11, and 3.12.
+
+Fix:
+
+```bash
+python3.12 -m venv .venv
+uv sync --extra dev
+```
+
+### `uv sync` cannot resolve `torch`
+
+The pinned `torch` build is only intended for the supported Python matrix above.
+
+Fix:
+
+- switch to Python 3.10-3.12
+- re-run `uv sync --extra dev`
+- if you need the published simulator package too, use `uv sync --extra dev --extra sim`
+
+## Simulator import issues
+
+### `ModuleNotFoundError: weiss_sim`
+
+Fix one of these ways:
+
+```bash
+uv sync --extra dev --extra sim
+```
+
+or point at a sibling checkout:
+
+```bash
+export WEISS_SIM_PYTHONPATH=/Users/vwp/code/thesis/weiss-schwarz-simulator/python
+```
+
+If the simulator needs a different interpreter, also set:
+
+```bash
+export WEISS_SIM_PYTHON=/path/to/python3.12
+```
+
+## Verification issues
+
+### `make verify` fails on formatting
+
+Run the formatter first:
+
+```bash
+make fmt
+```
+
+### `scripts/run_local_ci_parity.sh` fails on missing tools
+
+Install the repo dev dependencies first:
+
+```bash
+uv sync --extra dev
+```
+
+If you are not using `uv`, make sure the editable install includes dev extras:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+Then run the parity script through `bash`:
+
+```bash
+bash scripts/run_local_ci_parity.sh
+```
+
+### Artifact checks fail on the toy/demo path
+
+Regenerate the demo tree and inspect the generated files:
+
+```bash
+make artifact-hygiene
+```
+
+Then read:
+
+- [Artifact contract](artifact_contract.md)
+- [Runtime modes](runtime_modes.md)
+
+## Where to look next
+
+- [Getting started](getting_started.md)
+- [Docs hub](README.md)

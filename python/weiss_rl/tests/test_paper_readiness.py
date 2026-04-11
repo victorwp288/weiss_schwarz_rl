@@ -282,6 +282,36 @@ def _write_run_dir_fixture(tmp_path: Path) -> Path:
     _write_json(run_dir / "manifest.json", manifest_payload)
     _write_json(run_dir / "spec_bundle.json", cast(dict[str, Any], manifest_payload["spec_bundle"]))
     _write_json(run_dir / "config_canonical.json", cast(dict[str, Any], manifest_payload["config_canonical"]))
+    _write_json(
+        run_dir / "environment.json",
+        {
+            "kind": "environment_manifest_v1",
+            "artifact_schema_version": "run_artifacts_v2",
+            "run_id256": manifest_payload["run_id256"],
+            "run_id64": manifest_payload["run_id64"],
+        },
+    )
+    _write_json(
+        run_dir / "run_summary.json",
+        {
+            "kind": "run_summary_v1",
+            "artifact_schema_version": "run_artifacts_v2",
+            "runtime_mode": "train_ordered",
+            "policy_set_selection_mode": "deterministic_v1",
+        },
+    )
+    _write_json(
+        run_dir / "determinism_report.json",
+        {
+            "kind": "determinism_report_v1",
+            "artifact_schema_version": "run_artifacts_v2",
+            "policy_selection_mode": "deterministic_v1",
+            "replay_verification": {
+                "path": "eval/diagnostics/replay_verification.json",
+                "status": "pending",
+            },
+        },
+    )
     (run_dir / "spec_hash256.txt").parent.mkdir(parents=True, exist_ok=True)
     (run_dir / "spec_hash256.txt").write_text(str(manifest_payload["spec_hash256"]) + "\n", encoding="utf-8")
     (run_dir / "config_hash256.txt").write_text(str(manifest_payload["config_hash256"]) + "\n", encoding="utf-8")
@@ -452,7 +482,18 @@ def _write_run_dir_fixture(tmp_path: Path) -> Path:
     diagnostics_dir = run_dir / "eval" / "diagnostics"
     _write_json(
         diagnostics_dir / "seat_bias.json",
-        {"global": {"seat0_win_rate": 0.5, "ci_low": 0.4, "ci_high": 0.6, "decisive_games": 6}},
+        {
+            "global": {"seat0_win_rate": 0.5, "ci_low": 0.4, "ci_high": 0.6, "decisive_games": 6},
+            "matchups": [
+                {
+                    "policy_a": "B0 RandomLegal",
+                    "policy_b": "policy_000300",
+                    "seat0_win_rate": 0.5,
+                    "seat1_win_rate": 0.5,
+                    "decisive_games": 2,
+                }
+            ],
+        },
     )
     (diagnostics_dir / "truncation_heatmap_data.csv").parent.mkdir(parents=True, exist_ok=True)
     (diagnostics_dir / "truncation_heatmap_data.csv").write_text(
@@ -460,8 +501,15 @@ def _write_run_dir_fixture(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     _write_json(diagnostics_dir / "replay_verification.json", {"status": "ok", "checked_replays": 3})
+    _write_json(
+        final_eval_dir / "artifact_hashes.json",
+        {
+            "kind": "final_eval_artifact_hashes_v1",
+            "artifacts": {"eval/final_eval/summary.json": "ab" * 32},
+        },
+    )
 
-    sensitivity_dir = final_eval_dir / "sensitivity"
+    sensitivity_dir = run_dir / "eval" / "metagame"
     _write_json(
         sensitivity_dir / "summary.json",
         {
@@ -512,7 +560,6 @@ def test_build_paper_readiness_summary_passes_with_balanced_seats_and_strong_b0_
     assert payload["checks"]["baseline_win_rate_vs_b0"]["prob_gt_threshold"] == 1.0
 
 
-
 def test_build_paper_readiness_summary_flags_truncation_seat_bias_and_weak_b0_matchup(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(
         tmp_path,
@@ -537,7 +584,6 @@ def test_build_paper_readiness_summary_flags_truncation_seat_bias_and_weak_b0_ma
     assert payload["checks"]["seat_bias_alarm"]["alarm"] is True
     assert payload["checks"]["baseline_win_rate_vs_b0"]["passed"] is False
     assert payload["checks"]["baseline_win_rate_vs_b0"]["prob_gt_threshold"] == 0.0
-
 
 
 def test_build_paper_readiness_summary_ignores_reciprocal_matchups_for_guardrail_aggregation(tmp_path: Path) -> None:
@@ -578,7 +624,6 @@ def test_build_paper_readiness_summary_ignores_reciprocal_matchups_for_guardrail
     ]
 
 
-
 def test_build_paper_readiness_summary_requires_explicit_focal_policy_when_multiple_candidates(tmp_path: Path) -> None:
     final_eval_dir = _write_multi_policy_final_eval_fixture(tmp_path)
 
@@ -591,7 +636,6 @@ def test_build_paper_readiness_summary_requires_explicit_focal_policy_when_multi
     assert check["reason"] == "ambiguous_non_baseline_focal_policy"
     assert check["eligible_non_baseline_policy_ids"] == ["policy_000300", "policy_000400"]
     assert "pass --focal-policy-id" in check["message"]
-
 
 
 def test_build_paper_readiness_summary_uses_metadata_named_focal_policy(tmp_path: Path) -> None:
@@ -613,7 +657,6 @@ def test_build_paper_readiness_summary_uses_metadata_named_focal_policy(tmp_path
     assert check["prob_gt_threshold"] == 1.0
 
 
-
 def test_build_paper_readiness_summary_uses_recommended_focal_policy_metadata(tmp_path: Path) -> None:
     final_eval_dir = _write_multi_policy_final_eval_fixture(
         tmp_path,
@@ -633,7 +676,6 @@ def test_build_paper_readiness_summary_uses_recommended_focal_policy_metadata(tm
     assert check["prob_gt_threshold"] == 1.0
 
 
-
 def test_build_paper_readiness_summary_audits_run_directory_artifacts(tmp_path: Path) -> None:
     run_dir = _write_run_dir_fixture(tmp_path)
 
@@ -647,7 +689,6 @@ def test_build_paper_readiness_summary_audits_run_directory_artifacts(tmp_path: 
     assert payload["final_eval_artifact_contract"]["passed"] is True
     assert payload["final_eval_guardrails"]["passed"] is True
     assert payload["checks"]["baseline_win_rate_vs_b0"]["focal_policy_id"] == "policy_000300"
-
 
 
 def test_build_paper_readiness_summary_accepts_documented_unresolved_manifest_policy_selection(tmp_path: Path) -> None:
@@ -670,11 +711,10 @@ def test_build_paper_readiness_summary_accepts_documented_unresolved_manifest_po
 
     payload = build_paper_readiness_summary(run_dir=run_dir)
 
-    assert payload["passed"] is True
-    assert payload["alarms"] == []
-    assert payload["manifest_contract"]["passed"] is True
-    assert payload["manifest_contract"]["fields"]["policy_set_selection"]["passed"] is True
-
+    assert payload["passed"] is False
+    assert "manifest_contract" in payload["alarms"]
+    assert payload["manifest_contract"]["passed"] is False
+    assert payload["manifest_contract"]["fields"]["policy_set_selection"]["passed"] is False
 
 
 def test_build_paper_readiness_summary_reports_out_of_range_matchup_indices(tmp_path: Path) -> None:
@@ -696,7 +736,6 @@ def test_build_paper_readiness_summary_reports_out_of_range_matchup_indices(tmp_
     ]
 
 
-
 def test_build_paper_readiness_summary_reports_negative_matchup_indices(tmp_path: Path) -> None:
     run_dir = _write_run_dir_fixture(tmp_path)
     summary_path = run_dir / "eval" / "final_eval" / "summary.json"
@@ -714,7 +753,6 @@ def test_build_paper_readiness_summary_reports_negative_matchup_indices(tmp_path
     assert contract["reference_failures"] == [
         "matchups[0].opponent_policy_index=-1 is out of range for policy_ids with length 2"
     ]
-
 
 
 def test_build_paper_readiness_summary_flags_run_directory_gaps(tmp_path: Path) -> None:

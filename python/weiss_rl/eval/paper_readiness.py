@@ -10,6 +10,7 @@ from typing import Any, cast
 
 from scipy.stats import beta as beta_dist
 
+from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.eval.policy_set import (
     HEURISTIC_PUBLIC_POLICY_ID,
     NO_LEAGUE_POLICY_ID,
@@ -63,10 +64,10 @@ def build_paper_readiness_summary(
 
     if run_dir is not None:
         resolved_run_dir = Path(run_dir)
-        resolved_final_eval_dir = resolved_run_dir / "eval" / "final_eval"
+        layout = ArtifactLayout.from_run_dir(resolved_run_dir)
         return _build_run_directory_readiness_summary(
             run_dir=resolved_run_dir,
-            final_eval_dir=resolved_final_eval_dir,
+            final_eval_dir=layout.final_eval_dir,
             focal_policy_id=focal_policy_id,
             baseline_policy_id=baseline_policy_id,
             max_truncation_rate=max_truncation_rate,
@@ -283,6 +284,24 @@ def _required_run_artifact_specs() -> tuple[RequiredArtifactSpec, ...]:
             paths=(Path("config_canonical.json"),),
         ),
         RequiredArtifactSpec(
+            artifact_id="environment_json",
+            description="Environment manifest JSON",
+            category="run_root",
+            paths=(Path("environment.json"),),
+        ),
+        RequiredArtifactSpec(
+            artifact_id="run_summary_json",
+            description="Run summary JSON",
+            category="run_root",
+            paths=(Path("run_summary.json"),),
+        ),
+        RequiredArtifactSpec(
+            artifact_id="determinism_report_json",
+            description="Determinism report JSON",
+            category="run_root",
+            paths=(Path("determinism_report.json"),),
+        ),
+        RequiredArtifactSpec(
             artifact_id="training_metrics",
             description="Training metrics JSONL",
             category="training",
@@ -304,13 +323,22 @@ def _required_run_artifact_specs() -> tuple[RequiredArtifactSpec, ...]:
             artifact_id="final_eval_posterior_samples",
             description="Final-eval posterior samples JSON",
             category="final_eval",
-            paths=(Path("eval/final_eval/posterior_samples.json"),),
+            paths=(
+                Path("eval/final_eval/posterior_samples.json"),
+                Path("eval/final_eval/posterior_samples.npz"),
+            ),
         ),
         RequiredArtifactSpec(
             artifact_id="final_eval_matchups_manifest",
             description="Final-eval matchup manifest CSV",
             category="final_eval",
             paths=(Path("eval/final_eval/matchups.csv"),),
+        ),
+        RequiredArtifactSpec(
+            artifact_id="final_eval_artifact_hashes",
+            description="Final-eval artifact hashes JSON",
+            category="final_eval",
+            paths=(Path("eval/final_eval/artifact_hashes.json"),),
         ),
         RequiredArtifactSpec(
             artifact_id="final_eval_payoff_matrix_export",
@@ -343,7 +371,10 @@ def _required_run_artifact_specs() -> tuple[RequiredArtifactSpec, ...]:
             artifact_id="sensitivity_summary",
             description="Sensitivity report summary JSON",
             category="sensitivity",
-            paths=(Path("eval/final_eval/sensitivity/summary.json"),),
+            paths=(
+                Path("eval/metagame/summary.json"),
+                Path("eval/final_eval/sensitivity/summary.json"),
+            ),
         ),
         RequiredArtifactSpec(
             artifact_id="paper_figures_pdf",
@@ -365,29 +396,59 @@ def _required_run_artifact_specs() -> tuple[RequiredArtifactSpec, ...]:
                     artifact_id=f"sensitivity_{case_id.lower()}_summary",
                     description=f"Sensitivity {case_id} summary JSON",
                     category="sensitivity",
-                    paths=(Path(f"eval/final_eval/sensitivity/{case_id}/summary.json"),),
+                    paths=(
+                        Path(f"eval/metagame/{case_id}/summary.json"),
+                        Path(f"eval/final_eval/sensitivity/{case_id}/summary.json"),
+                    ),
                 ),
                 RequiredArtifactSpec(
                     artifact_id=f"sensitivity_{case_id.lower()}_payoff_matchups",
                     description=f"Sensitivity {case_id} payoff matchup CSV",
                     category="sensitivity",
-                    paths=(Path(f"eval/final_eval/sensitivity/{case_id}/payoff/matchups.csv"),),
+                    paths=(
+                        Path(f"eval/metagame/{case_id}/payoff/matchups.csv"),
+                        Path(f"eval/final_eval/sensitivity/{case_id}/payoff/matchups.csv"),
+                    ),
                 ),
                 RequiredArtifactSpec(
                     artifact_id=f"sensitivity_{case_id.lower()}_nash_mixture",
                     description=f"Sensitivity {case_id} Nash mixture CSV",
                     category="sensitivity",
-                    paths=(Path(f"eval/final_eval/sensitivity/{case_id}/nash/mixture_mean.csv"),),
+                    paths=(
+                        Path(f"eval/metagame/{case_id}/nash/mixture_mean.csv"),
+                        Path(f"eval/final_eval/sensitivity/{case_id}/nash/mixture_mean.csv"),
+                    ),
                 ),
                 RequiredArtifactSpec(
                     artifact_id=f"sensitivity_{case_id.lower()}_alpharank_stationary",
                     description=f"Sensitivity {case_id} AlphaRank stationary CSV",
                     category="sensitivity",
-                    paths=(Path(f"eval/final_eval/sensitivity/{case_id}/alpharank/stationary_mean.csv"),),
+                    paths=(
+                        Path(f"eval/metagame/{case_id}/alpharank/stationary_mean.csv"),
+                        Path(f"eval/final_eval/sensitivity/{case_id}/alpharank/stationary_mean.csv"),
+                    ),
                 ),
             )
         )
     return tuple(specs)
+
+
+def _sensitivity_root_candidates(*, final_eval_dir: Path) -> tuple[Path, ...]:
+    candidates: list[Path] = []
+    canonical = final_eval_dir.parent / "metagame"
+    legacy = final_eval_dir / "sensitivity"
+    for candidate in (canonical, legacy):
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return tuple(candidates)
+
+
+def _resolve_sensitivity_summary_path(final_eval_dir: Path) -> Path:
+    for candidate_root in _sensitivity_root_candidates(final_eval_dir=final_eval_dir):
+        summary_path = candidate_root / "summary.json"
+        if summary_path.is_file():
+            return summary_path
+    return _sensitivity_root_candidates(final_eval_dir=final_eval_dir)[0] / "summary.json"
 
 
 def _evaluate_required_artifact(*, run_dir: Path, spec: RequiredArtifactSpec) -> dict[str, Any]:
@@ -424,6 +485,7 @@ def _evaluate_required_artifact(*, run_dir: Path, spec: RequiredArtifactSpec) ->
 
 
 def _build_manifest_contract(run_dir: Path) -> dict[str, Any]:
+    layout = ArtifactLayout.from_run_dir(run_dir)
     manifest_path = run_dir / "manifest.json"
     try:
         manifest = _load_json_object(manifest_path)
@@ -460,9 +522,7 @@ def _build_manifest_contract(run_dir: Path) -> dict[str, Any]:
     }
     missing_fields = [name for name, result in field_checks.items() if result["reason"] == "missing"]
     invalid_fields = [
-        name
-        for name, result in field_checks.items()
-        if not result["passed"] and result["reason"] != "missing"
+        name for name, result in field_checks.items() if not result["passed"] and result["reason"] != "missing"
     ]
 
     consistency_checks = {
@@ -482,6 +542,9 @@ def _build_manifest_contract(run_dir: Path) -> dict[str, Any]:
             file_path=run_dir / "config_hash256.txt",
             expected=manifest.get("config_hash256"),
         ),
+        "run_summary_exists": _validate_existing_file(layout.run_summary_path),
+        "environment_manifest_exists": _validate_existing_file(layout.environment_path),
+        "determinism_report_exists": _validate_existing_file(layout.determinism_report_path),
     }
     mismatches = [name for name, result in consistency_checks.items() if not result["passed"]]
     passed = not missing_fields and not invalid_fields and not mismatches
@@ -613,8 +676,7 @@ def _build_final_eval_artifact_contract(final_eval_dir: Path) -> dict[str, Any]:
         }
 
     missing_matchups = [
-        f"{policy_ids[left]}__vs__{policy_ids[right]}"
-        for left, right in sorted(expected_keys - set(observed_keys))
+        f"{policy_ids[left]}__vs__{policy_ids[right]}" for left, right in sorted(expected_keys - set(observed_keys))
     ]
 
     passed = not duplicate_matchups and not noncanonical_matchups and not missing_matchups and not reference_failures
@@ -672,7 +734,7 @@ def _validate_final_eval_policy_set(*, final_eval_dir: Path, policy_ids: Sequenc
 
 
 def _validate_sensitivity_summary(*, final_eval_dir: Path, policy_ids: Sequence[str]) -> dict[str, Any]:
-    summary_path = final_eval_dir / "sensitivity" / "summary.json"
+    summary_path = _resolve_sensitivity_summary_path(final_eval_dir)
     try:
         payload = _load_json_object(summary_path)
     except Exception as exc:
@@ -1160,9 +1222,7 @@ def _posterior_samples(payload: Mapping[str, Any], *, focal_index: int, opponent
             raise TypeError
         samples = row[opponent_index]
     except (IndexError, TypeError) as exc:
-        raise ValueError(
-            f"posterior_samples.values is missing cell [{focal_index}][{opponent_index}]"
-        ) from exc
+        raise ValueError(f"posterior_samples.values is missing cell [{focal_index}][{opponent_index}]") from exc
     if not isinstance(samples, list):
         raise ValueError("posterior sample cell must be a list")
     return [float(sample) for sample in samples]
@@ -1248,18 +1308,10 @@ def _validate_manifest_policy_set_selection(value: Any, *, details: Any) -> dict
         return selection_check
     if value:
         return {"passed": True, "reason": None, "message": "ok"}
-    if _documents_unresolved_policy_set_selection(details):
-        return {
-            "passed": True,
-            "reason": None,
-            "message": "ok (policy_set_selection is unresolved but documented)",
-        }
     return {
         "passed": False,
         "reason": "empty",
-        "message": (
-            "field must not be empty unless policy_set_selection_details documents an unresolved selection"
-        ),
+        "message": "field must not be empty for a paper-grade readiness pass",
     }
 
 
@@ -1272,9 +1324,7 @@ def _documents_unresolved_policy_set_selection(details: Any) -> bool:
     if isinstance(reason, str) and reason.strip():
         return True
     missing_inputs = details.get("missing_inputs")
-    return isinstance(missing_inputs, list) and any(
-        isinstance(item, str) and item.strip() for item in missing_inputs
-    )
+    return isinstance(missing_inputs, list) and any(isinstance(item, str) and item.strip() for item in missing_inputs)
 
 
 def _validate_seed_files_field(value: Any) -> dict[str, Any]:
@@ -1315,6 +1365,17 @@ def _validate_seed_files_field(value: Any) -> dict[str, Any]:
                 "message": f"seed_files[{key!r}] must include a 64-character hex sha256",
             }
     return {"passed": True, "reason": None, "message": "ok"}
+
+
+def _validate_existing_file(path: Path) -> dict[str, Any]:
+    if path.is_file():
+        return {"passed": True, "reason": None, "message": "ok", "path": path.as_posix()}
+    return {
+        "passed": False,
+        "reason": "missing",
+        "message": f"required file is missing: {path}",
+        "path": path.as_posix(),
+    }
 
 
 def _validate_simulator_manifest(value: Any) -> dict[str, Any]:

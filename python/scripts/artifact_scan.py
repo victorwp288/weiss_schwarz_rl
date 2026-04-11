@@ -30,9 +30,7 @@ def main() -> int:
     args = _parse_args()
     repo_root = args.repo_root.resolve()
     artifact_roots = (
-        tuple(args.artifact_roots)
-        if args.artifact_roots is not None
-        else default_artifact_roots(repo_root)
+        tuple(args.artifact_roots) if args.artifact_roots is not None else default_artifact_roots(repo_root)
     )
     summary = run_artifact_hygiene_scan(repo_root=repo_root, artifact_roots=artifact_roots)
     if summary.findings:

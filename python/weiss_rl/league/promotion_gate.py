@@ -353,14 +353,19 @@ def _posterior_means(scores: Sequence[float], *, sample_count: int, seed: int | 
     score_array = np.asarray(scores, dtype=np.float64)
     if score_array.ndim != 1 or score_array.size == 0:
         raise ValueError("promotion gate requires at least one paired-seed score")
+    if not np.isfinite(score_array).all():
+        raise ValueError("promotion gate scores must be finite")
     if sample_count <= 0:
         raise ValueError("sample_count must be positive")
 
+    baseline = float(score_array[0])
+    if score_array.size == 1 or np.all(score_array == baseline):
+        return np.full((sample_count,), baseline, dtype=np.float64)
     rng = np.random.default_rng(seed)
     weights = rng.exponential(scale=1.0, size=(sample_count, score_array.size))
     weights /= np.sum(weights, axis=1, keepdims=True)
-    baseline = float(score_array[0])
-    return baseline + (weights @ (score_array - baseline))
+    centered = np.asarray(score_array - baseline, dtype=np.float64)
+    return baseline + np.sum(weights * centered[np.newaxis, :], axis=1, dtype=np.float64)
 
 
 def _rate(numerator: int, denominator: int) -> PromotionGateRate:

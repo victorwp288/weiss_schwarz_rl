@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -10,6 +11,8 @@ from pathlib import Path
 import torch
 
 from weiss_rl.config import compute_config_hash256, load_stack_config
+from weiss_rl.league.registry import SnapshotRegistry
+from weiss_rl.model import PolicyValueModel
 from weiss_rl.spec import spec_bundle_hash
 from weiss_rl.toy_public_demo import public_demo_spec_hash256
 
@@ -243,6 +246,41 @@ def _patch_periodic_dev_eval_config(tmp_path: Path) -> None:
 def _copy_repo_configs(tmp_path: Path) -> Path:
     shutil.copytree(REPO_ROOT / "configs", tmp_path / "configs")
     return tmp_path / "configs" / "rl_stack_locked.yaml"
+
+
+def _write_b1_baseline_run_fixture(tmp_path: Path, *, stack_config: Path, update: int = 5) -> Path:
+    stack = load_stack_config(stack_config)
+    assert stack.config.model is not None
+    config_hash256 = compute_config_hash256(stack)
+
+    run_dir = tmp_path / "runs" / "b1_no_league_source"
+    weights_path = run_dir / "training" / "snapshots" / "b1_noleague_baseline" / "weights.pt"
+    weights_path.parent.mkdir(parents=True, exist_ok=True)
+    model = PolicyValueModel(
+        observation_dim=512,
+        config=stack.config.model,
+        action_dim=9,
+    )
+    payload = {
+        "policy_id": "b1_noleague_baseline",
+        "update": update,
+        "config_hash256": config_hash256,
+        "model_state_dict": model.state_dict(),
+    }
+    torch.save(payload, weights_path)
+    weights_sha256 = hashlib.sha256(weights_path.read_bytes()).hexdigest()
+    (run_dir / "config_hash256.txt").write_text(f"{config_hash256}\n", encoding="utf-8")
+
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="b1_noleague_baseline",
+        update=update,
+        weights_sha256=weights_sha256,
+        path="training/snapshots/b1_noleague_baseline/weights.pt",
+    )
+    registry.pin_snapshot("b1_noleague_baseline")
+    registry.save(run_dir / "training" / "snapshots" / "registry.json")
+    return run_dir
 
 
 def _write_policy_set_inputs(tmp_path: Path) -> tuple[Path, Path]:
@@ -963,6 +1001,36 @@ def _write_paper_readiness_run_dir_fixture(tmp_path: Path) -> Path:
         (run_dir / "manifest.json", manifest),
         (run_dir / "spec_bundle.json", manifest["spec_bundle"]),
         (run_dir / "config_canonical.json", manifest["config_canonical"]),
+        (
+            run_dir / "environment.json",
+            {
+                "kind": "environment_manifest_v1",
+                "artifact_schema_version": "run_artifacts_v2",
+                "run_id256": manifest["run_id256"],
+                "run_id64": manifest["run_id64"],
+            },
+        ),
+        (
+            run_dir / "run_summary.json",
+            {
+                "kind": "run_summary_v1",
+                "artifact_schema_version": "run_artifacts_v2",
+                "runtime_mode": "train_ordered",
+                "policy_set_selection_mode": "deterministic_v1",
+            },
+        ),
+        (
+            run_dir / "determinism_report.json",
+            {
+                "kind": "determinism_report_v1",
+                "artifact_schema_version": "run_artifacts_v2",
+                "policy_selection_mode": "deterministic_v1",
+                "replay_verification": {
+                    "path": "eval/diagnostics/replay_verification.json",
+                    "status": "pending",
+                },
+            },
+        ),
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1048,9 +1116,7 @@ def _write_paper_readiness_run_dir_fixture(tmp_path: Path) -> Path:
                 "posterior_samples_path": prefix + "/posterior_samples.json",
             }
         )
-        matchup_rows.append(
-            ",".join((focal_policy_id, opponent_policy_id, prefix, "2", "2", "0", "True", "precision"))
-        )
+        matchup_rows.append(",".join((focal_policy_id, opponent_policy_id, prefix, "2", "2", "0", "True", "precision")))
 
     (final_eval_dir / "policy_set.json").write_text(
         json.dumps({"policy_ids": policies}, indent=2, sort_keys=True) + "\n",
@@ -1109,7 +1175,18 @@ def _write_paper_readiness_run_dir_fixture(tmp_path: Path) -> Path:
     (run_dir / "eval" / "diagnostics").mkdir(parents=True, exist_ok=True)
     (run_dir / "eval" / "diagnostics" / "seat_bias.json").write_text(
         json.dumps(
-            {"global": {"seat0_win_rate": 0.5, "ci_low": 0.4, "ci_high": 0.6, "decisive_games": 6}},
+            {
+                "global": {"seat0_win_rate": 0.5, "ci_low": 0.4, "ci_high": 0.6, "decisive_games": 6},
+                "matchups": [
+                    {
+                        "policy_a": "B0 RandomLegal",
+                        "policy_b": "policy_000300",
+                        "seat0_win_rate": 0.5,
+                        "seat1_win_rate": 0.5,
+                        "decisive_games": 2,
+                    }
+                ],
+            },
             indent=2,
             sort_keys=True,
         )
@@ -1124,8 +1201,21 @@ def _write_paper_readiness_run_dir_fixture(tmp_path: Path) -> Path:
         json.dumps({"status": "ok"}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    (final_eval_dir / "sensitivity").mkdir(parents=True, exist_ok=True)
-    (final_eval_dir / "sensitivity" / "summary.json").write_text(
+    (final_eval_dir / "artifact_hashes.json").write_text(
+        json.dumps(
+            {
+                "kind": "final_eval_artifact_hashes_v1",
+                "artifacts": {"eval/final_eval/summary.json": "ab" * 32},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    metagame_dir = run_dir / "eval" / "metagame"
+    metagame_dir.mkdir(parents=True, exist_ok=True)
+    (metagame_dir / "summary.json").write_text(
         json.dumps(
             {"policy_ids": policies, "cases": {case_id: {} for case_id in ("S0", "S1", "S2")}},
             indent=2,
@@ -1135,7 +1225,7 @@ def _write_paper_readiness_run_dir_fixture(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     for case_id in ("S0", "S1", "S2"):
-        case_dir = final_eval_dir / "sensitivity" / case_id
+        case_dir = metagame_dir / case_id
         (case_dir / "payoff").mkdir(parents=True, exist_ok=True)
         (case_dir / "nash").mkdir(parents=True, exist_ok=True)
         (case_dir / "alpharank").mkdir(parents=True, exist_ok=True)
@@ -1198,6 +1288,7 @@ def test_train_entrypoint_runs_periodic_dev_eval_and_handles_empty_ids_pass_fall
     )
     stack_config = _copy_repo_configs(tmp_path)
     _patch_periodic_dev_eval_config(tmp_path)
+    b1_baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, stack_config=stack_config)
 
     result = _run_entrypoint(
         tmp_path,
@@ -1216,6 +1307,8 @@ def test_train_entrypoint_runs_periodic_dev_eval_and_handles_empty_ids_pass_fall
             "1",
             "--checkpoint-interval-updates",
             "1",
+            "--b1-baseline-run-dir",
+            str(b1_baseline_run_dir),
         ],
     )
 
@@ -1252,6 +1345,7 @@ def test_train_entrypoint_periodic_dev_eval_writes_exact_current_checkpoint(tmp_
     bundle = _write_runtime_weiss_sim(tmp_path, spec_hash=123)
     stack_config = _copy_repo_configs(tmp_path)
     _patch_periodic_dev_eval_config(tmp_path)
+    b1_baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, stack_config=stack_config)
 
     result = _run_entrypoint(
         tmp_path,
@@ -1270,6 +1364,8 @@ def test_train_entrypoint_periodic_dev_eval_writes_exact_current_checkpoint(tmp_
             "1",
             "--checkpoint-interval-updates",
             "2",
+            "--b1-baseline-run-dir",
+            str(b1_baseline_run_dir),
         ],
     )
 

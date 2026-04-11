@@ -4,6 +4,8 @@ Learner-side JSONL logging is implemented as a standalone component and is now a
 
 `make train-min` remains a manifest/provenance smoke run. The inline training path only activates when `train.py` receives a full training stack and the active interpreter can import a simulator runtime with stepping APIs.
 
+For the current run-root layout and the canonical separation between training metrics, deterministic evaluation outputs, and artifact-level readiness files, see [Artifact contract](artifact_contract.md).
+
 ## What works today
 
 - `TrainingLogger` writes append-only JSONL records to `runs/<run>/logs/training_metrics.jsonl`
@@ -114,6 +116,7 @@ print(is_valid, message)
 - `policy_version` is the learner-side checkpoint version counter
 - checkpoint files are written as `checkpoint_<update_count>.pt`
 - actor sync lag should be interpreted in checkpoint-update units, not as full learner-step staleness between arbitrary updates
+- training metrics and run-root provenance are separate concerns; the latter now belongs in `manifest.json`, `environment.json`, and `run_summary.json`
 
 ## Tests
 

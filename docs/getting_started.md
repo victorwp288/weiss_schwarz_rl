@@ -1,23 +1,29 @@
 # Getting Started (Dev)
 
-Goal: get a fresh clone to a successful manifest smoke run without 1:1 help.
+Goal: get a fresh clone to a successful verification run without needing a 1:1 walkthrough.
+
+## Read first
+
+- [Docs hub](README.md)
+- [Runtime modes](runtime_modes.md)
+- [Artifact contract](artifact_contract.md)
+- [Troubleshooting](troubleshooting.md)
 
 ## Current entrypoint reality
 
-Before you sink time into the repo, here is the honest version:
+The repo now supports three useful lanes:
 
-- `make train-min` / `train.py --stack-config configs/stack_smoke.yaml` prove config loading, simulator provenance capture, and run-manifest writing.
-- `train.py` can also run a tiny inline M3-08 training smoke when you pass a full training stack and the active interpreter can step the simulator.
-- `eval.py` currently checks contracts and summarizes an already-produced `episodes.jsonl` file.
-- `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline that generates clearly-labeled demo artifacts without proprietary simulator assets.
-- `make_figures.py` otherwise renders paper figures from completed run artifacts.
-- None of those entrypoints are the full proprietary master-plan pipeline yet.
+- `make train-min` proves config loading, simulator provenance capture, and run-manifest writing.
+- `train.py` can run a tiny inline smoke path when the active interpreter can step the simulator.
+- `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline.
+
+The full thesis runtime is described in `runtime_modes.md`; this page stays focused on the quickest honest onboarding path.
 
 Repo paths in this guide are relative to the repo root.
 
 ## Prereqs
 
-- Python >= 3.10
+- Python >= 3.10, < 3.13
 - `uv` installed and available in your terminal (`pip install uv`)
 - Access to `weiss_sim` with `export_spec_bundle()` available.
   - If `weiss_sim` is already installed in your active Python environment, the probe uses that first.
@@ -31,6 +37,12 @@ From the repo root:
 
 ```bash
 uv sync --extra dev
+```
+
+If you want the published simulator dependency instead of a sibling checkout, use:
+
+```bash
+uv sync --extra dev --extra sim
 ```
 
 If `uv sync` fails with `No pyproject.toml found`, you are not in the repo root. In that case, include your current directory (`pwd`) plus the full error output when asking for help.
@@ -134,6 +146,8 @@ These are honest smoke checks for the other top-level entrypoints:
 uv run python python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
+make verify
+bash scripts/run_local_ci_parity.sh
 ```
 
 Expected outcomes:
@@ -205,9 +219,13 @@ When picking the repo back up later, start here:
 - Cause: running outside the managed environment or without installing the repo package.
 - Fix: run the command via `uv run ...` and ensure `uv sync --extra dev` succeeded.
 
+`Python 3.13` or newer
+- Cause: this repo is intentionally narrowed to the supported thesis/test matrix.
+- Fix: use Python 3.10, 3.11, or 3.12.
+
 `Unable to collect simulator provenance via weiss_sim.export_spec_bundle()`
 - Cause: the train scaffold could not import a compatible `weiss_sim` package or find a working simulator checkout/interpreter.
-- Fix: either install `weiss_sim` into the active environment, or set `WEISS_SIM_PYTHONPATH` (and, if needed, `WEISS_SIM_PYTHON`) to a working simulator environment.
+- Fix: either install `weiss_sim` into the active environment with `uv sync --extra dev --extra sim`, or set `WEISS_SIM_PYTHONPATH` (and, if needed, `WEISS_SIM_PYTHON`) to a working simulator environment.
 
 `--stack-config` not found or YAML load error
 - Cause: wrong working directory or incorrect config path.

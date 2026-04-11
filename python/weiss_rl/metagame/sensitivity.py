@@ -156,10 +156,7 @@ def _load_final_eval_context(final_eval_dir: Path) -> FinalEvalContext:
             policy_index=policy_index,
         )
         if focal_index > opponent_index:
-            raise ValueError(
-                "final_eval matchups must be canonical with "
-                "focal_policy_index <= opponent_policy_index"
-            )
+            raise ValueError("final_eval matchups must be canonical with focal_policy_index <= opponent_policy_index")
         canonical_key = (focal_index, opponent_index)
         if canonical_key in canonical_keys:
             raise ValueError(
@@ -445,9 +442,7 @@ def _write_delta_artifacts(
                 "s0_mean_mixture": float(baseline_nash_mean[index]),
                 "case_mean_mixture": float(nash_mean[index]),
                 "delta_mean_mixture": _stable_delta(float(nash_mean[index]), float(baseline_nash_mean[index])),
-                "abs_delta_mean_mixture": abs(
-                    _stable_delta(float(nash_mean[index]), float(baseline_nash_mean[index]))
-                ),
+                "abs_delta_mean_mixture": abs(_stable_delta(float(nash_mean[index]), float(baseline_nash_mean[index]))),
             }
             for index, policy_id in enumerate(artifacts.policy_ids)
         ]
@@ -472,9 +467,7 @@ def _write_delta_artifacts(
             }
             for index, policy_id in enumerate(artifacts.policy_ids)
         ]
-        alpharank_rows.sort(
-            key=lambda row: (-_as_float(row["abs_delta_mean_stationary_mass"]), str(row["policy_id"]))
-        )
+        alpharank_rows.sort(key=lambda row: (-_as_float(row["abs_delta_mean_stationary_mass"]), str(row["policy_id"])))
         _write_rows_csv(case_dir / "alpharank_sensitivity_delta_vs_s0.csv", alpharank_rows)
 
         payoff_rows: list[dict[str, Any]] = []
@@ -537,10 +530,7 @@ def _validate_supported_nash_config(metagame_config: MetagameConfig) -> None:
     if nash_config.impl != _SUPPORTED_NASH_IMPL:
         raise ValueError(f"unsupported metagame.nash.impl for sensitivity reporting: {nash_config.impl!r}")
     if nash_config.threads != 1:
-        raise ValueError(
-            "sensitivity reporting requires metagame.nash.threads=1, "
-            f"got {nash_config.threads}"
-        )
+        raise ValueError(f"sensitivity reporting requires metagame.nash.threads=1, got {nash_config.threads}")
     if nash_config.tie_break != _SUPPORTED_NASH_TIE_BREAK:
         raise ValueError(
             "sensitivity reporting requires metagame.nash.tie_break="
@@ -566,9 +556,7 @@ def _validate_supported_case_config(*, case_id: str, case_config: SensitivityCas
             expected=0.5,
         )
         if case_config.truncation_handling is not None:
-            raise ValueError(
-                f"{case_id} must not set truncation_handling, got {case_config.truncation_handling!r}"
-            )
+            raise ValueError(f"{case_id} must not set truncation_handling, got {case_config.truncation_handling!r}")
         return
 
     if case_config.truncation_score is not None:
@@ -647,18 +635,14 @@ def _resolve_final_eval_episodes_path(*, final_eval_dir: Path, value: Any, expec
     raw_path = Path(value)
     if raw_path.is_absolute():
         raise ValueError(
-            "final_eval matchup episodes_path must be relative to the final_eval root, "
-            f"got absolute path: {value!r}"
+            f"final_eval matchup episodes_path must be relative to the final_eval root, got absolute path: {value!r}"
         )
     resolved_root = final_eval_dir.resolve()
     resolved_path = (final_eval_dir / raw_path).resolve()
     try:
         resolved_path.relative_to(resolved_root)
     except ValueError as exc:
-        raise ValueError(
-            "final_eval matchup episodes_path resolves outside the final_eval root: "
-            f"{value!r}"
-        ) from exc
+        raise ValueError(f"final_eval matchup episodes_path resolves outside the final_eval root: {value!r}") from exc
     expected = expected_relative_path.as_posix()
     if value != expected:
         raise ValueError(

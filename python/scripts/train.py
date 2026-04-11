@@ -18,6 +18,7 @@ from typing import Any, cast
 import numpy as np
 import torch
 
+from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import StackConfig, canonical_config_dict, compute_config_hash256, load_stack_config
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
@@ -35,14 +36,16 @@ from weiss_rl.eval import (
     write_matchup_summary_csv,
     write_matchup_summary_json,
 )
+from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
-from weiss_rl.eval.policy_set import select_final_policy_set_deterministic_v1
+from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, select_final_policy_set_deterministic_v1
 from weiss_rl.learners.impala_learner import ImpalaLearner
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
 from weiss_rl.league import run_promotion_gate
 from weiss_rl.manifest import RunManifest, build_seed_file_manifest, default_run_dir_name, write_run_artifacts
 from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_mask, sample_actions_from_mask
 from weiss_rl.model import PolicyValueModel
+from weiss_rl.runtime import QueueRuntime, QueueRuntimeMode, build_runtime_config
 from weiss_rl.repro import (
     canonical_json_bytes,
     compute_run_id64,
@@ -101,6 +104,7 @@ class TrainingPaths:
     logs_dir: Path
     snapshots_dir: Path
     scalars_path: Path
+    performance_log_path: Path
 
 
 class _PeriodicDevEvalRunner:
@@ -438,6 +442,8 @@ def _hardware_summary() -> dict[str, str | int]:
         "machine": platform.machine(),
         "processor": platform.processor(),
         "cpu_count": os.cpu_count() or 0,
+        "learner_device": "cpu",
+        "actor_device": "cpu",
     }
 
 
@@ -468,6 +474,79 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{label} JSON must contain an object at the top level")
     return payload
+
+
+def _read_optional_hash_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8").strip()
+    return text or None
+
+
+def _validate_imported_snapshot_contract(
+    *,
+    source_run_dir: Path,
+    payload: dict[str, Any],
+    expected_model_state_dict: dict[str, Any],
+    expected_config_canonical: dict[str, Any] | None,
+    expected_spec_hash256: str | None,
+) -> None:
+    source_layout = ArtifactLayout.from_run_dir(source_run_dir)
+    manifest_path = source_layout.manifest_path
+    source_manifest = (
+        _load_json_object(manifest_path, label="imported B1 manifest") if manifest_path.is_file() else None
+    )
+    source_config_canonical = source_manifest.get("config_canonical") if isinstance(source_manifest, dict) else None
+    if isinstance(source_config_canonical, dict):
+        training_family = source_config_canonical.get("training_family_a")
+        if isinstance(training_family, dict) and str(training_family.get("mode", "")).strip() != "b1_no_league":
+            raise RuntimeError(
+                "Imported B1 baseline must come from a dedicated b1_no_league run, "
+                f"got training_family_a.mode={training_family.get('mode')!r}"
+            )
+        if isinstance(expected_config_canonical, dict):
+            for section_name in ("model", "environment"):
+                source_section = source_config_canonical.get(section_name)
+                expected_section = expected_config_canonical.get(section_name)
+                if source_section is None or expected_section is None:
+                    continue
+                if source_section != expected_section:
+                    raise RuntimeError(
+                        f"Imported B1 baseline config does not match the current run for section={section_name!r}"
+                    )
+
+    if expected_spec_hash256 is not None:
+        source_spec_hash = _read_optional_hash_file(source_layout.spec_hash_path)
+        if source_spec_hash is not None and source_spec_hash != expected_spec_hash256:
+            raise RuntimeError(
+                "Imported B1 baseline spec hash does not match the current run: "
+                f"source={source_spec_hash} expected={expected_spec_hash256}"
+            )
+
+    source_model_state_dict = payload.get("model_state_dict")
+    if not isinstance(source_model_state_dict, dict):
+        raise RuntimeError(f"Imported B1 baseline weights payload is missing model_state_dict: {source_run_dir}")
+    source_keys = set(source_model_state_dict)
+    expected_keys = set(expected_model_state_dict)
+    if source_keys != expected_keys:
+        missing = sorted(expected_keys - source_keys)
+        extra = sorted(source_keys - expected_keys)
+        raise RuntimeError(
+            "Imported B1 baseline model contract does not match the current run: "
+            f"missing_keys={missing} extra_keys={extra}"
+        )
+    for key in sorted(expected_keys):
+        source_value = source_model_state_dict[key]
+        expected_value = expected_model_state_dict[key]
+        if not isinstance(source_value, torch.Tensor) or not isinstance(expected_value, torch.Tensor):
+            continue
+        if tuple(source_value.shape) != tuple(expected_value.shape) or source_value.dtype != expected_value.dtype:
+            raise RuntimeError(
+                "Imported B1 baseline tensor contract does not match the current run: "
+                f"key={key} source_shape={tuple(source_value.shape)} "
+                f"expected_shape={tuple(expected_value.shape)} "
+                f"source_dtype={source_value.dtype} expected_dtype={expected_value.dtype}"
+            )
 
 
 def _load_snapshot_registry(path: Path) -> SnapshotRegistry:
@@ -682,18 +761,19 @@ def _print_manifest_only_message(reason: str) -> None:
 
 
 def _training_paths(run_dir: Path) -> TrainingPaths:
-    training_dir = run_dir / "training"
-    checkpoints_dir = training_dir / "checkpoints"
-    logs_dir = training_dir / "logs"
-    snapshots_dir = training_dir / "snapshots"
-    for path in (training_dir, checkpoints_dir, logs_dir, snapshots_dir):
-        path.mkdir(parents=True, exist_ok=True)
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.ensure_directories()
+    training_dir = layout.training_dir
+    checkpoints_dir = layout.training_checkpoints_dir
+    logs_dir = layout.training_logs_dir
+    snapshots_dir = layout.training_snapshots_dir
     return TrainingPaths(
         training_dir=training_dir,
         checkpoints_dir=checkpoints_dir,
         logs_dir=logs_dir,
         snapshots_dir=snapshots_dir,
         scalars_path=logs_dir / "scalars.jsonl",
+        performance_log_path=layout.performance_log_path,
     )
 
 
@@ -1017,10 +1097,99 @@ def _promotion_anchor_policy_id_candidates(anchor_name: str) -> tuple[str, ...]:
         return (_PROMOTION_GATE_RANDOMLEGAL_POLICY_ID,)
     if anchor_name == _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME:
         return (_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID, anchor_name)
+    if anchor_name == HEURISTIC_PUBLIC_POLICY_ID:
+        return (HEURISTIC_PUBLIC_POLICY_ID,)
     normalized = _slug_policy_id(anchor_name)
     if not normalized:
         return ()
     return tuple(dict.fromkeys((normalized, anchor_name)))
+
+
+def _find_noleague_baseline_snapshot(run_dir: Path) -> SnapshotMeta | None:
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    registry_path = layout.training_snapshots_dir / REGISTRY_FILENAME
+    if not registry_path.is_file():
+        return None
+    registry = SnapshotRegistry.load(registry_path)
+    snapshots_by_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
+    for policy_id in _promotion_anchor_policy_id_candidates(_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME):
+        snapshot = snapshots_by_id.get(policy_id)
+        if snapshot is not None:
+            return snapshot
+
+    manifest_path = layout.manifest_path
+    if not manifest_path.is_file():
+        return None
+    manifest = _load_json_object(manifest_path, label="run manifest")
+    config_canonical = manifest.get("config_canonical", {})
+    if not isinstance(config_canonical, dict):
+        return None
+    training_family = config_canonical.get("training_family_a", {})
+    if not isinstance(training_family, dict):
+        return None
+    if str(training_family.get("mode", "")).strip() != "b1_no_league":
+        return None
+    if not registry.snapshots:
+        return None
+    return max(registry.snapshots, key=lambda snapshot: snapshot.sort_key())
+
+
+def _import_noleague_baseline_anchor(
+    *,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    baseline_run_dir: Path,
+    expected_model_state_dict: dict[str, Any],
+    expected_config_canonical: dict[str, Any] | None,
+    expected_spec_hash256: str | None,
+) -> tuple[Path, str, int]:
+    source_run_dir = Path(baseline_run_dir).resolve()
+    source_snapshot = _find_noleague_baseline_snapshot(source_run_dir)
+    if source_snapshot is None:
+        raise FileNotFoundError(
+            "Could not resolve the canonical B1 no-league baseline snapshot in "
+            f"{source_run_dir}. Run a dedicated b1_no_league training job first."
+        )
+
+    source_weights_path = source_run_dir / source_snapshot.path
+    if not source_weights_path.is_file():
+        raise FileNotFoundError(f"Resolved B1 baseline snapshot is missing its weights artifact: {source_weights_path}")
+
+    snapshot_dir = training_paths.snapshots_dir / _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = snapshot_dir / SNAPSHOT_WEIGHTS_FILENAME
+    payload = torch.load(source_weights_path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Imported B1 baseline weights payload must be a dict: {source_weights_path}")
+    _validate_imported_snapshot_contract(
+        source_run_dir=source_run_dir,
+        payload=payload,
+        expected_model_state_dict=expected_model_state_dict,
+        expected_config_canonical=expected_config_canonical,
+        expected_spec_hash256=expected_spec_hash256,
+    )
+    imported_payload = dict(payload)
+    imported_payload["policy_id"] = _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID
+    imported_payload["imported_from_run_dir"] = source_run_dir.as_posix()
+    imported_payload["imported_from_policy_id"] = source_snapshot.policy_id
+    imported_payload["imported_from_snapshot_path"] = source_snapshot.path
+    torch.save(imported_payload, weights_path)
+    weights_sha256 = _sha256_file(weights_path)
+
+    _write_json_file(
+        snapshot_dir / SNAPSHOT_METADATA_FILENAME,
+        {
+            "format": "imported_train_snapshot_metadata_v1",
+            "policy_id": _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID,
+            "update": int(source_snapshot.update),
+            "weights_path": snapshot_weights_relpath(_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID),
+            "weights_sha256": weights_sha256,
+            "imported_from_run_dir": source_run_dir.as_posix(),
+            "imported_from_policy_id": source_snapshot.policy_id,
+            "imported_from_snapshot_path": source_snapshot.path,
+        },
+    )
+    return weights_path, weights_sha256, int(source_snapshot.update)
 
 
 def _ensure_noleague_baseline_anchor(
@@ -1031,14 +1200,25 @@ def _ensure_noleague_baseline_anchor(
     learner: ImpalaLearner,
     device: torch.device,
     config_hash256: str,
+    spec_hash256: str | None = None,
+    baseline_run_dir: Path | None = None,
+    permit_current_run_alias: bool = False,
+    source_checkpoint_path: Path | None = None,
+    update: int | None = None,
 ) -> str | None:
     league = stack.config.league
-    if league is None or not league.enabled or not league.promotion_gate_enabled:
-        return None
-    if _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME not in league.promotion_anchor_set_v1.required:
+    training_config = stack.config.training_family_a
+    training_mode = "" if training_config is None else str(training_config.mode)
+    requires_anchor = bool(
+        league is not None
+        and league.enabled
+        and league.promotion_gate_enabled
+        and _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME in league.promotion_anchor_set_v1.required
+    )
+    if not requires_anchor and not permit_current_run_alias:
         return None
     if learner.model is None:
-        raise RuntimeError("Cannot bootstrap the NoLeague baseline anchor without a learner model")
+        raise RuntimeError("Cannot ensure the NoLeague baseline anchor without a learner model")
 
     registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
     registry = SnapshotRegistry.load(registry_path)
@@ -1062,26 +1242,70 @@ def _ensure_noleague_baseline_anchor(
         )
         return existing_policy_id
 
-    checkpoint_path = training_paths.checkpoints_dir / _PROMOTION_GATE_NOLEAGUE_BASELINE_CHECKPOINT
-    _write_checkpoint(
-        checkpoint_path=checkpoint_path,
-        learner=learner,
-        stack=stack,
-        device=device,
+    if baseline_run_dir is not None:
+        weights_path, weights_sha256, imported_update = _import_noleague_baseline_anchor(
+            training_paths=training_paths,
+            run_dir=run_dir,
+            baseline_run_dir=baseline_run_dir,
+            expected_model_state_dict=learner.model.state_dict(),
+            expected_config_canonical=canonical_config_dict(stack),
+            expected_spec_hash256=spec_hash256,
+        )
+        registry.add_snapshot(
+            policy_id=_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID,
+            update=int(imported_update),
+            weights_sha256=weights_sha256,
+            path=weights_path.relative_to(run_dir).as_posix(),
+        )
+        registry.pin_snapshot(_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID)
+        _save_snapshot_registry_with_retention(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=run_dir,
+            registry=registry,
+        )
+        print(
+            "Imported promotion anchor: "
+            f"anchor={_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME} "
+            f"policy_id={_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID} "
+            f"source_run_dir={Path(baseline_run_dir).resolve()}"
+        )
+        return _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID
+
+    if not permit_current_run_alias:
+        if requires_anchor:
+            raise RuntimeError(
+                "The canonical B1 NoLeague baseline is required for this training run. "
+                "Pass --b1-baseline-run-dir pointing at a completed b1_no_league run."
+            )
+        return None
+
+    resolved_update = int(learner.update_count if update is None else update)
+    checkpoint_path = (
+        training_paths.checkpoints_dir / _PROMOTION_GATE_NOLEAGUE_BASELINE_CHECKPOINT
+        if source_checkpoint_path is None
+        else Path(source_checkpoint_path)
     )
+    if source_checkpoint_path is None:
+        _write_checkpoint(
+            checkpoint_path=checkpoint_path,
+            learner=learner,
+            stack=stack,
+            device=device,
+        )
     weights_path, weights_sha256 = _write_snapshot_artifact(
         snapshots_dir=training_paths.snapshots_dir,
         run_dir=run_dir,
         checkpoint_path=checkpoint_path,
         policy_id=_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID,
-        update=0,
+        update=resolved_update,
         config_hash256=config_hash256,
         device=device,
         model_state_dict=learner.model.state_dict(),
     )
     registry.add_snapshot(
         policy_id=_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID,
-        update=0,
+        update=resolved_update,
         weights_sha256=weights_sha256,
         path=weights_path.relative_to(run_dir).as_posix(),
     )
@@ -1093,9 +1317,10 @@ def _ensure_noleague_baseline_anchor(
         registry=registry,
     )
     print(
-        "Bootstrapped promotion anchor: "
+        "Persisted canonical B1 baseline alias: "
         f"anchor={_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME} "
-        f"policy_id={_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID}"
+        f"policy_id={_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID} "
+        f"training_mode={training_mode or 'unknown'} update={resolved_update}"
     )
     return _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID
 
@@ -1123,6 +1348,8 @@ def _resolve_promotion_anchor_policy_ids(
         policy_id = next((candidate for candidate in candidates if candidate in available_policy_ids), None)
         if policy_id is None and anchor_name == _PROMOTION_GATE_RANDOMLEGAL_NAME:
             policy_id = _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID
+        if policy_id is None and anchor_name == HEURISTIC_PUBLIC_POLICY_ID:
+            policy_id = HEURISTIC_PUBLIC_POLICY_ID
         if policy_id is not None:
             resolved[anchor_name] = policy_id
             continue
@@ -1171,6 +1398,7 @@ class _PromotionGateRunner:
         focal_policy_id: str,
         focal_model: PolicyValueModel,
         anchor_models: dict[str, PolicyValueModel],
+        heuristic_policies: dict[str, HeuristicPublicPolicy],
         observation_dim: int,
         action_dim: int,
         pass_action_id: int,
@@ -1185,6 +1413,7 @@ class _PromotionGateRunner:
         self.artifact_dir = artifact_dir
         self.require_sorted_legal_ids = require_sorted_legal_ids
         self._policy_models = {focal_policy_id: focal_model, **anchor_models}
+        self._heuristic_policies = dict(heuristic_policies)
         self._baseline_logits = np.zeros((action_dim,), dtype=np.float32)
         self._device = torch.device("cpu")
 
@@ -1253,6 +1482,13 @@ class _PromotionGateRunner:
             env_index=0,
             require_sorted=self.require_sorted_legal_ids,
         )
+        heuristic_policy = self._heuristic_policies.get(current_policy_id)
+        if heuristic_policy is not None:
+            action = heuristic_policy.choose_action(
+                np.asarray(batch.obs[0], dtype=np.float32),
+                legal_ids,
+            )
+            return int(action), seat_hidden
         model = self._policy_models.get(current_policy_id)
         if model is None:
             if current_policy_id != _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID:
@@ -1652,8 +1888,27 @@ def _run_snapshot_promotion_gate(
             stack=stack,
         )
         for policy_id in set(anchor_policy_ids.values())
-        if policy_id != _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID
+        if policy_id not in {_PROMOTION_GATE_RANDOMLEGAL_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID}
     }
+    heuristic_policies: dict[str, HeuristicPublicPolicy] = {}
+    if HEURISTIC_PUBLIC_POLICY_ID in set(anchor_policy_ids.values()):
+        try:
+            heuristic_policies = {
+                HEURISTIC_PUBLIC_POLICY_ID: HeuristicPublicPolicy.from_spec_bundle(contract.spec_bundle)
+            }
+        except Exception as exc:
+            assert league is not None
+            if HEURISTIC_PUBLIC_POLICY_ID in league.promotion_anchor_set_v1.required:
+                raise RuntimeError("Promotion gate requires a heuristic-compatible simulator contract for B2") from exc
+            anchor_policy_ids = {
+                anchor_name: policy_id
+                for anchor_name, policy_id in anchor_policy_ids.items()
+                if policy_id != HEURISTIC_PUBLIC_POLICY_ID
+            }
+            print(
+                "Promotion gate note: skipping optional B2 HeuristicPublic because the active simulator contract "
+                f"does not expose the required public action/observation metadata ({exc})."
+            )
     runner = _PromotionGateRunner(
         stack=stack,
         focal_policy_id=candidate_policy_id,
@@ -1664,6 +1919,7 @@ def _run_snapshot_promotion_gate(
             stack=stack,
         ),
         anchor_models=anchor_models,
+        heuristic_policies=heuristic_policies,
         observation_dim=observation_dim,
         action_dim=action_dim,
         pass_action_id=int(contract.spec_bundle["action"]["pass_action_id"]),
@@ -1719,6 +1975,8 @@ def _run_minimal_training(
     run_id256: str,
     config_hash256: str,
     spec_hash256: str,
+    runtime_mode: QueueRuntimeMode,
+    b1_baseline_run_dir: Path | None,
 ) -> dict[str, float]:
     _configure_torch_threads(stack)
     torch.manual_seed(seed)
@@ -1727,8 +1985,9 @@ def _run_minimal_training(
     observation_dim, action_dim = _spec_dimensions(contract)
     training_config = stack.config.training_family_a
     model_config = stack.config.model
-    if training_config is None or model_config is None:
-        raise RuntimeError("The locked stack is missing training_family_a or model config")
+    environment_config = stack.config.environment
+    if training_config is None or model_config is None or environment_config is None:
+        raise RuntimeError("The locked stack is missing training_family_a, model, or environment config")
 
     training_paths = _training_paths(artifacts.run_dir)
     pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
@@ -1760,38 +2019,45 @@ def _run_minimal_training(
         learner=learner,
         device=device,
         config_hash256=config_hash256,
+        spec_hash256=spec_hash256,
+        baseline_run_dir=b1_baseline_run_dir,
     )
-    env = _build_env(stack, profile=profile, num_envs=num_envs, seed=seed)
+    runtime_config = build_runtime_config(
+        stack=stack,
+        num_envs=num_envs,
+        unroll_length=unroll_length,
+        profile=profile,
+        seed=seed,
+        pass_action_id=pass_action_id,
+        runtime_mode=runtime_mode,
+    )
+    runtime = QueueRuntime(
+        stack=stack,
+        config=runtime_config,
+        model=model,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        run_dir=artifacts.run_dir,
+        performance_log_path=training_paths.performance_log_path,
+    )
     latest_metrics: dict[str, float] = {}
     start_time = time.time()
     try:
-        for update_index in range(max_updates):
-            rollout, initial_hidden_state, final_seat_hidden = _collect_rollout(
-                env,
-                model,
-                unroll_length=unroll_length,
-                num_envs=num_envs,
-                observation_dim=observation_dim,
-                action_dim=action_dim,
-                device=device,
-                rng=np.random.default_rng(seed + update_index),
-                pass_action_id=pass_action_id,
+        for _update_index in range(max_updates):
+            runtime_batch = runtime.collect_update_batch(
+                gamma=float(training_config.gamma),
+                truncation_bootstrap_value=bool(environment_config.truncation_bootstrap_value),
+                vtrace_rho_bar=float(training_config.vtrace_rho_bar),
+                vtrace_c_bar=float(training_config.vtrace_c_bar),
             )
-            bootstrap_value = _bootstrap_values(
-                model,
-                rollout,
-                final_seat_hidden,
-                device=device,
+            latest_metrics = learner.update(runtime_batch.learner_batch)
+            latest_metrics.update(runtime_batch.runtime_metrics)
+            latest_metrics.update(
+                runtime.maybe_publish_snapshot(
+                    learner_model=model,
+                    learner_update_count=int(learner.update_count),
+                )
             )
-            learner_batch = _build_learner_batch(
-                stack,
-                rollout,
-                bootstrap_value,
-                action_dim=action_dim,
-                initial_hidden_state=initial_hidden_state,
-                pass_action_id=pass_action_id,
-            )
-            latest_metrics = learner.update(learner_batch)
             _write_scalars_record(
                 scalars_path=training_paths.scalars_path,
                 learner=learner,
@@ -1820,6 +2086,19 @@ def _run_minimal_training(
                     update=int(learner.update_count),
                     policy_version=int(learner.get_policy_version()),
                 )
+                if str(training_config.mode).strip() == "b1_no_league":
+                    _ensure_noleague_baseline_anchor(
+                        stack=stack,
+                        training_paths=training_paths,
+                        run_dir=artifacts.run_dir,
+                        learner=learner,
+                        device=device,
+                        config_hash256=config_hash256,
+                        permit_current_run_alias=True,
+                        source_checkpoint_path=ckpt_path,
+                        update=int(learner.update_count),
+                    )
+                runtime.refresh_opponent_pool()
                 _run_snapshot_promotion_gate(
                     stack=stack,
                     contract=contract,
@@ -1854,7 +2133,19 @@ def _run_minimal_training(
                     f"stop_reason={summary_payload['stop_reason']}"
                 )
     finally:
-        env.close()
+        runtime.close()
+
+    if str(training_config.mode).strip() == "b1_no_league":
+        _ensure_noleague_baseline_anchor(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=artifacts.run_dir,
+            learner=learner,
+            device=device,
+            config_hash256=config_hash256,
+            permit_current_run_alias=True,
+            update=int(learner.update_count),
+        )
 
     if not latest_metrics:
         raise RuntimeError("The minimal train smoke finished without producing learner metrics")
@@ -1881,6 +2172,13 @@ def main() -> None:
     parser.add_argument("--num-envs", type=int, default=2, help="Tiny env count for the minimal smoke run")
     parser.add_argument("--unroll-length", type=int, default=4, help="Tiny rollout length for the smoke run")
     parser.add_argument("--max-updates", type=int, default=1, help="Number of learner updates to run")
+    parser.add_argument(
+        "--runtime-mode",
+        type=str,
+        default="train_ordered",
+        choices=("train_ordered", "train_async_fast"),
+        help="Queue runtime mode: deterministic ordered collection or throughput-oriented async-fast collection",
+    )
     parser.add_argument("--profile", type=str, default="", help="Optional simulator profile override")
     parser.add_argument("--device", type=str, default="", help="Optional learner device override")
     parser.add_argument("--seed", type=int, default=None, help="Optional seed override")
@@ -1901,6 +2199,12 @@ def main() -> None:
         type=Path,
         default=None,
         help="Optional dev-eval summaries JSON used to resolve the deterministic final policy set in the manifest",
+    )
+    parser.add_argument(
+        "--b1-baseline-run-dir",
+        type=Path,
+        default=None,
+        help="Completed b1_no_league run directory used to import the canonical B1 baseline anchor",
     )
     args = parser.parse_args()
     run_label = _resolve_run_label(parser, args.run_label, args.run_id_alias)
@@ -1949,9 +2253,7 @@ def main() -> None:
         spec_mismatch_policy=_spec_mismatch_policy(stack),
     )
     spec_bundle_message = (
-        "Loaded synthetic public-demo spec bundle: "
-        if public_demo_enabled
-        else "Verified runtime spec bundle: "
+        "Loaded synthetic public-demo spec bundle: " if public_demo_enabled else "Verified runtime spec bundle: "
     )
     print(spec_bundle_message + f"compat={simulator_info.get('compatibility_hash', '')} sha256={spec_hash256}")
     print(f"Loaded stack config with {len(stack.components)} components")
@@ -1983,6 +2285,25 @@ def main() -> None:
         manifest,
         run_label=run_label or None,
     )
+    run_summary_payload = _load_json_object(artifacts.run_summary_path, label="run summary")
+    run_summary_payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(args.runtime_mode)
+    run_summary_payload["policy_set_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
+    if args.b1_baseline_run_dir is not None:
+        run_summary_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
+    _write_json(artifacts.run_summary_path, run_summary_payload)
+
+    determinism_payload = _load_json_object(artifacts.determinism_report_path, label="determinism report")
+    determinism_payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(args.runtime_mode)
+    determinism_payload["policy_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
+    if args.b1_baseline_run_dir is not None:
+        determinism_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
+    _write_json(artifacts.determinism_report_path, determinism_payload)
+
+    environment_payload = _load_json_object(artifacts.environment_path, label="environment manifest")
+    environment_payload["cwd"] = stack.root.as_posix()
+    environment_payload["argv"] = sys.argv
+    environment_payload["hardware"] = manifest.hardware
+    _write_json(artifacts.environment_path, environment_payload)
     print(f"Wrote manifest: {artifacts.manifest_path}")
 
     if public_demo_enabled:
@@ -2021,6 +2342,8 @@ def main() -> None:
         run_id256=run_id256,
         config_hash256=config_hash256,
         spec_hash256=spec_hash256,
+        runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
+        b1_baseline_run_dir=None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve(),
     )
     print(
         "Completed minimal training run: "

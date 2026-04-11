@@ -182,9 +182,7 @@ def solve_nash_mixture(
     else:
         bias = np.arange(policy_count, dtype=np.float64)
 
-    c_primary = np.concatenate(
-        [np.zeros((policy_count,), dtype=np.float64), np.array([-1.0], dtype=np.float64)]
-    )
+    c_primary = np.concatenate([np.zeros((policy_count,), dtype=np.float64), np.array([-1.0], dtype=np.float64)])
     a_ub = np.concatenate([-p_mean_arr.T, np.ones((policy_count, 1), dtype=np.float64)], axis=1)
     b_ub = np.zeros((policy_count,), dtype=np.float64)
     a_eq = np.concatenate([np.ones((1, policy_count), dtype=np.float64), np.zeros((1, 1), dtype=np.float64)], axis=1)

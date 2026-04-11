@@ -11,6 +11,7 @@ from typing import Any, Callable
 import numpy as np
 
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
+from weiss_rl.envs.pool_factory import make_env_pool_from_config
 from weiss_rl.replay.bundles import (
     ReplayBundleMeta,
     ReplayRerunContract,
@@ -40,13 +41,22 @@ def require_supported_rerun_contract(meta: ReplayBundleMeta) -> ReplayRerunContr
 def build_replay_env(contract: ReplayRerunContract, *, env_factory: ReplayEnvFactory | None = None) -> Any:
     if env_factory is not None:
         return env_factory(contract)
-    return DecisionBoundaryEnv.create(
+    pool, layout_name = make_env_pool_from_config(
+        {
+            "max_decisions": int(contract.max_decisions),
+            "max_ticks": int(contract.max_ticks),
+            "observation_visibility": contract.observation_visibility,
+            "seed": 0,
+        },
+        profile="fast",
+        num_envs=1,
+    )
+    if layout_name != "i16_legal_ids":
+        raise RuntimeError(f"Replay verification requires ids-based legality, got {layout_name!r}")
+    return DecisionBoundaryEnv(
+        pool,
         legality="ids_offsets",
         engine_status_policy="passthrough",
-        num_envs=1,
-        max_decisions=int(contract.max_decisions),
-        max_ticks=int(contract.max_ticks),
-        observation_visibility=contract.observation_visibility,
     )
 
 

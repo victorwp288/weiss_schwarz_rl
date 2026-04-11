@@ -19,6 +19,7 @@ matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 
+from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.training_logger import TrainingLogger
 
 __all__ = [
@@ -157,8 +158,12 @@ class PaperFigureSpec:
 
 
 def _render_matchup_heatmap(run_root: Path) -> Figure:
+    layout = ArtifactLayout.from_run_dir(run_root)
     payoff_matrix = _load_square_matrix_csv(
-        run_root / "eval" / "final_eval" / "payoff_matrices" / "p_mean.csv",
+        _resolve_existing_input(
+            layout.final_eval_matrix_csv("mean"),
+            layout.final_eval_payoff_matrix_csv("p_mean"),
+        ),
         artifact_name="payoff matrix",
         minimum=0.0,
         maximum=1.0,
@@ -175,8 +180,9 @@ def _render_matchup_heatmap(run_root: Path) -> Figure:
 
 
 def _render_truncation_heatmap(run_root: Path) -> Figure:
+    layout = ArtifactLayout.from_run_dir(run_root)
     truncation_matrix = _load_square_matrix_csv(
-        run_root / "eval" / "diagnostics" / "truncation_heatmap_data.csv",
+        layout.truncation_heatmap_csv(),
         artifact_name="truncation heatmap",
         minimum=0.0,
         maximum=1.0,
@@ -193,12 +199,14 @@ def _render_truncation_heatmap(run_root: Path) -> Figure:
 
 
 def _render_seat_bias(run_root: Path) -> Figure:
-    seat_bias = _load_seat_bias_json(run_root / "eval" / "diagnostics" / "seat_bias.json")
+    layout = ArtifactLayout.from_run_dir(run_root)
+    seat_bias = _load_seat_bias_json(layout.seat_bias_json())
     return _build_seat_bias_figure(seat_bias)
 
 
 def _render_learning_curves(run_root: Path) -> Figure:
-    learning_curves = _load_learning_curves(run_root / "training" / "logs" / "training_metrics.jsonl")
+    layout = ArtifactLayout.from_run_dir(run_root)
+    learning_curves = _load_learning_curves(layout.training_logs_dir / "training_metrics.jsonl")
     return _build_learning_curves_figure(learning_curves)
 
 
@@ -265,6 +273,14 @@ def render_paper_figures(
     return tuple(outputs)
 
 
+def _resolve_existing_input(*candidates: Path) -> Path:
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    candidate_list = ", ".join(path.as_posix() for path in candidates)
+    raise FileNotFoundError(f"missing required input artifact; checked: {candidate_list}")
+
+
 def _resolve_figure_specs(fig_id: str | None) -> tuple[PaperFigureSpec, ...]:
     specs = _paper_figure_specs()
     if fig_id is None:
@@ -299,9 +315,7 @@ def _validate_required_inputs(run_root: Path, figure_specs: Sequence[PaperFigure
 
     selected_ids = ", ".join(spec.fig_id for spec in figure_specs)
     missing_lines = "\n".join(f"- {path}" for path in missing)
-    raise FileNotFoundError(
-        f"missing required input artifact(s) for fig-id selection {selected_ids}:\n{missing_lines}"
-    )
+    raise FileNotFoundError(f"missing required input artifact(s) for fig-id selection {selected_ids}:\n{missing_lines}")
 
 
 def _normalize_formats(formats: Sequence[str]) -> tuple[str, ...]:
@@ -545,8 +559,7 @@ def _load_seat_bias_json(path: Path) -> SeatBiasArtifact:
         )
         if not math.isclose(seat0_rate + seat1_rate, 1.0, rel_tol=0.0, abs_tol=1e-9):
             raise ValueError(
-                f"seat bias matchup entry {index} must satisfy "
-                f"seat0_win_rate + seat1_win_rate == 1: {path}"
+                f"seat bias matchup entry {index} must satisfy seat0_win_rate + seat1_win_rate == 1: {path}"
             )
         matchup_labels.append(f"{policy_a} vs {policy_b}")
         seat0_win_rates.append(seat0_rate)
@@ -591,9 +604,7 @@ def _load_learning_curves(path: Path) -> LearningCurveArtifact:
         values: list[float] = []
         for index, record in enumerate(records, start=1):
             if field_name not in record:
-                raise ValueError(
-                    f"training metrics field {field_name!r} is missing from record {index}: {path}"
-                )
+                raise ValueError(f"training metrics field {field_name!r} is missing from record {index}: {path}")
             values.append(
                 _parse_finite_number(record[field_name], path=path, field_name=f"record[{index}].{field_name}")
             )
@@ -602,9 +613,7 @@ def _load_learning_curves(path: Path) -> LearningCurveArtifact:
             break
 
     if not plottable_series:
-        raise ValueError(
-            f"training metrics JSONL does not contain any supported learning-curve metrics: {path}"
-        )
+        raise ValueError(f"training metrics JSONL does not contain any supported learning-curve metrics: {path}")
 
     return LearningCurveArtifact(updates=updates, series=tuple(plottable_series))
 
