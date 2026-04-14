@@ -8,7 +8,7 @@ from typing import Any, cast
 
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.cli_banner import print_startup_banner
-from weiss_rl.config import compute_config_hash256, load_stack_config
+from weiss_rl.config import compute_config_hash256, load_stack_config, load_study_config
 from weiss_rl.eval import (
     build_matchup_export,
     build_paper_readiness_summary,
@@ -26,8 +26,9 @@ from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_pol
 from weiss_rl.metagame import build_sensitivity_report
 from weiss_rl.plotting.paper_figures import render_paper_figures
 from weiss_rl.repro import parse_seed_file
-from weiss_rl.simulator_contract import load_simulator_contract
-from weiss_rl.spec import assert_spec_bundle_contract, should_verify_runtime_spec_bundle
+from weiss_rl.simulator_contract import load_verified_simulator_contract
+from weiss_rl.spec import assert_spec_bundle_contract
+from weiss_rl.tensorboard_logger import TensorBoardLogger, tensorboard_unavailable_reason
 from weiss_rl.toy_public_demo import (
     PUBLIC_DEMO_DEFAULT_BOOTSTRAP_SAMPLES,
     PUBLIC_DEMO_DEFAULT_PAIRED_SEEDS,
@@ -270,11 +271,13 @@ def _run_canonical_eval_pipeline(
     stage1_paired_seeds: int | None,
     max_paired_seeds: int | None,
     skip_metagame: bool,
+    study_config_path: Path | None,
     skip_figures: bool,
     skip_readiness: bool,
 ) -> int:
     layout = ArtifactLayout.from_run_dir(run_dir)
     layout.ensure_directories()
+    tensorboard_logger = TensorBoardLogger(layout.tensorboard_dir)
     if final_eval_dir is not None and final_eval_dir.resolve() != layout.final_eval_dir.resolve():
         parser.error(
             f"--final-eval-dir must match the canonical run directory layout for non-demo runs: {layout.final_eval_dir}"
@@ -286,10 +289,16 @@ def _run_canonical_eval_pipeline(
         raise ValueError(f"run manifest is missing a valid run_id256: {layout.manifest_path}")
 
     evaluation = stack.config.evaluation
-    metagame_config = stack.config.metagame
-    sensitivity_config = stack.config.sensitivity
     if evaluation is None:
         raise ValueError("stack config is missing evaluation settings")
+    study_config = None
+    if not skip_metagame:
+        resolved_study_config = (
+            (stack.root / "configs" / "study" / "metagame_sensitivity.yaml")
+            if study_config_path is None
+            else study_config_path.resolve()
+        )
+        study_config = load_study_config(resolved_study_config)
 
     (
         resolved_policy_ids,
@@ -311,7 +320,10 @@ def _run_canonical_eval_pipeline(
         selection_details=selection_details,
     )
 
-    contract = load_simulator_contract(stack.root)
+    contract = load_verified_simulator_contract(
+        stack.root,
+        expected_spec_hash=str(manifest.get("spec_hash256", "")).strip(),
+    )
     observation_dim = int(contract.spec_bundle["observation"]["obs_len"])
     action_dim = int(contract.spec_bundle["action"]["action_space_size"])
     pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
@@ -354,76 +366,95 @@ def _run_canonical_eval_pipeline(
     if resolved_stage1 > resolved_max:
         raise ValueError(f"stage1 paired seeds ({resolved_stage1}) cannot exceed max paired seeds ({resolved_max})")
 
-    final_eval_payload = run_final_eval(
-        output_dir=layout.final_eval_dir,
-        runner=runner,
-        paired_seeds=all_paired_seeds,
-        stage1_paired_seeds=resolved_stage1,
-        max_paired_seeds=resolved_max,
-        stop_rules=evaluation.stop_rules,
-        run_id256=run_id256,
-        config_hash256=str(manifest["config_hash256"]),
-        spec_hash256=str(manifest["spec_hash256"]),
-        scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
-        sample_count=int(bootstrap_samples),
-        policy_ids=resolved_policy_ids,
-        snapshot_registry_path=resolved_registry_path,
-        dev_eval_summaries_path=resolved_dev_eval_path,
-        selection_config=evaluation.final_policy_set_selection,
-        final_policy_set_size=int(evaluation.final_policy_set_size),
-        metadata={
-            "pipeline": {
-                "kind": "canonical_eval_pipeline_v1",
-                "selection": dict(selection_details),
-                "seed_file": seed_file_path.as_posix(),
-                "paired_seed_limit": None if paired_seed_limit is None else int(paired_seed_limit),
-            }
-        },
-        seed_file_path=seed_file_path,
-    )
+    try:
+        if not tensorboard_logger.enabled:
+            unavailable_reason = tensorboard_unavailable_reason()
+            print(
+                "TensorBoard logging is disabled for eval: "
+                + ("SummaryWriter unavailable" if unavailable_reason is None else unavailable_reason),
+                file=sys.stderr,
+            )
+        else:
+            tensorboard_logger.log_text("eval/run/manifest", manifest)
 
-    metagame_payload: dict[str, Any] | None = None
-    if not skip_metagame:
-        if metagame_config is None or sensitivity_config is None:
-            raise ValueError("stack config is missing metagame or sensitivity settings")
-        metagame_payload = build_sensitivity_report(
-            final_eval_dir=layout.final_eval_dir,
-            out_dir=layout.metagame_dir,
-            metagame_config=metagame_config,
-            sensitivity_config=sensitivity_config,
+        final_eval_payload = run_final_eval(
+            output_dir=layout.final_eval_dir,
+            runner=runner,
+            paired_seeds=all_paired_seeds,
+            stage1_paired_seeds=resolved_stage1,
+            max_paired_seeds=resolved_max,
+            stop_rules=evaluation.stop_rules,
+            run_id256=run_id256,
+            config_hash256=str(manifest["config_hash256"]),
+            spec_hash256=str(manifest["spec_hash256"]),
+            scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
+            sample_count=int(bootstrap_samples),
+            policy_ids=resolved_policy_ids,
+            snapshot_registry_path=resolved_registry_path,
+            dev_eval_summaries_path=resolved_dev_eval_path,
+            selection_config=evaluation.final_policy_set_selection,
+            final_policy_set_size=int(evaluation.final_policy_set_size),
+            metadata={
+                "pipeline": {
+                    "kind": "canonical_eval_pipeline_v1",
+                    "selection": dict(selection_details),
+                    "seed_file": seed_file_path.as_posix(),
+                    "paired_seed_limit": None if paired_seed_limit is None else int(paired_seed_limit),
+                }
+            },
+            seed_file_path=seed_file_path,
         )
 
-    figure_paths: tuple[Path, ...] = ()
-    if not skip_figures:
-        figure_paths = render_paper_figures(run_dir)
+        metagame_payload: dict[str, Any] | None = None
+        if not skip_metagame:
+            assert study_config is not None
+            metagame_payload = build_sensitivity_report(
+                final_eval_dir=layout.final_eval_dir,
+                out_dir=layout.metagame_dir,
+                metagame_config=study_config.metagame,
+                sensitivity_config=study_config.sensitivity,
+            )
 
-    readiness_payload: dict[str, Any] | None = None
-    if not skip_readiness:
-        readiness_payload = build_paper_readiness_summary(run_dir=run_dir)
-        write_paper_readiness_json(layout.paper_readiness_summary_path, readiness_payload)
+        figure_paths: tuple[Path, ...] = ()
+        if not skip_figures:
+            figure_paths = render_paper_figures(run_dir)
 
-    _update_run_level_reports(
-        layout=layout,
-        run_dir=run_dir,
-        policy_ids=resolved_policy_ids,
-        selection_details=selection_details,
-        final_eval_payload=final_eval_payload,
-        metagame_payload=metagame_payload,
-        figure_paths=figure_paths,
-        readiness_payload=readiness_payload,
-    )
+        readiness_payload: dict[str, Any] | None = None
+        if not skip_readiness:
+            readiness_payload = build_paper_readiness_summary(run_dir=run_dir)
+            write_paper_readiness_json(layout.paper_readiness_summary_path, readiness_payload)
 
-    print(f"Canonical final_eval summary JSON: {layout.final_eval_summary_json()}")
-    print(f"Canonical replay verification JSON: {layout.replay_verification_json()}")
-    if metagame_payload is not None:
-        print(f"Canonical metagame summary JSON: {layout.metagame_dir / 'summary.json'}")
-    if figure_paths:
-        print(f"Rendered {len(figure_paths)} paper figure files to {layout.figures_paper_dir}")
-    if readiness_payload is not None:
-        print(f"Paper readiness summary JSON: {layout.paper_readiness_summary_path}")
-        print("Paper readiness: " + ("passed" if bool(readiness_payload.get("passed", False)) else "failed"))
-    print(f"Resolved policy set: {resolved_policy_ids}")
-    return 0
+        _update_run_level_reports(
+            layout=layout,
+            run_dir=run_dir,
+            policy_ids=resolved_policy_ids,
+            selection_details=selection_details,
+            final_eval_payload=final_eval_payload,
+            metagame_payload=metagame_payload,
+            figure_paths=figure_paths,
+            readiness_payload=readiness_payload,
+        )
+
+        if tensorboard_logger.enabled:
+            tensorboard_logger.log_final_eval_summary(final_eval_payload, step=0)
+            if metagame_payload is not None:
+                tensorboard_logger.log_metagame_summary(metagame_payload, metagame_dir=layout.metagame_dir, step=0)
+            if readiness_payload is not None:
+                tensorboard_logger.log_paper_readiness(readiness_payload, step=0)
+
+        print(f"Canonical final_eval summary JSON: {layout.final_eval_summary_json()}")
+        print(f"Canonical replay verification JSON: {layout.replay_verification_json()}")
+        if metagame_payload is not None:
+            print(f"Canonical metagame summary JSON: {layout.metagame_dir / 'summary.json'}")
+        if figure_paths:
+            print(f"Rendered {len(figure_paths)} paper figure files to {layout.figures_paper_dir}")
+        if readiness_payload is not None:
+            print(f"Paper readiness summary JSON: {layout.paper_readiness_summary_path}")
+            print("Paper readiness: " + ("passed" if bool(readiness_payload.get("passed", False)) else "failed"))
+        print(f"Resolved policy set: {resolved_policy_ids}")
+        return 0
+    finally:
+        tensorboard_logger.close()
 
 
 def main() -> None:
@@ -520,6 +551,12 @@ def main() -> None:
         help="Skip metagame sensitivity generation in canonical non-demo mode",
     )
     parser.add_argument(
+        "--study-config",
+        type=Path,
+        default=None,
+        help="Optional study-only metagame/sensitivity config (defaults to configs/study/metagame_sensitivity.yaml)",
+    )
+    parser.add_argument(
         "--skip-figures",
         action="store_true",
         help="Skip paper figure rendering in canonical non-demo mode",
@@ -602,15 +639,7 @@ def main() -> None:
         actual=config_hash256,
     )
 
-    reproducibility = stack.config.reproducibility
     policy = "hard_fail"
-    require_export_spec_bundle = False
-    persist_in_manifest = False
-    if reproducibility is not None:
-        spec_bundle_policy = reproducibility.spec_bundle
-        policy = "hard_fail" if spec_bundle_policy.fail_on_spec_mismatch else "disabled"
-        require_export_spec_bundle = spec_bundle_policy.require_export_spec_bundle
-        persist_in_manifest = spec_bundle_policy.persist_in_manifest
 
     contract = None
     if args.public_demo:
@@ -618,14 +647,8 @@ def main() -> None:
         assert_spec_bundle_contract(args.spec_hash, public_demo_bundle)
         reported_spec_hash = public_demo_spec_hash256()
     else:
-        if should_verify_runtime_spec_bundle(
-            expected_spec_hash=args.spec_hash,
-            require_export_spec_bundle=require_export_spec_bundle,
-            persist_in_manifest=persist_in_manifest,
-        ):
-            contract = load_simulator_contract(stack.root)
-            assert_spec_bundle_contract(args.spec_hash, contract.spec_bundle)
-        reported_spec_hash = contract.spec_hash256 if contract is not None else "(not checked)"
+        contract = load_verified_simulator_contract(stack.root, expected_spec_hash=args.spec_hash)
+        reported_spec_hash = contract.spec_hash256
     print_startup_banner(
         reported_spec_hash,
         config_hash256,
@@ -694,6 +717,7 @@ def main() -> None:
                 stage1_paired_seeds=stage1_paired_seeds,
                 max_paired_seeds=max_paired_seeds,
                 skip_metagame=bool(args.skip_metagame),
+                study_config_path=None if args.study_config is None else args.study_config.resolve(),
                 skip_figures=bool(args.skip_figures),
                 skip_readiness=bool(args.skip_readiness),
             )

@@ -11,13 +11,14 @@ from typing import Any, Literal
 
 import pytest
 
-from weiss_rl.config import load_stack_config
+from weiss_rl.config import load_study_config
 from weiss_rl.config.models import StopRulesConfig
 from weiss_rl.eval import run_final_eval
 from weiss_rl.metagame import build_sensitivity_report
 from weiss_rl.tests.test_final_eval import _CONFIG_HASH256, _FakeMatrixRunner, _RUN_ID256, _SPEC_HASH256
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+STUDY_CONFIG_PATH = REPO_ROOT / "configs" / "study" / "metagame_sensitivity.yaml"
 
 
 def _write_final_eval_fixture(tmp_path: Path) -> Path:
@@ -71,16 +72,14 @@ def _write_final_eval_summary(final_eval_dir: Path, payload: dict[str, Any]) -> 
 
 def test_build_sensitivity_report_writes_case_artifacts_and_deltas(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.metagame is not None
-    assert stack.config.sensitivity is not None
+    study = load_study_config(STUDY_CONFIG_PATH)
 
     out_dir = final_eval_dir / "sensitivity"
     payload = build_sensitivity_report(
         final_eval_dir=final_eval_dir,
         out_dir=out_dir,
-        metagame_config=stack.config.metagame,
-        sensitivity_config=stack.config.sensitivity,
+        metagame_config=study.metagame,
+        sensitivity_config=study.sensitivity,
     )
 
     assert payload["policy_ids"] == ["policy_gamma", "policy_alpha", "policy_beta"]
@@ -120,15 +119,13 @@ def test_build_sensitivity_report_writes_case_artifacts_and_deltas(tmp_path: Pat
 
 def test_build_sensitivity_report_rejects_unsupported_case_config(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.metagame is not None
-    assert stack.config.sensitivity is not None
+    study = load_study_config(STUDY_CONFIG_PATH)
 
     bad_sensitivity = replace(
-        stack.config.sensitivity,
+        study.sensitivity,
         cases={
-            **stack.config.sensitivity.cases,
-            "S1": replace(stack.config.sensitivity.cases["S1"], draw_score=0.25),
+            **study.sensitivity.cases,
+            "S1": replace(study.sensitivity.cases["S1"], draw_score=0.25),
         },
     )
 
@@ -136,20 +133,18 @@ def test_build_sensitivity_report_rejects_unsupported_case_config(tmp_path: Path
         build_sensitivity_report(
             final_eval_dir=final_eval_dir,
             out_dir=tmp_path / "sensitivity",
-            metagame_config=stack.config.metagame,
+            metagame_config=study.metagame,
             sensitivity_config=bad_sensitivity,
         )
 
 
 def test_build_sensitivity_report_rejects_unsupported_nash_contract(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.metagame is not None
-    assert stack.config.sensitivity is not None
+    study = load_study_config(STUDY_CONFIG_PATH)
 
     bad_metagame = replace(
-        stack.config.metagame,
-        nash=replace(stack.config.metagame.nash, threads=2),
+        study.metagame,
+        nash=replace(study.metagame.nash, threads=2),
     )
 
     with pytest.raises(ValueError, match=r"metagame\.nash\.threads=1"):
@@ -157,15 +152,36 @@ def test_build_sensitivity_report_rejects_unsupported_nash_contract(tmp_path: Pa
             final_eval_dir=final_eval_dir,
             out_dir=tmp_path / "sensitivity",
             metagame_config=bad_metagame,
-            sensitivity_config=stack.config.sensitivity,
+            sensitivity_config=study.sensitivity,
         )
+
+
+def test_build_sensitivity_report_supports_global_selection_alpharank(tmp_path: Path) -> None:
+    final_eval_dir = _write_final_eval_fixture(tmp_path)
+    study = load_study_config(STUDY_CONFIG_PATH)
+
+    global_metagame = replace(
+        study.metagame,
+        alpharank=replace(study.metagame.alpharank, local_selection=False),
+    )
+
+    out_dir = final_eval_dir / "sensitivity_global"
+    payload = build_sensitivity_report(
+        final_eval_dir=final_eval_dir,
+        out_dir=out_dir,
+        metagame_config=global_metagame,
+        sensitivity_config=study.sensitivity,
+    )
+
+    assert payload["alpharank_selection_mode"] == "global"
+    summary = json.loads((out_dir / "S0" / "alpharank" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["selection_mode"] == "global"
+    assert (out_dir / "S2" / "alpharank" / "stationary_mean.csv").is_file()
 
 
 def test_build_sensitivity_report_rejects_mismatched_final_eval_policy_index(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.metagame is not None
-    assert stack.config.sensitivity is not None
+    study = load_study_config(STUDY_CONFIG_PATH)
 
     summary_path = final_eval_dir / "summary.json"
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -176,16 +192,14 @@ def test_build_sensitivity_report_rejects_mismatched_final_eval_policy_index(tmp
         build_sensitivity_report(
             final_eval_dir=final_eval_dir,
             out_dir=tmp_path / "sensitivity",
-            metagame_config=stack.config.metagame,
-            sensitivity_config=stack.config.sensitivity,
+            metagame_config=study.metagame,
+            sensitivity_config=study.sensitivity,
         )
 
 
 def test_build_sensitivity_report_rejects_duplicate_final_eval_matchup(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.metagame is not None
-    assert stack.config.sensitivity is not None
+    study = load_study_config(STUDY_CONFIG_PATH)
 
     summary_path = final_eval_dir / "summary.json"
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -196,16 +210,14 @@ def test_build_sensitivity_report_rejects_duplicate_final_eval_matchup(tmp_path:
         build_sensitivity_report(
             final_eval_dir=final_eval_dir,
             out_dir=tmp_path / "sensitivity",
-            metagame_config=stack.config.metagame,
-            sensitivity_config=stack.config.sensitivity,
+            metagame_config=study.metagame,
+            sensitivity_config=study.sensitivity,
         )
 
 
 def test_build_sensitivity_report_rejects_mismatched_matchup_episodes_path(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.metagame is not None
-    assert stack.config.sensitivity is not None
+    study = load_study_config(STUDY_CONFIG_PATH)
 
     summary_path = final_eval_dir / "summary.json"
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -229,16 +241,14 @@ def test_build_sensitivity_report_rejects_mismatched_matchup_episodes_path(tmp_p
         build_sensitivity_report(
             final_eval_dir=final_eval_dir,
             out_dir=tmp_path / "sensitivity",
-            metagame_config=stack.config.metagame,
-            sensitivity_config=stack.config.sensitivity,
+            metagame_config=study.metagame,
+            sensitivity_config=study.sensitivity,
         )
 
 
 def test_build_sensitivity_report_rejects_in_tree_same_pair_rogue_episodes_path(tmp_path: Path) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.metagame is not None
-    assert stack.config.sensitivity is not None
+    study = load_study_config(STUDY_CONFIG_PATH)
 
     summary_path = final_eval_dir / "summary.json"
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -254,8 +264,8 @@ def test_build_sensitivity_report_rejects_in_tree_same_pair_rogue_episodes_path(
         build_sensitivity_report(
             final_eval_dir=final_eval_dir,
             out_dir=tmp_path / "sensitivity",
-            metagame_config=stack.config.metagame,
-            sensitivity_config=stack.config.sensitivity,
+            metagame_config=study.metagame,
+            sensitivity_config=study.sensitivity,
         )
 
 
@@ -270,9 +280,7 @@ def test_build_sensitivity_report_rejects_unsafe_matchup_episodes_path(
     tmp_path: Path, episodes_path: str, message: str
 ) -> None:
     final_eval_dir = _write_final_eval_fixture(tmp_path)
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    assert stack.config.metagame is not None
-    assert stack.config.sensitivity is not None
+    study = load_study_config(STUDY_CONFIG_PATH)
 
     summary_path = final_eval_dir / "summary.json"
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -283,8 +291,8 @@ def test_build_sensitivity_report_rejects_unsafe_matchup_episodes_path(
         build_sensitivity_report(
             final_eval_dir=final_eval_dir,
             out_dir=tmp_path / "sensitivity",
-            metagame_config=stack.config.metagame,
-            sensitivity_config=stack.config.sensitivity,
+            metagame_config=study.metagame,
+            sensitivity_config=study.sensitivity,
         )
 
 
@@ -298,8 +306,8 @@ def test_metagame_entrypoint_writes_sensitivity_tree(tmp_path: Path) -> None:
         [
             sys.executable,
             str(REPO_ROOT / "python" / "scripts" / "metagame.py"),
-            "--stack-config",
-            str(REPO_ROOT / "configs" / "rl_stack_locked.yaml"),
+            "--study-config",
+            str(STUDY_CONFIG_PATH),
             "--final-eval-dir",
             str(final_eval_dir),
             "--out-dir",

@@ -13,6 +13,7 @@ from weiss_rl.eval.policy_set import (
     select_final_policy_set_deterministic_v1,
 )
 from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
+from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 
 def _repo_root() -> Path:
@@ -20,7 +21,7 @@ def _repo_root() -> Path:
 
 
 def _selection_config(**overrides: Any):
-    stack = load_stack_config(_repo_root() / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
     assert stack.config.evaluation is not None
     return replace(stack.config.evaluation.final_policy_set_selection, **overrides)
 

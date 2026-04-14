@@ -11,6 +11,8 @@ Use this for evaluation, selection, metagame analysis, figures, and readiness.
 - stable policy ordering and tie-breaks
 - CPU evaluation by default
 - canonical artifact writing only
+- always uses the simulator-backed contract surface, not the scaffold-only smoke path
+- keeps the evaluation protocol deterministic and only materializes dense legality where diagnostics or plots need it
 
 This is the mode that should produce the exact thesis-facing outputs.
 
@@ -18,7 +20,8 @@ This is the mode that should produce the exact thesis-facing outputs.
 
 Use this when you want reproducible thesis runs with deterministic merge order.
 
-- queue-based actor/learner runtime
+- canonical single-node queue runtime
+- defaults to the simulator `fast` profile with packed legal IDs on the training hot path
 - barriered policy sync
 - unrolls merged in stable order
 - useful for debugging regressions and reproducing paper claims
@@ -33,6 +36,7 @@ Use this when you want the same runtime shape but with higher throughput.
 - queue-based collection
 - policy lag and queue lag are recorded
 - update ordering may vary with scheduling
+- packed legal IDs remain the fast path when the profile supports them
 
 This mode is performance-oriented, but it is not intended to be bitwise identical across arbitrary host scheduling.
 
@@ -47,9 +51,9 @@ Use this for public-safe CI/demo artifacts.
 ## Simulator installation modes
 
 - `uv sync --extra dev` uses the repo's regular dev dependencies.
-- `uv sync --extra dev --extra sim` adds the published `weiss-sim` package.
-- If you prefer a sibling checkout, point `WEISS_SIM_PYTHONPATH` at the simulator source tree.
+- `uv sync --extra dev --extra sim` adds the published `weiss-sim` package and is the canonical validation path for simulator-backed runs.
+- If you prefer a sibling checkout for local development, point `WEISS_SIM_PYTHONPATH` at the simulator source tree.
 
 ## Practical rule
 
-When the result needs to be thesis-grade, use `paper_eval_pinned` and canonical artifacts. When the result needs to be fast, use `train_async_fast` but keep provenance and seeds fixed.
+When the result needs to be thesis-grade, use `paper_eval_pinned` and canonical artifacts. When the result needs to be fast, use `train_async_fast` but keep provenance and seeds fixed. Use `stack_smoke.yaml` only for scaffold checks, not for thesis claims.

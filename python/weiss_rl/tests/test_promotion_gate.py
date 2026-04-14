@@ -12,6 +12,7 @@ from weiss_rl.eval.harness import GameResult, MatchupSummary, ScheduledGame
 from weiss_rl.league import PromotionGateAnchorResult, PromotionGatePosterior, PromotionGateRate, run_promotion_gate
 from weiss_rl.league.promotion_gate import _decision_reasons
 from weiss_rl.repro import hash_seed_file
+from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 _RUN_ID256 = "ab" * 32
 _CONFIG_HASH256 = "cd" * 32
@@ -63,8 +64,9 @@ def _game_result(scheduled_game: ScheduledGame, outcome: OutcomeToken) -> GameRe
 
 def _stack_with_promotion_gate_override(stack, **overrides):
     assert stack.config.league is not None
-    promotion_gate = replace(stack.config.league.promotion_gate, **overrides)
-    league = replace(stack.config.league, promotion_gate=promotion_gate)
+    promotion_gate = replace(stack.config.league.promotion.gate, **overrides)
+    promotion = replace(stack.config.league.promotion, gate=promotion_gate)
+    league = replace(stack.config.league, promotion=promotion)
     return replace(stack, config=replace(stack.config, league=league))
 
 
@@ -95,8 +97,7 @@ def _anchor_result(anchor_name: str, *, prob_lt_guardrail: float) -> PromotionGa
 
 
 def test_run_promotion_gate_writes_pass_record_in_anchor_order(tmp_path: Path) -> None:
-    repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
 
     result = run_promotion_gate(
         stack=stack,
@@ -121,7 +122,7 @@ def test_run_promotion_gate_writes_pass_record_in_anchor_order(tmp_path: Path) -
         "B1 NoLeague baseline",
         "B2 HeuristicPublic",
     )
-    assert result.seed_file_sha256 == hash_seed_file(repo_root / "configs/seeds/promotion_eval_seeds.txt")
+    assert result.seed_file_sha256 == hash_seed_file(_repo_root() / "configs/seeds/promotion_eval_seeds.txt")
     assert result.overall_posterior.prob_gt_target == 1.0
     assert result.truncation.rate == 0.0
 
@@ -145,8 +146,7 @@ def test_run_promotion_gate_writes_pass_record_in_anchor_order(tmp_path: Path) -
 
 
 def test_run_promotion_gate_records_machine_readable_failure_reasons(tmp_path: Path) -> None:
-    repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
 
     def outcome_for_game(game: ScheduledGame) -> OutcomeToken:
         return "L" if game.opponent_policy_id == "b1_snapshot" else "W"
@@ -187,8 +187,7 @@ def test_run_promotion_gate_records_machine_readable_failure_reasons(tmp_path: P
 
 
 def test_run_promotion_gate_rejects_unexpected_uncertainty_method(tmp_path: Path) -> None:
-    repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
     stack = _stack_with_promotion_gate_override(stack, uncertainty_method="jackknife_v1")
 
     with pytest.raises(
@@ -213,8 +212,7 @@ def test_run_promotion_gate_rejects_unexpected_uncertainty_method(tmp_path: Path
 
 
 def test_decision_reasons_use_strict_overall_and_anchor_thresholds() -> None:
-    repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
     anchors = (_anchor_result("B0 RandomLegal", prob_lt_guardrail=0.04),)
     truncation = PromotionGateRate(numerator=0, denominator=20, rate=0.0)
 
@@ -236,8 +234,7 @@ def test_decision_reasons_use_strict_overall_and_anchor_thresholds() -> None:
 
 
 def test_decision_reasons_allow_truncation_limit_and_reject_above() -> None:
-    repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
     anchors = (_anchor_result("B0 RandomLegal", prob_lt_guardrail=0.04),)
     overall = _posterior(prob_gt_target=0.96)
 
@@ -261,8 +258,7 @@ def test_decision_reasons_allow_truncation_limit_and_reject_above() -> None:
 
 
 def test_run_promotion_gate_rejects_missing_required_anchor(tmp_path: Path) -> None:
-    repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
 
     with pytest.raises(ValueError, match="missing required promotion anchors: B1 NoLeague baseline"):
         run_promotion_gate(

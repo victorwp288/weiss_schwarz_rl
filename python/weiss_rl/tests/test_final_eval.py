@@ -12,6 +12,7 @@ from weiss_rl.config import load_stack_config
 from weiss_rl.config.models import StopRulesConfig
 from weiss_rl.eval import resolve_final_policy_set, run_final_eval
 from weiss_rl.eval.harness import GameResult, ScheduledGame
+from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 _RUN_ID256 = "ab" * 32
 _CONFIG_HASH256 = "cd" * 32
@@ -67,7 +68,7 @@ def _repo_root() -> Path:
 
 
 def _selection_config(**overrides: Any):
-    stack = load_stack_config(_repo_root() / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
     assert stack.config.evaluation is not None
     return replace(stack.config.evaluation.final_policy_set_selection, **overrides)
 

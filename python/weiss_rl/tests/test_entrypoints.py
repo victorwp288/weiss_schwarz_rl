@@ -23,6 +23,46 @@ def _mismatched_sha256(value: str) -> str:
     return ("0" if value[0] != "0" else "1") + value[1:]
 
 
+def _typed_observation_spec() -> dict[str, object]:
+    return {
+        "obs_encoding_version": 2,
+        "dtype": "i32",
+        "obs_len": 512,
+        "self_first": True,
+        "header_fields": [
+            {"name": "active_player", "index": 0},
+            {"name": "phase", "index": 1},
+            {"name": "decision_kind", "index": 2},
+        ],
+        "player_blocks": [
+            {
+                "player_index": 0,
+                "base": 16,
+                "len": 42,
+                "slices": [
+                    {"name": "level_count", "start": 0, "len": 1, "visibility": "public"},
+                    {"name": "clock_count", "start": 1, "len": 1, "visibility": "public"},
+                    {"name": "hand_count", "start": 2, "len": 1, "visibility": "private"},
+                    {"name": "stage", "start": 3, "len": 35, "visibility": "public"},
+                    {"name": "hand", "start": 38, "len": 4, "visibility": "private"},
+                ],
+            },
+            {
+                "player_index": 1,
+                "base": 58,
+                "len": 42,
+                "slices": [
+                    {"name": "level_count", "start": 0, "len": 1, "visibility": "public"},
+                    {"name": "clock_count", "start": 1, "len": 1, "visibility": "public"},
+                    {"name": "hand_count", "start": 2, "len": 1, "visibility": "private"},
+                    {"name": "stage", "start": 3, "len": 35, "visibility": "public"},
+                    {"name": "hand", "start": 38, "len": 4, "visibility": "private"},
+                ],
+            },
+        ],
+    }
+
+
 def _write_stub_weiss_sim(
     tmp_path: Path,
     *,
@@ -32,11 +72,7 @@ def _write_stub_weiss_sim(
     bundle: dict[str, object] = {
         "policy_version": 3,
         "spec_hash": spec_hash,
-        "observation": {
-            "obs_encoding_version": 2,
-            "dtype": "i32",
-            "obs_len": 512,
-        },
+        "observation": _typed_observation_spec(),
         "action": {
             "action_encoding_version": 1,
             "action_space_size": 9,
@@ -229,23 +265,85 @@ def _write_runtime_weiss_sim(
 
 
 def _patch_periodic_dev_eval_config(tmp_path: Path) -> None:
-    evaluation_path = tmp_path / "configs" / "evaluation_locked.yaml"
-    evaluation_text = evaluation_path.read_text(encoding="utf-8")
-    evaluation_text = evaluation_text.replace(
+    preset_path = tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"
+    preset_text = preset_path.read_text(encoding="utf-8")
+    preset_text = preset_text.replace(
         "periodic_dev_eval_interval_updates: 50000",
         "periodic_dev_eval_interval_updates: 1",
     )
-    evaluation_text = evaluation_text.replace(
+    preset_text = preset_text.replace(
         "periodic_dev_eval_paired_seeds: 64",
         "periodic_dev_eval_paired_seeds: 1",
     )
-    evaluation_path.write_text(evaluation_text, encoding="utf-8")
+    preset_path.write_text(preset_text, encoding="utf-8")
     (tmp_path / "configs" / "seeds" / "dev_eval_seeds.txt").write_text("7\n", encoding="utf-8")
 
 
 def _copy_repo_configs(tmp_path: Path) -> Path:
     shutil.copytree(REPO_ROOT / "configs", tmp_path / "configs")
-    return tmp_path / "configs" / "rl_stack_locked.yaml"
+    return tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"
+
+
+def _write_eval_only_stack_config(tmp_path: Path) -> Path:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    stack_config = configs_dir / "stack_eval_only.yaml"
+    stack_config.write_text(
+        "\n".join(
+            (
+                "schema_version: 1",
+                "description: Minimal scaffold preset with evaluation-only policy-set selection.",
+                "experiment:",
+                "  role: main",
+                "evaluation:",
+                "  eval_device: cpu",
+                "  eval_sampling_algorithm: pinned_cdf_pcg_v1",
+                "  eval_inference_mode: true",
+                "  seat_swap: true",
+                "  eval_assert_sorted_legal_ids: true",
+                "  seed_files:",
+                "    dev_eval: configs/seeds/dev_eval_seeds.txt",
+                "    report_eval: configs/seeds/report_eval_seeds.txt",
+                "    promotion_gate: configs/seeds/promotion_eval_seeds.txt",
+                "  periodic_dev_eval_interval_updates: 0",
+                "  periodic_dev_eval_paired_seeds: 16",
+                "  final_policy_set_size: 10",
+                "  final_matrix_stage1_paired_seeds: 2",
+                "  final_matrix_stage2_adaptive_max_paired_seeds: 2",
+                "  legal_fingerprint_checks:",
+                "    enabled: true",
+                "    version: legal_fingerprint_v1",
+                "    mismatch_policy: hard_fail",
+                "    require_strictly_increasing_legal_ids: true",
+                "  stop_rules:",
+                "    stop_delta_ci_half_width: 0.03",
+                "    stop_confidence: 0.95",
+                "  replay_capture_rate_eval: 0.0",
+                "  regression_capture_count: 0",
+                "  decision_kind_tagging:",
+                "    required_for_training: false",
+                "    enable_python_derived_debug_tag: false",
+                "  final_policy_set_selection:",
+                "    version: deterministic_v1",
+                "    include_random_legal_baseline_b0: true",
+                "    include_no_league_baseline_b1: true",
+                "    include_heuristic_public_b2_if_exists: true",
+                "    include_final_champion_snapshot: true",
+                "    include_spaced_snapshots_near_percent_updates: [25, 50, 75]",
+                "    remaining_slots_strategy: top_dev_performers_vs_anchor_set_v1",
+                "    fixed_anchor_set_v1:",
+                "      required: [B0 RandomLegal, B1 NoLeague baseline]",
+                "      optional_if_available: [B2 HeuristicPublic]",
+                "    seed_file: configs/seeds/dev_eval_seeds.txt",
+                "    folding: S0",
+                "    seat_swap: true",
+                "    tie_break: lowest_policy_id",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    return stack_config
 
 
 def _write_b1_baseline_run_fixture(tmp_path: Path, *, stack_config: Path, update: int = 5) -> Path:
@@ -260,6 +358,7 @@ def _write_b1_baseline_run_fixture(tmp_path: Path, *, stack_config: Path, update
         observation_dim=512,
         config=stack.config.model,
         action_dim=9,
+        observation_spec=_typed_observation_spec(),  # type: ignore[arg-type]
     )
     payload = {
         "policy_id": "b1_noleague_baseline",
@@ -450,7 +549,8 @@ def test_train_entrypoint_rejects_invalid_runtime_spec_bundle_before_claiming_ve
 
 def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
     bundle = _write_stub_weiss_sim(tmp_path, spec_hash=123)
-    stack_config = _copy_repo_configs(tmp_path)
+    _copy_repo_configs(tmp_path)
+    stack_config = tmp_path / "configs" / "stack_smoke.yaml"
 
     result = _run_entrypoint(
         tmp_path,
@@ -468,15 +568,11 @@ def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
     assert manifest["spec_bundle"] == bundle
     assert manifest["policy_set_selection"] == []
     assert manifest["policy_set_selection_details"] == {
-        "status": "unresolved",
-        "version": "deterministic_v1",
-        "final_policy_set_size": 10,
+        "status": "not_configured",
         "source_paths": {
             "snapshot_registry_json": None,
             "dev_eval_summaries_json": None,
         },
-        "missing_inputs": ["snapshot_registry_json", "dev_eval_summaries_json"],
-        "reason": "deterministic final policy set inputs were not provided",
     }
     assert (manifest_path.parent / "spec_bundle.json").is_file()
     assert (manifest_path.parent / "spec_hash256.txt").read_text(encoding="utf-8").strip() == spec_bundle_hash(bundle)
@@ -485,12 +581,30 @@ def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
     assert "run_label:              spec_bundle_run" in result.stdout
     assert "run_dir_name:           spec_bundle_run" in result.stdout
     assert "Manifest scaffold only: no learner training or rollout collection was executed." in result.stdout
-    assert "active weiss_sim runtime is missing stepping APIs" in result.stdout
+    assert "missing config blocks: environment, training, model" in result.stdout
+
+
+def test_train_entrypoint_locked_stack_fails_on_incomplete_runtime(tmp_path: Path) -> None:
+    bundle = _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash=str(bundle["spec_hash"]),
+        run_label="locked_stack_requires_runtime",
+    )
+
+    assert result.returncode != 0
+    assert "Canonical simulator-backed training requires a weiss_sim runtime with stepping support" in result.stderr
+    assert "active weiss_sim runtime is missing stepping APIs" in result.stderr
 
 
 def test_train_entrypoint_resolves_policy_set_selection_when_inputs_are_supplied(tmp_path: Path) -> None:
     bundle = _write_stub_weiss_sim(tmp_path, spec_hash=123)
-    stack_config = _copy_repo_configs(tmp_path)
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
     snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
 
     result = _run_entrypoint(
@@ -538,7 +652,8 @@ def test_train_entrypoint_resolves_policy_set_selection_when_inputs_are_supplied
 
 def test_train_entrypoint_uses_default_run_dir_when_no_label_override(tmp_path: Path) -> None:
     _write_stub_weiss_sim(tmp_path, spec_hash=123)
-    stack_config = _copy_repo_configs(tmp_path)
+    _copy_repo_configs(tmp_path)
+    stack_config = tmp_path / "configs" / "stack_smoke.yaml"
 
     result = _run_entrypoint(
         tmp_path,
@@ -558,7 +673,8 @@ def test_train_entrypoint_uses_default_run_dir_when_no_label_override(tmp_path: 
 
 def test_train_entrypoint_accepts_deprecated_run_id_alias(tmp_path: Path) -> None:
     _write_stub_weiss_sim(tmp_path, spec_hash=123)
-    stack_config = _copy_repo_configs(tmp_path)
+    _copy_repo_configs(tmp_path)
+    stack_config = tmp_path / "configs" / "stack_smoke.yaml"
 
     result = _run_entrypoint(
         tmp_path,
@@ -620,6 +736,7 @@ def test_eval_entrypoint_reports_run_label_without_claiming_run_identity(tmp_pat
 
     assert result.returncode == 0, result.stderr
     assert "run_label:              eval_report_label" in result.stdout
+    assert "Verified runtime spec bundle" in result.stdout
     assert "computed_run_id64:" not in result.stdout
     assert "computed_run_id256:" not in result.stdout
 
@@ -1316,7 +1433,7 @@ def test_train_entrypoint_runs_periodic_dev_eval_and_handles_empty_ids_pass_fall
     assert "Periodic dev eval: update=1 opponent=b0_randomlegal" in result.stdout
 
     eval_root = tmp_path / "runs" / "periodic_dev_eval_run" / "eval" / "dev_eval" / "update_1"
-    seed_usage = json.loads((eval_root / "seed_usage.json").read_text(encoding="utf-8"))
+    seed_usage = json.loads((eval_root / "b0_randomlegal" / "seed_usage.json").read_text(encoding="utf-8"))
     summary_payload = json.loads((eval_root / "b0_randomlegal" / "matchup_summary.json").read_text(encoding="utf-8"))
     diagnostics_payload = json.loads((eval_root / "b0_randomlegal" / "diagnostics.json").read_text(encoding="utf-8"))
     episodes_lines = (eval_root / "b0_randomlegal" / "episodes.jsonl").read_text(encoding="utf-8").splitlines()
@@ -1334,7 +1451,8 @@ def test_train_entrypoint_runs_periodic_dev_eval_and_handles_empty_ids_pass_fall
         "update_count": 1,
         "policy_version": 1,
         "checkpoint_path": "training/checkpoints/checkpoint_1.pt",
-        "seed_usage_path": "eval/dev_eval/update_1/seed_usage.json",
+        "seed_usage_path": "eval/dev_eval/update_1/b0_randomlegal/seed_usage.json",
+        "anchor_display_name": "B0 RandomLegal",
     }
     assert diagnostics_payload["seat_results"]["seat0_wins"] == 2
     assert diagnostics_payload["seat_results"]["seat1_wins"] == 0
@@ -1374,7 +1492,7 @@ def test_train_entrypoint_periodic_dev_eval_writes_exact_current_checkpoint(tmp_
     run_root = tmp_path / "runs" / "periodic_dev_eval_checkpoint_traceability"
     eval_root = run_root / "eval" / "dev_eval" / "update_1"
     checkpoint_path = run_root / "training" / "checkpoints" / "checkpoint_1.pt"
-    seed_usage = json.loads((eval_root / "seed_usage.json").read_text(encoding="utf-8"))
+    seed_usage = json.loads((eval_root / "b0_randomlegal" / "seed_usage.json").read_text(encoding="utf-8"))
     summary_payload = json.loads((eval_root / "b0_randomlegal" / "matchup_summary.json").read_text(encoding="utf-8"))
     checkpoint_payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
@@ -1382,6 +1500,38 @@ def test_train_entrypoint_periodic_dev_eval_writes_exact_current_checkpoint(tmp_
     assert seed_usage["focal_policy"]["checkpoint_path"] == "training/checkpoints/checkpoint_1.pt"
     assert summary_payload["evaluation_context"]["checkpoint_path"] == "training/checkpoints/checkpoint_1.pt"
     assert checkpoint_payload["update_count"] == 1
+
+
+def test_train_entrypoint_uses_configured_checkpoint_interval_by_default(tmp_path: Path) -> None:
+    bundle = _write_runtime_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+    b1_baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, stack_config=stack_config)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash=str(bundle["spec_hash"]),
+        run_label="checkpoint_default_from_config",
+        extra_args=[
+            "--device",
+            "cpu",
+            "--num-envs",
+            "1",
+            "--unroll-length",
+            "1",
+            "--max-updates",
+            "1",
+            "--b1-baseline-run-dir",
+            str(b1_baseline_run_dir),
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    run_root = tmp_path / "runs" / "checkpoint_default_from_config"
+    registry = json.loads((run_root / "training" / "snapshots" / "registry.json").read_text(encoding="utf-8"))
+    assert [snapshot["policy_id"] for snapshot in registry["snapshots"]] == ["b1_noleague_baseline"]
+    assert not (run_root / "eval" / "promotion_gate" / "update_1").exists()
 
 
 def _run_public_demo_train(
@@ -1432,7 +1582,7 @@ def test_train_entrypoint_public_demo_stages_public_safe_catalog_without_weiss_s
 def test_eval_entrypoint_public_demo_generates_demo_only_final_eval_artifacts(tmp_path: Path) -> None:
     train_result, run_dir = _run_public_demo_train(tmp_path, run_label="toy_public_demo_eval")
     assert train_result.returncode == 0, train_result.stderr
-    stack_config = tmp_path / "configs" / "rl_stack_locked.yaml"
+    stack_config = tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"
 
     result = _run_entrypoint(
         tmp_path,
@@ -1473,7 +1623,7 @@ def test_eval_entrypoint_public_demo_generates_demo_only_final_eval_artifacts(tm
 def test_make_figures_entrypoint_public_demo_writes_clearly_labeled_bundle(tmp_path: Path) -> None:
     train_result, run_dir = _run_public_demo_train(tmp_path, run_label="toy_public_demo_figures")
     assert train_result.returncode == 0, train_result.stderr
-    stack_config = tmp_path / "configs" / "rl_stack_locked.yaml"
+    stack_config = tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"
     eval_result = _run_entrypoint(
         tmp_path,
         script_name="eval.py",

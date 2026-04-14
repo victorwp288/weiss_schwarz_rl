@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
+import torch
 
 from weiss_rl.config import load_stack_config
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, RANDOM_LEGAL_POLICY_ID
 from weiss_rl.eval.simulator_runner import resolve_eval_policies
+from weiss_rl.league.registry import SnapshotRegistry
+from weiss_rl.model import PolicyValueModel
+from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 
 def _repo_root() -> Path:
@@ -20,7 +25,7 @@ def _heuristic_spec_bundle() -> dict[str, object]:
         "spec_hash": 123,
         "observation": {
             "obs_encoding_version": 2,
-            "obs_len": 100,
+            "obs_len": 512,
             "dtype": "i32",
             "self_first": True,
             "header_fields": [
@@ -164,7 +169,7 @@ def test_heuristic_public_prefers_pass_over_main_move_loops() -> None:
 
 
 def test_resolve_eval_policies_supports_b2_without_snapshot_weights(tmp_path: Path) -> None:
-    stack = load_stack_config(_repo_root() / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
 
     resolved = resolve_eval_policies(
         stack=stack,
@@ -178,3 +183,49 @@ def test_resolve_eval_policies_supports_b2_without_snapshot_weights(tmp_path: Pa
     assert resolved[RANDOM_LEGAL_POLICY_ID].kind == "random_legal"
     assert resolved[HEURISTIC_PUBLIC_POLICY_ID].kind == "heuristic_public"
     assert resolved[HEURISTIC_PUBLIC_POLICY_ID].heuristic_policy is not None
+
+
+def test_resolve_eval_policies_loads_snapshots_from_registry_run_root(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+    assert stack.config.model is not None
+
+    source_run_dir = tmp_path / "source_run"
+    registry_path = source_run_dir / "training" / "snapshots" / "registry.json"
+    weights_path = source_run_dir / "training" / "snapshots" / "policy_000100" / "weights.pt"
+    weights_path.parent.mkdir(parents=True, exist_ok=True)
+
+    model = PolicyValueModel(
+        observation_dim=512,
+        config=stack.config.model,
+        action_dim=9,
+        observation_spec=_heuristic_spec_bundle()["observation"],  # type: ignore[arg-type]
+    )
+    torch.save({"model_state_dict": model.state_dict()}, weights_path)
+
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="policy_000100",
+        update=100,
+        weights_sha256="1" * 64,
+        path="training/snapshots/policy_000100/weights.pt",
+    )
+    registry.save(registry_path)
+
+    consumer_run_dir = tmp_path / "consumer_run"
+    manifest_path = consumer_run_dir / "manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=["policy_000100"],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        snapshot_registry_path=registry_path,
+    )
+
+    assert resolved["policy_000100"].source_run_dir == source_run_dir.resolve().as_posix()
+    assert resolved["policy_000100"].snapshot_path == "training/snapshots/policy_000100/weights.pt"
+    assert resolved["policy_000100"].model is not None

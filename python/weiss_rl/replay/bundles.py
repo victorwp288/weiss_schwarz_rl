@@ -55,6 +55,8 @@ class ReplayRerunContract:
     observation_visibility: str
     max_decisions: int
     max_ticks: int
+    reward_json: str | None = None
+    curriculum_json: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

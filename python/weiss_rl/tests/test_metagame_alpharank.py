@@ -83,6 +83,63 @@ def test_policy_order_permutation_only_permutates_outputs() -> None:
     assert permuted_stationary.tolist() == pytest.approx(stationary[permutation].tolist(), abs=1e-12)
 
 
+def test_compute_alpharank_stationary_global_selection_basic() -> None:
+    p_mean = np.array(
+        [
+            [0.7, 0.55, 0.45],
+            [0.45, 0.6, 0.65],
+            [0.55, 0.35, 0.5],
+        ],
+        dtype=np.float64,
+    )
+
+    stationary = compute_alpharank_stationary(p_mean, m=20, alpha=10, local_selection=False)
+
+    assert stationary.shape == (3,)
+    assert float(np.sum(stationary, dtype=np.float64)) == pytest.approx(1.0, abs=1e-12)
+    assert np.all(stationary >= 0.0)
+
+
+def test_global_selection_uses_self_play_terms_and_can_differ_from_local_selection() -> None:
+    p_mean = np.array(
+        [
+            [0.9, 0.6],
+            [0.6, 0.1],
+        ],
+        dtype=np.float64,
+    )
+
+    local_stationary = compute_alpharank_stationary(p_mean, m=25, alpha=8, local_selection=True)
+    global_stationary = compute_alpharank_stationary(p_mean, m=25, alpha=8, local_selection=False)
+
+    assert local_stationary.tolist() == pytest.approx([0.5, 0.5], abs=1e-12)
+    assert global_stationary[0] > global_stationary[1]
+    assert global_stationary.tolist() != pytest.approx(local_stationary.tolist(), abs=1e-6)
+
+
+def test_global_selection_permutation_only_permutates_outputs() -> None:
+    p_mean = np.array(
+        [
+            [0.8, 0.5, 0.2],
+            [0.4, 0.6, 0.9],
+            [0.7, 0.1, 0.3],
+        ],
+        dtype=np.float64,
+    )
+    permutation = np.array([1, 2, 0], dtype=np.int64)
+    permuted_p_mean = p_mean[np.ix_(permutation, permutation)]
+
+    stationary = compute_alpharank_stationary(p_mean, m=12, alpha=5, local_selection=False)
+    permuted_stationary = compute_alpharank_stationary(
+        permuted_p_mean,
+        m=12,
+        alpha=5,
+        local_selection=False,
+    )
+
+    assert permuted_stationary.tolist() == pytest.approx(stationary[permutation].tolist(), abs=1e-12)
+
+
 def test_compute_alpharank_stationary_matches_known_two_policy_reference() -> None:
     p_mean = np.array(
         [

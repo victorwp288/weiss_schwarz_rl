@@ -5,11 +5,12 @@ from pathlib import Path
 
 from weiss_rl.config import canonical_config_dict, compute_config_hash256, load_stack_config
 from weiss_rl.manifest import RunManifest, build_seed_file_manifest, default_run_dir_name, write_run_artifacts
+from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 
 def test_write_run_artifacts_creates_manifest_scaffold(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[3]
-    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
     manifest = RunManifest(
         run_id256="ab" * 32,
         run_id64="0123456789abcdef",

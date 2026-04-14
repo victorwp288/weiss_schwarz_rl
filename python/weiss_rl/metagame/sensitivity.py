@@ -109,6 +109,7 @@ def build_sensitivity_report(
         "out_dir": out_dir.as_posix(),
         "policy_ids": list(context.policy_ids),
         "sample_count": int(metagame_config.sampling_m),
+        "alpharank_selection_mode": _alpharank_selection_mode(metagame_config),
         "required_outputs": list(sensitivity_config.report.required_outputs),
         "cases": case_paths,
         "deltas": delta_paths,
@@ -300,6 +301,7 @@ def _build_case_artifacts(
         case_id=case_id,
         case_config=case_config,
         scheme=scheme,
+        alpharank_selection_mode=_alpharank_selection_mode(metagame_config),
         policy_ids=policy_ids,
         p_mean=p_mean,
         u_mean=u_mean,
@@ -327,6 +329,7 @@ def _write_case_artifacts(
     case_id: str,
     case_config: SensitivityCaseConfig,
     scheme: PayoffFoldScheme,
+    alpharank_selection_mode: str,
     policy_ids: Sequence[str],
     p_mean: np.ndarray,
     u_mean: np.ndarray,
@@ -395,6 +398,7 @@ def _write_case_artifacts(
         {
             "case_id": case_id,
             "scheme": scheme,
+            "selection_mode": alpharank_selection_mode,
             "top_policies_by_stationary_mass": alpharank_rows[:_TOP_SHIFT_LIMIT],
         },
     )
@@ -538,6 +542,14 @@ def _validate_supported_nash_config(metagame_config: MetagameConfig) -> None:
         )
 
 
+def _alpharank_selection_mode(metagame_config: MetagameConfig) -> str:
+    return _alpharank_selection_mode_from_bool(metagame_config.alpharank.local_selection)
+
+
+def _alpharank_selection_mode_from_bool(local_selection: bool) -> str:
+    return "local" if local_selection else "global"
+
+
 def _validate_supported_case_config(*, case_id: str, case_config: SensitivityCaseConfig) -> None:
     _require_case_float(
         case_id=case_id,
@@ -633,7 +645,7 @@ def _resolve_final_eval_episodes_path(*, final_eval_dir: Path, value: Any, expec
     if not isinstance(value, str) or not value:
         raise ValueError("final_eval matchup episodes_path must be a non-empty string")
     raw_path = Path(value)
-    if raw_path.is_absolute():
+    if raw_path.is_absolute() or value.startswith(("/", "\\")):
         raise ValueError(
             f"final_eval matchup episodes_path must be relative to the final_eval root, got absolute path: {value!r}"
         )

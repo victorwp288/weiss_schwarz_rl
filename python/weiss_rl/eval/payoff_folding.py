@@ -34,7 +34,7 @@ def fold_game_payoff(outcome: str, *, scheme: PayoffFoldScheme) -> float | None:
     if normalized_outcome == "D":
         return 0.5
     if normalized_scheme in ("S0", "S1"):
-        return 0.5
+        return 0.0
     return None
 
 

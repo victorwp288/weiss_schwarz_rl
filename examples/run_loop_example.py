@@ -19,7 +19,7 @@ from config_example import load_example_config, repo_root
 from policy_example import sample_actions_for_policy
 
 
-def run_minimal_loop_example(*, stack_config: Path, loop_config: Path, steps_override: int | None) -> None:
+def run_minimal_loop_example(*, preset_config: Path, loop_config: Path, steps_override: int | None) -> None:
     try:
         import weiss_sim
     except ModuleNotFoundError as exc:
@@ -31,11 +31,11 @@ def run_minimal_loop_example(*, stack_config: Path, loop_config: Path, steps_ove
             "but actual execution still needs an importable simulator."
         ) from exc
 
-    config = load_example_config(stack_config_path=stack_config, loop_config_path=loop_config)
+    config = load_example_config(preset_config_path=preset_config, loop_config_path=loop_config)
     if steps_override is not None:
         config.num_steps = int(steps_override)
 
-    print("Loaded config:")
+    print("Loaded preset:")
     print(
         f" mode={config.mode} num_envs={config.num_envs} num_steps={config.num_steps} "
         f"seed={config.seed} policy={config.action_policy}"
@@ -104,10 +104,10 @@ def parse_args() -> argparse.Namespace:
         " `--help` works without `weiss_sim`, but actual execution requires the simulator to be importable.",
     )
     parser.add_argument(
-        "--stack-config",
+        "--preset-config",
         type=Path,
-        default=root / "configs" / "rl_stack_locked.yaml",
-        help="Path to the consolidated config index",
+        default=root / "configs" / "presets" / "typed_local.yaml",
+        help="Path to the grouped preset config",
     )
     parser.add_argument(
         "--loop-config",
@@ -127,7 +127,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     run_minimal_loop_example(
-        stack_config=args.stack_config,
+        preset_config=args.preset_config,
         loop_config=args.loop_config,
         steps_override=args.steps,
     )

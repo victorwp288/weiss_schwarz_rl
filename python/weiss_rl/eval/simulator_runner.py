@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 import torch
 
+from weiss_rl.action_diagnostics import (
+    ActionSummaryCounters,
+    make_action_sequence_state,
+    summarize_eval_action_counters,
+    update_eval_action_counters,
+)
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import StackConfig
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
-from weiss_rl.envs.pool_factory import make_env_pool_from_config
+from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
 from weiss_rl.eval.harness import (
     EvalGameRunner,
     GameResult,
@@ -83,6 +90,7 @@ def resolve_eval_policies(
     registry_path = snapshot_registry_path or (
         ArtifactLayout.from_run_dir(run_dir).training_snapshots_dir / "registry.json"
     )
+    registry_run_dir = Path(registry_path).resolve().parent.parent.parent
     registry = SnapshotRegistry.load(registry_path)
     snapshots_by_policy_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
     resolved: dict[str, ResolvedEvalPolicy] = {}
@@ -107,6 +115,7 @@ def resolve_eval_policies(
                 stack=stack,
                 observation_dim=observation_dim,
                 action_dim=action_dim,
+                spec_bundle=spec_bundle,
             )
             continue
 
@@ -114,16 +123,17 @@ def resolve_eval_policies(
         if snapshot is None:
             raise FileNotFoundError(f"Could not resolve eval policy {policy_id!r} in snapshot registry {registry_path}")
         model = _load_snapshot_eval_model(
-            run_dir=run_dir,
+            run_dir=registry_run_dir,
             snapshot_path=snapshot.path,
             stack=stack,
             observation_dim=observation_dim,
             action_dim=action_dim,
+            observation_spec=_observation_spec_from_bundle(spec_bundle),
         )
         resolved[policy_id] = ResolvedEvalPolicy(
             policy_id=policy_id,
             kind="snapshot_registry",
-            source_run_dir=run_dir.as_posix(),
+            source_run_dir=registry_run_dir.as_posix(),
             snapshot_path=snapshot.path,
             model=model,
         )
@@ -167,6 +177,8 @@ class SimulatorEvalRunner(EvalGameRunner):
             for seat in (0, 1)
         }
         seat_rngs = {seat: Pcg32XshRrV1(self._rng_seed(scheduled_game=scheduled_game, seat=seat)) for seat in (0, 1)}
+        action_counters = ActionSummaryCounters()
+        action_sequence_state = make_action_sequence_state(1)
         last_acting_seat: int | None = None
 
         try:
@@ -181,22 +193,31 @@ class SimulatorEvalRunner(EvalGameRunner):
                         env_index=0,
                         acting_seat=last_acting_seat,
                         episode_seed=scheduled_game.episode_seed,
+                        max_decisions=getattr(env, "max_decisions", None),
+                        max_ticks=getattr(env, "max_ticks", None),
+                        max_no_progress_decisions=getattr(env, "max_no_progress_decisions", None),
                     )
+                    result_payload = {
+                        "episode_seed": result.episode_seed,
+                        "terminated": result.terminated,
+                        "truncated": result.truncated,
+                        "winner_seat": result.winner_seat,
+                        "engine_status": result.engine_status,
+                        "decision_count": result.decision_count,
+                        "tick_count": result.tick_count,
+                        "no_progress_count": result.no_progress_count,
+                        "termination_reason": result.termination_reason,
+                        "simulator_episode_key": result.simulator_episode_key,
+                        **summarize_eval_action_counters(action_counters),
+                    }
                     if replay_capture is None:
-                        return result
+                        return GameResult(**result_payload)
                     replay_sample = self._finalize_replay_capture(
                         scheduled_game=scheduled_game,
                         replay_capture=replay_capture,
                     )
-                    return GameResult(
-                        episode_seed=result.episode_seed,
-                        terminated=result.terminated,
-                        truncated=result.truncated,
-                        winner_seat=result.winner_seat,
-                        engine_status=result.engine_status,
-                        simulator_episode_key=result.simulator_episode_key,
-                        replay_sample=replay_sample,
-                    )
+                    result_payload["replay_sample"] = replay_sample
+                    return GameResult(**result_payload)
 
                 current_seat = int(batch.actor[0])
                 current_policy_id = (
@@ -210,6 +231,13 @@ class SimulatorEvalRunner(EvalGameRunner):
                     seat_hidden=seat_hidden[current_seat],
                     rng=seat_rngs[current_seat],
                     legal_ids=legal_ids,
+                )
+                update_eval_action_counters(
+                    counters=action_counters,
+                    state=action_sequence_state,
+                    action=int(action),
+                    legal_ids=legal_ids,
+                    pass_action_id=self.pass_action_id,
                 )
                 decision_id = int(np.asarray(batch.decision_id, dtype=np.int64)[0])
                 last_acting_seat = current_seat
@@ -240,16 +268,9 @@ class SimulatorEvalRunner(EvalGameRunner):
             env.close()
 
     def _build_ids_eval_env(self, *, seed: int) -> DecisionBoundaryEnv:
-        environment_config = self.stack.config.environment
-        if environment_config is None:
-            raise RuntimeError("stack config is missing environment config")
+        env_config = build_env_config_from_stack(self.stack, seed=int(seed))
         pool, layout_name = make_env_pool_from_config(
-            {
-                "max_decisions": int(environment_config.max_decisions),
-                "max_ticks": int(environment_config.max_ticks),
-                "observation_visibility": environment_config.observation_visibility,
-                "seed": int(seed),
-            },
+            env_config,
             profile="fast",
             num_envs=1,
         )
@@ -257,11 +278,20 @@ class SimulatorEvalRunner(EvalGameRunner):
             raise RuntimeError(
                 f"Pinned evaluation requires ids-based legality for deterministic CPU sampling, got {layout_name!r}."
             )
+        max_no_progress_decisions = None
+        curriculum = self.stack.config.curriculum
+        if curriculum is not None:
+            raw_limit = curriculum.simulator.get("max_no_progress_decisions")
+            if raw_limit is not None:
+                max_no_progress_decisions = int(raw_limit)
         return DecisionBoundaryEnv(
             pool,
             legality="ids_offsets",
             pass_action_id=self.pass_action_id,
             engine_status_policy="hard_fail",
+            max_decisions=int(env_config["max_decisions"]),
+            max_ticks=int(env_config["max_ticks"]),
+            max_no_progress_decisions=max_no_progress_decisions,
         )
 
     def _select_action(
@@ -288,7 +318,6 @@ class SimulatorEvalRunner(EvalGameRunner):
                 self._baseline_logits,
                 legal_ids,
                 rng=rng,
-                pass_action_id=self.pass_action_id,
             )
             return action, seat_hidden
         if seat_hidden is None:
@@ -304,7 +333,6 @@ class SimulatorEvalRunner(EvalGameRunner):
             logits,
             legal_ids,
             rng=rng,
-            pass_action_id=self.pass_action_id,
         )
         return action, next_seat_hidden
 
@@ -420,14 +448,16 @@ class SimulatorEvalRunner(EvalGameRunner):
         return None
 
     def _replay_rerun_contract(self) -> ReplayRerunContract:
-        environment_config = self.stack.config.environment
-        if environment_config is None:
+        if self.stack.config.environment is None:
             raise RuntimeError("stack config is missing environment config")
+        env_config = build_env_config_from_stack(self.stack, seed=0)
         return ReplayRerunContract(
-            version=1,
-            observation_visibility=str(environment_config.observation_visibility),
-            max_decisions=int(environment_config.max_decisions),
-            max_ticks=int(environment_config.max_ticks),
+            version=2,
+            observation_visibility=str(env_config["observation_visibility"]),
+            max_decisions=int(env_config["max_decisions"]),
+            max_ticks=int(env_config["max_ticks"]),
+            reward_json=None if "reward_json" not in env_config else str(env_config["reward_json"]),
+            curriculum_json=None if "curriculum_json" not in env_config else str(env_config["curriculum_json"]),
         )
 
     def _rng_seed(self, *, scheduled_game: ScheduledGame, seat: int) -> int:
@@ -493,6 +523,7 @@ def _resolve_b1_policy(
     stack: StackConfig,
     observation_dim: int,
     action_dim: int,
+    spec_bundle: Mapping[str, object] | None,
 ) -> ResolvedEvalPolicy:
     for candidate_run_dir in _candidate_b1_run_dirs(run_dir=run_dir, b1_baseline_run_dir=b1_baseline_run_dir):
         snapshot = _find_b1_snapshot(candidate_run_dir)
@@ -504,17 +535,18 @@ def _resolve_b1_policy(
             stack=stack,
             observation_dim=observation_dim,
             action_dim=action_dim,
+            observation_spec=_observation_spec_from_bundle(spec_bundle, run_dir=candidate_run_dir),
         )
         return ResolvedEvalPolicy(
             policy_id=NO_LEAGUE_POLICY_ID,
-            kind="b1_no_league",
+            kind="baseline_noleague",
             source_run_dir=candidate_run_dir.as_posix(),
             snapshot_path=snapshot.path,
             model=model,
         )
     raise FileNotFoundError(
         "Could not resolve the mandatory B1 NoLeague baseline. "
-        "Pass --b1-baseline-run-dir or evaluate from a b1_no_league run that persisted the canonical baseline snapshot."
+        "Pass --b1-baseline-run-dir or evaluate from a baseline_noleague run that persisted the canonical baseline snapshot."
     )
 
 
@@ -552,8 +584,11 @@ def _find_b1_snapshot(run_dir: Path) -> SnapshotMeta | None:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         config_canonical = manifest.get("config_canonical", {})
         if isinstance(config_canonical, dict):
-            training = config_canonical.get("training_family_a", {})
-            if isinstance(training, dict) and str(training.get("mode", "")) == "b1_no_league":
+            experiment = config_canonical.get("experiment", {})
+            role = ""
+            if isinstance(experiment, Mapping):
+                role = str(experiment.get("role", "")).strip()
+            if role == "baseline_noleague":
                 return max(
                     registry.snapshots,
                     key=lambda snapshot: (int(snapshot.update), str(snapshot.policy_id)),
@@ -569,6 +604,7 @@ def _load_snapshot_eval_model(
     stack: StackConfig,
     observation_dim: int,
     action_dim: int,
+    observation_spec: Mapping[str, object] | None = None,
 ) -> PolicyValueModel:
     payload = torch.load(run_dir / snapshot_path, map_location="cpu", weights_only=True)
     model_state_dict = payload.get("model_state_dict")
@@ -581,7 +617,33 @@ def _load_snapshot_eval_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
+        observation_spec=observation_spec,
     ).to(torch.device("cpu"))
     eval_model.load_state_dict(model_state_dict)
     eval_model.eval()
     return eval_model
+
+
+def _observation_spec_from_bundle(
+    spec_bundle: Mapping[str, object] | None,
+    *,
+    run_dir: Path | None = None,
+) -> Mapping[str, object] | None:
+    if spec_bundle is not None:
+        observation = spec_bundle.get("observation")
+        if isinstance(observation, Mapping):
+            return observation
+    if run_dir is None:
+        return None
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    if not layout.spec_bundle_path.is_file():
+        return None
+    payload = json.loads(layout.spec_bundle_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"spec_bundle.json must contain an object: {layout.spec_bundle_path}")
+    observation = payload.get("observation")
+    if observation is None:
+        return None
+    if not isinstance(observation, Mapping):
+        raise RuntimeError(f"spec_bundle.json observation payload must be an object: {layout.spec_bundle_path}")
+    return observation

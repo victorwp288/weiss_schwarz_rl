@@ -84,6 +84,67 @@ def _model_config() -> ModelConfig:
     )
 
 
+def _typed_model_config() -> ModelConfig:
+    return ModelConfig(
+        gru_hidden_size=256,
+        encoder_mlp_width=256,
+        encoder_mlp_layers=2,
+        layer_norm=True,
+        dropout=ModelDropoutConfig(family_a=0.0, ablation=0.1),
+        encoder_kind="typed_v1",
+        typed_feature_width=64,
+    )
+
+
+def _feedforward_model_config() -> ModelConfig:
+    return ModelConfig(
+        gru_hidden_size=256,
+        encoder_mlp_width=256,
+        encoder_mlp_layers=2,
+        layer_norm=True,
+        dropout=ModelDropoutConfig(family_a=0.0, ablation=0.1),
+        recurrent_core="none",
+    )
+
+
+def _typed_observation_spec() -> dict[str, object]:
+    return {
+        "obs_encoding_version": 2,
+        "dtype": "f32",
+        "obs_len": 18,
+        "self_first": True,
+        "header_fields": [
+            {"name": "phase", "index": 0},
+            {"name": "choice_total", "index": 1},
+        ],
+        "player_blocks": [
+            {
+                "name": "self",
+                "base": 2,
+                "len": 8,
+                "slices": [
+                    {"name": "level_count", "start": 0, "len": 1},
+                    {"name": "clock_count", "start": 1, "len": 1},
+                    {"name": "stage", "start": 2, "len": 6},
+                ],
+            },
+            {
+                "name": "opponent",
+                "base": 10,
+                "len": 6,
+                "slices": [
+                    {"name": "level_count", "start": 0, "len": 1},
+                    {"name": "clock_count", "start": 1, "len": 1},
+                    {"name": "stage", "start": 2, "len": 4},
+                ],
+            },
+        ],
+        "tail_slices": [
+            {"name": "choice_page", "start": 16, "len": 2},
+        ],
+    }
+
+
 def test_policy_value_model_forward_shapes() -> None:
     model = PolicyValueModel(observation_dim=512, config=_model_config())
     obs = torch.randn(4, 512)
@@ -93,6 +154,26 @@ def test_policy_value_model_forward_shapes() -> None:
     assert logits.shape == (4, GLOBAL_ACTION_SPACE_SIZE)
     assert value.shape == (4,)
     assert next_hidden.shape == (4, 256)
+
+
+def test_policy_value_model_typed_encoder_forward_shapes() -> None:
+    model = PolicyValueModel(
+        observation_dim=18,
+        config=_typed_model_config(),
+        observation_spec=_typed_observation_spec(),
+    )
+    obs = torch.randn(4, 18)
+
+    logits, value, next_hidden = model(obs)
+
+    assert logits.shape == (4, GLOBAL_ACTION_SPACE_SIZE)
+    assert value.shape == (4,)
+    assert next_hidden.shape == (4, 256)
+
+
+def test_policy_value_model_typed_encoder_requires_observation_spec() -> None:
+    with pytest.raises(ValueError, match="requires observation_spec"):
+        PolicyValueModel(observation_dim=18, config=_typed_model_config())
 
 
 def test_policy_value_model_accepts_explicit_hidden_state() -> None:
@@ -105,6 +186,34 @@ def test_policy_value_model_accepts_explicit_hidden_state() -> None:
     assert logits.shape == (3, GLOBAL_ACTION_SPACE_SIZE)
     assert value.shape == (3,)
     assert next_hidden.shape == hidden_state.shape
+
+
+def test_policy_value_model_feedforward_core_keeps_hidden_shape_and_outputs() -> None:
+    model = PolicyValueModel(observation_dim=512, config=_feedforward_model_config())
+    obs = torch.randn(3, 512)
+    hidden_state = model.initial_hidden(batch_size=3)
+
+    logits, value, next_hidden = model(obs, hidden_state)
+
+    assert logits.shape == (3, GLOBAL_ACTION_SPACE_SIZE)
+    assert value.shape == (3,)
+    assert next_hidden.shape == hidden_state.shape
+    torch.testing.assert_close(next_hidden, hidden_state)
+
+
+def test_policy_value_model_feedforward_seat_core_leaves_hidden_unchanged() -> None:
+    model = PolicyValueModel(observation_dim=512, config=_feedforward_model_config())
+    obs = torch.randn(4, 512)
+    acting_seat = torch.tensor([0, 1, 0, 1], dtype=torch.long)
+    seat_hidden_state = model.initial_seat_hidden(batch_size=4)
+    seat_hidden_state[:, 0, :] = -1.0
+    seat_hidden_state[:, 1, :] = 2.0
+
+    logits, value, next_hidden = model.forward_seat_aware(obs, acting_seat, seat_hidden_state)
+
+    assert logits.shape == (4, GLOBAL_ACTION_SPACE_SIZE)
+    assert value.shape == (4,)
+    torch.testing.assert_close(next_hidden, seat_hidden_state)
 
 
 def test_policy_value_model_initial_seat_hidden_shape() -> None:
@@ -141,6 +250,46 @@ def test_policy_value_model_seat_aware_forward_updates_only_acting_seat() -> Non
         next_seat_hidden[batch_index, acting_seat],
         seat_hidden_state[batch_index, acting_seat],
     )
+
+
+def test_policy_value_model_seat_aware_inplace_matches_regular_forward() -> None:
+    torch.manual_seed(7)
+    model = PolicyValueModel(observation_dim=512, config=_model_config())
+    obs = torch.randn(4, 512)
+    acting_seat = torch.tensor([0, 1, 1, 0], dtype=torch.long)
+    seat_hidden_state = model.initial_seat_hidden(batch_size=4)
+    seat_hidden_state[:, 0, :] = -1.0
+    seat_hidden_state[:, 1, :] = 2.0
+
+    logits_ref, value_ref, next_hidden_ref = model.forward_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden_state.clone(),
+    )
+    inplace_hidden = seat_hidden_state.clone()
+    logits_inplace, value_inplace, next_hidden_inplace = model.forward_seat_aware_inplace(
+        obs,
+        acting_seat,
+        inplace_hidden,
+    )
+
+    torch.testing.assert_close(logits_inplace, logits_ref)
+    torch.testing.assert_close(value_inplace, value_ref)
+    torch.testing.assert_close(next_hidden_inplace, next_hidden_ref)
+    torch.testing.assert_close(inplace_hidden, next_hidden_ref)
+
+
+
+def test_policy_value_model_write_acting_hidden_preserves_state_dtype() -> None:
+    model = PolicyValueModel(observation_dim=512, config=_model_config())
+    seat_hidden_state = model.initial_seat_hidden(batch_size=3)
+    acting_seat = torch.tensor([0, 1, 0], dtype=torch.long)
+    next_acting_hidden = torch.randn(3, model.hidden_size, dtype=torch.float16)
+
+    next_seat_hidden = model._write_acting_hidden(seat_hidden_state, acting_seat, next_acting_hidden)
+
+    assert next_seat_hidden.dtype == seat_hidden_state.dtype
+    assert next_seat_hidden.shape == seat_hidden_state.shape
 
 
 def test_policy_value_model_seat_aware_poisoned_other_seat_does_not_change_outputs() -> None:

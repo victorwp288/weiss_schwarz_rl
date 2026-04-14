@@ -2,6 +2,8 @@
 
 This is the shortest map from onboarding to the thesis-oriented contracts.
 
+The canonical simulator-backed path uses the published `weiss-sim` package, the single-node queue runtime, and the `DecisionBoundaryEnv` boundary-step contract. `stack_smoke.yaml` is only the scaffold path.
+
 ## Start here
 
 - [Getting started](getting_started.md)

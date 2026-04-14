@@ -22,7 +22,7 @@ from weiss_rl.replay.bundles import (
 
 ReplayEnvFactory = Callable[[ReplayRerunContract], Any]
 
-_SUPPORTED_RERUN_CONTRACT_VERSION = 1
+_SUPPORTED_RERUN_CONTRACT_VERSION = 2
 
 
 def require_supported_rerun_contract(meta: ReplayBundleMeta) -> ReplayRerunContract:
@@ -41,22 +41,36 @@ def require_supported_rerun_contract(meta: ReplayBundleMeta) -> ReplayRerunContr
 def build_replay_env(contract: ReplayRerunContract, *, env_factory: ReplayEnvFactory | None = None) -> Any:
     if env_factory is not None:
         return env_factory(contract)
+    env_config = {
+        "max_decisions": int(contract.max_decisions),
+        "max_ticks": int(contract.max_ticks),
+        "observation_visibility": contract.observation_visibility,
+        "seed": 0,
+        **({"reward_json": contract.reward_json} if contract.reward_json else {}),
+        **({"curriculum_json": contract.curriculum_json} if contract.curriculum_json else {}),
+    }
     pool, layout_name = make_env_pool_from_config(
-        {
-            "max_decisions": int(contract.max_decisions),
-            "max_ticks": int(contract.max_ticks),
-            "observation_visibility": contract.observation_visibility,
-            "seed": 0,
-        },
+        env_config,
         profile="fast",
         num_envs=1,
     )
     if layout_name != "i16_legal_ids":
         raise RuntimeError(f"Replay verification requires ids-based legality, got {layout_name!r}")
+    rerun_curriculum = None
+    if contract.curriculum_json:
+        rerun_curriculum = json.loads(contract.curriculum_json)
+    max_no_progress_decisions = None
+    if isinstance(rerun_curriculum, dict):
+        raw_limit = rerun_curriculum.get("max_no_progress_decisions")
+        if raw_limit is not None:
+            max_no_progress_decisions = int(raw_limit)
     return DecisionBoundaryEnv(
         pool,
         legality="ids_offsets",
         engine_status_policy="passthrough",
+        max_decisions=int(env_config["max_decisions"]),
+        max_ticks=int(env_config["max_ticks"]),
+        max_no_progress_decisions=max_no_progress_decisions,
     )
 
 

@@ -1,0 +1,40 @@
+schema_version: 1
+description: "Study-only metagame and sensitivity reporting defaults"
+metagame:
+  payoff_uncertainty_method: bayesian_bootstrap_seedlevel_v1
+  sampling_M: 1000
+  optional_secondary_uncertainty_method: dirichlet_wldt_jeffreys_v1
+  dirichlet_alpha_wldt: 0.5
+  primary_analysis: Nash
+  secondary_analysis: AlphaRank
+  nash:
+    impl: weiss_rl_nash_lp_v1
+    backend: scipy_linprog_highs
+    threads: 1
+    value_tolerance: 1.0e-10
+    tie_break: deterministic_secondary_lp_by_policy_id
+  alpharank:
+    impl: weiss_rl_alpharank_v1
+    m: 50
+    alpha: 100
+    local_selection: true
+    use_inf_alpha: false
+    inf_alpha_eps: 0.01
+sensitivity:
+  S0:
+    draw_score: 0.5
+    truncation_score: 0.5
+    description: paper_default
+  S1:
+    draw_score: 0.5
+    truncation_score: 0.5
+    description: truncation_draw_like_reported_explicitly
+  S2:
+    draw_score: 0.5
+    truncation_handling: exclude_from_payoff_aggregation
+    description: truncation_rate_still_reported
+  report:
+    required_outputs:
+      - nash_sensitivity_delta_vs_s0
+      - alpharank_sensitivity_delta_vs_s0
+      - largest_matchup_pij_shifts

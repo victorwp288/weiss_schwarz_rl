@@ -10,6 +10,12 @@ from typing import Any, Literal
 
 import numpy as np
 
+from weiss_rl.action_diagnostics import (
+    make_action_sequence_state,
+    reset_action_sequence_state,
+    update_action_summary_from_ids,
+    update_action_summary_from_mask,
+)
 from weiss_rl.masking import (
     MaskingAnomalyCounters,
     masked_logp_from_legal_ids,
@@ -18,6 +24,7 @@ from weiss_rl.masking import (
     sample_actions_from_mask,
 )
 from weiss_rl.league.outcomes import OnlineOutcomeTracker
+from weiss_rl.termination_reason import classify_episode_end_reason
 
 from weiss_rl.replay.bundles import (
     ReplayRerunContract,
@@ -215,6 +222,21 @@ class ActorWorker:
         if obs0.ndim != 2 or obs0.shape[0] != N:
             raise ValueError("expected batch.obs shape (N, OBS_LEN)")
         obs_buf = np.empty((T, N, obs0.shape[1]), dtype=obs0.dtype)
+        timeout_limits = _env_timeout_limits(env)
+        no_progress_timeout_rows = 0
+        natural_timeout_rows = 0
+        decision_limit_timeout_rows = 0
+        tick_limit_timeout_rows = 0
+        timeout_unknown_rows = 0
+        engine_fault_done_rows = 0
+        action_counters = {
+            "total_actions": 0,
+            "pass_actions": 0,
+            "main_move_actions": 0,
+            "pass_with_nonpass_available": 0,
+            "max_consecutive_main_moves": 0,
+        }
+        action_sequence_state = make_action_sequence_state(N)
 
         for t in range(T):
             _refresh_opponent_ids(self.opponent_id_by_env, batch=batch, env=env, num_envs=N)
@@ -250,6 +272,8 @@ class ActorWorker:
 
             if self.layout_name == "i16_legal_ids":
                 legal_ids, legal_offsets = _batch_legal_ids_offsets(batch)
+                packed_legal_ids_array = np.asarray(legal_ids, dtype=np.int64)
+                packed_legal_offsets_array = np.asarray(legal_offsets, dtype=np.int64)
                 actions, logp, ent = sample_actions_from_legal_ids(
                     logits,
                     legal_ids,
@@ -269,6 +293,14 @@ class ActorWorker:
                 offset_base = int(packed_legal_offsets[-1][-1])
                 packed_legal_ids.append(legal_ids_prefix.astype(np.int32, copy=False))
                 packed_legal_offsets.append((legal_offsets[1:] + offset_base).astype(np.uint32, copy=False))
+                update_action_summary_from_ids(
+                    counters=action_counters,
+                    state=action_sequence_state,
+                    actions=actions,
+                    legal_ids=packed_legal_ids_array,
+                    legal_offsets=packed_legal_offsets_array,
+                    pass_action_id=pass_action_id,
+                )
 
                 if not np.all(np.isfinite(logp)):
                     self._raise_numeric_fault(
@@ -316,6 +348,13 @@ class ActorWorker:
                     pass_action_id=pass_action_id,
                 )
                 legal_mask_buf[t] = legal_mask
+                update_action_summary_from_mask(
+                    counters=action_counters,
+                    state=action_sequence_state,
+                    actions=actions,
+                    legal_mask=legal_mask,
+                    pass_action_id=pass_action_id,
+                )
 
                 if not np.all(np.isfinite(logp)):
                     self._raise_numeric_fault(
@@ -353,6 +392,9 @@ class ActorWorker:
             terminated = np.asarray(next_batch.terminated)
             truncated = np.asarray(next_batch.truncated)
             engine_status = np.asarray(next_batch.engine_status)
+            decision_count = _batch_counter(next_batch, "decision_count", num_envs=N)
+            tick_count = _batch_counter(next_batch, "tick_count", num_envs=N)
+            no_progress_count = _batch_counter(next_batch, "no_progress_count", num_envs=N)
 
             # Replay capture: append post-step signals using pre-step legality and identity.
             if self.layout_name == "i16_legal_ids":
@@ -397,6 +439,30 @@ class ActorWorker:
 
                 for env_index in np.flatnonzero(done_mask):
                     env_index_int = int(env_index)
+                    termination_reason = classify_episode_end_reason(
+                        terminated=bool(terminated[env_index_int]),
+                        truncated=bool(truncated[env_index_int]),
+                        engine_status=int(engine_status[env_index_int]),
+                        decision_count=int(decision_count[env_index_int]),
+                        tick_count=int(tick_count[env_index_int]),
+                        no_progress_count=int(no_progress_count[env_index_int]),
+                        max_decisions=timeout_limits["max_decisions"],
+                        max_ticks=timeout_limits["max_ticks"],
+                        max_no_progress_decisions=timeout_limits["max_no_progress_decisions"],
+                    )
+                    if termination_reason == "engine_fault":
+                        engine_fault_done_rows += 1
+                    elif termination_reason == "no_progress_timeout":
+                        no_progress_timeout_rows += 1
+                    elif termination_reason == "decision_limit_timeout":
+                        natural_timeout_rows += 1
+                        decision_limit_timeout_rows += 1
+                    elif termination_reason == "tick_limit_timeout":
+                        natural_timeout_rows += 1
+                        tick_limit_timeout_rows += 1
+                    elif termination_reason == "timeout_unknown":
+                        natural_timeout_rows += 1
+                        timeout_unknown_rows += 1
                     env_fault_payload = None
                     if int(engine_status[env_index_int]) != 0:
                         env_fault_payload = {
@@ -427,8 +493,10 @@ class ActorWorker:
                 reset_done = getattr(env, "reset_done", None)
                 if callable(reset_done):
                     self._resample_opponents(done_mask)
+                    reset_action_sequence_state(action_sequence_state, done_mask)
                     batch = reset_done(done_mask)
                 else:
+                    reset_action_sequence_state(action_sequence_state, done_mask)
                     batch = next_batch
             else:
                 batch = next_batch
@@ -465,7 +533,16 @@ class ActorWorker:
             legal_offsets=legal_offsets_final,
             legal_mask=legal_mask_final,
             entropy=entropy_buf,
-            counters={"empty_legal": anomaly.empty_legal},
+            counters={
+                "empty_legal": anomaly.empty_legal,
+                "engine_fault_done_rows": engine_fault_done_rows,
+                "no_progress_timeout_rows": no_progress_timeout_rows,
+                "natural_timeout_rows": natural_timeout_rows,
+                "decision_limit_timeout_rows": decision_limit_timeout_rows,
+                "tick_limit_timeout_rows": tick_limit_timeout_rows,
+                "timeout_unknown_rows": timeout_unknown_rows,
+                **action_counters,
+            },
         )
 
     @property
@@ -864,6 +941,29 @@ def _batch_episode_identity(batch: Any) -> tuple[np.ndarray | None, np.ndarray |
     seed_array = None if episode_seed is None else np.asarray(episode_seed, dtype=np.uint64)
     key_array = None if episode_key is None else np.asarray(episode_key, dtype=np.uint64)
     return seed_array, key_array
+
+
+def _batch_counter(batch: Any, field_name: str, *, num_envs: int) -> np.ndarray:
+    values = getattr(batch, field_name, None)
+    if values is None:
+        return np.zeros((num_envs,), dtype=np.uint32)
+    array = np.asarray(values, dtype=np.uint32)
+    if array.shape != (num_envs,):
+        raise ValueError(f"{field_name} must have shape ({num_envs},)")
+    return array
+
+
+def _env_timeout_limits(env: Any) -> dict[str, int | None]:
+    return {
+        "max_decisions": _optional_int_attr(env, "max_decisions"),
+        "max_ticks": _optional_int_attr(env, "max_ticks"),
+        "max_no_progress_decisions": _optional_int_attr(env, "max_no_progress_decisions"),
+    }
+
+
+def _optional_int_attr(value: Any, attr_name: str) -> int | None:
+    raw_value = getattr(value, attr_name, None)
+    return None if raw_value is None else int(raw_value)
 
 
 def _episode_identity_or_zeros(identity: np.ndarray | None, *, num_envs: int) -> np.ndarray:

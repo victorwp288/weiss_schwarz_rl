@@ -1,0 +1,12 @@
+schema_version: 2
+extends: typed_local_antistall.yaml
+description: "Typed GRU local anti-stall v2 with tighter no-progress cutoff and stronger timeout pressure"
+rewards:
+  shaping:
+    damage_reward: 0.015
+    no_progress_penalty: 0.015
+  truncation:
+    reward: -0.6
+curriculum:
+  simulator:
+    max_no_progress_decisions: 64

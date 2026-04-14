@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 import math
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import torch
 
+from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import StackConfig, compute_config_hash256, load_stack_config
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
+from weiss_rl.eval.heuristic_public import ActionCatalog, HeuristicPublicPolicy
+from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
 from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotRegistry
 from weiss_rl.masking import masked_log_softmax
 from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, PolicyValueModel
@@ -24,8 +28,10 @@ from weiss_rl.replay.runner import ReplayEnvFactory, build_replay_env, require_s
 class LoadedReplayPolicy:
     spec: str
     label: str
-    weights_path: Path
-    model: PolicyValueModel
+    kind: str
+    weights_path: Path | None
+    model: PolicyValueModel | None = None
+    heuristic_policy: HeuristicPublicPolicy | None = None
 
 
 def inspect_replay_bundle(
@@ -56,6 +62,8 @@ def inspect_replay_bundle(
     contract = require_supported_rerun_contract(meta)
     env = None
     compared_steps = 0
+    run_spec_bundle = _load_run_spec_bundle(resolved_run_dir)
+    action_catalog = _load_action_catalog(run_spec_bundle)
 
     try:
         env = build_replay_env(contract, env_factory=env_factory)
@@ -70,6 +78,7 @@ def inspect_replay_bundle(
             action_dim=GLOBAL_ACTION_SPACE_SIZE,
             run_dir=resolved_run_dir,
             registry=registry,
+            run_spec_bundle=run_spec_bundle,
         )
         policy_b_loaded = _load_policy(
             spec=policy_b,
@@ -78,11 +87,16 @@ def inspect_replay_bundle(
             action_dim=GLOBAL_ACTION_SPACE_SIZE,
             run_dir=resolved_run_dir,
             registry=registry,
+            run_spec_bundle=run_spec_bundle,
         )
 
         device = torch.device("cpu")
-        policy_a_hidden = policy_a_loaded.model.initial_seat_hidden(1, device=device)
-        policy_b_hidden = policy_b_loaded.model.initial_seat_hidden(1, device=device)
+        policy_a_hidden = (
+            None if policy_a_loaded.model is None else policy_a_loaded.model.initial_seat_hidden(1, device=device)
+        )
+        policy_b_hidden = (
+            None if policy_b_loaded.model is None else policy_b_loaded.model.initial_seat_hidden(1, device=device)
+        )
         spec_hash256 = bytes.fromhex(meta.spec_hash256)
 
         step_diffs: list[dict[str, Any]] = []
@@ -96,14 +110,16 @@ def inspect_replay_bundle(
 
             legal_ids = _legal_ids_for_env_row(current_batch)
             logits_a, policy_a_hidden = _forward_policy(
-                policy=policy_a_loaded.model,
+                policy=policy_a_loaded,
                 batch=current_batch,
                 seat_hidden=policy_a_hidden,
+                legal_ids=legal_ids,
             )
             logits_b, policy_b_hidden = _forward_policy(
-                policy=policy_b_loaded.model,
+                policy=policy_b_loaded,
                 batch=current_batch,
                 seat_hidden=policy_b_hidden,
+                legal_ids=legal_ids,
             )
             step_diffs.append(
                 _build_step_diff(
@@ -113,6 +129,7 @@ def inspect_replay_bundle(
                     logits_a=logits_a,
                     logits_b=logits_b,
                     top_actions=top_actions,
+                    action_catalog=action_catalog,
                 )
             )
 
@@ -128,19 +145,21 @@ def inspect_replay_bundle(
             current_batch = next_batch
 
         report = {
-            "bundle_path": str(bundle_path),
+            "bundle_path": bundle_path.as_posix(),
             "policy_a": {
                 "spec": policy_a_loaded.spec,
                 "label": policy_a_loaded.label,
-                "weights_path": str(policy_a_loaded.weights_path),
+                "kind": policy_a_loaded.kind,
+                "weights_path": None if policy_a_loaded.weights_path is None else policy_a_loaded.weights_path.as_posix(),
             },
             "policy_b": {
                 "spec": policy_b_loaded.spec,
                 "label": policy_b_loaded.label,
-                "weights_path": str(policy_b_loaded.weights_path),
+                "kind": policy_b_loaded.kind,
+                "weights_path": None if policy_b_loaded.weights_path is None else policy_b_loaded.weights_path.as_posix(),
             },
-            "run_dir": None if resolved_run_dir is None else str(resolved_run_dir),
-            "snapshot_registry_path": None if resolved_registry_path is None else str(resolved_registry_path),
+            "run_dir": None if resolved_run_dir is None else resolved_run_dir.as_posix(),
+            "snapshot_registry_path": None if resolved_registry_path is None else resolved_registry_path.as_posix(),
             "replay": {
                 "replay_key64": f"{meta.replay_key64:016x}",
                 "episode_key64": int(meta.episode_key64),
@@ -162,11 +181,13 @@ def inspect_replay_bundle(
 
 def format_replay_inspection_report(report: dict[str, Any]) -> str:
     summary = report["summary"]
+    policy_a_source = _format_policy_source(report["policy_a"])
+    policy_b_source = _format_policy_source(report["policy_b"])
     lines = [
         "Replay inspector",
         f"bundle: {report['bundle_path']}",
-        f"policy_a: {report['policy_a']['label']} ({report['policy_a']['weights_path']})",
-        f"policy_b: {report['policy_b']['label']} ({report['policy_b']['weights_path']})",
+        f"policy_a: {report['policy_a']['label']} ({policy_a_source})",
+        f"policy_b: {report['policy_b']['label']} ({policy_b_source})",
         f"compared_steps: {report['compared_steps']}",
         (
             "summary: "
@@ -174,34 +195,56 @@ def format_replay_inspection_report(report: dict[str, Any]) -> str:
             f"mean_tv={summary['mean_total_variation']:.6f} "
             f"max_abs_prob_delta={summary['max_abs_probability_delta']:.6f}"
         ),
+        (
+            "alignment: "
+            f"action_match_rate={summary['policy_a_matches_policy_b_top_action_rate']:.6f} "
+            f"family_match_rate={summary['policy_a_matches_policy_b_top_action_family_rate']:.6f} "
+            f"mean_p_on_b={summary['policy_a_mean_probability_on_policy_b_top_action']:.6f} "
+            f"median_rank_of_b={summary['policy_a_median_rank_of_policy_b_top_action']:.2f}"
+        ),
         "top_differences:",
     ]
+    if summary["top_action_family_confusions"]:
+        family_confusions = ", ".join(
+            f"{item['policy_b_family']}->{item['policy_a_family']} x{item['count']}"
+            for item in summary["top_action_family_confusions"]
+        )
+        lines.append(f"family_confusions: {family_confusions}")
 
     for index, diff in enumerate(report["top_differences"], start=1):
         lines.append(
             (
                 f"{index}. step={diff['step_index']} decision_id={diff['decision_id']} actor={diff['actor']} "
-                f"recorded_action={diff['recorded_action']} tv={diff['total_variation']:.6f} "
+                f"recorded_action={_format_action_descriptor(diff['recorded_action_detail'])} "
+                f"tv={diff['total_variation']:.6f} "
                 f"max_abs_prob_delta={diff['max_abs_probability_delta']:.6f}"
             )
         )
         lines.append(
             (
-                f"   {report['policy_a']['label']}: top_action={diff['policy_a_top_action']['action']} "
+                f"   {report['policy_a']['label']}: top_action={_format_action_descriptor(diff['policy_a_top_action'])} "
                 f"p={diff['policy_a_top_action']['probability']:.6f} "
                 f"recorded_p={diff['policy_a_recorded_action_probability']:.6f}"
             )
         )
         lines.append(
             (
-                f"   {report['policy_b']['label']}: top_action={diff['policy_b_top_action']['action']} "
+                f"   {report['policy_b']['label']}: top_action={_format_action_descriptor(diff['policy_b_top_action'])} "
                 f"p={diff['policy_b_top_action']['probability']:.6f} "
                 f"recorded_p={diff['policy_b_recorded_action_probability']:.6f}"
             )
         )
+        lines.append(
+            (
+                f"   learner_on_b2: p={diff['policy_a_probability_on_policy_b_top_action']:.6f} "
+                f"rank={diff['policy_a_rank_of_policy_b_top_action']} "
+                f"action_match={diff['policy_a_matches_policy_b_top_action']} "
+                f"family_match={diff['policy_a_matches_policy_b_top_action_family']}"
+            )
+        )
         action_delta_text = ", ".join(
             (
-                f"a{item['action']}:Δ={item['probability_delta_b_minus_a']:+.6f} "
+                f"{_format_action_descriptor(item)}:Δ={item['probability_delta_b_minus_a']:+.6f} "
                 f"(A={item['probability_a']:.6f},B={item['probability_b']:.6f})"
             )
             for item in diff["top_action_deltas"]
@@ -246,7 +289,20 @@ def _load_policy(
     action_dim: int,
     run_dir: Path | None,
     registry: SnapshotRegistry | None,
+    run_spec_bundle: dict[str, Any] | None,
 ) -> LoadedReplayPolicy:
+    normalized_spec = str(spec).strip()
+    if normalized_spec == HEURISTIC_PUBLIC_POLICY_ID:
+        if run_spec_bundle is None:
+            raise RuntimeError("Resolving B2 HeuristicPublic for replay inspection requires spec_bundle.json in run_dir")
+        return LoadedReplayPolicy(
+            spec=normalized_spec,
+            label=normalized_spec,
+            kind="heuristic_public",
+            weights_path=None,
+            heuristic_policy=HeuristicPublicPolicy.from_spec_bundle(run_spec_bundle),
+        )
+
     weights_path, label = _resolve_policy_weights_path(spec=spec, run_dir=run_dir, registry=registry)
     payload = torch.load(weights_path, map_location="cpu", weights_only=True)
     model_state_dict = payload.get("model_state_dict")
@@ -269,15 +325,49 @@ def _load_policy(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
+        observation_spec=_load_run_observation_spec(run_spec_bundle),
     ).to(torch.device("cpu"))
     model.load_state_dict(model_state_dict)
     model.eval()
     return LoadedReplayPolicy(
         spec=str(spec),
         label=label,
+        kind="model",
         weights_path=weights_path,
         model=model,
     )
+
+
+def _load_run_spec_bundle(run_dir: Path | None) -> dict[str, Any] | None:
+    if run_dir is None:
+        return None
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    if not layout.spec_bundle_path.is_file():
+        return None
+    payload = json.loads(layout.spec_bundle_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"spec_bundle.json must contain an object: {layout.spec_bundle_path}")
+    return dict(payload)
+
+
+def _load_run_observation_spec(spec_bundle: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if spec_bundle is None:
+        return None
+    observation = spec_bundle.get("observation")
+    if observation is None:
+        return None
+    if not isinstance(observation, dict):
+        raise RuntimeError("spec_bundle.json observation payload must be an object")
+    return dict(observation)
+
+
+def _load_action_catalog(spec_bundle: Mapping[str, Any] | None) -> ActionCatalog | None:
+    if spec_bundle is None:
+        return None
+    try:
+        return ActionCatalog.from_spec_bundle(spec_bundle)
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _resolve_policy_weights_path(
@@ -404,14 +494,26 @@ def _legal_ids_for_env_row(batch: DecisionBoundaryBatch) -> np.ndarray:
 
 def _forward_policy(
     *,
-    policy: PolicyValueModel,
+    policy: LoadedReplayPolicy,
     batch: DecisionBoundaryBatch,
-    seat_hidden: torch.Tensor,
-) -> tuple[np.ndarray, torch.Tensor]:
+    seat_hidden: torch.Tensor | None,
+    legal_ids: np.ndarray,
+) -> tuple[np.ndarray, torch.Tensor | None]:
+    if policy.heuristic_policy is not None:
+        chosen_action = int(
+            policy.heuristic_policy.choose_action(np.asarray(batch.obs[0], dtype=np.float32), np.asarray(legal_ids))
+        )
+        logits = np.full((GLOBAL_ACTION_SPACE_SIZE,), -1.0e9, dtype=np.float32)
+        logits[chosen_action] = 0.0
+        return logits, seat_hidden
+
+    if policy.model is None or seat_hidden is None:
+        raise RuntimeError(f"Replay policy {policy.label!r} is missing a model or hidden state")
+
     device = torch.device("cpu")
     acting_seat = int(batch.actor[0])
     with torch.inference_mode():
-        logits_tensor, _value_tensor, next_seat_hidden = policy.forward_seat_aware(
+        logits_tensor, _value_tensor, next_seat_hidden = policy.model.forward_seat_aware(
             torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=device),
             torch.as_tensor([acting_seat], device=device, dtype=torch.long),
             seat_hidden,
@@ -428,6 +530,7 @@ def _build_step_diff(
     logits_a: np.ndarray,
     logits_b: np.ndarray,
     top_actions: int,
+    action_catalog: ActionCatalog | None,
 ) -> dict[str, Any]:
     legal_mask = np.zeros((logits_a.shape[0],), dtype=bool)
     legal_mask[np.asarray(legal_ids, dtype=np.int64)] = True
@@ -444,23 +547,47 @@ def _build_step_diff(
     abs_probability_delta = np.abs(probability_delta)
     legal_action_indices = np.flatnonzero(legal_mask)
     ranked_action_indices = legal_action_indices[np.argsort(abs_probability_delta[legal_action_indices])[::-1]]
+    policy_a_top_action = _top_action_payload(
+        probabilities=probs[0],
+        legal_indices=legal_action_indices,
+        action_catalog=action_catalog,
+    )
+    policy_b_top_action = _top_action_payload(
+        probabilities=probs[1],
+        legal_indices=legal_action_indices,
+        action_catalog=action_catalog,
+    )
+    policy_b_top_action_id = int(policy_b_top_action["action"])
 
     return {
         "step_index": int(step_index),
         "decision_id": int(expected_step.decision_id),
         "actor": int(expected_step.actor),
         "recorded_action": int(expected_step.action),
+        "recorded_action_detail": _action_descriptor(int(expected_step.action), action_catalog=action_catalog),
         "total_variation": total_variation,
         "kl_divergence_ab": kl_divergence_ab,
         "kl_divergence_ba": kl_divergence_ba,
         "max_abs_probability_delta": float(np.max(abs_probability_delta[legal_action_indices], initial=0.0)),
         "policy_a_recorded_action_probability": float(probs[0, int(expected_step.action)]),
         "policy_b_recorded_action_probability": float(probs[1, int(expected_step.action)]),
-        "policy_a_top_action": _top_action_payload(probabilities=probs[0], legal_indices=legal_action_indices),
-        "policy_b_top_action": _top_action_payload(probabilities=probs[1], legal_indices=legal_action_indices),
+        "policy_a_probability_on_policy_b_top_action": float(probs[0, policy_b_top_action_id]),
+        "policy_a_rank_of_policy_b_top_action": _rank_of_action(
+            probabilities=probs[0],
+            legal_indices=legal_action_indices,
+            action_id=policy_b_top_action_id,
+        ),
+        "policy_a_matches_policy_b_top_action": int(policy_a_top_action["action"]) == policy_b_top_action_id,
+        "policy_a_matches_policy_b_top_action_family": (
+            policy_a_top_action.get("family") == policy_b_top_action.get("family")
+            if "family" in policy_a_top_action and "family" in policy_b_top_action
+            else False
+        ),
+        "policy_a_top_action": policy_a_top_action,
+        "policy_b_top_action": policy_b_top_action,
         "top_action_deltas": [
             {
-                "action": int(action_index),
+                **_action_descriptor(int(action_index), action_catalog=action_catalog),
                 "probability_a": float(probs[0, action_index]),
                 "probability_b": float(probs[1, action_index]),
                 "probability_delta_b_minus_a": float(probability_delta[action_index]),
@@ -471,14 +598,48 @@ def _build_step_diff(
     }
 
 
-def _top_action_payload(*, probabilities: np.ndarray, legal_indices: np.ndarray) -> dict[str, Any]:
+def _top_action_payload(
+    *,
+    probabilities: np.ndarray,
+    legal_indices: np.ndarray,
+    action_catalog: ActionCatalog | None,
+) -> dict[str, Any]:
     if legal_indices.size == 0:
         raise RuntimeError("Replay inspection requires at least one legal action per compared step")
     top_action = int(legal_indices[np.argmax(probabilities[legal_indices])])
-    return {
-        "action": top_action,
-        "probability": float(probabilities[top_action]),
-    }
+    return {**_action_descriptor(top_action, action_catalog=action_catalog), "probability": float(probabilities[top_action])}
+
+
+def _rank_of_action(*, probabilities: np.ndarray, legal_indices: np.ndarray, action_id: int) -> int:
+    legal_probabilities = probabilities[legal_indices]
+    sorted_indices = legal_indices[np.argsort(legal_probabilities)[::-1]]
+    positions = np.flatnonzero(sorted_indices == int(action_id))
+    if positions.size == 0:
+        raise RuntimeError(f"Expected action {action_id} to be legal in replay inspection")
+    return int(positions[0]) + 1
+
+
+def _action_descriptor(action_id: int, *, action_catalog: ActionCatalog | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"action": int(action_id)}
+    if action_catalog is None:
+        return payload
+    decoded = action_catalog.decode(int(action_id))
+    payload["family"] = decoded.family
+    if decoded.hand_index is not None:
+        payload["hand_index"] = int(decoded.hand_index)
+    if decoded.stage_slot is not None:
+        payload["stage_slot"] = int(decoded.stage_slot)
+    if decoded.from_slot is not None:
+        payload["from_slot"] = int(decoded.from_slot)
+    if decoded.to_slot is not None:
+        payload["to_slot"] = int(decoded.to_slot)
+    if decoded.slot is not None:
+        payload["slot"] = int(decoded.slot)
+    if decoded.attack_type is not None:
+        payload["attack_type"] = str(decoded.attack_type)
+    if decoded.index is not None:
+        payload["index"] = int(decoded.index)
+    return payload
 
 
 def _summarize_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -> dict[str, Any]:
@@ -490,6 +651,11 @@ def _summarize_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -
             "mean_total_variation": 0.0,
             "median_total_variation": 0.0,
             "max_abs_probability_delta": 0.0,
+            "policy_a_matches_policy_b_top_action_rate": 0.0,
+            "policy_a_matches_policy_b_top_action_family_rate": 0.0,
+            "policy_a_mean_probability_on_policy_b_top_action": 0.0,
+            "policy_a_median_rank_of_policy_b_top_action": 0.0,
+            "top_action_family_confusions": [],
         }
 
     total_variation = np.asarray([float(item["total_variation"]) for item in step_diffs], dtype=np.float64)
@@ -497,6 +663,27 @@ def _summarize_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -
         [float(item["max_abs_probability_delta"]) for item in step_diffs],
         dtype=np.float64,
     )
+    policy_a_matches_policy_b_top_action = np.asarray(
+        [bool(item["policy_a_matches_policy_b_top_action"]) for item in step_diffs],
+        dtype=np.float64,
+    )
+    policy_a_matches_policy_b_top_action_family = np.asarray(
+        [bool(item["policy_a_matches_policy_b_top_action_family"]) for item in step_diffs],
+        dtype=np.float64,
+    )
+    policy_a_probability_on_policy_b_top_action = np.asarray(
+        [float(item["policy_a_probability_on_policy_b_top_action"]) for item in step_diffs],
+        dtype=np.float64,
+    )
+    policy_a_rank_of_policy_b_top_action = np.asarray(
+        [float(item["policy_a_rank_of_policy_b_top_action"]) for item in step_diffs],
+        dtype=np.float64,
+    )
+    confusion_counter: Counter[tuple[str, str]] = Counter()
+    for item in step_diffs:
+        policy_b_family = str(item["policy_b_top_action"].get("family", "unknown"))
+        policy_a_family = str(item["policy_a_top_action"].get("family", "unknown"))
+        confusion_counter[(policy_b_family, policy_a_family)] += 1
     return {
         "compared_steps": len(step_diffs),
         "top_k": int(top_k),
@@ -504,6 +691,18 @@ def _summarize_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -
         "mean_total_variation": float(np.mean(total_variation)),
         "median_total_variation": float(np.median(total_variation)),
         "max_abs_probability_delta": float(np.max(max_abs_probability_delta)),
+        "policy_a_matches_policy_b_top_action_rate": float(np.mean(policy_a_matches_policy_b_top_action)),
+        "policy_a_matches_policy_b_top_action_family_rate": float(np.mean(policy_a_matches_policy_b_top_action_family)),
+        "policy_a_mean_probability_on_policy_b_top_action": float(np.mean(policy_a_probability_on_policy_b_top_action)),
+        "policy_a_median_rank_of_policy_b_top_action": float(np.median(policy_a_rank_of_policy_b_top_action)),
+        "top_action_family_confusions": [
+            {
+                "policy_b_family": policy_b_family,
+                "policy_a_family": policy_a_family,
+                "count": int(count),
+            }
+            for (policy_b_family, policy_a_family), count in confusion_counter.most_common(5)
+        ],
     }
 
 
@@ -525,6 +724,26 @@ def _top_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -> list
 def _canonical_float(value: Any) -> float:
     scalar = float(np.float32(value))
     return scalar if math.isfinite(scalar) else scalar
+
+
+def _format_policy_source(policy_report: Mapping[str, Any]) -> str:
+    weights_path = policy_report.get("weights_path")
+    if isinstance(weights_path, str) and weights_path:
+        return weights_path
+    return str(policy_report.get("kind", "unknown"))
+
+
+def _format_action_descriptor(payload: Mapping[str, Any]) -> str:
+    parts = [f"a{int(payload['action'])}"]
+    family = payload.get("family")
+    if family is None:
+        return "".join(parts)
+    detail_parts: list[str] = [str(family)]
+    for key in ("hand_index", "stage_slot", "from_slot", "to_slot", "slot", "attack_type", "index"):
+        value = payload.get(key)
+        if value is not None:
+            detail_parts.append(f"{key}={value}")
+    return f"{parts[0]}[{', '.join(detail_parts)}]"
 
 
 __all__ = [

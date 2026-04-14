@@ -12,10 +12,12 @@ import numpy as np
 import pytest
 import torch
 
-from weiss_rl.config import load_stack_config
+from weiss_rl.config import canonical_config_dict, load_stack_config
+from weiss_rl.learners.impala_learner import ImpalaLearner
 from weiss_rl.league import PromotionGatePosterior, PromotionGateRate, PromotionGateResult
 from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
 from weiss_rl.model import PolicyValueModel
+from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -58,6 +60,7 @@ def _make_policy_value_model(stack: Any) -> PolicyValueModel:
         observation_dim=512,
         config=stack.config.model,
         action_dim=9,
+        observation_spec=_heuristic_public_contract_bundle()["observation"],  # type: ignore[arg-type]
     )
 
 
@@ -68,10 +71,10 @@ def _write_b1_baseline_run_fixture(
     policy_id: str = "b1_noleague_baseline",
     config_hash256: str = "ab" * 32,
     spec_hash256: str = "cd" * 32,
-    training_mode: str = "b1_no_league",
+    experiment_role: str = "baseline_noleague",
 ) -> Path:
     train_script = _load_train_script_module()
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
     run_dir = tmp_path / "b1_run"
     training_paths = train_script._training_paths(run_dir)
     checkpoint_path = training_paths.checkpoints_dir / f"checkpoint_{update}.pt"
@@ -98,17 +101,15 @@ def _write_b1_baseline_run_fixture(
     registry.save(training_paths.snapshots_dir / "registry.json")
     (run_dir / "config_hash256.txt").write_text(f"{config_hash256}\n", encoding="utf-8")
     (run_dir / "spec_hash256.txt").write_text(f"{spec_hash256}\n", encoding="utf-8")
+    config_canonical = canonical_config_dict(stack)
+    config_canonical["experiment"] = {
+        **dict(config_canonical.get("experiment", {})),
+        "role": experiment_role,
+    }
     (run_dir / "manifest.json").write_text(
         json.dumps(
             {
-                "config_canonical": {
-                    "model": stack.component_docs["model"],
-                    "environment": stack.component_docs["environment"],
-                    "training_family_a": {
-                        **stack.component_docs["training_family_a"],
-                        "mode": training_mode,
-                    },
-                }
+                "config_canonical": config_canonical
             },
             indent=2,
             sort_keys=True,
@@ -412,7 +413,7 @@ def test_train_snapshot_retention_prunes_old_snapshot_artifacts(tmp_path: Path) 
 
 def test_ensure_noleague_baseline_anchor_imports_frozen_snapshot_once(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
     baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, update=5)
 
     run_dir = tmp_path / "consumer_run"
@@ -486,12 +487,58 @@ def test_ensure_noleague_baseline_anchor_imports_frozen_snapshot_once(tmp_path: 
     assert reloaded.snapshots[0].weights_sha256 == snapshot.weights_sha256
 
 
+def test_ensure_noleague_baseline_anchor_refreshes_current_run_alias_to_latest_update(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    run_dir = tmp_path / "b1_run"
+    training_paths = train_script._training_paths(run_dir)
+    learner = SimpleNamespace(
+        model=_make_policy_value_model(stack),
+        update_count=1,
+        optimizer=None,
+        get_policy_version=lambda: 1,
+    )
+
+    first_policy_id = train_script._ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        learner=learner,
+        device=torch.device("cpu"),
+        config_hash256="ab" * 32,
+        permit_current_run_alias=True,
+        update=1,
+    )
+
+    first_registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    first_snapshot = next(snapshot for snapshot in first_registry.snapshots if snapshot.policy_id == first_policy_id)
+    first_hash = first_snapshot.weights_sha256
+
+    learner.update_count = 3
+    second_policy_id = train_script._ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        learner=learner,
+        device=torch.device("cpu"),
+        config_hash256="ab" * 32,
+        permit_current_run_alias=True,
+        update=3,
+    )
+
+    assert second_policy_id == first_policy_id == "b1_noleague_baseline"
+    second_registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    second_snapshot = next(snapshot for snapshot in second_registry.snapshots if snapshot.policy_id == second_policy_id)
+    assert second_snapshot.update == 3
+    assert second_snapshot.weights_sha256 != first_hash
+
+
 def test_ensure_noleague_baseline_anchor_rejects_non_b1_imported_run(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
-    baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, training_mode="standard")
+    stack = load_stack_config(canonical_stack_config_path())
+    baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, experiment_role="main")
 
-    with pytest.raises(RuntimeError, match="must come from a dedicated b1_no_league run"):
+    with pytest.raises(RuntimeError, match="must come from a dedicated baseline_noleague run"):
         train_script._ensure_noleague_baseline_anchor(
             stack=stack,
             training_paths=train_script._training_paths(tmp_path / "consumer_run"),
@@ -511,7 +558,7 @@ def test_ensure_noleague_baseline_anchor_rejects_non_b1_imported_run(tmp_path: P
 
 def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_path: Path, monkeypatch) -> None:
     train_script = _load_train_script_module()
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
 
     bootstrap_calls: list[dict[str, Any]] = []
 
@@ -530,10 +577,7 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
         train_script._run_minimal_training(
             stack=stack,
             contract=SimpleNamespace(
-                spec_bundle={
-                    "observation": {"obs_len": 512},
-                    "action": {"action_space_size": 9, "pass_action_id": 8},
-                }
+                spec_bundle=_heuristic_public_contract_bundle()
             ),
             artifacts=SimpleNamespace(run_dir=run_dir),
             num_envs=1,
@@ -566,7 +610,7 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
 
 def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path: Path, monkeypatch) -> None:
     train_script = _load_train_script_module()
-    stack = load_stack_config(REPO_ROOT / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(canonical_stack_config_path())
     baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, update=5)
 
     run_dir = tmp_path / "run"
@@ -647,8 +691,9 @@ def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path
         training_paths=training_paths,
         learner=SimpleNamespace(model=learner_model),
         candidate_policy_id=candidate_policy_id,
-        update_count=7,
-        policy_version=7,
+        update_count=int(stack.config.league.warmup.first_updates),
+        league_reference_update=int(stack.config.league.warmup.first_updates),
+        policy_version=int(stack.config.league.warmup.first_updates),
         run_id256="12" * 32,
         config_hash256="34" * 32,
         spec_hash256="56" * 32,
@@ -657,6 +702,385 @@ def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path
     assert promoted is True
     registry = SnapshotRegistry.load(registry_path)
     assert registry.champion_snapshots == [candidate_policy_id]
+
+
+def test_run_snapshot_promotion_gate_skips_during_warmup(tmp_path: Path, monkeypatch) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, update=5)
+
+    run_dir = tmp_path / "run"
+    training_paths = train_script._training_paths(run_dir)
+
+    train_script._ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        learner=SimpleNamespace(
+            model=_make_policy_value_model(stack),
+            update_count=0,
+            optimizer=None,
+            get_policy_version=lambda: 0,
+        ),
+        device=torch.device("cpu"),
+        config_hash256="ab" * 32,
+        baseline_run_dir=baseline_run_dir,
+    )
+
+    learner_model = _make_policy_value_model(stack)
+    candidate_checkpoint_path = training_paths.checkpoints_dir / "checkpoint_7.pt"
+    torch.save({"format": "checkpoint_stub"}, candidate_checkpoint_path)
+    candidate_policy_id = train_script._persist_snapshot_registry_entry(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        checkpoint_path=candidate_checkpoint_path,
+        model_state_dict=learner_model.state_dict(),
+        config_hash256="cd" * 32,
+        device=torch.device("cpu"),
+        update=7,
+        policy_version=7,
+    )
+
+    def fail_run_promotion_gate(**kwargs):
+        raise AssertionError("promotion gate should be skipped during warmup")
+
+    monkeypatch.setattr(train_script, "run_promotion_gate", fail_run_promotion_gate)
+
+    promoted = train_script._run_snapshot_promotion_gate(
+        stack=stack,
+        contract=SimpleNamespace(spec_bundle=_heuristic_public_contract_bundle()),
+        artifacts=SimpleNamespace(run_dir=run_dir),
+        training_paths=training_paths,
+        learner=SimpleNamespace(model=learner_model),
+        candidate_policy_id=candidate_policy_id,
+        update_count=int(stack.config.league.warmup.first_updates) - 1,
+        league_reference_update=int(stack.config.league.warmup.first_updates) - 1,
+        policy_version=7,
+        run_id256="12" * 32,
+        config_hash256="34" * 32,
+        spec_hash256="56" * 32,
+    )
+
+    assert promoted is None
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    assert registry.champion_snapshots == []
+
+
+def test_run_snapshot_promotion_gate_uses_effective_update_for_warmup(tmp_path: Path, monkeypatch) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, update=5)
+
+    run_dir = tmp_path / "run"
+    training_paths = train_script._training_paths(run_dir)
+
+    train_script._ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        learner=SimpleNamespace(
+            model=_make_policy_value_model(stack),
+            update_count=0,
+            optimizer=None,
+            get_policy_version=lambda: 0,
+        ),
+        device=torch.device("cpu"),
+        config_hash256="ab" * 32,
+        baseline_run_dir=baseline_run_dir,
+    )
+
+    learner_model = _make_policy_value_model(stack)
+    candidate_checkpoint_path = training_paths.checkpoints_dir / "checkpoint_220.pt"
+    torch.save({"format": "checkpoint_stub"}, candidate_checkpoint_path)
+    candidate_policy_id = train_script._persist_snapshot_registry_entry(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        checkpoint_path=candidate_checkpoint_path,
+        model_state_dict=learner_model.state_dict(),
+        config_hash256="cd" * 32,
+        device=torch.device("cpu"),
+        update=220,
+        policy_version=220,
+    )
+
+    def fail_run_promotion_gate(**kwargs):
+        raise AssertionError("promotion gate should be skipped while effective update is still in warmup")
+
+    monkeypatch.setattr(train_script, "run_promotion_gate", fail_run_promotion_gate)
+
+    promoted = train_script._run_snapshot_promotion_gate(
+        stack=stack,
+        contract=SimpleNamespace(spec_bundle=_heuristic_public_contract_bundle()),
+        artifacts=SimpleNamespace(run_dir=run_dir),
+        training_paths=training_paths,
+        learner=SimpleNamespace(model=learner_model),
+        candidate_policy_id=candidate_policy_id,
+        update_count=int(stack.config.league.warmup.first_updates) + 20,
+        league_reference_update=int(stack.config.league.warmup.first_updates) - 20,
+        policy_version=220,
+        run_id256="12" * 32,
+        config_hash256="34" * 32,
+        spec_hash256="56" * 32,
+    )
+
+    assert promoted is None
+
+
+def test_checkpoint_aliases_track_latest_and_best_and_restore_resume_state(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    run_dir = tmp_path / "run"
+    training_paths = train_script._training_paths(run_dir)
+    artifacts = train_script._run_artifacts_from_existing_run_dir(run_dir)
+
+    learner = ImpalaLearner(
+        model=_make_policy_value_model(stack),
+        checkpoint_dir=training_paths.checkpoints_dir,
+        logs_dir=training_paths.logs_dir,
+        pass_action_id=0,
+    )
+    learner._optimizer_for_step()
+    learner.update_count = 3
+    learner.policy_version = 2
+    learner.total_samples_processed = 96
+    checkpoint_path = training_paths.checkpoints_dir / "checkpoint_3.pt"
+    train_script._write_checkpoint(
+        checkpoint_path=checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+
+    tracker = train_script._publish_checkpoint_aliases(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        checkpoint_path=checkpoint_path,
+        learner=learner,
+        latest_metrics={"loss": 1.25},
+    )
+    assert training_paths.latest_checkpoint_path.is_file()
+    assert training_paths.best_checkpoint_path.is_file()
+    assert tracker["latest"]["metric_kind"] == "training_loss"
+    assert tracker["best"]["metric_kind"] == "training_loss"
+
+    learner.update_count = 4
+    learner.policy_version = 3
+    learner.total_samples_processed = 128
+    second_checkpoint_path = training_paths.checkpoints_dir / "checkpoint_4.pt"
+    train_script._write_checkpoint(
+        checkpoint_path=second_checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+    tracker = train_script._publish_checkpoint_aliases(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        checkpoint_path=second_checkpoint_path,
+        learner=learner,
+        latest_metrics={"loss": 1.5},
+        dev_eval_summary={"aggregate_score": 0.61, "uncertainty": {"mean": 0.61}},
+    )
+    assert tracker["best"]["metric_kind"] == "dev_eval_mean"
+    assert tracker["best"]["source_checkpoint_path"].endswith("training/checkpoints/checkpoint_4.pt")
+
+    restored_learner = ImpalaLearner(
+        model=_make_policy_value_model(stack),
+        checkpoint_dir=training_paths.checkpoints_dir,
+        logs_dir=training_paths.logs_dir,
+        pass_action_id=0,
+    )
+    resume_state = train_script._restore_learner_from_checkpoint(
+        checkpoint_path=training_paths.best_checkpoint_path,
+        learner=restored_learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        expected_spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+    assert resume_state.update_count == 4
+    assert resume_state.policy_version == 3
+    assert resume_state.total_samples_processed == 128
+    assert restored_learner.update_count == 4
+    assert restored_learner.policy_version == 3
+
+    restored_learner.update_count = 99
+    restored_learner.policy_version = 77
+    restored_learner.total_samples_processed = 12345
+    preserved_start_time = restored_learner.start_time
+    preserved_resume_state = train_script._restore_learner_from_checkpoint(
+        checkpoint_path=training_paths.best_checkpoint_path,
+        learner=restored_learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        expected_spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+        restore_counters=False,
+    )
+    assert preserved_resume_state.update_count == 99
+    assert preserved_resume_state.policy_version == 77
+    assert preserved_resume_state.total_samples_processed == 12345
+    assert restored_learner.update_count == 99
+    assert restored_learner.policy_version == 77
+    assert restored_learner.start_time == preserved_start_time
+
+
+def test_finalize_from_best_checkpoint_rewrites_latest_alias(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(REPO_ROOT / "configs" / "presets" / "typed_local.yaml")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    artifacts = SimpleNamespace(run_dir=run_dir)
+    training_paths = train_script._training_paths(run_dir)
+    learner = ImpalaLearner(
+        model=_make_policy_value_model(stack),
+        checkpoint_dir=training_paths.checkpoints_dir,
+        logs_dir=training_paths.logs_dir,
+        pass_action_id=0,
+    )
+    learner._optimizer_for_step()
+
+    learner.update_count = 160
+    learner.policy_version = 8
+    learner.total_samples_processed = 5120
+    best_checkpoint = training_paths.checkpoints_dir / "checkpoint_160.pt"
+    train_script._write_checkpoint(
+        checkpoint_path=best_checkpoint,
+        learner=learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+    train_script._publish_checkpoint_aliases(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        checkpoint_path=best_checkpoint,
+        learner=learner,
+        latest_metrics={"loss": 0.5},
+        dev_eval_summary={"aggregate_score": 0.65625, "stall_monitor": {"worst_truncation_rate": 0.0}},
+    )
+
+    learner.update_count = 220
+    learner.policy_version = 11
+    learner.total_samples_processed = 7040
+    current_checkpoint = training_paths.checkpoints_dir / "checkpoint_220.pt"
+    train_script._write_checkpoint(
+        checkpoint_path=current_checkpoint,
+        learner=learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+    tracker = train_script._publish_checkpoint_aliases(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        checkpoint_path=current_checkpoint,
+        learner=learner,
+        latest_metrics={"loss": 0.1},
+        dev_eval_summary={"aggregate_score": 0.28125, "stall_monitor": {"worst_truncation_rate": 0.0}},
+    )
+    assert tracker["best"]["source_checkpoint_path"].endswith("training/checkpoints/checkpoint_160.pt")
+
+    runtime = SimpleNamespace(
+        reset_count=0,
+        refresh_count=0,
+    )
+    runtime.reset_outcome_tracker = lambda: setattr(runtime, "reset_count", runtime.reset_count + 1)
+    runtime.refresh_opponent_pool = lambda: setattr(runtime, "refresh_count", runtime.refresh_count + 1)
+
+    event = train_script._maybe_finalize_from_best_checkpoint(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        runtime=runtime,
+        learner=learner,
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+        latest_metrics={"loss": 0.1},
+        dev_eval_summary={"aggregate_score": 0.28125, "stall_monitor": {"worst_truncation_rate": 0.0}},
+    )
+
+    assert event is not None
+    assert runtime.reset_count == 1
+    assert runtime.refresh_count == 1
+    tracker = train_script._load_checkpoint_tracker(training_paths)
+    assert tracker["latest"]["metric_kind"] == "dev_eval_mean"
+    assert tracker["latest"]["metric_value"] == pytest.approx(0.65625)
+    assert tracker["latest"]["source_checkpoint_path"].endswith("training/checkpoints/best.pt")
+
+
+def test_demote_registry_champions_newer_than_removes_newer_refs_only(tmp_path: Path) -> None:
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="policy_000080",
+        update=80,
+        weights_sha256="8" * 64,
+        path="training/snapshots/policy_000080/weights.pt",
+    )
+    registry.add_snapshot(
+        policy_id="policy_000120",
+        update=120,
+        weights_sha256="1" * 64,
+        path="training/snapshots/policy_000120/weights.pt",
+    )
+    registry.add_champion("policy_000080")
+    registry.add_champion("policy_000120")
+
+    removed = registry.demote_champions_newer_than(80)
+
+    assert removed == ["policy_000120"]
+    assert registry.champion_snapshots == ["policy_000080"]
+
+
+def test_demote_stale_champions_removes_old_refs_only() -> None:
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="policy_000080",
+        update=80,
+        weights_sha256="8" * 64,
+        path="training/snapshots/policy_000080/weights.pt",
+    )
+    registry.add_snapshot(
+        policy_id="policy_000180",
+        update=180,
+        weights_sha256="1" * 64,
+        path="training/snapshots/policy_000180/weights.pt",
+    )
+    registry.add_champion("policy_000080")
+    registry.add_champion("policy_000180")
+
+    removed = registry.demote_stale_champions(current_update=220, max_age_updates=60)
+
+    assert removed == ["policy_000080"]
+    assert registry.champion_snapshots == ["policy_000180"]
+
+
+def test_resolve_resume_checkpoint_path_defaults_to_latest_alias(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    run_dir = tmp_path / "resume_run"
+    latest_path = run_dir / "training" / "checkpoints" / "latest.pt"
+    latest_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_path.write_bytes(b"checkpoint")
+
+    resolved = train_script._resolve_resume_checkpoint_path(
+        resume_from="",
+        resume_run_dir=run_dir,
+    )
+
+    assert resolved == latest_path.resolve()
 
 
 def test_periodic_dev_eval_runner_resets_env_with_scheduled_episode_seed(tmp_path: Path, monkeypatch) -> None:
@@ -671,6 +1095,8 @@ def test_periodic_dev_eval_runner_resets_env_with_scheduled_episode_seed(tmp_pat
         actor=np.array([-1], dtype=np.int32),
         decision_id=np.array([0], dtype=np.int64),
         engine_status=np.array([0], dtype=np.uint8),
+        decision_count=np.array([0], dtype=np.uint32),
+        tick_count=np.array([0], dtype=np.uint32),
         episode_seed=np.array([579856027068064], dtype=np.uint64),
         episode_key=np.array([1], dtype=np.uint64),
         ids_offsets=(np.array([], dtype=np.uint32), np.array([0, 0], dtype=np.int32)),
@@ -699,6 +1125,7 @@ def test_periodic_dev_eval_runner_resets_env_with_scheduled_episode_seed(tmp_pat
     runner = train_script._PeriodicDevEvalRunner(
         stack=SimpleNamespace(),
         model=FakeModel(),
+        opponent_policy_id="baseline",
         observation_dim=1,
         action_dim=1,
         pass_action_id=0,
@@ -737,6 +1164,8 @@ def test_promotion_gate_runner_resets_env_with_scheduled_episode_seed(tmp_path: 
         actor=np.array([-1], dtype=np.int32),
         decision_id=np.array([0], dtype=np.int64),
         engine_status=np.array([0], dtype=np.uint8),
+        decision_count=np.array([0], dtype=np.uint32),
+        tick_count=np.array([0], dtype=np.uint32),
         episode_seed=np.array([579856027068064], dtype=np.uint64),
         episode_key=np.array([1], dtype=np.uint64),
         ids_offsets=(np.array([], dtype=np.uint32), np.array([0, 0], dtype=np.int32)),

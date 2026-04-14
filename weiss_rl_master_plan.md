@@ -134,6 +134,12 @@ Low-level (throughput):
 - RL helpers: `reset_rl(pool, layout=...)`, `step_rl(pool, actions, layout=...)`
 - Optional helper stepping from logits: `step_rl_select_from_logits`, `step_rl_sample_from_logits` (useful for baselines and for “rust selection only” benchmarks)
 
+Implementation note:
+
+- `DecisionBoundaryEnv` is the RL contract surface used by the repo.
+- The wrapper is implemented on top of the simulator helpers above, but downstream code should reason in terms of the boundary-step batch rather than the raw helpers.
+- Simulator-backed validation should use the published `weiss-sim` package when available.
+
 Replays / drift:
 
 - replay sampling hooks (enabled via environment options) + episode keys / seeds for deterministic replay.
@@ -295,11 +301,11 @@ Notes:
 - The simulator defines layout; we treat it as authoritative and log the spec bundle.
 - Observation visibility modes (public/full) do not change layout indices; they only sanitize values.
 
-**Policy input:** We treat observation vector as typed features:
+**Policy input:** the baseline stack uses a dense-feature encoder over the raw observation vector, and the thesis experiment stack may swap in a contract-aware `typed_v1` encoder.
 
-- categorical IDs (cards, decision kind, to-play seat, etc.) -> embeddings
-- bounded counts/scalars -> normalized float features
-- optional zone summaries
+- baseline: normalize the observation blocks into a flat dense feature vector, then feed the vector through an MLP and GRU
+- `typed_v1`: use the simulator observation metadata (`header_fields`, `player_blocks`, `tail_slices`) to encode semantically grouped slices before the shared GRU
+- full card-ID embedding tables remain deferred to a later encoder revision once observation slicing is stable
 
 ### 6.2 Action space rules
 
@@ -450,18 +456,20 @@ Because the game is two-player with alternating decisions and hidden information
 - at each decision, update only the acting seat’s GRU state
 - the non-acting seat’s hidden state must not affect outputs for the acting seat (poison test required)
 
-### 8.3 Suggested encoder (stable and implementable)
+### 8.3 V1 encoder baseline and typed_v1 experiment path
 
-Given the simulator’s fixed vector encoding, we implement:
+Given the simulator’s fixed vector encoding, we implement two pinned options:
 
-- Split obs into:
-  - header fields (decision kind, to_play seat, phase, etc.)
-  - per-player blocks x2
-  - reveal history tail
-  - context tail
-- For categorical ranges: use embeddings (card IDs, decision kind, etc.)
-- For counts/scalars: normalize to float32 (e.g., divide by max)
-- Concatenate -> MLP -> GRU
+- `mlp` baseline:
+  - flatten the observation into dense feature blocks
+  - normalize the numeric ranges into float32 features
+  - concatenate -> MLP -> GRU
+- `typed_v1` experiment:
+  - parse the simulator-exported observation spec
+  - encode header fields, each player block, and optional tail slices separately
+  - fuse those typed features before the shared GRU
+
+The baseline remains the default locked stack. `typed_v1` is the structured experiment path. Full embedding-table work stays out of scope.
 
 Default sizes:
 
@@ -977,11 +985,11 @@ Pinning requirements:
 - value tolerance: 1e-10
 - deterministic tie-break (secondary LP weighted by ascending policy_id)
 
-### 15.3 AlphaRank (secondary)
+### 15.3 AlphaRank (secondary; local and global selection modes)
 
 For each posterior-sampled payoff matrix:
 
-- compute AlphaRank stationary distribution α (pinned params)
+- compute AlphaRank stationary distribution α under a pinned selection mode
 
 Report:
 
@@ -992,7 +1000,10 @@ Report:
 Pinning requirements:
 
 - `alpharank_impl_id = "weiss_rl_alpharank_v1"`
-- params: `m=50, alpha=100, use_local_selection_model=true, use_inf_alpha=false, inf_alpha_eps=0.01`
+- params: `m=50, alpha=100, use_inf_alpha=false, inf_alpha_eps=0.01`
+- `local_selection=true` gives the original pairwise-delta local-selection mode
+- `local_selection=false` gives the global-selection mode that uses population-state-aware resident/mutant fitness deltas
+- the canonical locked stack keeps `local_selection=true`; the experiment stack may opt into `local_selection=false`
 
 ---
 

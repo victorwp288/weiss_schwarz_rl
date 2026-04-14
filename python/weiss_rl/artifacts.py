@@ -26,6 +26,7 @@ class ArtifactLayout:
     replays_raw_dir: Path
     replays_bundles_dir: Path
     replays_verification_dir: Path
+    tensorboard_dir: Path
     figures_dir: Path
     figures_paper_dir: Path
     manifest_path: Path
@@ -63,6 +64,7 @@ class ArtifactLayout:
             replays_raw_dir=(run_dir / "replays" / "raw"),
             replays_bundles_dir=(run_dir / "replays" / "bundles"),
             replays_verification_dir=(run_dir / "replays" / "verification"),
+            tensorboard_dir=run_dir / "tensorboard",
             figures_dir=figures_dir,
             figures_paper_dir=figures_dir / "paper",
             manifest_path=run_dir / "manifest.json",
@@ -102,6 +104,7 @@ class ArtifactLayout:
             self.replays_raw_dir,
             self.replays_bundles_dir,
             self.replays_verification_dir,
+            self.tensorboard_dir,
             self.figures_dir,
             self.figures_paper_dir,
         ):

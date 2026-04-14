@@ -94,7 +94,7 @@ def _record(
         ("W", {"S0": 1.0, "S1": 1.0, "S2": 1.0}),
         ("L", {"S0": 0.0, "S1": 0.0, "S2": 0.0}),
         ("D", {"S0": 0.5, "S1": 0.5, "S2": 0.5}),
-        ("T", {"S0": 0.5, "S1": 0.5, "S2": None}),
+        ("T", {"S0": 0.0, "S1": 0.0, "S2": None}),
     ],
 )
 def test_fold_game_payoff_matches_s0_s1_s2_rules(
@@ -109,8 +109,8 @@ def test_fold_game_payoff_matches_s0_s1_s2_rules(
 def test_paired_seed_score_applies_scheme_rules() -> None:
     pair_records = _pair(7, "W", "T")
 
-    assert paired_seed_score(pair_records, scheme="S0") == 0.75
-    assert paired_seed_score(list(reversed(pair_records)), scheme="S1") == 0.75
+    assert paired_seed_score(pair_records, scheme="S0") == 0.5
+    assert paired_seed_score(list(reversed(pair_records)), scheme="S1") == 0.5
     assert paired_seed_score(pair_records, scheme="S2") == 1.0
     assert paired_seed_score(_pair(8, "T", "T"), scheme="S2") is None
 
@@ -130,8 +130,8 @@ def test_paired_seed_mean_score_returns_expected_exact_p_ij_mean() -> None:
         *_pair(3, "W", "W"),
     ]
 
-    assert paired_seed_mean_score(records, scheme="S0") == 0.6875
-    assert paired_seed_mean_score(records, scheme="S1") == 0.6875
+    assert paired_seed_mean_score(records, scheme="S0") == 0.5625
+    assert paired_seed_mean_score(records, scheme="S1") == 0.5625
     assert paired_seed_mean_score(records, scheme="S2") == 0.75
 
 

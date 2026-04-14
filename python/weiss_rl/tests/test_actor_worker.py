@@ -774,7 +774,10 @@ def test_actor_worker_mask_layout_returns_entropy_and_pass_fallback() -> None:
     assert np.allclose(recomputed.reshape(T, N), batch.behavior_logp, atol=0.0, rtol=0.0)
     assert np.all(batch.action[:, 1] == pass_action_id)
     assert np.all(batch.behavior_logp[:, 1] == 0.0)
-    assert batch.counters == {"empty_legal": batch.T}
+    assert batch.counters["empty_legal"] == batch.T
+    assert batch.counters["engine_fault_done_rows"] == 4
+    assert batch.counters["natural_timeout_rows"] == 0
+    assert batch.counters["no_progress_timeout_rows"] == 0
 
 
 def test_actor_worker_keeps_episode_identity_on_terminal_autoreset_transition() -> None:

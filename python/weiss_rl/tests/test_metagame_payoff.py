@@ -98,7 +98,7 @@ def test_build_p_mean_and_counts_produces_symmetric_matrix() -> None:
     hero_index = policy_ids.index("champion")
     foe_index = policy_ids.index("baseline")
 
-    expected = 0.75
+    expected = 0.625
     assert p_mean[hero_index, foe_index] == expected
     assert p_mean[foe_index, hero_index] == 1.0 - expected
     assert p_mean[hero_index, hero_index] == 0.5
@@ -154,8 +154,8 @@ def test_build_p_mean_and_counts_uses_episode_seed_across_repeated_pair_indices(
     champion = policy_ids.index("champion")
     baseline = policy_ids.index("baseline")
 
-    assert p_mean[champion, baseline] == pytest.approx(0.75)
-    assert p_mean[baseline, champion] == pytest.approx(0.25)
+    assert p_mean[champion, baseline] == pytest.approx(0.625)
+    assert p_mean[baseline, champion] == pytest.approx(0.375)
     assert counts[champion, baseline] == 2
     assert counts[baseline, champion] == 2
 

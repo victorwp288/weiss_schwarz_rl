@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+MAKE_EXE = shutil.which("make")
+
+
+def _require_make() -> str:
+    if MAKE_EXE is None:
+        pytest.skip("make is not installed on this host")
+    return MAKE_EXE
 
 
 def test_make_figures_target_requires_run_dir() -> None:
+    make_exe = _require_make()
     result = subprocess.run(
-        ["make", "figures"],
+        [make_exe, "figures"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -21,8 +32,9 @@ def test_make_figures_target_requires_run_dir() -> None:
 
 
 def test_make_figures_target_forwards_run_dir_fig_id_and_formats() -> None:
+    make_exe = _require_make()
     result = subprocess.run(
-        ["make", "-n", "figures", "RUN_DIR=runs/synthetic", "FIG_ID=seat_bias", "FORMATS=pdf png"],
+        [make_exe, "-n", "figures", "RUN_DIR=runs/synthetic", "FIG_ID=seat_bias", "FORMATS=pdf png"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

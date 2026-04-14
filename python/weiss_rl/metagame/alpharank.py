@@ -90,18 +90,26 @@ def compute_stationary_distribution(
         raise ValueError("alpha must be >= 1")
     if inf_alpha_eps < 0.0:
         raise ValueError("inf_alpha_eps must be >= 0")
-    if not local_selection:
-        raise NotImplementedError("Global selection not implemented")
     if n == 1:
         stationary = np.ones(1, dtype=np.float64)
         return AlphaRankResult(stationary=stationary, transition_matrix=np.asarray([[1.0]], dtype=np.float64))
 
-    transition_matrix = _build_transition_matrix(
-        p_mean_arr,
-        m=m,
-        alpha=alpha,
-        use_inf_alpha=use_inf_alpha,
-        tie_tolerance=inf_alpha_eps,
+    transition_matrix = (
+        _build_transition_matrix_local(
+            p_mean_arr,
+            m=m,
+            alpha=alpha,
+            use_inf_alpha=use_inf_alpha,
+            tie_tolerance=inf_alpha_eps,
+        )
+        if local_selection
+        else _build_transition_matrix_global(
+            p_mean_arr,
+            m=m,
+            alpha=alpha,
+            use_inf_alpha=use_inf_alpha,
+            tie_tolerance=inf_alpha_eps,
+        )
     )
     stationary = _solve_stationary_distribution(transition_matrix)
     return AlphaRankResult(stationary=stationary, transition_matrix=transition_matrix)
@@ -137,6 +145,42 @@ def write_alpharank_artifacts(
     write_stationary_mean_csv(stationary_mean_csv, policy_ids, stationary)
 
 
+def _build_transition_matrix_local(
+    p_mean: np.ndarray,
+    *,
+    m: int,
+    alpha: int,
+    use_inf_alpha: bool,
+    tie_tolerance: float,
+) -> np.ndarray:
+    return _build_transition_matrix(
+        p_mean,
+        m=m,
+        alpha=alpha,
+        use_inf_alpha=use_inf_alpha,
+        tie_tolerance=tie_tolerance,
+        delta_profile_fn=_local_selection_profile,
+    )
+
+
+def _build_transition_matrix_global(
+    p_mean: np.ndarray,
+    *,
+    m: int,
+    alpha: int,
+    use_inf_alpha: bool,
+    tie_tolerance: float,
+) -> np.ndarray:
+    return _build_transition_matrix(
+        p_mean,
+        m=m,
+        alpha=alpha,
+        use_inf_alpha=use_inf_alpha,
+        tie_tolerance=tie_tolerance,
+        delta_profile_fn=_global_selection_profile,
+    )
+
+
 def _build_transition_matrix(
     p_mean: np.ndarray,
     *,
@@ -144,6 +188,7 @@ def _build_transition_matrix(
     alpha: int,
     use_inf_alpha: bool,
     tie_tolerance: float,
+    delta_profile_fn,
 ) -> np.ndarray:
     num_policies = p_mean.shape[0]
     transition_matrix = np.zeros((num_policies, num_policies), dtype=np.float64)
@@ -154,9 +199,14 @@ def _build_transition_matrix(
         for mutant_index in range(num_policies):
             if mutant_index == resident_index:
                 continue
-            delta = _local_selection_delta(p_mean, resident_index=resident_index, mutant_index=mutant_index)
+            deltas = delta_profile_fn(
+                p_mean,
+                resident_index=resident_index,
+                mutant_index=mutant_index,
+                m=m,
+            )
             fixation = _pairwise_fixation_probability(
-                delta=delta,
+                deltas=deltas,
                 m=m,
                 alpha=alpha,
                 use_inf_alpha=use_inf_alpha,
@@ -183,9 +233,51 @@ def _local_selection_delta(p_mean: np.ndarray, *, resident_index: int, mutant_in
     return float(p_mean[mutant_index, resident_index] - p_mean[resident_index, mutant_index])
 
 
+def _local_selection_profile(
+    p_mean: np.ndarray,
+    *,
+    resident_index: int,
+    mutant_index: int,
+    m: int,
+) -> np.ndarray:
+    if m <= 1:
+        return np.zeros((0,), dtype=np.float64)
+    delta = _local_selection_delta(p_mean, resident_index=resident_index, mutant_index=mutant_index)
+    return np.full((m - 1,), delta, dtype=np.float64)
+
+
+def _global_selection_profile(
+    p_mean: np.ndarray,
+    *,
+    resident_index: int,
+    mutant_index: int,
+    m: int,
+) -> np.ndarray:
+    if m <= 1:
+        return np.zeros((0,), dtype=np.float64)
+    if m == 2:
+        delta = _local_selection_delta(p_mean, resident_index=resident_index, mutant_index=mutant_index)
+        return np.asarray([delta], dtype=np.float64)
+
+    deltas = np.zeros((m - 1,), dtype=np.float64)
+    denom = float(m - 1)
+    for mutant_count in range(1, m):
+        resident_count = m - mutant_count
+        mutant_fitness = (
+            ((mutant_count - 1) * p_mean[mutant_index, mutant_index])
+            + (resident_count * p_mean[mutant_index, resident_index])
+        ) / denom
+        resident_fitness = (
+            (mutant_count * p_mean[resident_index, mutant_index])
+            + ((resident_count - 1) * p_mean[resident_index, resident_index])
+        ) / denom
+        deltas[mutant_count - 1] = float(mutant_fitness - resident_fitness)
+    return deltas
+
+
 def _pairwise_fixation_probability(
     *,
-    delta: float,
+    deltas: np.ndarray,
     m: int,
     alpha: int,
     use_inf_alpha: bool,
@@ -194,17 +286,23 @@ def _pairwise_fixation_probability(
     if m == 1:
         return 1.0
 
+    delta_profile = np.asarray(deltas, dtype=np.float64)
+    if delta_profile.shape != (m - 1,):
+        raise ValueError(f"deltas must have shape ({m - 1},), got {delta_profile.shape}")
+    cumulative_deltas = np.cumsum(delta_profile, dtype=np.float64)
+
     if use_inf_alpha:
-        if delta > tie_tolerance:
-            return 1.0
-        if delta < -tie_tolerance:
+        if np.any(cumulative_deltas < -tie_tolerance):
             return 0.0
+        zero_like = int(np.count_nonzero(np.abs(cumulative_deltas) <= tie_tolerance))
+        if zero_like:
+            return 1.0 / float(1 + zero_like)
+        return 1.0
+
+    if np.all(np.abs(cumulative_deltas) <= tie_tolerance):
         return 1.0 / float(m)
 
-    if delta == 0.0:
-        return 1.0 / float(m)
-
-    exponents = -(float(alpha) * delta) * np.arange(m, dtype=np.float64)
+    exponents = -(float(alpha) * np.concatenate((np.asarray([0.0], dtype=np.float64), cumulative_deltas)))
     max_exponent = float(np.max(exponents))
     shifted_sum = float(np.sum(np.exp(exponents - max_exponent), dtype=np.float64))
     log_denom = max_exponent + float(np.log(shifted_sum))

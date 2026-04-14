@@ -1,10 +1,15 @@
-"""Immutable config models for the RL stack."""
+"""Immutable grouped config models for the RL presets."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class ExperimentConfig:
+    role: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,30 +47,160 @@ class ModelConfig:
     encoder_mlp_layers: int
     layer_norm: bool
     dropout: ModelDropoutConfig
+    encoder_kind: str = "mlp"
+    typed_feature_width: int = 64
+    recurrent_core: str = "gru"
 
 
 @dataclass(frozen=True, slots=True)
-class TrainingFamilyAConfig:
-    algorithm: str
+class TrainingRolloutConfig:
     unroll_length: int
     batch_unrolls_per_update: int
-    gamma: float
-    reward_mode: str
-    optimizer: str
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingOptimizerConfig:
+    name: str
     learning_rate: float
     grad_norm_clip: float
     value_loss_coef: float
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingExplorationConfig:
     entropy_coef: float
     entropy_anneal_to: float
     entropy_anneal_steps_updates: int
-    vtrace_rho_bar: float
-    vtrace_c_bar: float
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingPrecisionConfig:
     mixed_precision: bool
+    compile_learner: bool
     masking_math_float32: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingCheckpointingConfig:
     checkpoint_interval_updates: int
     snapshot_interval_updates: int
     actor_reload_interval_updates: int
-    mode: str
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingVTraceConfig:
+    rho_bar: float
+    c_bar: float
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingPpoConfig:
+    clip_epsilon: float = 0.2
+    value_clip_epsilon: float = 0.2
+    gae_lambda: float = 0.95
+    epochs: int = 4
+    target_kl: float = 0.0
+    normalize_advantages: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingConfig:
+    algorithm: str
+    rollout: TrainingRolloutConfig
+    optimizer: TrainingOptimizerConfig
+    exploration: TrainingExplorationConfig
+    precision: TrainingPrecisionConfig
+    checkpointing: TrainingCheckpointingConfig
+    vtrace: TrainingVTraceConfig
+    ppo: TrainingPpoConfig
+
+    @property
+    def unroll_length(self) -> int:
+        return int(self.rollout.unroll_length)
+
+    @property
+    def batch_unrolls_per_update(self) -> int:
+        return int(self.rollout.batch_unrolls_per_update)
+
+    @property
+    def learning_rate(self) -> float:
+        return float(self.optimizer.learning_rate)
+
+    @property
+    def grad_norm_clip(self) -> float:
+        return float(self.optimizer.grad_norm_clip)
+
+    @property
+    def value_loss_coef(self) -> float:
+        return float(self.optimizer.value_loss_coef)
+
+    @property
+    def entropy_coef(self) -> float:
+        return float(self.exploration.entropy_coef)
+
+    @property
+    def entropy_anneal_to(self) -> float:
+        return float(self.exploration.entropy_anneal_to)
+
+    @property
+    def entropy_anneal_steps_updates(self) -> int:
+        return int(self.exploration.entropy_anneal_steps_updates)
+
+    @property
+    def mixed_precision(self) -> bool:
+        return bool(self.precision.mixed_precision)
+
+    @property
+    def compile_learner(self) -> bool:
+        return bool(self.precision.compile_learner)
+
+    @property
+    def masking_math_float32(self) -> bool:
+        return bool(self.precision.masking_math_float32)
+
+    @property
+    def checkpoint_interval_updates(self) -> int:
+        return int(self.checkpointing.checkpoint_interval_updates)
+
+    @property
+    def snapshot_interval_updates(self) -> int:
+        return int(self.checkpointing.snapshot_interval_updates)
+
+    @property
+    def actor_reload_interval_updates(self) -> int:
+        return int(self.checkpointing.actor_reload_interval_updates)
+
+    @property
+    def vtrace_rho_bar(self) -> float:
+        return float(self.vtrace.rho_bar)
+
+    @property
+    def vtrace_c_bar(self) -> float:
+        return float(self.vtrace.c_bar)
+
+    @property
+    def ppo_clip_epsilon(self) -> float:
+        return float(self.ppo.clip_epsilon)
+
+    @property
+    def ppo_value_clip_epsilon(self) -> float:
+        return float(self.ppo.value_clip_epsilon)
+
+    @property
+    def ppo_gae_lambda(self) -> float:
+        return float(self.ppo.gae_lambda)
+
+    @property
+    def ppo_epochs(self) -> int:
+        return int(self.ppo.epochs)
+
+    @property
+    def ppo_target_kl(self) -> float:
+        return float(self.ppo.target_kl)
+
+    @property
+    def ppo_normalize_advantages(self) -> bool:
+        return bool(self.ppo.normalize_advantages)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,11 +219,83 @@ class EnvironmentConfig:
     max_decisions_per_episode: int
     max_learner_steps_per_episode: int
     max_ticks: int
-    truncation_reward: float
-    shaping_enabled_family_a: bool
     deck_set_size: DeckSetSizeConfig
-    truncation_bootstrap_value: bool
-    truncation_bootstrap_rule: str
+
+
+@dataclass(frozen=True, slots=True)
+class RewardDiscountConfig:
+    gamma: float
+
+
+@dataclass(frozen=True, slots=True)
+class RewardShapingConfig:
+    enable_damage_shaping: bool
+    damage_reward: float
+    level_reward: float
+    board_reward: float
+    no_progress_penalty: float
+
+
+@dataclass(frozen=True, slots=True)
+class RewardTruncationConfig:
+    reward: float
+    bootstrap_value: bool
+    bootstrap_rule: str
+
+
+@dataclass(frozen=True, slots=True)
+class RewardsConfig:
+    objective: str
+    discount: RewardDiscountConfig
+    shaping: RewardShapingConfig
+    truncation: RewardTruncationConfig
+
+    @property
+    def gamma(self) -> float:
+        return float(self.discount.gamma)
+
+
+@dataclass(frozen=True, slots=True)
+class CurriculumStallMonitorConfig:
+    enabled: bool
+    truncation_rate_threshold: float
+    consecutive_evals: int
+
+
+@dataclass(frozen=True, slots=True)
+class CurriculumCheckpointGuardConfig:
+    enabled: bool
+    rollback_score_margin: float
+    rollback_truncation_rate_threshold: float
+    rollback_max_prob_lt_half: float
+    min_best_score: float
+    promote_min_prob_gt_half: float
+    promote_max_ci_half_width: float
+    cooldown_updates: int
+
+
+@dataclass(frozen=True, slots=True)
+class CurriculumConfig:
+    simulator: dict[str, Any] = field(default_factory=dict)
+    stall_monitor: CurriculumStallMonitorConfig = field(
+        default_factory=lambda: CurriculumStallMonitorConfig(
+            enabled=False,
+            truncation_rate_threshold=1.0,
+            consecutive_evals=2,
+        )
+    )
+    checkpoint_guard: CurriculumCheckpointGuardConfig = field(
+        default_factory=lambda: CurriculumCheckpointGuardConfig(
+            enabled=False,
+            rollback_score_margin=1.0,
+            rollback_truncation_rate_threshold=1.0,
+            rollback_max_prob_lt_half=1.0,
+            min_best_score=1.0,
+            promote_min_prob_gt_half=0.0,
+            promote_max_ci_half_width=1.0,
+            cooldown_updates=0,
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +304,13 @@ class LeagueWarmupConfig:
     initial_window_episodes: int
     ramp_target_updates: int
     ramp_target_window_episodes: int
+
+
+@dataclass(frozen=True, slots=True)
+class LeaguePoolConfig:
+    recent_size: int
+    champion_size: int
+    champion_max_age_updates: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,22 +336,91 @@ class PromotionGateConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class LeagueConfig:
-    enabled: bool
-    snapshot_pool_recent_size: int
-    snapshot_pool_champion_size: int
+class LeagueSamplingConfig:
     opponent_sampling: str
     pfsp_power: float
     pfsp_epsilon_uniform: float
     pfsp_stats_source: str
     pfsp_window_episodes: int
+    heuristic_public_start_updates: int
+    heuristic_public_mix_fraction: float
+    heuristic_public_reserved_envs_per_actor: int
+    noleague_baseline_reserved_envs_per_actor: int
+    champion_mix_fraction: float
+    hard_negative_mix_fraction: float
+    hard_negative_min_samples: int
+    hard_negative_max_win_rate: float
+
+
+@dataclass(frozen=True, slots=True)
+class LeaguePromotionConfig:
+    enabled: bool
+    paired_seeds: int
+    threshold: str
+    anchor_set_v1: PromotionAnchorSetConfig
+    seed_file: str
+    gate: PromotionGateConfig
+
+
+@dataclass(frozen=True, slots=True)
+class LeagueConfig:
+    enabled: bool
+    pool: LeaguePoolConfig
+    sampling: LeagueSamplingConfig
     warmup: LeagueWarmupConfig
-    promotion_gate_enabled: bool
-    promotion_gate_paired_seeds: int
-    promotion_threshold: str
-    promotion_anchor_set_v1: PromotionAnchorSetConfig
-    promotion_seed_file: str
-    promotion_gate: PromotionGateConfig
+    promotion: LeaguePromotionConfig
+
+    @property
+    def snapshot_pool_recent_size(self) -> int:
+        return int(self.pool.recent_size)
+
+    @property
+    def snapshot_pool_champion_size(self) -> int:
+        return int(self.pool.champion_size)
+
+    @property
+    def opponent_sampling(self) -> str:
+        return self.sampling.opponent_sampling
+
+    @property
+    def pfsp_power(self) -> float:
+        return float(self.sampling.pfsp_power)
+
+    @property
+    def pfsp_epsilon_uniform(self) -> float:
+        return float(self.sampling.pfsp_epsilon_uniform)
+
+    @property
+    def pfsp_stats_source(self) -> str:
+        return self.sampling.pfsp_stats_source
+
+    @property
+    def pfsp_window_episodes(self) -> int:
+        return int(self.sampling.pfsp_window_episodes)
+
+    @property
+    def promotion_gate_enabled(self) -> bool:
+        return bool(self.promotion.enabled)
+
+    @property
+    def promotion_gate_paired_seeds(self) -> int:
+        return int(self.promotion.paired_seeds)
+
+    @property
+    def promotion_threshold(self) -> str:
+        return self.promotion.threshold
+
+    @property
+    def promotion_anchor_set_v1(self) -> PromotionAnchorSetConfig:
+        return self.promotion.anchor_set_v1
+
+    @property
+    def promotion_seed_file(self) -> str:
+        return self.promotion.seed_file
+
+    @property
+    def promotion_gate(self) -> PromotionGateConfig:
+        return self.promotion.gate
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,7 +528,7 @@ class ReproducibilityConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class NashConfig:
+class MetagameNashConfig:
     impl: str
     backend: str
     threads: int
@@ -254,10 +537,10 @@ class NashConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class AlphaRankConfig:
+class MetagameAlphaRankConfig:
     impl: str
     m: int
-    alpha: int
+    alpha: float
     local_selection: bool
     use_inf_alpha: bool
     inf_alpha_eps: float
@@ -271,14 +554,14 @@ class MetagameConfig:
     dirichlet_alpha_wldt: float
     primary_analysis: str
     secondary_analysis: str
-    nash: NashConfig
-    alpharank: AlphaRankConfig
+    nash: MetagameNashConfig
+    alpharank: MetagameAlphaRankConfig
 
 
 @dataclass(frozen=True, slots=True)
 class SensitivityCaseConfig:
-    draw_score: float
     description: str
+    draw_score: float
     truncation_score: float | None = None
     truncation_handling: str | None = None
 
@@ -295,74 +578,26 @@ class SensitivityConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class ComputeBudgetAllocationConfig:
-    bring_up_correctness: int
-    main_training_3_seeds: int
-    ablations: int
-    baseline_extra_run: int
-    reserve: int
-
-
-@dataclass(frozen=True, slots=True)
-class ComputeBudgetConfig:
-    baseline_credits: int
-    allocation: ComputeBudgetAllocationConfig
-    calibration_required: bool
-    calibration_metrics: tuple[str, ...]
-    update_targets_from_calibration: bool
-    drift_alert_threshold_percent: int
-
-
-@dataclass(frozen=True, slots=True)
-class FamilyBDiscountAblationConfig:
-    enabled_by_default: bool
-    gamma_default: float
-    requires_k_raw_decisions_tracking: bool
-    gamma_step_formula: str
-
-
-@dataclass(frozen=True, slots=True)
-class FamilyCStallTriggerConfig:
-    after_updates: int
-    eval_opponent: str
-    eval_seed_file: str
-    seat_swap: bool
-    probability_metric: str
-    trigger_if_below: float
-
-
-@dataclass(frozen=True, slots=True)
-class FamilyCShapingDefaultsConfig:
-    terminal_win: float
-    terminal_loss: float
-    terminal_draw_timeout: float
-    per_learner_step_penalty_formula: str
-    lambda_default: float
-    max_total_shaping_magnitude_per_episode: float
-
-
-@dataclass(frozen=True, slots=True)
-class FamilyCShapingAblationConfig:
-    enabled_by_default: bool
-    stall_trigger: FamilyCStallTriggerConfig
-    shaping_defaults: FamilyCShapingDefaultsConfig
-    truncation_reward: float
+class StudyConfig:
+    root: Path
+    schema_version: int | None
+    description: str
+    metagame: MetagameConfig
+    sensitivity: SensitivityConfig
 
 
 @dataclass(frozen=True, slots=True)
 class LockedConfig:
+    experiment: ExperimentConfig | None = None
     system: SystemConfig | None = None
     model: ModelConfig | None = None
-    training_family_a: TrainingFamilyAConfig | None = None
+    training: TrainingConfig | None = None
     environment: EnvironmentConfig | None = None
+    rewards: RewardsConfig | None = None
+    curriculum: CurriculumConfig | None = None
     league: LeagueConfig | None = None
     evaluation: EvaluationConfig | None = None
     reproducibility: ReproducibilityConfig | None = None
-    metagame: MetagameConfig | None = None
-    sensitivity: SensitivityConfig | None = None
-    compute_budget: ComputeBudgetConfig | None = None
-    family_b_discount_ablation: FamilyBDiscountAblationConfig | None = None
-    family_c_shaping_ablation: FamilyCShapingAblationConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)

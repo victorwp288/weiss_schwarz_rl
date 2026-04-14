@@ -172,6 +172,45 @@ def test_record_completed_game_stores_required_reproducibility_fields() -> None:
     assert record.run_id256 == _RUN_ID256
 
 
+def test_record_completed_game_preserves_action_diagnostics() -> None:
+    scheduled_game = ScheduledGame(
+        pair_index=0,
+        swap_index=0,
+        episode_index=0,
+        episode_seed=77,
+        focal_policy_id="champion",
+        opponent_policy_id="baseline",
+        seat0_policy_id="champion",
+        seat1_policy_id="baseline",
+        focal_seat=0,
+    )
+    result = GameResult(
+        episode_seed=77,
+        terminated=True,
+        truncated=False,
+        winner_seat=0,
+        total_actions=19,
+        pass_actions=5,
+        main_move_actions=7,
+        pass_with_nonpass_available=3,
+        max_consecutive_main_moves=4,
+    )
+
+    record = record_completed_game(
+        scheduled_game=scheduled_game,
+        result=result,
+        run_id256=_RUN_ID256,
+        config_hash256=_CONFIG_HASH256,
+        spec_hash256=_SPEC_HASH256,
+    )
+
+    assert record.total_actions == 19
+    assert record.pass_actions == 5
+    assert record.main_move_actions == 7
+    assert record.pass_with_nonpass_available == 3
+    assert record.max_consecutive_main_moves == 4
+
+
 @pytest.mark.parametrize(
     ("result", "expected_message"),
     [
@@ -233,7 +272,16 @@ def test_summarize_game_records_counts_wldt_and_engine_errors(tmp_path: Path) ->
 
     summary = summarize_game_records(records)
 
-    assert summary == MatchupSummary(games=4, wins=1, losses=1, draws=1, truncations=1, engine_errors=1)
+    assert summary == MatchupSummary(
+        games=4,
+        wins=1,
+        losses=1,
+        draws=1,
+        truncations=1,
+        engine_errors=1,
+        natural_timeouts=1,
+        timeout_unknown=1,
+    )
     assert summarize_pair_outcomes(["w", "L", "d", "t"]) == MatchupSummary(
         games=4,
         wins=1,
@@ -242,6 +290,73 @@ def test_summarize_game_records_counts_wldt_and_engine_errors(tmp_path: Path) ->
         truncations=1,
         engine_errors=0,
     )
+
+
+def test_summarize_game_records_aggregates_action_diagnostics() -> None:
+    records = [
+        record_completed_game(
+            scheduled_game=ScheduledGame(
+                pair_index=0,
+                swap_index=0,
+                episode_index=0,
+                episode_seed=10,
+                focal_policy_id="champion",
+                opponent_policy_id="baseline",
+                seat0_policy_id="champion",
+                seat1_policy_id="baseline",
+                focal_seat=0,
+            ),
+            result=GameResult(
+                episode_seed=10,
+                terminated=True,
+                truncated=False,
+                winner_seat=0,
+                total_actions=8,
+                pass_actions=2,
+                main_move_actions=3,
+                pass_with_nonpass_available=1,
+                max_consecutive_main_moves=2,
+            ),
+            run_id256=_RUN_ID256,
+            config_hash256=_CONFIG_HASH256,
+            spec_hash256=_SPEC_HASH256,
+        ),
+        record_completed_game(
+            scheduled_game=ScheduledGame(
+                pair_index=0,
+                swap_index=1,
+                episode_index=1,
+                episode_seed=10,
+                focal_policy_id="champion",
+                opponent_policy_id="baseline",
+                seat0_policy_id="baseline",
+                seat1_policy_id="champion",
+                focal_seat=1,
+            ),
+            result=GameResult(
+                episode_seed=10,
+                terminated=False,
+                truncated=True,
+                winner_seat=None,
+                total_actions=6,
+                pass_actions=1,
+                main_move_actions=4,
+                pass_with_nonpass_available=0,
+                max_consecutive_main_moves=4,
+            ),
+            run_id256=_RUN_ID256,
+            config_hash256=_CONFIG_HASH256,
+            spec_hash256=_SPEC_HASH256,
+        ),
+    ]
+
+    summary = summarize_game_records(records)
+
+    assert summary.total_actions == 14
+    assert summary.pass_actions == 3
+    assert summary.main_move_actions == 7
+    assert summary.pass_with_nonpass_available == 1
+    assert summary.max_consecutive_main_moves == 4
 
 
 def test_truncation_is_preserved_raw_in_record_and_summary(tmp_path: Path) -> None:
@@ -351,6 +466,7 @@ def test_game_result_from_step_uses_reward_perspective_seat() -> None:
         truncated=False,
         winner_seat=0,
         engine_status=0,
+        termination_reason="terminated",
         simulator_episode_key=100,
     )
     assert record_b == GameResult(
@@ -359,6 +475,7 @@ def test_game_result_from_step_uses_reward_perspective_seat() -> None:
         truncated=False,
         winner_seat=0,
         engine_status=3,
+        termination_reason="engine_fault",
         simulator_episode_key=200,
     )
 
@@ -380,6 +497,7 @@ def test_game_result_from_step_prefers_explicit_winner_seat_metadata() -> None:
         truncated=False,
         winner_seat=1,
         engine_status=0,
+        termination_reason="terminated",
         simulator_episode_key=777,
     )
 
@@ -400,6 +518,7 @@ def test_game_result_from_step_treats_zero_terminal_reward_as_draw_fallback() ->
         truncated=False,
         winner_seat=None,
         engine_status=0,
+        termination_reason="terminated",
         simulator_episode_key=555,
     )
 
@@ -422,6 +541,7 @@ def test_game_result_from_step_uses_pre_step_acting_seat_when_terminal_row_clear
         truncated=False,
         winner_seat=0,
         engine_status=0,
+        termination_reason="terminated",
         simulator_episode_key=999,
     )
 
@@ -441,6 +561,7 @@ def test_game_result_from_step_accepts_caller_supplied_missing_terminal_context(
         truncated=False,
         winner_seat=0,
         engine_status=0,
+        termination_reason="terminated",
         simulator_episode_key=999,
     )
 

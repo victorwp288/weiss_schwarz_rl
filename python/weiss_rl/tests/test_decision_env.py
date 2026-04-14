@@ -423,6 +423,80 @@ def test_pack_batch_ids_offsets_trims_raw_capacity_and_derives_episode_identity_
             np.array([0, 1], dtype=np.uint64),
         ),
     )
+    npt.assert_array_equal(batch.decision_kind, np.array([0, 0], dtype=np.int32))
+    assert batch.episode_identity_source == "derived"
+
+
+def test_pack_batch_prefers_simulator_episode_identity_when_present() -> None:
+    step = SimpleNamespace(
+        obs=np.zeros((1, 4), dtype=np.int16),
+        rewards=np.zeros((1,), dtype=np.float32),
+        terminated=np.array([False]),
+        truncated=np.array([False]),
+        actor=np.array([0], dtype=np.int32),
+        decision_kind=np.array([7], dtype=np.int32),
+        decision_id=np.array([17], dtype=np.int64),
+        engine_status=np.array([0], dtype=np.uint8),
+        spec_hash=np.array([11], dtype=np.uint64),
+        episode_seed=np.array([333], dtype=np.uint64),
+        episode_key=np.array([444], dtype=np.uint64),
+        legal_ids=np.array([1, 2], dtype=np.uint32),
+        legal_offsets=np.array([0, 2], dtype=np.uint32),
+    )
+    pool = FakePool(
+        envs_len=1,
+        episode_seed_batch=np.array([101], dtype=np.uint64),
+        episode_index_batch=np.array([5], dtype=np.uint32),
+        env_index_batch=np.array([0], dtype=np.uint32),
+    )
+
+    batch = _pack_batch(step, legality="ids_offsets", pool=pool)
+
+    npt.assert_array_equal(batch.episode_seed, np.array([333], dtype=np.uint64))
+    npt.assert_array_equal(batch.episode_key, np.array([444], dtype=np.uint64))
+    npt.assert_array_equal(batch.decision_kind, np.array([7], dtype=np.int32))
+    assert batch.episode_identity_source == "simulator"
+
+
+def test_pack_batch_can_return_views_for_runtime_fast_path() -> None:
+    obs = np.arange(8, dtype=np.int16).reshape(2, 4)
+    rewards = np.array([1.0, 2.0], dtype=np.float32)
+    terminated = np.array([False, True])
+    truncated = np.array([False, False])
+    actor = np.array([0, 1], dtype=np.int32)
+    decision_kind = np.array([3, 4], dtype=np.int32)
+    decision_id = np.array([17, 18], dtype=np.int64)
+    engine_status = np.array([0, 0], dtype=np.uint8)
+    mask = np.array([[True, False, True], [False, True, False]], dtype=np.bool_)
+    step = SimpleNamespace(
+        obs=obs,
+        rewards=rewards,
+        terminated=terminated,
+        truncated=truncated,
+        actor=actor,
+        decision_kind=decision_kind,
+        decision_id=decision_id,
+        engine_status=engine_status,
+        spec_hash=np.array([11, 12], dtype=np.uint64),
+        masks=mask,
+        episode_seed=np.array([333, 444], dtype=np.uint64),
+        episode_key=np.array([555, 666], dtype=np.uint64),
+    )
+
+    batch = _pack_batch(step, legality="mask", copy_arrays=False)
+
+    assert np.shares_memory(batch.obs, obs)
+    assert np.shares_memory(batch.reward, rewards)
+    assert np.shares_memory(batch.terminated, terminated)
+    assert np.shares_memory(batch.truncated, truncated)
+    assert np.shares_memory(batch.actor, actor)
+    assert np.shares_memory(batch.to_play, actor)
+    assert np.shares_memory(batch.decision_kind, decision_kind)
+    assert np.shares_memory(batch.decision_id, decision_id)
+    assert np.shares_memory(batch.engine_status, engine_status)
+    assert batch.mask is not None and np.shares_memory(batch.mask, mask)
+    assert np.shares_memory(batch.episode_seed, step.episode_seed)
+    assert np.shares_memory(batch.episode_key, step.episode_key)
 
 
 def test_derive_episode_key_matches_weiss_sim_runner_helper() -> None:
@@ -506,6 +580,41 @@ def test_ids_offsets_mode_reset_and_step_return_typed_batch() -> None:
         assert next_legal_ids.shape == (int(next_legal_offsets[-1]),)
         assert next_batch.reward.shape == (env.num_envs,)
         _assert_batch_episode_identity_matches_pool(next_batch, env.pool)
+    finally:
+        env.close()
+
+
+def test_ids_offsets_mode_step_sample_from_logits_with_logp_matches_manual() -> None:
+    env = _make_env(legality="ids_offsets")
+    try:
+        batch = env.reset()
+        assert batch.ids_offsets is not None
+        legal_ids, legal_offsets = batch.ids_offsets
+        legal_ids_before = np.asarray(legal_ids, dtype=np.uint32).copy()
+        legal_offsets_before = np.asarray(legal_offsets, dtype=np.uint32).copy()
+        logits = np.random.default_rng(202).standard_normal(
+            (env.num_envs, env.action_space), dtype=np.float32
+        )
+        next_batch, actions, action_logp = env.step_sample_from_logits_with_logp(
+            logits,
+            np.array([11 + idx for idx in range(env.num_envs)], dtype=np.uint64),
+        )
+        assert isinstance(next_batch, DecisionBoundaryBatch)
+        assert actions.shape == (env.num_envs,)
+        assert action_logp.shape == (env.num_envs,)
+        expected = np.zeros((env.num_envs,), dtype=np.float32)
+        for env_index in range(env.num_envs):
+            start = int(legal_offsets_before[env_index])
+            end = int(legal_offsets_before[env_index + 1])
+            ids = np.asarray(legal_ids_before[start:end], dtype=np.int64)
+            row = np.asarray(logits[env_index, ids], dtype=np.float64)
+            max_logit = float(np.max(row))
+            probs = np.exp(row - max_logit)
+            total = float(np.sum(probs))
+            chosen = int(actions[env_index])
+            chosen_index = int(np.flatnonzero(ids == chosen)[0])
+            expected[env_index] = float((row[chosen_index] - max_logit) - np.log(total))
+        np.testing.assert_allclose(action_logp, expected, rtol=1e-6, atol=1e-6)
     finally:
         env.close()
 

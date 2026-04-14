@@ -1,0 +1,8 @@
+schema_version: 2
+extends: typed_local_antistall.yaml
+description: "Typed GRU local long-horizon experiment with gamma 1.0 and no damage shaping"
+rewards:
+  discount:
+    gamma: 1.0
+  shaping:
+    damage_reward: 0.0

@@ -1,165 +1,268 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from weiss_rl.config import canonical_config_json, compute_config_hash256, load_stack_config
+from weiss_rl.config import canonical_config_dict, canonical_config_json, compute_config_hash256, load_stack_config
+from weiss_rl.repro import canonical_json_bytes, sha256_hex
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def test_load_stack_config_merges_locked_components() -> None:
+def _temp_repo(tmp_path: Path) -> Path:
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "python").mkdir()
+    return tmp_path
+
+
+def test_load_stack_config_reads_typed_thesis_preset() -> None:
     repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(repo_root / "configs/presets/typed_thesis_locked.yaml")
 
     assert stack.root == repo_root
-    assert stack.schema_version == 1
-    assert stack.components["system"] == repo_root / "configs/system_locked.yaml"
+    assert stack.schema_version == 2
+    assert stack.components == {}
+    assert stack.config.experiment is not None
+    assert stack.config.experiment.role == "main"
+    assert stack.config.model is not None
+    assert stack.config.model.encoder_kind == "typed_v1"
+    assert stack.config.training is not None
+    assert stack.config.training.algorithm == "impala_vtrace_gru"
+    assert stack.config.rewards is not None
+    assert stack.config.rewards.gamma == pytest.approx(1.0)
+    assert stack.config.league is not None
+    assert stack.config.league.warmup.first_updates == 200000
     assert stack.seed_sets["dev_eval"] == repo_root / "configs/seeds/dev_eval_seeds.txt"
 
-    assert stack.config.system is not None
-    assert stack.config.system.total_envs == 96
-    assert stack.config.model is not None
-    assert stack.config.model.dropout.ablation == 0.1
-    assert stack.config.evaluation is not None
-    assert stack.config.evaluation.final_policy_set_selection.tie_break == "lowest_policy_id"
-    assert stack.config.reproducibility is not None
-    assert stack.config.reproducibility.seed_derivation.base_seed64 == 20260212
 
-
-def test_load_stack_config_allows_minimal_smoke_index() -> None:
+def test_load_stack_config_applies_extends_for_typed_local() -> None:
     repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs/stack_smoke.yaml")
+    stack = load_stack_config(repo_root / "configs/presets/typed_local.yaml")
 
-    assert stack.schema_version == 1
-    assert stack.components == {}
-    assert stack.seed_sets == {}
-    assert stack.config.system is None
+    assert stack.config.training is not None
+    assert stack.config.training.entropy_coef == pytest.approx(0.03)
+    assert stack.config.training.checkpoint_interval_updates == 20
+    assert stack.config.rewards is not None
+    assert stack.config.rewards.objective == "terminal_pm1"
+    assert stack.config.rewards.gamma == pytest.approx(0.99)
+    assert stack.config.rewards.shaping.enable_damage_shaping is True
+    assert stack.config.rewards.shaping.level_reward == pytest.approx(0.0)
+    assert stack.config.rewards.shaping.board_reward == pytest.approx(0.0)
+    assert stack.config.rewards.shaping.no_progress_penalty == pytest.approx(0.0)
+    assert stack.config.rewards.truncation.reward == pytest.approx(-0.1)
+    assert stack.config.curriculum is not None
+    assert stack.config.curriculum.stall_monitor.enabled is True
+    assert stack.config.curriculum.checkpoint_guard.enabled is True
+    assert stack.config.curriculum.checkpoint_guard.rollback_score_margin == pytest.approx(0.15)
+    assert stack.config.curriculum.checkpoint_guard.rollback_max_prob_lt_half == pytest.approx(0.7)
+    assert stack.config.curriculum.checkpoint_guard.min_best_score == pytest.approx(0.55)
+    assert stack.config.curriculum.checkpoint_guard.promote_min_prob_gt_half == pytest.approx(0.6)
+    assert stack.config.curriculum.checkpoint_guard.promote_max_ci_half_width == pytest.approx(0.24)
+    assert stack.config.curriculum.simulator == {}
+    assert stack.config.league is not None
+    assert stack.config.league.pool.champion_max_age_updates == 120
+    assert stack.config.league.sampling.heuristic_public_start_updates == 100
+    assert stack.config.league.sampling.heuristic_public_mix_fraction == pytest.approx(0.1)
+    assert stack.config.league.sampling.heuristic_public_reserved_envs_per_actor == 0
+    assert stack.config.league.sampling.noleague_baseline_reserved_envs_per_actor == 0
+    assert stack.config.league.sampling.champion_mix_fraction == pytest.approx(0.35)
+    assert stack.config.league.sampling.hard_negative_mix_fraction == pytest.approx(0.25)
+    assert stack.config.league.sampling.hard_negative_min_samples == 16
+    assert stack.config.league.warmup.first_updates == 200
+    assert stack.config.league.promotion.seed_file == "configs/seeds/local_promotion_eval_seeds.txt"
+    assert stack.config.evaluation is not None
+    assert stack.config.evaluation.periodic_dev_eval_paired_seeds == 8
+    assert stack.seed_sets["dev_eval"] == repo_root / "configs/seeds/local_dev_eval_seeds.txt"
+    assert stack.seed_sets["promotion_gate"] == repo_root / "configs/seeds/local_promotion_eval_seeds.txt"
+
+
+def test_load_stack_config_supports_baselines_and_ablations() -> None:
+    repo_root = _repo_root()
+
+    noleague = load_stack_config(repo_root / "configs/presets/baselines/noleague_impala.yaml")
+    assert noleague.config.experiment is not None
+    assert noleague.config.experiment.role == "baseline_noleague"
+    assert noleague.config.league is not None
+    assert noleague.config.league.enabled is False
+
+    norecurrence = load_stack_config(repo_root / "configs/presets/baselines/norecurrence_impala.yaml")
+    assert norecurrence.config.experiment is not None
+    assert norecurrence.config.experiment.role == "baseline_norecurrence"
+    assert norecurrence.config.model is not None
+    assert norecurrence.config.model.recurrent_core == "none"
+    assert norecurrence.config.training is not None
+    assert norecurrence.config.training.algorithm == "impala_vtrace_ff"
+
+    ppo = load_stack_config(repo_root / "configs/presets/baselines/ppo_lite.yaml")
+    assert ppo.config.experiment is not None
+    assert ppo.config.experiment.role == "baseline_ppo_lite"
+    assert ppo.config.training is not None
+    assert ppo.config.training.algorithm == "ppo_lite_masked_v1"
+    assert ppo.config.training.ppo_epochs == 4
+
+    discount = load_stack_config(repo_root / "configs/presets/ablations/discount_gamma099.yaml")
+    assert discount.config.experiment is not None
+    assert discount.config.experiment.role == "ablation_discount"
+    assert discount.config.rewards is not None
+    assert discount.config.rewards.gamma == pytest.approx(0.99)
+
+    shaping = load_stack_config(repo_root / "configs/presets/ablations/reward_shaping.yaml")
+    assert shaping.config.experiment is not None
+    assert shaping.config.experiment.role == "ablation_reward"
+    assert shaping.config.rewards is not None
+    assert shaping.config.rewards.shaping.enable_damage_shaping is True
+    assert shaping.config.rewards.shaping.level_reward == pytest.approx(0.05)
+    assert shaping.config.rewards.shaping.no_progress_penalty == pytest.approx(0.005)
+
+
+def test_load_stack_config_applies_antistall_v2_overrides() -> None:
+    repo_root = _repo_root()
+    stack = load_stack_config(repo_root / "configs/presets/typed_local_antistall_v2.yaml")
+
+    assert stack.config.rewards is not None
+    assert stack.config.rewards.shaping.damage_reward == pytest.approx(0.015)
+    assert stack.config.rewards.shaping.no_progress_penalty == pytest.approx(0.015)
+    assert stack.config.rewards.truncation.reward == pytest.approx(-0.6)
+    assert stack.config.curriculum is not None
+    assert stack.config.curriculum.simulator["max_no_progress_decisions"] == 64
+
+
+def test_load_stack_config_applies_longhorizon_v1_overrides() -> None:
+    repo_root = _repo_root()
+    stack = load_stack_config(repo_root / "configs/presets/typed_local_longhorizon_v1.yaml")
+
+    assert stack.config.rewards is not None
+    assert stack.config.rewards.gamma == pytest.approx(1.0)
+    assert stack.config.rewards.shaping.damage_reward == pytest.approx(0.0)
+    assert stack.config.rewards.shaping.no_progress_penalty == pytest.approx(0.01)
+
+
+def test_load_stack_config_applies_anchorlane_v1_overrides() -> None:
+    repo_root = _repo_root()
+    stack = load_stack_config(repo_root / "configs/presets/typed_local_anchorlanes_v1.yaml")
+
+    assert stack.config.league is not None
+    assert stack.config.league.sampling.heuristic_public_reserved_envs_per_actor == 1
+    assert stack.config.league.sampling.noleague_baseline_reserved_envs_per_actor == 1
 
 
 def test_canonical_config_hash_is_stable() -> None:
     repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+    stack = load_stack_config(repo_root / "configs/presets/typed_thesis_locked.yaml")
 
-    assert canonical_config_json(stack).startswith('{"config":{"compute_budget":')
+    canonical = canonical_config_json(stack)
+    assert '"experiment":{"role":"main"}' in canonical
     assert compute_config_hash256(stack) == compute_config_hash256(
-        load_stack_config(repo_root / "configs/rl_stack_locked.yaml")
+        load_stack_config(repo_root / "configs/presets/typed_thesis_locked.yaml")
     )
 
 
-def test_config_hash_changes_when_merged_semantics_change(tmp_path: Path) -> None:
+def test_load_stack_config_reads_canonical_run_artifact_json(tmp_path: Path) -> None:
     repo_root = _repo_root()
-    configs_dir = tmp_path / "configs"
-    configs_dir.mkdir(parents=True)
+    baseline = load_stack_config(repo_root / "configs/presets/typed_local_longhorizon_v1.yaml")
+    fake_repo = _temp_repo(tmp_path)
+    artifact_path = fake_repo / "runs" / "example_run" / "config_canonical.json"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.loads(json.dumps(canonical_config_dict(baseline)))
+    payload["config"]["league"]["sampling"].pop("heuristic_public_reserved_envs_per_actor", None)
+    payload["config"]["league"]["sampling"].pop("noleague_baseline_reserved_envs_per_actor", None)
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    system_text = (repo_root / "configs/system_locked.yaml").read_text(encoding="utf-8")
-    (configs_dir / "stack.yaml").write_text(
-        "rl_stack_locked:\n  schema_version: 1\n  components:\n    system: configs/system_locked.yaml\n",
+    loaded = load_stack_config(artifact_path)
+
+    assert loaded.root == fake_repo
+    assert loaded.config.rewards is not None
+    assert loaded.config.rewards.gamma == pytest.approx(1.0)
+    assert loaded.seed_sets["dev_eval"] == fake_repo / "configs/seeds/local_dev_eval_seeds.txt"
+    assert canonical_config_dict(loaded) == payload
+    assert compute_config_hash256(loaded) == sha256_hex(canonical_json_bytes(payload))
+
+
+def test_config_hash_changes_when_resolved_semantics_change(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    fake_repo = _temp_repo(tmp_path)
+    config_path = fake_repo / "configs" / "typed_local.yaml"
+    thesis_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
+    thesis_path.write_text(
+        (repo_root / "configs/presets/typed_thesis_locked.yaml").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
-    (configs_dir / "system_locked.yaml").write_text(system_text, encoding="utf-8")
-    baseline = load_stack_config(configs_dir / "stack.yaml")
-
-    (configs_dir / "system_locked.yaml").write_text(
-        system_text.replace("  total_envs: 96\n", "  total_envs: 97\n"),
+    config_path.write_text(
+        (repo_root / "configs/presets/typed_local.yaml").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
-    changed = load_stack_config(configs_dir / "stack.yaml")
+    baseline = load_stack_config(config_path)
 
-    assert changed.config.system is not None
-    assert changed.config.system.total_envs == 97
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("gamma: 0.99", "gamma: 0.98"),
+        encoding="utf-8",
+    )
+    changed = load_stack_config(config_path)
+
+    assert changed.config.rewards is not None
+    assert changed.config.rewards.gamma == pytest.approx(0.98)
     assert compute_config_hash256(changed) != compute_config_hash256(baseline)
 
 
-def test_load_stack_config_rejects_unknown_component(tmp_path: Path) -> None:
-    stack_path = tmp_path / "configs" / "stack.yaml"
-    stack_path.parent.mkdir(parents=True)
+def test_load_stack_config_rejects_unknown_top_level_keys(tmp_path: Path) -> None:
+    fake_repo = _temp_repo(tmp_path)
+    stack_path = fake_repo / "configs" / "typed_local.yaml"
     stack_path.write_text(
-        "rl_stack_locked:\n  components:\n    mystery: configs/mystery.yaml\n",
+        "\n".join(
+            (
+                "schema_version: 2",
+                "description: broken",
+                "experiment:",
+                "  role: main",
+                "mystery: true",
+            )
+        ),
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="Unsupported component"):
+    with pytest.raises(ValueError, match="unsupported keys: mystery"):
         load_stack_config(stack_path)
 
 
-def test_load_stack_config_rejects_mixed_top_level_config_docs(tmp_path: Path) -> None:
-    stack_path = tmp_path / "configs" / "stack.yaml"
-    stack_path.parent.mkdir(parents=True)
+def test_load_stack_config_rejects_unknown_experiment_role(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    fake_repo = _temp_repo(tmp_path)
+    thesis_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
+    thesis_path.write_text(
+        (repo_root / "configs/presets/typed_thesis_locked.yaml")
+        .read_text(encoding="utf-8")
+        .replace("role: main", "role: mystery_role", 1),
+        encoding="utf-8",
+    )
+    stack_path = fake_repo / "configs" / "typed_local.yaml"
     stack_path.write_text(
-        "rl_stack_locked:\n  components: {}\n  seed_sets: {}\nminimal_loop:\n  mode: fast\n",
+        (repo_root / "configs/presets/typed_local.yaml").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="extra top-level keys: minimal_loop"):
+    with pytest.raises(ValueError, match="experiment.role must be one of"):
         load_stack_config(stack_path)
 
 
-def test_load_stack_config_rejects_unknown_component_fields(tmp_path: Path) -> None:
+def test_load_stack_config_rejects_unsupported_pfsp_stats_source(tmp_path: Path) -> None:
     repo_root = _repo_root()
-    configs_dir = tmp_path / "configs"
-    configs_dir.mkdir(parents=True)
-
-    system_text = (repo_root / "configs/system_locked.yaml").read_text(encoding="utf-8")
-    (configs_dir / "system_locked.yaml").write_text(system_text + "  hidden_toggle: true\n", encoding="utf-8")
-    (configs_dir / "stack.yaml").write_text(
-        "rl_stack_locked:\n  components:\n    system: configs/system_locked.yaml\n",
+    fake_repo = _temp_repo(tmp_path)
+    thesis_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
+    thesis_path.write_text(
+        (repo_root / "configs/presets/typed_thesis_locked.yaml")
+        .read_text(encoding="utf-8")
+        .replace("pfsp_stats_source: online_outcomes", "pfsp_stats_source: registry_snapshots", 1),
+        encoding="utf-8",
+    )
+    stack_path = fake_repo / "configs" / "typed_local.yaml"
+    stack_path.write_text(
+        (repo_root / "configs/presets/typed_local.yaml").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="system has unsupported keys: hidden_toggle"):
-        load_stack_config(configs_dir / "stack.yaml")
-
-
-def test_load_stack_config_rejects_unknown_training_mode(tmp_path: Path) -> None:
-    repo_root = _repo_root()
-    configs_dir = tmp_path / "configs"
-    configs_dir.mkdir(parents=True)
-
-    training_text = (repo_root / "configs/training_family_a_locked.yaml").read_text(encoding="utf-8")
-    (configs_dir / "training_family_a_locked.yaml").write_text(
-        training_text.replace("mode: standard  # standard | b1_no_league", "mode: mystery_mode"),
-        encoding="utf-8",
-    )
-    (configs_dir / "stack.yaml").write_text(
-        "rl_stack_locked:\n  components:\n    training_family_a: configs/training_family_a_locked.yaml\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="training_family_a.mode must be one of"):
-        load_stack_config(configs_dir / "stack.yaml")
-
-
-def test_load_stack_config_applies_b1_no_league_overrides(tmp_path: Path) -> None:
-    repo_root = _repo_root()
-    configs_dir = tmp_path / "configs"
-    configs_dir.mkdir(parents=True)
-
-    training_text = (repo_root / "configs/training_family_a_locked.yaml").read_text(encoding="utf-8")
-    league_text = (repo_root / "configs/league_locked.yaml").read_text(encoding="utf-8")
-    (configs_dir / "training_family_a_locked.yaml").write_text(
-        training_text.replace("mode: standard  # standard | b1_no_league", "mode: b1_no_league"),
-        encoding="utf-8",
-    )
-    (configs_dir / "league_locked.yaml").write_text(league_text, encoding="utf-8")
-    (configs_dir / "stack.yaml").write_text(
-        "rl_stack_locked:\n"
-        "  components:\n"
-        "    training_family_a: configs/training_family_a_locked.yaml\n"
-        "    league: configs/league_locked.yaml\n",
-        encoding="utf-8",
-    )
-
-    stack = load_stack_config(configs_dir / "stack.yaml")
-
-    assert stack.config.training_family_a is not None
-    assert stack.config.training_family_a.mode == "b1_no_league"
-    assert stack.config.league is not None
-    assert stack.config.league.enabled is False
-    assert stack.config.league.opponent_sampling == "latest_only_mirror"
-    assert stack.config.league.pfsp_stats_source == "disabled"
-    assert stack.config.league.promotion_gate_enabled is False
-    assert stack.config.league.promotion_threshold == "disabled"
+    with pytest.raises(ValueError, match="pfsp_stats_source currently only supports 'online_outcomes'"):
+        load_stack_config(stack_path)

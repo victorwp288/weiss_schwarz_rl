@@ -13,11 +13,12 @@ Goal: get a fresh clone to a successful verification run without needing a 1:1 w
 
 The repo now supports three useful lanes:
 
-- `make train-min` proves config loading, simulator provenance capture, and run-manifest writing.
-- `train.py` can run a tiny inline smoke path when the active interpreter can step the simulator.
+- `configs/stack_smoke.yaml` with `make train-min` is the explicit scaffold-only path. It proves config loading, simulator provenance capture, and run-manifest writing, but it does not claim thesis-grade training.
+- `configs/presets/typed_thesis_locked.yaml` with the published `weiss-sim` package is the canonical simulator-backed path. It is the one to use for real train/eval, metagame, figures, and readiness checks.
+- `configs/presets/typed_local.yaml` is the local typed default when you want a less locked preset for iteration.
 - `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline.
 
-The full thesis runtime is described in `runtime_modes.md`; this page stays focused on the quickest honest onboarding path.
+The full runtime modes are described in `runtime_modes.md`; this page stays focused on the quickest honest onboarding path.
 
 Repo paths in this guide are relative to the repo root.
 
@@ -26,6 +27,7 @@ Repo paths in this guide are relative to the repo root.
 - Python >= 3.10, < 3.13
 - `uv` installed and available in your terminal (`pip install uv`)
 - Access to `weiss_sim` with `export_spec_bundle()` available.
+  - The published `weiss-sim` package is the canonical validation source for simulator-backed runs.
   - If `weiss_sim` is already installed in your active Python environment, the probe uses that first.
   - Otherwise it checks `WEISS_SIM_PYTHONPATH` if set.
   - Otherwise it looks for a sibling checkout at `../weiss-schwarz-simulator/python` relative to this repo.
@@ -55,7 +57,7 @@ uv run python ...
 
 If you are doing an ad-hoc local invocation without installing the package, set `PYTHONPATH=python` explicitly. That is mostly useful for targeted tests and local debugging, not the default onboarding path.
 
-## Manifest smoke test (<2 minutes CPU)
+## Scaffold smoke test (<2 minutes CPU)
 
 This does **not** execute training. It verifies:
 
@@ -77,7 +79,7 @@ make train-min
 
 Expected console lines for the explicit `--run-label smoke_local` command:
 
-- `Loaded stack config with 0 components`
+- `Loaded stack config`
 - `computed_run_id64:` and `computed_run_id256:` entries in the startup contract
 - `run_label:              smoke_local`
 - `run_dir_name:           smoke_local`
@@ -92,58 +94,45 @@ If you use `make train-min` instead, expect the same contract/manifest scaffold 
 
 `--run-label` only controls the human-friendly run directory name. The computed run identity is recorded separately in the banner and manifest. `--run-id` is still accepted as a deprecated compatibility alias for the label override.
 
-## Expected output files
+## Canonical simulator-backed run
 
-After the smoke run, you should have either:
-
-- `runs/smoke_local/manifest.json`
-- `runs/smoke_local/spec_bundle.json`
-- `runs/smoke_local/config_canonical.json`
-
-when you used the explicit `--run-label smoke_local` command above, or the same files under `runs/run_<computed_run_id64>/` when you used `make train-min`.
-
-### Minimal inline training smoke (M3-08 bring-up)
-
-This is the small real training path behind the current M3-08 work.
-It still is **not** the full actor/learner architecture from the master plan, but it does run a tiny inline rollout -> learner update -> artifact write path.
+Use this for the real thesis-oriented train/eval path. It exercises the single-node queue runtime through the `DecisionBoundaryEnv` contract and validates against the published `weiss-sim` package.
 
 Requirements:
 
-- use a full stack config such as `configs/rl_stack_locked.yaml`
-- the **active interpreter** must be able to import `weiss_sim` with stepping APIs, not just `export_spec_bundle()`
-- `make train-inline-smoke` handles the usual sibling-checkout case by prepending `../weiss-schwarz-simulator/python` to `PYTHONPATH`
+- use `configs/presets/typed_thesis_locked.yaml`
+- install the published simulator package with `uv sync --extra dev --extra sim`, or otherwise ensure the active interpreter can import the same validated `weiss_sim`
+- keep the run on a single machine for the canonical path
 
 Run:
 
 ```bash
-make train-inline-smoke
-# or
-uv run python python/scripts/train.py --stack-config configs/rl_stack_locked.yaml --run-label m3_08_smoke --device cpu
+uv run python python/scripts/train.py --stack-config configs/presets/typed_thesis_locked.yaml --run-label thesis_local --device cpu
+uv run python python/scripts/eval.py --stack-config configs/presets/typed_thesis_locked.yaml --run-dir runs/thesis_local
+uv run python python/scripts/make_figures.py --run-dir runs/thesis_local
 ```
 
 Expected training artifacts when the runtime is available:
 
-- `runs/m3_08_smoke/training/logs/scalars.jsonl`
-- `runs/m3_08_smoke/training/logs/training_metrics.jsonl`
-- `runs/m3_08_smoke/training/checkpoints/checkpoint_1.pt`
-- `runs/m3_08_smoke/training/checkpoints/checkpoint_metadata_1.json`
+- `runs/thesis_local/training/logs/scalars.jsonl`
+- `runs/thesis_local/training/logs/training_metrics.jsonl`
+- `runs/thesis_local/training/checkpoints/checkpoint_1.pt`
+- `runs/thesis_local/training/checkpoints/checkpoint_metadata_1.json`
 
-If the active interpreter still cannot step the simulator, `train.py` writes the manifest scaffold and then prints a manifest-only fallback reason instead of pretending training ran.
-
-Inspection (replace `smoke_local` with the generated `run_<computed_run_id64>` directory if you used `make train-min`):
+Inspection after either path:
 
 ```bash
-cat runs/smoke_local/manifest.json
+cat runs/thesis_local/manifest.json
 ```
 
 You should see fields like `run_id256`, `spec_hash256`, `config_hash256`, `simulator`, and `spec_bundle`.
 
 ## Optional follow-up checks
 
-These are honest smoke checks for the other top-level entrypoints:
+These are the follow-up checks for the other top-level entrypoints:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml
+uv run python python/scripts/eval.py --stack-config configs/presets/typed_thesis_locked.yaml
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
 make verify
@@ -162,12 +151,12 @@ This path is intentionally synthetic. It exists so CI and public readers can exe
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/rl_stack_locked.yaml \
+  --stack-config configs/presets/typed_thesis_locked.yaml \
   --public-demo \
   --run-label toy_public_demo
 
 uv run python python/scripts/eval.py \
-  --stack-config configs/rl_stack_locked.yaml \
+  --stack-config configs/presets/typed_thesis_locked.yaml \
   --public-demo \
   --run-dir runs/toy_public_demo
 

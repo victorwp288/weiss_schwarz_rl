@@ -113,7 +113,7 @@ def test_make_replay_bundle_meta_preserves_simulator_episode_identity() -> None:
 
 def test_make_replay_bundle_meta_marks_bundle_rerunnable_when_contract_present() -> None:
     contract = ReplayRerunContract(
-        version=1,
+        version=2,
         observation_visibility="public",
         max_decisions=200,
         max_ticks=10_000,
@@ -453,7 +453,7 @@ def test_verify_replay_bundle_rejects_unsupported_rerun_contract_versions_before
         env_factory_called = True
         raise AssertionError("env_factory should not be called for unsupported rerun contract versions")
 
-    with pytest.raises(RuntimeError, match="unsupported: expected version 1, got 99"):
+    with pytest.raises(RuntimeError, match="unsupported: expected version 2, got 99"):
         replay_runner.verify_replay_bundle(
             bundle_path=bundle_path,
             report_path=report_path,
@@ -563,6 +563,8 @@ def test_build_replay_env_uses_fast_pool_factory_for_default_reruns(monkeypatch:
             "max_ticks": contract.max_ticks,
             "observation_visibility": contract.observation_visibility,
             "seed": 0,
+            "reward_json": contract.reward_json,
+            "curriculum_json": contract.curriculum_json,
         },
         "profile": "fast",
         "num_envs": 1,
@@ -570,14 +572,23 @@ def test_build_replay_env_uses_fast_pool_factory_for_default_reruns(monkeypatch:
     assert wrapper_calls["pool"] is pool
     assert wrapper_calls["legality"] == "ids_offsets"
     assert wrapper_calls["engine_status_policy"] == "passthrough"
+    assert pool_factory_calls["env_config"]["reward_json"] == contract.reward_json
+    assert pool_factory_calls["env_config"]["curriculum_json"] == contract.curriculum_json
 
 
-def _rerun_contract(*, version: int = 1) -> ReplayRerunContract:
+def _rerun_contract(
+    *,
+    version: int = 2,
+    reward_json: str | None = '{"objective":"terminal_pm1"}',
+    curriculum_json: str | None = '{"version":"curriculum_v1"}',
+) -> ReplayRerunContract:
     return ReplayRerunContract(
         version=version,
         observation_visibility="public",
         max_decisions=200,
         max_ticks=10_000,
+        reward_json=reward_json,
+        curriculum_json=curriculum_json,
     )
 
 
@@ -631,6 +642,8 @@ def _ids_batch(
         actor=np.array([actor], dtype=np.int32),
         decision_id=np.array([decision_id], dtype=np.int64),
         engine_status=np.array([engine_status], dtype=np.uint8),
+        decision_count=np.array([0], dtype=np.uint32),
+        tick_count=np.array([0], dtype=np.uint32),
         episode_seed=np.array([episode_seed], dtype=np.uint64),
         episode_key=np.array([episode_key], dtype=np.uint64),
         ids_offsets=(ids, np.array([0, int(ids.size)], dtype=np.int32)),

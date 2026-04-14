@@ -3,17 +3,17 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from weiss_rl.config import load_stack_config
+from weiss_rl.config import load_study_config
 from weiss_rl.metagame import build_sensitivity_report
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build metagame sensitivity reports from final_eval artifacts")
     parser.add_argument(
-        "--stack-config",
+        "--study-config",
         type=Path,
         required=True,
-        help="Path to the stack config providing metagame and sensitivity settings",
+        help="Path to the study-only config providing metagame and sensitivity settings",
     )
     parser.add_argument(
         "--final-eval-dir",
@@ -29,18 +29,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    stack = load_stack_config(args.stack_config)
-    if stack.config.metagame is None:
-        raise ValueError("stack config is missing metagame settings")
-    if stack.config.sensitivity is None:
-        raise ValueError("stack config is missing sensitivity settings")
+    study = load_study_config(args.study_config)
 
     out_dir = args.out_dir or (args.final_eval_dir / "sensitivity")
     payload = build_sensitivity_report(
         final_eval_dir=args.final_eval_dir,
         out_dir=out_dir,
-        metagame_config=stack.config.metagame,
-        sensitivity_config=stack.config.sensitivity,
+        metagame_config=study.metagame,
+        sensitivity_config=study.sensitivity,
     )
     print(f"Sensitivity summary JSON: {out_dir / 'summary.json'}")
     print(f"Sensitivity cases: {sorted(payload['cases'])}")

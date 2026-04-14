@@ -1,0 +1,12 @@
+schema_version: 2
+extends: ../typed_thesis_locked.yaml
+description: "Reward shaping ablation"
+experiment:
+  role: ablation_reward
+rewards:
+  shaping:
+    enable_damage_shaping: true
+    damage_reward: 0.05
+    level_reward: 0.05
+    board_reward: 0.02
+    no_progress_penalty: 0.005

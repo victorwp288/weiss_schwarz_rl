@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from weiss_rl.repro import canonical_json_bytes, sha256_hex
-from weiss_rl.spec import parse_spec_bundle
+from weiss_rl.spec import assert_spec_bundle_contract, parse_spec_bundle
 
 _COLLECTION_SCRIPT = """
 import json
@@ -173,3 +173,11 @@ def load_simulator_contract(repo_root: Path) -> SimulatorContract:
         "WEISS_SIM_PYTHON to a working simulator environment.\n"
         f"Tried:\n{tried}"
     )
+
+
+def load_verified_simulator_contract(repo_root: Path, *, expected_spec_hash: str) -> SimulatorContract:
+    """Load the active simulator contract and optionally assert the caller-supplied hash."""
+
+    contract = load_simulator_contract(repo_root)
+    assert_spec_bundle_contract(expected_spec_hash, contract.spec_bundle)
+    return contract

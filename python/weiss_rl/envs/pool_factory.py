@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+from inspect import signature
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
+
+from weiss_rl.config import StackConfig
 
 Profile = Literal["debug", "balanced", "fast"]
 LayoutName = Literal["mask", "i16_legal_ids"]
@@ -74,6 +78,53 @@ def _validate_env_config(kwargs: Mapping[str, Any]) -> None:
         raise ValueError(f"env_config missing required keys: {missing}")
 
 
+def _reward_payload_from_stack(stack: StackConfig) -> str | None:
+    rewards = stack.config.rewards
+    if rewards is None:
+        return None
+    objective = str(rewards.objective).strip().lower()
+    if objective not in {"terminal_pm1", "terminal_only_pm1"}:
+        raise ValueError(f"Unsupported rewards.objective {rewards.objective!r}")
+    payload = {
+        "terminal_win": 1.0,
+        "terminal_loss": -1.0,
+        "terminal_draw": 0.0,
+        "terminal_timeout": float(rewards.truncation.reward),
+        "enable_shaping": bool(rewards.shaping.enable_damage_shaping),
+        "damage_reward": float(rewards.shaping.damage_reward),
+        "level_reward": float(rewards.shaping.level_reward),
+        "board_reward": float(rewards.shaping.board_reward),
+        "no_progress_penalty": float(rewards.shaping.no_progress_penalty),
+    }
+    return json.dumps(payload, sort_keys=True)
+
+
+def _curriculum_payload_from_stack(stack: StackConfig) -> str | None:
+    curriculum = stack.config.curriculum
+    if curriculum is None or not curriculum.simulator:
+        return None
+    return json.dumps(curriculum.simulator, sort_keys=True)
+
+
+def build_env_config_from_stack(stack: StackConfig, *, seed: int) -> dict[str, Any]:
+    environment_config = stack.config.environment
+    if environment_config is None:
+        raise RuntimeError("stack config is missing environment")
+    env_config: dict[str, Any] = {
+        "max_decisions": int(environment_config.max_decisions),
+        "max_ticks": int(environment_config.max_ticks),
+        "observation_visibility": environment_config.observation_visibility,
+        "seed": int(seed),
+    }
+    reward_json = _reward_payload_from_stack(stack)
+    curriculum_json = _curriculum_payload_from_stack(stack)
+    if reward_json is not None:
+        env_config["reward_json"] = reward_json
+    if curriculum_json is not None:
+        env_config["curriculum_json"] = curriculum_json
+    return env_config
+
+
 def make_env_pool_from_config(
     env_config: Mapping[str, Any],
     *,
@@ -98,5 +149,22 @@ def make_env_pool_from_config(
     import weiss_sim
 
     factory = getattr(weiss_sim, settings.entrypoint)
-    env = factory(**kwargs)
+    parameters = signature(factory).parameters
+    uses_kwargs_wrapper = any(
+        parameter.kind == parameter.VAR_KEYWORD for parameter in parameters.values()
+    )
+    if uses_kwargs_wrapper and hasattr(weiss_sim, "make"):
+        translated_kwargs = dict(kwargs)
+        curriculum_json = translated_kwargs.pop("curriculum_json", None)
+        if curriculum_json is not None:
+            translated_kwargs["curriculum"] = json.loads(str(curriculum_json))
+        env = weiss_sim.make(mode=settings.entrypoint, **translated_kwargs)
+    elif "curriculum_json" not in parameters and "curriculum" in parameters:
+        translated_kwargs = dict(kwargs)
+        curriculum_json = translated_kwargs.pop("curriculum_json", None)
+        if curriculum_json is not None:
+            translated_kwargs["curriculum"] = json.loads(str(curriculum_json))
+        env = factory(**translated_kwargs)
+    else:
+        env = factory(**kwargs)
     return env.pool, settings.layout_name

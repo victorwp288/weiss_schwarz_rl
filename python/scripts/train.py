@@ -10,19 +10,27 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
 import torch
+from torch import nn
 
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.cli_banner import print_startup_banner
-from weiss_rl.config import StackConfig, canonical_config_dict, compute_config_hash256, load_stack_config
+from weiss_rl.config import (
+    StackConfig,
+    apply_stack_overrides,
+    canonical_config_dict,
+    compute_config_hash256,
+    load_stack_config,
+    parse_override_tokens,
+)
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
-from weiss_rl.envs.pool_factory import make_env_pool_from_config
+from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
 from weiss_rl.eval import (
     DevEvalPolicySummary,
     Pcg32XshRrV1,
@@ -40,9 +48,16 @@ from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, select_final_policy_set_deterministic_v1
 from weiss_rl.learners.impala_learner import ImpalaLearner
+from weiss_rl.learners.ppo_lite_learner import PpoLiteLearner
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
 from weiss_rl.league import run_promotion_gate
-from weiss_rl.manifest import RunManifest, build_seed_file_manifest, default_run_dir_name, write_run_artifacts
+from weiss_rl.manifest import (
+    RunArtifacts,
+    RunManifest,
+    build_seed_file_manifest,
+    default_run_dir_name,
+    write_run_artifacts,
+)
 from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_mask, sample_actions_from_mask
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.runtime import QueueRuntime, QueueRuntimeMode, build_runtime_config
@@ -54,8 +69,9 @@ from weiss_rl.repro import (
     parse_seed_file,
     stable_hash64,
 )
-from weiss_rl.simulator_contract import SimulatorContract, load_simulator_contract
+from weiss_rl.simulator_contract import SimulatorContract, load_verified_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract
+from weiss_rl.tensorboard_logger import TensorBoardLogger, tensorboard_unavailable_reason
 from weiss_rl.toy_public_demo import (
     PUBLIC_DEMO_MODE,
     public_demo_simulator_info,
@@ -79,6 +95,13 @@ _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID = "b0_randomlegal"
 _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME = "B1 NoLeague baseline"
 _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID = "b1_noleague_baseline"
 _PROMOTION_GATE_NOLEAGUE_BASELINE_CHECKPOINT = "baseline_checkpoint.pt"
+_LATEST_CHECKPOINT_FILENAME = "latest.pt"
+_BEST_CHECKPOINT_FILENAME = "best.pt"
+_CHECKPOINT_TRACKER_FILENAME = "checkpoint_tracker.json"
+_IMPALA_ALGORITHMS = frozenset({"impala_vtrace_gru", "impala_vtrace_ff"})
+_PPO_ALGORITHMS = frozenset({"ppo_lite_masked_v1"})
+_CONFIRMATORY_DEV_EVAL_MAX_PROB_SHORTFALL = 0.1
+_CONFIRMATORY_DEV_EVAL_MAX_CI_EXCESS = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,8 +126,20 @@ class TrainingPaths:
     checkpoints_dir: Path
     logs_dir: Path
     snapshots_dir: Path
+    tensorboard_dir: Path
     scalars_path: Path
     performance_log_path: Path
+    latest_checkpoint_path: Path
+    best_checkpoint_path: Path
+    checkpoint_tracker_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeCheckpoint:
+    checkpoint_path: Path
+    update_count: int
+    policy_version: int
+    total_samples_processed: int
 
 
 class _PeriodicDevEvalRunner:
@@ -113,15 +148,21 @@ class _PeriodicDevEvalRunner:
         *,
         stack: StackConfig,
         model: PolicyValueModel,
+        opponent_policy_id: str,
         observation_dim: int,
         action_dim: int,
         pass_action_id: int,
         artifact_dir: Path,
         focal_policy_id: str,
         require_sorted_legal_ids: bool,
+        opponent_model: PolicyValueModel | None = None,
+        heuristic_policy: HeuristicPublicPolicy | None = None,
     ) -> None:
         self.stack = stack
         self.model = model
+        self.opponent_policy_id = opponent_policy_id
+        self.opponent_model = opponent_model
+        self.heuristic_policy = heuristic_policy
         self.observation_dim = observation_dim
         self.action_dim = action_dim
         self.pass_action_id = pass_action_id
@@ -137,7 +178,12 @@ class _PeriodicDevEvalRunner:
             seed=scheduled_game.episode_seed,
             pass_action_id=self.pass_action_id,
         )
-        seat_hidden = self.model.initial_seat_hidden(1, device=self._device)
+        focal_hidden = self.model.initial_seat_hidden(1, device=self._device)
+        opponent_hidden = (
+            None
+            if self.opponent_model is None
+            else self.opponent_model.initial_seat_hidden(1, device=self._device)
+        )
         seat_rngs = {
             seat: Pcg32XshRrV1(_periodic_dev_eval_rng_seed(scheduled_game=scheduled_game, seat=seat)) for seat in (0, 1)
         }
@@ -153,14 +199,18 @@ class _PeriodicDevEvalRunner:
                         env_index=0,
                         acting_seat=last_acting_seat,
                         episode_seed=scheduled_game.episode_seed,
+                        max_decisions=getattr(env, "max_decisions", None),
+                        max_ticks=getattr(env, "max_ticks", None),
+                        max_no_progress_decisions=getattr(env, "max_no_progress_decisions", None),
                     )
 
                 current_seat = int(batch.actor[0])
-                action, seat_hidden = self._select_action(
+                action, focal_hidden, opponent_hidden = self._select_action(
                     batch=batch,
                     scheduled_game=scheduled_game,
                     current_seat=current_seat,
-                    seat_hidden=seat_hidden,
+                    focal_hidden=focal_hidden,
+                    opponent_hidden=opponent_hidden,
                     rng=seat_rngs[current_seat],
                 )
                 last_acting_seat = current_seat
@@ -175,26 +225,62 @@ class _PeriodicDevEvalRunner:
         batch: DecisionBoundaryBatch,
         scheduled_game: ScheduledGame,
         current_seat: int,
-        seat_hidden: torch.Tensor,
+        focal_hidden: torch.Tensor,
+        opponent_hidden: torch.Tensor | None,
         rng: Pcg32XshRrV1,
-    ) -> tuple[int, torch.Tensor]:
+    ) -> tuple[int, torch.Tensor, torch.Tensor | None]:
         legal_ids = _legal_ids_for_env_row(
             batch=batch,
             env_index=0,
             require_sorted=self.require_sorted_legal_ids,
         )
         current_policy_id = scheduled_game.seat0_policy_id if current_seat == 0 else scheduled_game.seat1_policy_id
-        if current_policy_id != self.focal_policy_id:
-            action, _ = sample_action_pinned(
-                self._baseline_logits,
-                legal_ids,
+        if current_policy_id == self.focal_policy_id:
+            action, focal_hidden = self._sample_model_action(
+                model=self.model,
+                seat_hidden=focal_hidden,
+                batch=batch,
+                current_seat=current_seat,
+                legal_ids=legal_ids,
                 rng=rng,
-                pass_action_id=self.pass_action_id,
             )
-            return action, seat_hidden
+            return action, focal_hidden, opponent_hidden
+        if self.opponent_model is not None and current_policy_id == self.opponent_policy_id:
+            assert opponent_hidden is not None
+            action, opponent_hidden = self._sample_model_action(
+                model=self.opponent_model,
+                seat_hidden=opponent_hidden,
+                batch=batch,
+                current_seat=current_seat,
+                legal_ids=legal_ids,
+                rng=rng,
+            )
+            return action, focal_hidden, opponent_hidden
+        if self.heuristic_policy is not None and current_policy_id == self.opponent_policy_id:
+            action = self.heuristic_policy.choose_action(
+                np.asarray(batch.obs[0], dtype=np.float32),
+                legal_ids,
+            )
+            return int(action), focal_hidden, opponent_hidden
+        action, _ = sample_action_pinned(
+            self._baseline_logits,
+            legal_ids,
+            rng=rng,
+        )
+        return action, focal_hidden, opponent_hidden
 
+    def _sample_model_action(
+        self,
+        *,
+        model: PolicyValueModel,
+        seat_hidden: torch.Tensor,
+        batch: DecisionBoundaryBatch,
+        current_seat: int,
+        legal_ids: np.ndarray,
+        rng: Pcg32XshRrV1,
+    ) -> tuple[int, torch.Tensor]:
         with torch.inference_mode():
-            logits_tensor, _value_tensor, next_seat_hidden = self.model.forward_seat_aware(
+            logits_tensor, _value_tensor, next_seat_hidden = model.forward_seat_aware(
                 torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
                 torch.as_tensor([current_seat], device=self._device, dtype=torch.long),
                 seat_hidden,
@@ -204,7 +290,6 @@ class _PeriodicDevEvalRunner:
             logits,
             legal_ids,
             rng=rng,
-            pass_action_id=self.pass_action_id,
         )
         return action, next_seat_hidden
 
@@ -435,15 +520,20 @@ def _start_nonce() -> int:
     return time.time_ns() & _U64_MASK
 
 
-def _hardware_summary() -> dict[str, str | int]:
+def _hardware_summary(
+    learner_device: torch.device | str = "cpu",
+    *,
+    actor_device: torch.device | str = "cpu",
+) -> dict[str, str | int]:
+    learner_device_name = str(learner_device)
     return {
         "platform": platform.platform(),
         "python_version": platform.python_version(),
         "machine": platform.machine(),
         "processor": platform.processor(),
         "cpu_count": os.cpu_count() or 0,
-        "learner_device": "cpu",
-        "actor_device": "cpu",
+        "learner_device": learner_device_name,
+        "actor_device": str(actor_device),
     }
 
 
@@ -476,6 +566,24 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
+def _experiment_role(stack: StackConfig) -> str:
+    experiment = stack.config.experiment
+    return "" if experiment is None else str(experiment.role).strip()
+
+
+def _is_noleague_baseline_role(role: str) -> bool:
+    return str(role).strip() == "baseline_noleague"
+
+
+def _role_from_config_canonical(config_canonical: Mapping[str, Any]) -> str:
+    experiment = config_canonical.get("experiment", {})
+    if isinstance(experiment, Mapping):
+        role = str(experiment.get("role", "")).strip()
+        if role:
+            return role
+    return ""
+
+
 def _read_optional_hash_file(path: Path) -> str | None:
     if not path.is_file():
         return None
@@ -498,11 +606,11 @@ def _validate_imported_snapshot_contract(
     )
     source_config_canonical = source_manifest.get("config_canonical") if isinstance(source_manifest, dict) else None
     if isinstance(source_config_canonical, dict):
-        training_family = source_config_canonical.get("training_family_a")
-        if isinstance(training_family, dict) and str(training_family.get("mode", "")).strip() != "b1_no_league":
+        source_role = _role_from_config_canonical(source_config_canonical)
+        if source_role and not _is_noleague_baseline_role(source_role):
             raise RuntimeError(
-                "Imported B1 baseline must come from a dedicated b1_no_league run, "
-                f"got training_family_a.mode={training_family.get('mode')!r}"
+                "Imported B1 baseline must come from a dedicated baseline_noleague run, "
+                f"got experiment.role={source_role!r}"
             )
         if isinstance(expected_config_canonical, dict):
             for section_name in ("model", "environment"):
@@ -673,10 +781,7 @@ def _resolve_policy_set_selection(
 
 
 def _spec_mismatch_policy(stack: StackConfig) -> str:
-    reproducibility = stack.config.reproducibility
-    if reproducibility is None:
-        return "hard_fail"
-    return "hard_fail" if reproducibility.spec_bundle.fail_on_spec_mismatch else "disabled"
+    return "hard_fail"
 
 
 def _resolve_run_label(parser: argparse.ArgumentParser, run_label: str, run_id_alias: str) -> str:
@@ -701,7 +806,7 @@ def _resolve_runtime_profile(stack: StackConfig, profile_override: str) -> str:
         return profile_override.strip()
     system_config = stack.config.system
     if system_config is None:
-        return "balanced"
+        return "fast"
     return system_config.profile.local_iteration
 
 
@@ -711,7 +816,7 @@ def _resolve_device(stack: StackConfig, device_override: str) -> torch.device:
         system_config = stack.config.system
         requested = "cpu" if system_config is None else system_config.learner_device
     if requested.startswith("cuda") and not torch.cuda.is_available():
-        print("Requested CUDA device is unavailable; falling back to cpu for the minimal train smoke.", file=sys.stderr)
+        print("Requested CUDA device is unavailable; falling back to cpu for the canonical single-node run.", file=sys.stderr)
         requested = "cpu"
     return torch.device(requested)
 
@@ -725,16 +830,22 @@ def _resolve_seed(stack: StackConfig, seed_override: int | None) -> int:
     return int(reproducibility.seed_derivation.base_seed64)
 
 
-def _minimal_training_prerequisite_failure(stack: StackConfig) -> str | None:
+def _manifest_scaffold_only_reason(stack: StackConfig) -> str | None:
     missing_blocks: list[str] = []
     if stack.config.environment is None:
         missing_blocks.append("environment")
-    if stack.config.training_family_a is None:
-        missing_blocks.append("training_family_a")
+    if stack.config.training is None:
+        missing_blocks.append("training")
     if stack.config.model is None:
         missing_blocks.append("model")
     if missing_blocks:
         return f"missing config blocks: {', '.join(missing_blocks)}"
+    return None
+
+
+def _runtime_training_prerequisite_failure(stack: StackConfig) -> str | None:
+    if _manifest_scaffold_only_reason(stack) is not None:
+        return None
 
     try:
         weiss_sim = importlib.import_module("weiss_sim")
@@ -760,6 +871,13 @@ def _print_manifest_only_message(reason: str) -> None:
     print(f"Reason: {reason}.")
 
 
+def _raise_runtime_prerequisite_failure(reason: str) -> None:
+    raise RuntimeError(
+        "Canonical simulator-backed training requires a weiss_sim runtime with stepping support. "
+        f"Startup failed because {reason}."
+    )
+
+
 def _training_paths(run_dir: Path) -> TrainingPaths:
     layout = ArtifactLayout.from_run_dir(run_dir)
     layout.ensure_directories()
@@ -772,7 +890,32 @@ def _training_paths(run_dir: Path) -> TrainingPaths:
         checkpoints_dir=checkpoints_dir,
         logs_dir=logs_dir,
         snapshots_dir=snapshots_dir,
+        tensorboard_dir=layout.tensorboard_dir,
         scalars_path=logs_dir / "scalars.jsonl",
+        performance_log_path=layout.performance_log_path,
+        latest_checkpoint_path=checkpoints_dir / _LATEST_CHECKPOINT_FILENAME,
+        best_checkpoint_path=checkpoints_dir / _BEST_CHECKPOINT_FILENAME,
+        checkpoint_tracker_path=checkpoints_dir / _CHECKPOINT_TRACKER_FILENAME,
+    )
+
+
+def _run_artifacts_from_existing_run_dir(run_dir: Path) -> RunArtifacts:
+    resolved_run_dir = Path(run_dir).resolve()
+    layout = ArtifactLayout.from_run_dir(resolved_run_dir)
+    layout.ensure_directories()
+    return RunArtifacts(
+        run_dir=resolved_run_dir,
+        run_dir_name=resolved_run_dir.name,
+        layout=layout,
+        manifest_path=layout.manifest_path,
+        spec_bundle_path=layout.spec_bundle_path,
+        spec_hash_path=layout.spec_hash_path,
+        config_hash_path=layout.config_hash_path,
+        config_json_path=layout.config_json_path,
+        environment_path=layout.environment_path,
+        run_summary_path=layout.run_summary_path,
+        determinism_report_path=layout.determinism_report_path,
+        paper_readiness_summary_path=layout.paper_readiness_summary_path,
         performance_log_path=layout.performance_log_path,
     )
 
@@ -794,16 +937,8 @@ def _spec_dimensions(contract: SimulatorContract) -> tuple[int, int]:
     return observation_dim, action_dim
 
 
-def _env_pool_config(stack: StackConfig, *, seed: int) -> dict[str, int | str]:
-    environment_config = stack.config.environment
-    if environment_config is None:
-        raise RuntimeError("The locked stack is missing the environment config block")
-    return {
-        "max_decisions": int(environment_config.max_decisions),
-        "max_ticks": int(environment_config.max_ticks),
-        "observation_visibility": environment_config.observation_visibility,
-        "seed": int(seed),
-    }
+def _env_pool_config(stack: StackConfig, *, seed: int) -> dict[str, Any]:
+    return build_env_config_from_stack(stack, seed=int(seed))
 
 
 def _build_env(
@@ -813,17 +948,31 @@ def _build_env(
     num_envs: int,
     seed: int,
 ) -> DecisionBoundaryEnv:
+    env_config = _env_pool_config(stack, seed=seed)
     pool, layout_name = make_env_pool_from_config(
-        _env_pool_config(stack, seed=seed),
+        env_config,
         profile=profile,  # type: ignore[arg-type]
         num_envs=num_envs,
     )
     if layout_name != "mask":
         raise RuntimeError(
-            "The minimal M3-08 training path expects mask legality because ImpalaLearner consumes legal_mask. "
+            "The compatibility training path expects mask legality because ImpalaLearner consumes legal_mask. "
             f"Profile {profile!r} resolved to layout {layout_name!r}."
         )
-    return DecisionBoundaryEnv(pool, legality="mask", engine_status_policy="hard_fail")
+    max_no_progress_decisions = None
+    curriculum = stack.config.curriculum
+    if curriculum is not None:
+        raw_limit = curriculum.simulator.get("max_no_progress_decisions")
+        if raw_limit is not None:
+            max_no_progress_decisions = int(raw_limit)
+    return DecisionBoundaryEnv(
+        pool,
+        legality="mask",
+        engine_status_policy="hard_fail",
+        max_decisions=int(env_config["max_decisions"]),
+        max_ticks=int(env_config["max_ticks"]),
+        max_no_progress_decisions=max_no_progress_decisions,
+    )
 
 
 def _build_ids_eval_env(
@@ -832,8 +981,9 @@ def _build_ids_eval_env(
     seed: int,
     pass_action_id: int,
 ) -> DecisionBoundaryEnv:
+    env_config = _env_pool_config(stack, seed=seed)
     pool, layout_name = make_env_pool_from_config(
-        _env_pool_config(stack, seed=seed),
+        env_config,
         profile="fast",
         num_envs=1,
     )
@@ -842,11 +992,20 @@ def _build_ids_eval_env(
             "Periodic dev eval requires ids-based legality for the pinned eval protocol. "
             f"Profile 'fast' resolved to layout {layout_name!r}."
         )
+    max_no_progress_decisions = None
+    curriculum = stack.config.curriculum
+    if curriculum is not None:
+        raw_limit = curriculum.simulator.get("max_no_progress_decisions")
+        if raw_limit is not None:
+            max_no_progress_decisions = int(raw_limit)
     return DecisionBoundaryEnv(
         pool,
         legality="ids_offsets",
         pass_action_id=pass_action_id,
         engine_status_policy="hard_fail",
+        max_decisions=int(env_config["max_decisions"]),
+        max_ticks=int(env_config["max_ticks"]),
+        max_no_progress_decisions=max_no_progress_decisions,
     )
 
 
@@ -892,7 +1051,7 @@ def _collect_rollout(
                 raise RuntimeError(f"Expected legal mask shape {(num_envs, action_dim)}, got {tuple(mask_step.shape)}")
             if np.any((actor_step != 0) & (actor_step != 1)):
                 raise RuntimeError(
-                    "The minimal collector only supports live decision-boundary rows during the rollout window. "
+                    "The collector only supports live decision-boundary rows during the rollout window. "
                     f"Received actor rows {actor_step.tolist()} at step {step_index}."
                 )
 
@@ -986,10 +1145,10 @@ def _build_learner_batch(
     initial_hidden_state: torch.Tensor,
     pass_action_id: int,
 ) -> dict[str, Any]:
-    training_config = stack.config.training_family_a
-    environment_config = stack.config.environment
-    if training_config is None or environment_config is None:
-        raise RuntimeError("The minimal M3-08 path requires training and environment config blocks")
+    training_config = stack.config.training
+    rewards_config = stack.config.rewards
+    if training_config is None or rewards_config is None:
+        raise RuntimeError("The canonical single-node path requires training and rewards config blocks")
 
     target_logp = masked_logp_from_mask(
         rollout.logits.reshape(-1, action_dim),
@@ -998,13 +1157,15 @@ def _build_learner_batch(
         pass_action_id=pass_action_id,
     ).reshape(rollout.actions.shape)
 
-    discounts = np.logical_not(rollout.terminated).astype(np.float32) * float(training_config.gamma)
-    if not bool(environment_config.truncation_bootstrap_value):
+    rewards = np.asarray(rollout.rewards, dtype=np.float32)
+
+    discounts = np.logical_not(rollout.terminated).astype(np.float32) * float(rewards_config.gamma)
+    if not bool(rewards_config.truncation.bootstrap_value):
         discounts *= np.logical_not(rollout.truncated).astype(np.float32)
 
     values = np.concatenate([rollout.values, bootstrap_value[np.newaxis, :]], axis=0)
     vtrace_result: VTraceTargets = compute_vtrace_targets(
-        rollout.rewards,
+        rewards,
         values,
         discounts,
         rollout.behavior_logp,
@@ -1020,7 +1181,7 @@ def _build_learner_batch(
         "to_play_seat": rollout.to_play_seat,
         "actor": rollout.to_play_seat,
         "initial_hidden_state": initial_hidden_state.detach().cpu().numpy(),
-        "rewards": rollout.rewards,
+        "rewards": rewards,
         "discounts": discounts,
         "behavior_logp": rollout.behavior_logp,
         "behavior_logits": rollout.logits,
@@ -1056,7 +1217,9 @@ def _write_checkpoint(
     learner: ImpalaLearner,
     stack: StackConfig,
     device: torch.device,
-) -> None:
+    spec_hash256: str | None = None,
+    algorithm: str | None = None,
+) -> dict[str, Any]:
     if learner.model is None:
         raise RuntimeError("Cannot write a checkpoint without a learner model")
 
@@ -1066,10 +1229,681 @@ def _write_checkpoint(
         "policy_version": int(learner.get_policy_version()),
         "device": str(device),
         "config_hash256": compute_config_hash256(stack),
+        "spec_hash256": spec_hash256,
+        "algorithm": algorithm,
+        "recurrent_core": getattr(stack.config.model, "recurrent_core", None),
+        "total_samples_processed": int(getattr(learner, "total_samples_processed", 0)),
         "model_state_dict": learner.model.state_dict(),
         "optimizer_state_dict": None if learner.optimizer is None else learner.optimizer.state_dict(),
+        "grad_scaler_state_dict": (
+            None
+            if getattr(learner, "_grad_scaler", None) is None
+            else learner._grad_scaler.state_dict()
+        ),
     }
     torch.save(payload, checkpoint_path)
+    return payload
+
+
+def _relative_path_text(path: Path, *, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def _load_checkpoint_tracker(training_paths: TrainingPaths) -> dict[str, Any]:
+    if not training_paths.checkpoint_tracker_path.is_file():
+        return {"format": "checkpoint_tracker_v1", "latest": None, "best": None}
+    payload = json.loads(training_paths.checkpoint_tracker_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            f"checkpoint tracker must be a JSON object: {training_paths.checkpoint_tracker_path}"
+        )
+    payload.setdefault("format", "checkpoint_tracker_v1")
+    payload.setdefault("latest", None)
+    payload.setdefault("best", None)
+    return payload
+
+
+def _write_checkpoint_tracker(training_paths: TrainingPaths, payload: dict[str, Any]) -> None:
+    training_paths.checkpoint_tracker_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _checkpoint_guard_log_path(training_paths: TrainingPaths) -> Path:
+    return training_paths.logs_dir / "checkpoint_guard.jsonl"
+
+
+def _build_checkpoint_record(
+    *,
+    alias_name: str,
+    alias_path: Path,
+    source_checkpoint_path: Path,
+    artifacts: RunArtifacts,
+    learner: ImpalaLearner,
+    metric_kind: str | None = None,
+    metric_value: float | None = None,
+) -> dict[str, Any]:
+    return {
+        "alias": alias_name,
+        "alias_path": _relative_path_text(alias_path, root=artifacts.run_dir),
+        "source_checkpoint_path": _relative_path_text(source_checkpoint_path, root=artifacts.run_dir),
+        "update_count": int(learner.update_count),
+        "policy_version": int(learner.get_policy_version()),
+        "metric_kind": metric_kind,
+        "metric_value": metric_value,
+    }
+
+
+def _dev_eval_aggregate_score(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
+    if dev_eval_summary is None:
+        return None
+    aggregate_score = dev_eval_summary.get("aggregate_score")
+    if isinstance(aggregate_score, (int, float)) and np.isfinite(float(aggregate_score)):
+        return float(aggregate_score)
+    uncertainty = dev_eval_summary.get("uncertainty")
+    if isinstance(uncertainty, Mapping):
+        mean_value = uncertainty.get("mean")
+        if isinstance(mean_value, (int, float)) and np.isfinite(float(mean_value)):
+            return float(mean_value)
+    return None
+
+
+def _dev_eval_worst_truncation_rate(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
+    if dev_eval_summary is None:
+        return None
+    stall_monitor = dev_eval_summary.get("stall_monitor")
+    if isinstance(stall_monitor, Mapping):
+        worst_rate = stall_monitor.get("worst_truncation_rate")
+        if isinstance(worst_rate, (int, float)) and np.isfinite(float(worst_rate)):
+            return float(worst_rate)
+    anchors = dev_eval_summary.get("anchors")
+    if not isinstance(anchors, Mapping):
+        return None
+    worst_rate: float | None = None
+    for anchor_payload in anchors.values():
+        if not isinstance(anchor_payload, Mapping):
+            continue
+        summary = anchor_payload.get("summary")
+        if not isinstance(summary, Mapping):
+            continue
+        games = summary.get("games")
+        truncations = summary.get("truncations")
+        if not isinstance(games, (int, float)) or not isinstance(truncations, (int, float)):
+            continue
+        if float(games) <= 0:
+            continue
+        rate = float(truncations) / float(games)
+        worst_rate = rate if worst_rate is None else max(worst_rate, rate)
+    return worst_rate
+
+
+def _summary_rate(matchup_summary: Mapping[str, Any], key: str) -> float | None:
+    games = matchup_summary.get("games")
+    count = matchup_summary.get(key)
+    if not isinstance(games, (int, float)) or not isinstance(count, (int, float)):
+        return None
+    if float(games) <= 0.0:
+        return None
+    return float(count) / float(games)
+
+
+def _dev_eval_worst_reason_rate(
+    dev_eval_summary: Mapping[str, Any] | None,
+    *,
+    summary_key: str,
+    stall_monitor_key: str,
+) -> float | None:
+    if dev_eval_summary is None:
+        return None
+    stall_monitor = dev_eval_summary.get("stall_monitor")
+    if isinstance(stall_monitor, Mapping):
+        worst_rate = stall_monitor.get(stall_monitor_key)
+        if isinstance(worst_rate, (int, float)) and np.isfinite(float(worst_rate)):
+            return float(worst_rate)
+    anchors = dev_eval_summary.get("anchors")
+    if not isinstance(anchors, Mapping):
+        return None
+    worst_rate: float | None = None
+    for anchor_payload in anchors.values():
+        if not isinstance(anchor_payload, Mapping):
+            continue
+        summary = anchor_payload.get("summary")
+        if not isinstance(summary, Mapping):
+            continue
+        rate = _summary_rate(summary, summary_key)
+        if rate is None:
+            continue
+        worst_rate = rate if worst_rate is None else max(worst_rate, rate)
+    return worst_rate
+
+
+def _dev_eval_worst_no_progress_timeout_rate(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
+    return _dev_eval_worst_reason_rate(
+        dev_eval_summary,
+        summary_key="no_progress_timeouts",
+        stall_monitor_key="worst_no_progress_timeout_rate",
+    )
+
+
+def _dev_eval_worst_natural_timeout_rate(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
+    return _dev_eval_worst_reason_rate(
+        dev_eval_summary,
+        summary_key="natural_timeouts",
+        stall_monitor_key="worst_natural_timeout_rate",
+    )
+
+
+def _dev_eval_worst_stall_rate(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
+    no_progress_rate = _dev_eval_worst_no_progress_timeout_rate(dev_eval_summary)
+    if no_progress_rate is not None:
+        return no_progress_rate
+    return _dev_eval_worst_truncation_rate(dev_eval_summary)
+
+
+def _dev_eval_confidence_stats(dev_eval_summary: Mapping[str, Any] | None) -> dict[str, float | None]:
+    stats = {
+        "min_prob_gt_half": None,
+        "max_prob_lt_half": None,
+        "max_ci_half_width": None,
+    }
+    if dev_eval_summary is None:
+        return stats
+    anchors = dev_eval_summary.get("anchors")
+    if not isinstance(anchors, Mapping):
+        return stats
+    min_prob_gt_half: float | None = None
+    max_prob_lt_half: float | None = None
+    max_ci_half_width: float | None = None
+    for anchor_payload in anchors.values():
+        if not isinstance(anchor_payload, Mapping):
+            continue
+        uncertainty = anchor_payload.get("uncertainty")
+        if not isinstance(uncertainty, Mapping):
+            continue
+        prob_gt_half = uncertainty.get("prob_gt_half")
+        prob_lt_half = uncertainty.get("prob_lt_half")
+        ci_half_width = uncertainty.get("ci_half_width")
+        if isinstance(prob_gt_half, (int, float)) and np.isfinite(float(prob_gt_half)):
+            min_prob_gt_half = (
+                float(prob_gt_half)
+                if min_prob_gt_half is None
+                else min(min_prob_gt_half, float(prob_gt_half))
+            )
+        if isinstance(prob_lt_half, (int, float)) and np.isfinite(float(prob_lt_half)):
+            max_prob_lt_half = (
+                float(prob_lt_half)
+                if max_prob_lt_half is None
+                else max(max_prob_lt_half, float(prob_lt_half))
+            )
+        if isinstance(ci_half_width, (int, float)) and np.isfinite(float(ci_half_width)):
+            max_ci_half_width = (
+                float(ci_half_width)
+                if max_ci_half_width is None
+                else max(max_ci_half_width, float(ci_half_width))
+            )
+    stats["min_prob_gt_half"] = min_prob_gt_half
+    stats["max_prob_lt_half"] = max_prob_lt_half
+    stats["max_ci_half_width"] = max_ci_half_width
+    return stats
+
+
+def _dev_eval_ineligibility_reasons(
+    stack: StackConfig,
+    *,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> tuple[str, ...]:
+    if dev_eval_summary is None:
+        return ("missing",)
+    current_score = _dev_eval_aggregate_score(dev_eval_summary)
+    if current_score is None:
+        return ("missing_score",)
+    curriculum = stack.config.curriculum
+    if curriculum is None or not curriculum.stall_monitor.enabled:
+        return ()
+    reasons: list[str] = []
+    worst_rate = _dev_eval_worst_stall_rate(dev_eval_summary)
+    if worst_rate is not None and worst_rate >= float(curriculum.stall_monitor.truncation_rate_threshold):
+        reasons.append("truncation")
+    checkpoint_guard = curriculum.checkpoint_guard
+    confidence = _dev_eval_confidence_stats(dev_eval_summary)
+    min_prob_gt_half = confidence["min_prob_gt_half"]
+    max_ci_half_width = confidence["max_ci_half_width"]
+    if min_prob_gt_half is not None and (
+        float(min_prob_gt_half) < float(checkpoint_guard.promote_min_prob_gt_half)
+    ):
+        reasons.append("confidence_prob")
+    if max_ci_half_width is not None and (
+        float(max_ci_half_width) > float(checkpoint_guard.promote_max_ci_half_width)
+    ):
+        reasons.append("confidence_ci")
+    return tuple(reasons)
+
+
+def _dev_eval_metric_eligible(stack: StackConfig, *, dev_eval_summary: Mapping[str, Any] | None) -> bool:
+    return not _dev_eval_ineligibility_reasons(stack, dev_eval_summary=dev_eval_summary)
+
+
+def _confirmatory_dev_eval_target_pairs(stack: StackConfig) -> int:
+    evaluation = _evaluation_config_or_raise(stack)
+    base_pairs = int(evaluation.periodic_dev_eval_paired_seeds)
+    max_pairs = int(evaluation.final_matrix_stage2_adaptive_max_paired_seeds)
+    return max(base_pairs, min(max_pairs, max(32, base_pairs * 4)))
+
+
+def _expand_periodic_dev_eval_paired_seeds(
+    base_paired_seeds: Sequence[int],
+    *,
+    requested_pairs: int,
+    seed_file_sha256: str,
+    update_count: int,
+    policy_version: int,
+    scope: str,
+) -> list[int]:
+    requested_pairs_i = int(requested_pairs)
+    paired_seeds = [int(seed) for seed in base_paired_seeds[:requested_pairs_i]]
+    seen = set(paired_seeds)
+    extra_index = 0
+    while len(paired_seeds) < requested_pairs_i:
+        derived_seed = stable_hash64(
+            canonical_json_bytes(
+                {
+                    "kind": "periodic_dev_eval_confirmatory_seed_v1",
+                    "scope": str(scope),
+                    "seed_file_sha256": str(seed_file_sha256),
+                    "update_count": int(update_count),
+                    "policy_version": int(policy_version),
+                    "extra_index": int(extra_index),
+                }
+            )
+        ) & _U64_MASK
+        extra_index += 1
+        if derived_seed in seen:
+            continue
+        paired_seeds.append(int(derived_seed))
+        seen.add(int(derived_seed))
+    return paired_seeds
+
+
+def _confirmatory_dev_eval_request(
+    *,
+    stack: StackConfig,
+    existing_best_record: Mapping[str, Any] | None,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    reasons = _dev_eval_ineligibility_reasons(stack, dev_eval_summary=dev_eval_summary)
+    if any(reason not in {"confidence_prob", "confidence_ci"} for reason in reasons):
+        return None
+    current_score = _dev_eval_aggregate_score(dev_eval_summary)
+    if current_score is None:
+        return None
+    curriculum = stack.config.curriculum
+    if curriculum is None:
+        return None
+    checkpoint_guard = curriculum.checkpoint_guard
+    if float(current_score) < float(checkpoint_guard.min_best_score):
+        return None
+
+    existing_metric_kind = ""
+    existing_metric_value: float | None = None
+    score_shortfall = 0.0
+    if existing_best_record is not None:
+        existing_metric_kind = str(existing_best_record.get("metric_kind", "")).strip()
+        raw_existing_metric_value = existing_best_record.get("metric_value")
+        if isinstance(raw_existing_metric_value, (int, float)) and np.isfinite(float(raw_existing_metric_value)):
+            existing_metric_value = float(raw_existing_metric_value)
+            score_shortfall = max(0.0, existing_metric_value - float(current_score))
+    if (
+        existing_metric_kind == "dev_eval_mean"
+        and existing_metric_value is not None
+        and score_shortfall > 0.0
+        and score_shortfall > 2.0 * float(checkpoint_guard.rollback_score_margin)
+    ):
+        return None
+
+    confidence = _dev_eval_confidence_stats(dev_eval_summary)
+    confirmatory_reasons: list[str] = []
+    prob_shortfall = 0.0
+    if "confidence_prob" in reasons:
+        min_prob_gt_half = confidence["min_prob_gt_half"]
+        if min_prob_gt_half is None:
+            return None
+        prob_shortfall = max(0.0, float(checkpoint_guard.promote_min_prob_gt_half) - float(min_prob_gt_half))
+        if prob_shortfall <= _CONFIRMATORY_DEV_EVAL_MAX_PROB_SHORTFALL:
+            confirmatory_reasons.append("confidence_prob")
+    ci_excess = 0.0
+    if "confidence_ci" in reasons:
+        max_ci_half_width = confidence["max_ci_half_width"]
+        if max_ci_half_width is None:
+            return None
+        ci_excess = max(0.0, float(max_ci_half_width) - float(checkpoint_guard.promote_max_ci_half_width))
+        if ci_excess <= _CONFIRMATORY_DEV_EVAL_MAX_CI_EXCESS:
+            confirmatory_reasons.append("confidence_ci")
+    if (
+        existing_metric_kind == "dev_eval_mean"
+        and existing_metric_value is not None
+        and score_shortfall > 0.0
+        and score_shortfall <= 2.0 * float(checkpoint_guard.rollback_score_margin)
+    ):
+        confirmatory_reasons.append("score_drop")
+    if not confirmatory_reasons:
+        return None
+    if prob_shortfall > _CONFIRMATORY_DEV_EVAL_MAX_PROB_SHORTFALL:
+        return None
+    if ci_excess > _CONFIRMATORY_DEV_EVAL_MAX_CI_EXCESS:
+        return None
+
+    return {
+        "reasons": confirmatory_reasons,
+        "current_score": float(current_score),
+        "existing_best_score": existing_metric_value,
+        "prob_shortfall": prob_shortfall,
+        "ci_excess": ci_excess,
+        "target_pairs": _confirmatory_dev_eval_target_pairs(stack),
+    }
+
+
+def _checkpoint_candidate_metric(
+    *,
+    stack: StackConfig,
+    latest_metrics: Mapping[str, float] | None,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> tuple[str | None, float | None]:
+    if _dev_eval_metric_eligible(stack, dev_eval_summary=dev_eval_summary):
+        aggregate_score = _dev_eval_aggregate_score(dev_eval_summary)
+        if aggregate_score is not None:
+            return "dev_eval_mean", aggregate_score
+    evaluation = stack.config.evaluation
+    if evaluation is not None and int(evaluation.periodic_dev_eval_interval_updates) > 0:
+        return None, None
+    if latest_metrics is not None:
+        loss_value = latest_metrics.get("loss")
+        if isinstance(loss_value, (int, float)) and np.isfinite(float(loss_value)):
+            return "training_loss", float(loss_value)
+    return None, None
+
+
+def _should_promote_best_checkpoint(
+    *,
+    existing_record: Mapping[str, Any] | None,
+    candidate_kind: str | None,
+    candidate_value: float | None,
+) -> bool:
+    if candidate_kind is None:
+        return False
+    if existing_record is None:
+        return True
+    existing_kind = existing_record.get("metric_kind")
+    existing_value = existing_record.get("metric_value")
+    if candidate_kind == "dev_eval_mean":
+        if existing_kind != "dev_eval_mean":
+            return True
+        if not isinstance(existing_value, (int, float)):
+            return True
+        return float(candidate_value) > float(existing_value)
+    if candidate_kind == "training_loss":
+        if existing_kind == "dev_eval_mean":
+            return False
+        if not isinstance(existing_value, (int, float)):
+            return True
+        return float(candidate_value) < float(existing_value)
+    return False
+
+
+def _publish_checkpoint_aliases(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    artifacts: RunArtifacts,
+    checkpoint_path: Path,
+    learner: ImpalaLearner,
+    latest_metrics: Mapping[str, float] | None,
+    dev_eval_summary: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    tracker = _load_checkpoint_tracker(training_paths)
+
+    shutil.copy2(checkpoint_path, training_paths.latest_checkpoint_path)
+    latest_kind, latest_value = _checkpoint_candidate_metric(
+        stack=stack,
+        latest_metrics=latest_metrics,
+        dev_eval_summary=dev_eval_summary,
+    )
+    latest_record = _build_checkpoint_record(
+        alias_name="latest",
+        alias_path=training_paths.latest_checkpoint_path,
+        source_checkpoint_path=checkpoint_path,
+        artifacts=artifacts,
+        learner=learner,
+        metric_kind=latest_kind,
+        metric_value=latest_value,
+    )
+    tracker["latest"] = latest_record
+
+    best_record = tracker.get("best")
+    if not isinstance(best_record, Mapping):
+        best_record = None
+    if _should_promote_best_checkpoint(
+        existing_record=cast(Mapping[str, Any] | None, best_record),
+        candidate_kind=latest_kind,
+        candidate_value=latest_value,
+    ):
+        shutil.copy2(checkpoint_path, training_paths.best_checkpoint_path)
+        tracker["best"] = _build_checkpoint_record(
+            alias_name="best",
+            alias_path=training_paths.best_checkpoint_path,
+            source_checkpoint_path=checkpoint_path,
+            artifacts=artifacts,
+            learner=learner,
+            metric_kind=latest_kind,
+            metric_value=latest_value,
+        )
+
+    _write_checkpoint_tracker(training_paths, tracker)
+    return tracker
+
+
+def _append_checkpoint_guard_event(training_paths: TrainingPaths, payload: Mapping[str, Any]) -> None:
+    path = _checkpoint_guard_log_path(training_paths)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(payload), sort_keys=True) + "\n")
+
+
+def _demote_registry_champions_newer_than(training_paths: TrainingPaths, *, update_count: int) -> list[str]:
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    if not registry_path.is_file():
+        return []
+    registry = SnapshotRegistry.load(registry_path)
+    removed = registry.demote_champions_newer_than(int(update_count))
+    if removed:
+        registry.save(registry_path)
+    return removed
+
+
+def _best_checkpoint_record(training_paths: TrainingPaths) -> Mapping[str, Any] | None:
+    tracker = _load_checkpoint_tracker(training_paths)
+    best_record = tracker.get("best")
+    return best_record if isinstance(best_record, Mapping) else None
+
+
+def _resolve_resume_checkpoint_path(
+    *,
+    resume_from: str,
+    resume_run_dir: Path | None,
+) -> Path | None:
+    normalized = str(resume_from).strip()
+    if not normalized:
+        if resume_run_dir is None:
+            return None
+        normalized = "latest"
+    alias_name = normalized.lower()
+    if alias_name in {"latest", "best"}:
+        if resume_run_dir is None:
+            raise ValueError("--resume-from latest|best requires --resume-run-dir")
+        filename = _LATEST_CHECKPOINT_FILENAME if alias_name == "latest" else _BEST_CHECKPOINT_FILENAME
+        checkpoint_path = Path(resume_run_dir).resolve() / "training" / "checkpoints" / filename
+    else:
+        checkpoint_path = Path(normalized).resolve()
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"Resume checkpoint not found: {checkpoint_path}")
+    return checkpoint_path
+
+
+def _restore_learner_from_checkpoint(
+    *,
+    checkpoint_path: Path,
+    learner: ImpalaLearner,
+    stack: StackConfig,
+    device: torch.device,
+    expected_spec_hash256: str,
+    algorithm: str,
+    restore_counters: bool = True,
+) -> ResumeCheckpoint:
+    payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"checkpoint payload must be a dict: {checkpoint_path}")
+    if str(payload.get("format", "")).strip() != "minimal_train_checkpoint_v1":
+        raise RuntimeError(f"unsupported checkpoint format in {checkpoint_path}")
+    payload_config_hash = str(payload.get("config_hash256", "")).strip().lower()
+    expected_config_hash = compute_config_hash256(stack)
+    if payload_config_hash != expected_config_hash:
+        raise RuntimeError(
+            f"checkpoint config hash mismatch for {checkpoint_path}: expected {expected_config_hash}, got {payload_config_hash}"
+        )
+    payload_spec_hash = payload.get("spec_hash256")
+    if payload_spec_hash is not None and str(payload_spec_hash).strip().lower() != expected_spec_hash256:
+        raise RuntimeError(
+            f"checkpoint spec hash mismatch for {checkpoint_path}: expected {expected_spec_hash256}, got {payload_spec_hash}"
+        )
+    payload_algorithm = payload.get("algorithm")
+    if payload_algorithm is not None and str(payload_algorithm).strip() and str(payload_algorithm).strip() != algorithm:
+        raise RuntimeError(
+            f"checkpoint algorithm mismatch for {checkpoint_path}: expected {algorithm}, got {payload_algorithm}"
+        )
+    model_state_dict = payload.get("model_state_dict")
+    if learner.model is None or not isinstance(model_state_dict, dict):
+        raise RuntimeError(f"checkpoint is missing a model_state_dict: {checkpoint_path}")
+    learner.model.load_state_dict(model_state_dict)
+    optimizer_state_dict = payload.get("optimizer_state_dict")
+    if optimizer_state_dict is not None:
+        optimizer = learner._optimizer_for_step()
+        optimizer.load_state_dict(optimizer_state_dict)
+    grad_scaler_state_dict = payload.get("grad_scaler_state_dict")
+    if grad_scaler_state_dict is not None and getattr(learner, "_grad_scaler", None) is not None:
+        learner._grad_scaler.load_state_dict(grad_scaler_state_dict)
+    if restore_counters:
+        learner.update_count = int(payload.get("update_count", 0))
+        learner.policy_version = int(payload.get("policy_version", 0))
+        learner.total_samples_processed = int(payload.get("total_samples_processed", 0))
+        learner.start_time = time.time()
+    return ResumeCheckpoint(
+        checkpoint_path=checkpoint_path.resolve(),
+        update_count=learner.update_count,
+        policy_version=learner.policy_version,
+        total_samples_processed=learner.total_samples_processed,
+    )
+
+
+def _build_training_learner(
+    *,
+    algorithm: str,
+    model: PolicyValueModel,
+    compiled_model: nn.Module | None,
+    training_config: Any,
+    training_paths: TrainingPaths,
+    pass_action_id: int,
+    checkpoint_interval_updates: int,
+) -> ImpalaLearner | PpoLiteLearner:
+    common_kwargs = {
+        "model": model,
+        "compiled_model": compiled_model,
+        "learning_rate": training_config.learning_rate,
+        "value_loss_coef": training_config.value_loss_coef,
+        "entropy_coef": training_config.entropy_coef,
+        "grad_norm_clip": training_config.grad_norm_clip,
+        "mixed_precision": bool(training_config.mixed_precision),
+        "checkpoint_dir": training_paths.checkpoints_dir,
+        "checkpoint_interval_updates": int(checkpoint_interval_updates),
+        "logs_dir": training_paths.logs_dir,
+        "logging_interval_updates": 1,
+        "pass_action_id": pass_action_id,
+    }
+    if algorithm in _IMPALA_ALGORITHMS:
+        return ImpalaLearner(
+            **common_kwargs,
+            vtrace_rho_bar=training_config.vtrace_rho_bar,
+            vtrace_c_bar=training_config.vtrace_c_bar,
+        )
+    if algorithm in _PPO_ALGORITHMS:
+        return PpoLiteLearner(
+            **common_kwargs,
+            ppo_clip_epsilon=training_config.ppo_clip_epsilon,
+            value_clip_epsilon=training_config.ppo_value_clip_epsilon,
+            ppo_epochs=int(training_config.ppo_epochs),
+            target_kl=training_config.ppo_target_kl,
+            normalize_advantages=bool(training_config.ppo_normalize_advantages),
+        )
+    raise RuntimeError(f"Unsupported training.algorithm: {algorithm}")
+
+
+def _entropy_coef_for_next_update(training_config: Any, *, update_count: int) -> float:
+    start = float(training_config.entropy_coef)
+    target = float(training_config.entropy_anneal_to)
+    steps = max(1, int(training_config.entropy_anneal_steps_updates))
+    progress = min(max(int(update_count), 0), steps) / float(steps)
+    return float(start + (target - start) * progress)
+
+
+def _maybe_compile_learner_model(
+    *,
+    model: PolicyValueModel,
+    training_config: Any,
+    device: torch.device,
+) -> nn.Module | None:
+    if not bool(getattr(training_config, "compile_learner", False)):
+        return None
+    if device.type != "cuda":
+        print("Learner compile note: compile_learner is enabled but the learner device is not CUDA; skipping torch.compile.")
+        return None
+    compiled = torch.compile(model, mode="reduce-overhead")
+    print("Enabled torch.compile for the learner forward path (mode=reduce-overhead).")
+    return compiled
+
+
+def _collect_training_batch(
+    *,
+    runtime: QueueRuntime,
+    algorithm: str,
+    training_config: Any,
+    rewards_config: Any,
+) -> Any:
+    if algorithm in _IMPALA_ALGORITHMS:
+        return runtime.collect_update_batch(
+            gamma=float(rewards_config.gamma),
+            truncation_reward=float(rewards_config.truncation.reward),
+            truncation_bootstrap_value=bool(rewards_config.truncation.bootstrap_value),
+            vtrace_rho_bar=float(training_config.vtrace_rho_bar),
+            vtrace_c_bar=float(training_config.vtrace_c_bar),
+        )
+    if algorithm in _PPO_ALGORITHMS:
+        return runtime.collect_policy_batch(
+            gamma=float(rewards_config.gamma),
+            gae_lambda=float(training_config.ppo_gae_lambda),
+            truncation_reward=float(rewards_config.truncation.reward),
+            truncation_bootstrap_value=bool(rewards_config.truncation.bootstrap_value),
+        )
+    raise RuntimeError(f"Unsupported training.algorithm: {algorithm}")
+
+
+def _validate_algorithm_model_contract(*, algorithm: str, recurrent_core: str) -> None:
+    normalized_core = str(recurrent_core).strip().lower()
+    if algorithm == "impala_vtrace_gru" and normalized_core != "gru":
+        raise RuntimeError("impala_vtrace_gru requires model.recurrent_core=gru")
+    if algorithm == "impala_vtrace_ff" and normalized_core != "none":
+        raise RuntimeError("impala_vtrace_ff requires model.recurrent_core=none")
 
 
 def _json_relative_path(path: Path, *, root: Path) -> str:
@@ -1124,10 +1958,7 @@ def _find_noleague_baseline_snapshot(run_dir: Path) -> SnapshotMeta | None:
     config_canonical = manifest.get("config_canonical", {})
     if not isinstance(config_canonical, dict):
         return None
-    training_family = config_canonical.get("training_family_a", {})
-    if not isinstance(training_family, dict):
-        return None
-    if str(training_family.get("mode", "")).strip() != "b1_no_league":
+    if not _is_noleague_baseline_role(_role_from_config_canonical(config_canonical)):
         return None
     if not registry.snapshots:
         return None
@@ -1148,7 +1979,7 @@ def _import_noleague_baseline_anchor(
     if source_snapshot is None:
         raise FileNotFoundError(
             "Could not resolve the canonical B1 no-league baseline snapshot in "
-            f"{source_run_dir}. Run a dedicated b1_no_league training job first."
+            f"{source_run_dir}. Run a dedicated baseline_noleague training job first."
         )
 
     source_weights_path = source_run_dir / source_snapshot.path
@@ -1207,8 +2038,8 @@ def _ensure_noleague_baseline_anchor(
     update: int | None = None,
 ) -> str | None:
     league = stack.config.league
-    training_config = stack.config.training_family_a
-    training_mode = "" if training_config is None else str(training_config.mode)
+    training_config = stack.config.training
+    experiment_role = _experiment_role(stack)
     requires_anchor = bool(
         league is not None
         and league.enabled
@@ -1232,6 +2063,14 @@ def _ensure_noleague_baseline_anchor(
         ),
         None,
     )
+    if existing_policy_id is not None and baseline_run_dir is None and permit_current_run_alias:
+        existing_snapshot = next(
+            (snapshot for snapshot in registry.snapshots if snapshot.policy_id == existing_policy_id),
+            None,
+        )
+        resolved_update = int(learner.update_count if update is None else update)
+        if existing_snapshot is None or int(existing_snapshot.update) < resolved_update:
+            existing_policy_id = None
     if existing_policy_id is not None:
         registry.pin_snapshot(existing_policy_id)
         _save_snapshot_registry_with_retention(
@@ -1276,7 +2115,7 @@ def _ensure_noleague_baseline_anchor(
         if requires_anchor:
             raise RuntimeError(
                 "The canonical B1 NoLeague baseline is required for this training run. "
-                "Pass --b1-baseline-run-dir pointing at a completed b1_no_league run."
+                "Pass --b1-baseline-run-dir pointing at a completed baseline_noleague run."
             )
         return None
 
@@ -1292,6 +2131,8 @@ def _ensure_noleague_baseline_anchor(
             learner=learner,
             stack=stack,
             device=device,
+            algorithm=str(training_config.algorithm).strip() if training_config is not None else None,
+            spec_hash256=spec_hash256,
         )
     weights_path, weights_sha256 = _write_snapshot_artifact(
         snapshots_dir=training_paths.snapshots_dir,
@@ -1320,7 +2161,7 @@ def _ensure_noleague_baseline_anchor(
         "Persisted canonical B1 baseline alias: "
         f"anchor={_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME} "
         f"policy_id={_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID} "
-        f"training_mode={training_mode or 'unknown'} update={resolved_update}"
+        f"experiment_role={experiment_role or 'unknown'} update={resolved_update}"
     )
     return _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID
 
@@ -1370,6 +2211,7 @@ def _load_snapshot_eval_model(
     observation_dim: int,
     action_dim: int,
     stack: StackConfig,
+    observation_spec: dict[str, Any] | None = None,
 ) -> PolicyValueModel:
     payload = torch.load(run_dir / snapshot_path, map_location="cpu", weights_only=True)
     model_state_dict = payload.get("model_state_dict")
@@ -1384,6 +2226,7 @@ def _load_snapshot_eval_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
+        observation_spec=observation_spec,
     ).to(torch.device("cpu"))
     eval_model.load_state_dict(model_state_dict)
     eval_model.eval()
@@ -1497,7 +2340,6 @@ class _PromotionGateRunner:
                 self._baseline_logits,
                 legal_ids,
                 rng=rng,
-                pass_action_id=self.pass_action_id,
             )
             return action, seat_hidden
 
@@ -1515,7 +2357,6 @@ class _PromotionGateRunner:
             logits,
             legal_ids,
             rng=rng,
-            pass_action_id=self.pass_action_id,
         )
         return action, next_seat_hidden
 
@@ -1672,6 +2513,7 @@ def _clone_cpu_eval_model(
     observation_dim: int,
     action_dim: int,
     stack: StackConfig,
+    observation_spec: dict[str, Any] | None = None,
 ) -> PolicyValueModel:
     model_config = stack.config.model
     if model_config is None:
@@ -1680,6 +2522,7 @@ def _clone_cpu_eval_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
+        observation_spec=observation_spec,
     ).to(torch.device("cpu"))
     cpu_state_dict = {name: value.detach().cpu().clone() for name, value in learner_model.state_dict().items()}
     eval_model.load_state_dict(cpu_state_dict)
@@ -1701,6 +2544,8 @@ def _ensure_current_checkpoint(
     learner: ImpalaLearner,
     stack: StackConfig,
     device: torch.device,
+    spec_hash256: str | None = None,
+    algorithm: str | None = None,
 ) -> Path:
     checkpoint_path = _checkpoint_path_for_update(
         training_paths.checkpoints_dir,
@@ -1714,6 +2559,8 @@ def _ensure_current_checkpoint(
         learner=learner,
         stack=stack,
         device=device,
+        spec_hash256=spec_hash256,
+        algorithm=algorithm,
     )
     return checkpoint_path
 
@@ -1724,6 +2571,380 @@ def _should_run_periodic_dev_eval(stack: StackConfig, *, update_count: int) -> b
         return False
     interval = int(evaluation.periodic_dev_eval_interval_updates)
     return interval > 0 and update_count % interval == 0
+
+
+def _periodic_dev_eval_summaries_path(training_paths: TrainingPaths) -> Path:
+    return training_paths.logs_dir / "periodic_dev_eval_summaries.json"
+
+
+def _stall_monitor_state_path(training_paths: TrainingPaths) -> Path:
+    return training_paths.logs_dir / "stall_monitor.json"
+
+
+def _periodic_dev_eval_opponents(
+    *,
+    stack: StackConfig,
+    contract: SimulatorContract,
+    run_dir: Path,
+    observation_dim: int,
+    action_dim: int,
+) -> list[tuple[str, str, PolicyValueModel | None, HeuristicPublicPolicy | None]]:
+    opponents: list[tuple[str, str, PolicyValueModel | None, HeuristicPublicPolicy | None]] = [
+        ("b0_randomlegal", _PROMOTION_GATE_RANDOMLEGAL_NAME, None, None),
+    ]
+    baseline_snapshot = _find_noleague_baseline_snapshot(run_dir)
+    if baseline_snapshot is not None:
+        opponents.append(
+            (
+                _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID,
+                _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME,
+                _load_snapshot_eval_model(
+                    run_dir=run_dir,
+                    snapshot_path=baseline_snapshot.path,
+                    stack=stack,
+                    observation_dim=observation_dim,
+                    action_dim=action_dim,
+                    observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
+                ),
+                None,
+            )
+        )
+
+    league = stack.config.league
+    if league is not None and (
+        HEURISTIC_PUBLIC_POLICY_ID in league.promotion_anchor_set_v1.required
+        or HEURISTIC_PUBLIC_POLICY_ID in league.promotion_anchor_set_v1.optional_if_available
+    ):
+        try:
+            heuristic_policy = HeuristicPublicPolicy.from_spec_bundle(contract.spec_bundle)
+        except Exception as exc:
+            if HEURISTIC_PUBLIC_POLICY_ID in league.promotion_anchor_set_v1.required:
+                raise RuntimeError("Periodic dev eval requires a heuristic-compatible simulator contract for B2") from exc
+        else:
+            opponents.append(
+                (
+                    HEURISTIC_PUBLIC_POLICY_ID,
+                    HEURISTIC_PUBLIC_POLICY_ID,
+                    None,
+                    heuristic_policy,
+                )
+            )
+    return opponents
+
+
+def _persist_periodic_dev_eval_summary(
+    *,
+    training_paths: TrainingPaths,
+    payload: Mapping[str, Any],
+) -> None:
+    focal_policy_id = str(payload.get("policy_id", "")).strip()
+    if not focal_policy_id:
+        return
+    path = _periodic_dev_eval_summaries_path(training_paths)
+    summaries = _load_json_object(path, label="periodic dev-eval summaries") if path.is_file() else {}
+    summaries[focal_policy_id] = {
+        "aggregate_score": float(payload.get("aggregate_score", 0.0)),
+        "anchor_scores": dict(cast(Mapping[str, Any], payload.get("anchor_scores", {}))),
+        "update_count": int(payload.get("update_count", 0)),
+        "policy_version": int(payload.get("policy_version", 0)),
+    }
+    _write_json(path, summaries)
+
+
+def _update_stall_monitor(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    update_count: int,
+    summary_payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    curriculum = stack.config.curriculum
+    if curriculum is None or not curriculum.stall_monitor.enabled:
+        return None
+    threshold = float(curriculum.stall_monitor.truncation_rate_threshold)
+    required_consecutive = int(curriculum.stall_monitor.consecutive_evals)
+    anchors_raw = summary_payload.get("anchors", {})
+    if not isinstance(anchors_raw, Mapping):
+        return None
+
+    anchor_truncation_rates: dict[str, float] = {}
+    anchor_no_progress_rates: dict[str, float] = {}
+    anchor_natural_timeout_rates: dict[str, float] = {}
+    anchor_stall_rates: dict[str, float] = {}
+    for anchor_name, anchor_payload in anchors_raw.items():
+        if not isinstance(anchor_payload, Mapping):
+            continue
+        matchup_summary = anchor_payload.get("summary", {})
+        if not isinstance(matchup_summary, Mapping):
+            continue
+        truncation_rate = _summary_rate(matchup_summary, "truncations")
+        no_progress_rate = _summary_rate(matchup_summary, "no_progress_timeouts")
+        natural_timeout_rate = _summary_rate(matchup_summary, "natural_timeouts")
+        if truncation_rate is None and no_progress_rate is None and natural_timeout_rate is None:
+            continue
+        anchor_truncation_rates[anchor_name] = 0.0 if truncation_rate is None else truncation_rate
+        anchor_no_progress_rates[anchor_name] = 0.0 if no_progress_rate is None else no_progress_rate
+        anchor_natural_timeout_rates[anchor_name] = 0.0 if natural_timeout_rate is None else natural_timeout_rate
+        anchor_stall_rates[anchor_name] = (
+            anchor_no_progress_rates[anchor_name]
+            if no_progress_rate is not None
+            else anchor_truncation_rates[anchor_name]
+        )
+    if not anchor_stall_rates:
+        return None
+
+    state_path = _stall_monitor_state_path(training_paths)
+    state = _load_json_object(state_path, label="stall monitor state") if state_path.is_file() else {}
+    previous_consecutive = int(state.get("consecutive_trigger_count", 0))
+    worst_anchor = max(anchor_stall_rates, key=anchor_stall_rates.get)
+    worst_rate = float(anchor_stall_rates[worst_anchor])
+    consecutive = previous_consecutive + 1 if worst_rate >= threshold else 0
+    stall_risk = consecutive >= required_consecutive
+    payload = {
+        "enabled": True,
+        "update_count": int(update_count),
+        "threshold": threshold,
+        "required_consecutive_evals": required_consecutive,
+        "consecutive_trigger_count": consecutive,
+        "stall_risk": stall_risk,
+        "worst_anchor": worst_anchor,
+        "stall_indicator_kind": (
+            "no_progress_timeout"
+            if anchor_no_progress_rates.get(worst_anchor, 0.0) > 0.0
+            else "truncation_fallback"
+        ),
+        "worst_stall_rate": worst_rate,
+        "worst_truncation_rate": float(anchor_truncation_rates.get(worst_anchor, 0.0)),
+        "worst_no_progress_timeout_rate": float(anchor_no_progress_rates.get(worst_anchor, 0.0)),
+        "worst_natural_timeout_rate": float(anchor_natural_timeout_rates.get(worst_anchor, 0.0)),
+        "anchor_truncation_rates": anchor_truncation_rates,
+        "anchor_no_progress_timeout_rates": anchor_no_progress_rates,
+        "anchor_natural_timeout_rates": anchor_natural_timeout_rates,
+    }
+    _write_json(state_path, payload)
+    return payload
+
+
+def _maybe_rollback_to_best_checkpoint(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    artifacts: RunArtifacts,
+    runtime: QueueRuntime,
+    learner: ImpalaLearner,
+    model: PolicyValueModel,
+    device: torch.device,
+    spec_hash256: str,
+    algorithm: str,
+    latest_metrics: Mapping[str, float] | None,
+    dev_eval_summary: Mapping[str, Any] | None,
+    last_rollback_update: int | None,
+) -> dict[str, Any] | None:
+    curriculum = stack.config.curriculum
+    if curriculum is None:
+        return None
+    checkpoint_guard = curriculum.checkpoint_guard
+    if not checkpoint_guard.enabled or dev_eval_summary is None:
+        return None
+    if last_rollback_update is not None and (
+        int(learner.update_count) - int(last_rollback_update)
+    ) < int(checkpoint_guard.cooldown_updates):
+        return None
+
+    current_score = _dev_eval_aggregate_score(dev_eval_summary)
+    if current_score is None:
+        return None
+    worst_truncation_rate = _dev_eval_worst_truncation_rate(dev_eval_summary)
+    worst_stall_rate = _dev_eval_worst_stall_rate(dev_eval_summary)
+    worst_no_progress_timeout_rate = _dev_eval_worst_no_progress_timeout_rate(dev_eval_summary)
+    worst_natural_timeout_rate = _dev_eval_worst_natural_timeout_rate(dev_eval_summary)
+    tracker = _load_checkpoint_tracker(training_paths)
+    best_record = tracker.get("best")
+    if not isinstance(best_record, Mapping):
+        return None
+    best_metric_kind = str(best_record.get("metric_kind", "")).strip()
+    best_metric_value = best_record.get("metric_value")
+    best_update_count = best_record.get("update_count")
+    if best_metric_kind != "dev_eval_mean":
+        return None
+    if not isinstance(best_metric_value, (int, float)) or not np.isfinite(float(best_metric_value)):
+        return None
+    if not isinstance(best_update_count, int) or int(best_update_count) >= int(learner.update_count):
+        return None
+    best_score = float(best_metric_value)
+    if best_score < float(checkpoint_guard.min_best_score):
+        return None
+
+    confidence = _dev_eval_confidence_stats(dev_eval_summary)
+    rollback_reasons: list[str] = []
+    if current_score <= best_score - float(checkpoint_guard.rollback_score_margin):
+        rollback_reasons.append("score_drop")
+    if worst_stall_rate is not None and (
+        worst_stall_rate >= float(checkpoint_guard.rollback_truncation_rate_threshold)
+    ):
+        rollback_reasons.append("truncation")
+    max_prob_lt_half = confidence["max_prob_lt_half"]
+    if max_prob_lt_half is not None and (
+        float(max_prob_lt_half) >= float(checkpoint_guard.rollback_max_prob_lt_half)
+    ):
+        rollback_reasons.append("confidence")
+    if not rollback_reasons:
+        return None
+
+    best_checkpoint_path = training_paths.best_checkpoint_path
+    _restore_learner_from_checkpoint(
+        checkpoint_path=best_checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=device,
+        expected_spec_hash256=spec_hash256,
+        algorithm=algorithm,
+        restore_counters=False,
+    )
+    demoted_champions = _demote_registry_champions_newer_than(
+        training_paths,
+        update_count=int(best_update_count),
+    )
+    publish_metrics = runtime.maybe_publish_snapshot(
+        learner_model=model,
+        learner_update_count=int(learner.update_count),
+        force=True,
+    )
+    runtime.reset_outcome_tracker()
+    runtime.refresh_opponent_pool()
+    _write_checkpoint(
+        checkpoint_path=training_paths.latest_checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=device,
+        spec_hash256=spec_hash256,
+        algorithm=algorithm,
+    )
+    tracker["latest"] = _build_checkpoint_record(
+        alias_name="latest",
+        alias_path=training_paths.latest_checkpoint_path,
+        source_checkpoint_path=best_checkpoint_path,
+        artifacts=artifacts,
+        learner=learner,
+        metric_kind="dev_eval_mean",
+        metric_value=best_score,
+    )
+    _write_checkpoint_tracker(training_paths, tracker)
+
+    payload = {
+        "format": "checkpoint_guard_event_v1",
+        "action": "rollback_to_best",
+        "update_count": int(learner.update_count),
+        "policy_version": int(learner.get_policy_version()),
+        "current_score": current_score,
+        "best_score": best_score,
+        "best_update_count": int(best_update_count),
+        "worst_stall_rate": worst_stall_rate,
+        "worst_truncation_rate": worst_truncation_rate,
+        "worst_no_progress_timeout_rate": worst_no_progress_timeout_rate,
+        "worst_natural_timeout_rate": worst_natural_timeout_rate,
+        "min_prob_gt_half": confidence["min_prob_gt_half"],
+        "max_prob_lt_half": confidence["max_prob_lt_half"],
+        "max_ci_half_width": confidence["max_ci_half_width"],
+        "reasons": rollback_reasons,
+        "best_checkpoint_path": _relative_path_text(best_checkpoint_path, root=artifacts.run_dir),
+        "latest_checkpoint_path": _relative_path_text(training_paths.latest_checkpoint_path, root=artifacts.run_dir),
+        "snapshot_publish_latency_ms": publish_metrics.get("snapshot_publish_latency_ms", 0.0),
+        "snapshot_apply_latency_ms": publish_metrics.get("snapshot_apply_latency_ms", 0.0),
+        "latest_loss": None if latest_metrics is None else latest_metrics.get("loss"),
+        "demoted_champions": demoted_champions,
+    }
+    _append_checkpoint_guard_event(training_paths, payload)
+    return payload
+
+
+def _maybe_finalize_from_best_checkpoint(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    artifacts: RunArtifacts,
+    runtime: QueueRuntime,
+    learner: ImpalaLearner,
+    device: torch.device,
+    spec_hash256: str,
+    algorithm: str,
+    latest_metrics: Mapping[str, float] | None,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    curriculum = stack.config.curriculum
+    if curriculum is None or not curriculum.checkpoint_guard.enabled:
+        return None
+    best_record = _best_checkpoint_record(training_paths)
+    if best_record is None:
+        return None
+    best_metric_kind = str(best_record.get("metric_kind", "")).strip()
+    best_metric_value = best_record.get("metric_value")
+    best_update_count = best_record.get("update_count")
+    if best_metric_kind != "dev_eval_mean":
+        return None
+    if not isinstance(best_metric_value, (int, float)) or not np.isfinite(float(best_metric_value)):
+        return None
+    if not isinstance(best_update_count, int):
+        return None
+    current_score = _dev_eval_aggregate_score(dev_eval_summary)
+    best_score = float(best_metric_value)
+    if current_score is None or current_score >= best_score:
+        return None
+    confidence = _dev_eval_confidence_stats(dev_eval_summary)
+    best_checkpoint_path = training_paths.best_checkpoint_path
+    _restore_learner_from_checkpoint(
+        checkpoint_path=best_checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=device,
+        expected_spec_hash256=spec_hash256,
+        algorithm=algorithm,
+        restore_counters=False,
+    )
+    demoted_champions = _demote_registry_champions_newer_than(
+        training_paths,
+        update_count=int(best_update_count),
+    )
+    runtime.reset_outcome_tracker()
+    runtime.refresh_opponent_pool()
+    final_checkpoint_path = _ensure_current_checkpoint(
+        training_paths=training_paths,
+        learner=learner,
+        stack=stack,
+        device=device,
+        spec_hash256=spec_hash256,
+        algorithm=algorithm,
+    )
+    tracker = _load_checkpoint_tracker(training_paths)
+    tracker["latest"] = _build_checkpoint_record(
+        alias_name="latest",
+        alias_path=training_paths.latest_checkpoint_path,
+        source_checkpoint_path=best_checkpoint_path,
+        artifacts=artifacts,
+        learner=learner,
+        metric_kind="dev_eval_mean",
+        metric_value=best_score,
+    )
+    shutil.copy2(final_checkpoint_path, training_paths.latest_checkpoint_path)
+    _write_checkpoint_tracker(training_paths, tracker)
+    payload = {
+        "format": "checkpoint_guard_event_v1",
+        "action": "finalize_to_best",
+        "update_count": int(learner.update_count),
+        "policy_version": int(learner.get_policy_version()),
+        "current_score": current_score,
+        "best_score": best_score,
+        "best_update_count": int(best_update_count),
+        "min_prob_gt_half": confidence["min_prob_gt_half"],
+        "max_prob_lt_half": confidence["max_prob_lt_half"],
+        "max_ci_half_width": confidence["max_ci_half_width"],
+        "latest_loss": None if latest_metrics is None else latest_metrics.get("loss"),
+        "best_checkpoint_path": _relative_path_text(best_checkpoint_path, root=artifacts.run_dir),
+        "latest_checkpoint_path": _relative_path_text(training_paths.latest_checkpoint_path, root=artifacts.run_dir),
+        "demoted_champions": demoted_champions,
+    }
+    _append_checkpoint_guard_event(training_paths, payload)
+    return payload
 
 
 def _run_periodic_dev_eval(
@@ -1737,12 +2958,24 @@ def _run_periodic_dev_eval(
     run_id256: str,
     config_hash256: str,
     spec_hash256: str,
+    artifact_dir_name: str = "dev_eval",
+    artifact_scope: str = "periodic_dev_eval",
+    paired_seeds_override: Sequence[int] | None = None,
+    persist_summary: bool = True,
+    update_stall_monitor: bool = True,
 ) -> dict[str, Any]:
     if learner.model is None:
         raise RuntimeError("Periodic dev eval requires an attached learner model")
 
     evaluation = _validate_periodic_dev_eval_contract(stack)
-    seed_file, validated_sources, paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
+    seed_file, validated_sources, scheduled_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
+    paired_seeds = (
+        [int(seed) for seed in paired_seeds_override]
+        if paired_seeds_override is not None
+        else [int(seed) for seed in scheduled_paired_seeds]
+    )
+    if not paired_seeds:
+        raise RuntimeError("Periodic dev eval requires at least one paired seed")
     observation_dim, action_dim = _spec_dimensions(contract)
     pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
     update_count = int(learner.update_count)
@@ -1753,92 +2986,161 @@ def _run_periodic_dev_eval(
         learner=learner,
         stack=stack,
         device=device,
+        spec_hash256=spec_hash256,
+        algorithm=str(stack.config.training.algorithm).strip()
+        if stack.config.training is not None
+        else None,
     )
 
-    update_dir = artifacts.run_dir / "eval" / "dev_eval" / f"update_{update_count}"
+    update_dir = artifacts.run_dir / "eval" / artifact_dir_name / f"update_{update_count}"
     matchup_dir = update_dir / "b0_randomlegal"
     eval_model = _clone_cpu_eval_model(
         learner_model=cast(PolicyValueModel, learner.model),
         observation_dim=observation_dim,
         action_dim=action_dim,
         stack=stack,
+        observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
     )
-    runner = _PeriodicDevEvalRunner(
+    opponents = _periodic_dev_eval_opponents(
         stack=stack,
-        model=eval_model,
+        contract=contract,
+        run_dir=artifacts.run_dir,
         observation_dim=observation_dim,
         action_dim=action_dim,
-        pass_action_id=pass_action_id,
-        artifact_dir=matchup_dir,
-        focal_policy_id=focal_policy_id,
-        require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
     )
 
-    seed_usage_payload = {
-        "seed_set": "dev_eval",
-        "seed_file": {
-            "path": _json_relative_path(seed_file, root=stack.root),
-            "sha256": seed_file_sha256,
-            "validated_sources": validated_sources,
-        },
-        "paired_seed_count": len(paired_seeds),
-        "paired_seeds": list(paired_seeds),
-        "protocol": {
-            "seat_swap": bool(evaluation.seat_swap),
-            "eval_device": evaluation.eval_device,
-            "eval_inference_mode": bool(evaluation.eval_inference_mode),
-            "eval_sampling_algorithm": evaluation.eval_sampling_algorithm,
-            "eval_assert_sorted_legal_ids": bool(evaluation.eval_assert_sorted_legal_ids),
-        },
-        "focal_policy": {
-            "policy_id": focal_policy_id,
+    anchor_payloads: dict[str, dict[str, Any]] = {}
+    anchor_scores: dict[str, float] = {}
+    primary_summary: dict[str, Any] | None = None
+    for opponent_policy_id, display_name, opponent_model, heuristic_policy in opponents:
+        matchup_dir = update_dir / opponent_policy_id
+        runner = _PeriodicDevEvalRunner(
+            stack=stack,
+            model=eval_model,
+            opponent_policy_id=opponent_policy_id,
+            opponent_model=opponent_model,
+            heuristic_policy=heuristic_policy,
+            observation_dim=observation_dim,
+            action_dim=action_dim,
+            pass_action_id=pass_action_id,
+            artifact_dir=matchup_dir,
+            focal_policy_id=focal_policy_id,
+            require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+        )
+
+        seed_usage_payload = {
+            "seed_set": "dev_eval",
+            "seed_file": {
+                "path": _json_relative_path(seed_file, root=stack.root),
+                "sha256": seed_file_sha256,
+                "validated_sources": validated_sources,
+            },
+            "artifact_scope": artifact_scope,
+            "seed_schedule": {
+                "configured_paired_seed_count": len(scheduled_paired_seeds),
+                "requested_paired_seed_count": len(paired_seeds),
+                "expanded_beyond_seed_file": len(paired_seeds) > len(scheduled_paired_seeds),
+            },
+            "paired_seed_count": len(paired_seeds),
+            "paired_seeds": list(paired_seeds),
+            "protocol": {
+                "seat_swap": bool(evaluation.seat_swap),
+                "eval_device": evaluation.eval_device,
+                "eval_inference_mode": bool(evaluation.eval_inference_mode),
+                "eval_sampling_algorithm": evaluation.eval_sampling_algorithm,
+                "eval_assert_sorted_legal_ids": bool(evaluation.eval_assert_sorted_legal_ids),
+            },
+            "focal_policy": {
+                "policy_id": focal_policy_id,
+                "update_count": update_count,
+                "policy_version": policy_version,
+                "checkpoint_path": (
+                    None if checkpoint_path is None else _json_relative_path(checkpoint_path, root=artifacts.run_dir)
+                ),
+            },
+            "opponent_policy": {
+                "policy_id": opponent_policy_id,
+                "display_name": display_name,
+            },
+        }
+        _write_json(matchup_dir / "seed_usage.json", seed_usage_payload)
+
+        matchup = run_seat_swapped_matchup(
+            focal_policy_id=focal_policy_id,
+            opponent_policy_id=opponent_policy_id,
+            paired_seeds=paired_seeds,
+            runner=runner,
+            episodes_path=matchup_dir / "episodes.jsonl",
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+        )
+
+        matchup_payload = build_matchup_export(
+            matchup.records,
+            stop_rules=evaluation.stop_rules,
+            max_paired_seeds=len(paired_seeds),
+            scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
+            sample_count=1000,
+            seed=_periodic_dev_eval_bootstrap_seed(update_count=update_count, policy_version=policy_version),
+        )
+        matchup_payload["evaluation_context"] = {
+            "artifact_scope": artifact_scope,
             "update_count": update_count,
             "policy_version": policy_version,
             "checkpoint_path": (
                 None if checkpoint_path is None else _json_relative_path(checkpoint_path, root=artifacts.run_dir)
             ),
-        },
-        "opponent_policy": {
-            "policy_id": "b0_randomlegal",
-            "display_name": "B0 RandomLegal",
-        },
-    }
-    _write_json(update_dir / "seed_usage.json", seed_usage_payload)
+            "seed_usage_path": _json_relative_path(matchup_dir / "seed_usage.json", root=artifacts.run_dir),
+            "anchor_display_name": display_name,
+        }
+        write_matchup_summary_json(matchup_dir / "matchup_summary.json", matchup_payload)
+        write_matchup_summary_csv(matchup_dir / "matchup_summary.csv", matchup_payload)
+        write_matchup_diagnostics_json(
+            matchup_dir / "diagnostics.json",
+            build_seat_advantage_diagnostics(matchup.records),
+        )
+        anchor_payloads[display_name] = matchup_payload
+        anchor_scores[display_name] = float(matchup_payload["uncertainty"]["mean"])
+        if primary_summary is None or opponent_policy_id == "b0_randomlegal":
+            primary_summary = matchup_payload
 
-    matchup = run_seat_swapped_matchup(
-        focal_policy_id=focal_policy_id,
-        opponent_policy_id="b0_randomlegal",
-        paired_seeds=paired_seeds,
-        runner=runner,
-        episodes_path=matchup_dir / "episodes.jsonl",
-        run_id256=run_id256,
-        config_hash256=config_hash256,
-        spec_hash256=spec_hash256,
-    )
+    if primary_summary is None:
+        raise RuntimeError("Periodic dev eval did not produce any matchup summaries")
 
-    summary_payload = build_matchup_export(
-        matchup.records,
-        stop_rules=evaluation.stop_rules,
-        max_paired_seeds=len(paired_seeds),
-        scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
-        sample_count=1000,
-        seed=_periodic_dev_eval_bootstrap_seed(update_count=update_count, policy_version=policy_version),
+    aggregate_score = sum(anchor_scores.values()) / max(1, len(anchor_scores))
+    summary_payload = dict(primary_summary)
+    summary_payload.update(
+        {
+            "policy_id": focal_policy_id,
+            "update_count": update_count,
+            "policy_version": policy_version,
+            "aggregate_score": aggregate_score,
+            "anchor_scores": anchor_scores,
+            "anchors": anchor_payloads,
+        }
     )
-    summary_payload["evaluation_context"] = {
-        "artifact_scope": "periodic_dev_eval",
-        "update_count": update_count,
-        "policy_version": policy_version,
-        "checkpoint_path": (
-            None if checkpoint_path is None else _json_relative_path(checkpoint_path, root=artifacts.run_dir)
-        ),
-        "seed_usage_path": _json_relative_path(update_dir / "seed_usage.json", root=artifacts.run_dir),
-    }
-    write_matchup_summary_json(matchup_dir / "matchup_summary.json", summary_payload)
-    write_matchup_summary_csv(matchup_dir / "matchup_summary.csv", summary_payload)
-    write_matchup_diagnostics_json(
-        matchup_dir / "diagnostics.json",
-        build_seat_advantage_diagnostics(matchup.records),
-    )
+    if persist_summary:
+        _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=summary_payload)
+    if update_stall_monitor:
+        stall_monitor = _update_stall_monitor(
+            stack=stack,
+            training_paths=training_paths,
+            update_count=update_count,
+            summary_payload=summary_payload,
+        )
+        if stall_monitor is not None:
+            summary_payload["stall_monitor"] = stall_monitor
+            if bool(stall_monitor.get("stall_risk", False)):
+                print(
+                    "Stall monitor warning: "
+                    f"update={update_count} worst_anchor={stall_monitor['worst_anchor']} "
+                    f"stall_rate={float(stall_monitor['worst_stall_rate']):.3f} "
+                    f"no_progress_rate={float(stall_monitor['worst_no_progress_timeout_rate']):.3f} "
+                    f"truncation_rate={float(stall_monitor['worst_truncation_rate']):.3f} "
+                    f"consecutive={int(stall_monitor['consecutive_trigger_count'])}"
+                )
+    _write_json(update_dir / "summary.json", summary_payload)
     return summary_payload
 
 
@@ -1851,6 +3153,7 @@ def _run_snapshot_promotion_gate(
     learner: ImpalaLearner,
     candidate_policy_id: str,
     update_count: int,
+    league_reference_update: int | None,
     policy_version: int,
     run_id256: str,
     config_hash256: str,
@@ -1858,6 +3161,14 @@ def _run_snapshot_promotion_gate(
 ) -> bool | None:
     league = stack.config.league
     if league is None or not league.enabled or not league.promotion_gate_enabled:
+        return None
+    reference_update = int(update_count if league_reference_update is None else league_reference_update)
+    if reference_update < int(league.warmup.first_updates):
+        print(
+            "Promotion gate skipped during league warmup: "
+            f"update={update_count} effective_update={reference_update} threshold={int(league.warmup.first_updates)} "
+            f"candidate={candidate_policy_id}"
+        )
         return None
     if learner.model is None:
         raise RuntimeError("Promotion gate requires an attached learner model")
@@ -1886,6 +3197,7 @@ def _run_snapshot_promotion_gate(
             observation_dim=observation_dim,
             action_dim=action_dim,
             stack=stack,
+            observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
         )
         for policy_id in set(anchor_policy_ids.values())
         if policy_id not in {_PROMOTION_GATE_RANDOMLEGAL_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID}
@@ -1917,6 +3229,7 @@ def _run_snapshot_promotion_gate(
             observation_dim=observation_dim,
             action_dim=action_dim,
             stack=stack,
+            observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
         ),
         anchor_models=anchor_models,
         heuristic_policies=heuristic_policies,
@@ -1977,39 +3290,62 @@ def _run_minimal_training(
     spec_hash256: str,
     runtime_mode: QueueRuntimeMode,
     b1_baseline_run_dir: Path | None,
+    resume_checkpoint_path: Path | None = None,
+    tensorboard_logger: TensorBoardLogger | None = None,
 ) -> dict[str, float]:
     _configure_torch_threads(stack)
     torch.manual_seed(seed)
     np.random.seed(seed & 0xFFFF_FFFF)
 
     observation_dim, action_dim = _spec_dimensions(contract)
-    training_config = stack.config.training_family_a
+    training_config = stack.config.training
     model_config = stack.config.model
     environment_config = stack.config.environment
-    if training_config is None or model_config is None or environment_config is None:
-        raise RuntimeError("The locked stack is missing training_family_a, model, or environment config")
+    rewards_config = stack.config.rewards
+    experiment_role = _experiment_role(stack)
+    if training_config is None or model_config is None or environment_config is None or rewards_config is None:
+        raise RuntimeError("The locked stack is missing training, model, environment, or rewards config")
 
     training_paths = _training_paths(artifacts.run_dir)
     pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
+    algorithm = str(training_config.algorithm).strip()
+    _validate_algorithm_model_contract(algorithm=algorithm, recurrent_core=model_config.recurrent_core)
     model = PolicyValueModel(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
+        observation_spec=contract.spec_bundle.get("observation"),
     ).to(device)
-    learner = ImpalaLearner(
+    compiled_model = _maybe_compile_learner_model(
         model=model,
-        learning_rate=training_config.learning_rate,
-        value_loss_coef=training_config.value_loss_coef,
-        entropy_coef=training_config.entropy_coef,
-        grad_norm_clip=training_config.grad_norm_clip,
-        checkpoint_dir=training_paths.checkpoints_dir,
-        checkpoint_interval_updates=checkpoint_interval_updates,
-        logs_dir=training_paths.logs_dir,
-        logging_interval_updates=1,
-        vtrace_rho_bar=training_config.vtrace_rho_bar,
-        vtrace_c_bar=training_config.vtrace_c_bar,
-        pass_action_id=pass_action_id,
+        training_config=training_config,
+        device=device,
     )
+    learner = _build_training_learner(
+        algorithm=algorithm,
+        model=model,
+        compiled_model=compiled_model,
+        training_config=training_config,
+        training_paths=training_paths,
+        pass_action_id=pass_action_id,
+        checkpoint_interval_updates=checkpoint_interval_updates,
+    )
+    resume_state = None
+    if resume_checkpoint_path is not None:
+        resume_state = _restore_learner_from_checkpoint(
+            checkpoint_path=resume_checkpoint_path,
+            learner=learner,
+            stack=stack,
+            device=device,
+            expected_spec_hash256=spec_hash256,
+            algorithm=algorithm,
+        )
+        print(
+            "Resumed learner state: "
+            f"checkpoint={resume_state.checkpoint_path} "
+            f"update={resume_state.update_count} "
+            f"policy_version={resume_state.policy_version}"
+        )
 
     config_hash256 = compute_config_hash256(stack)
     _ensure_noleague_baseline_anchor(
@@ -2037,18 +3373,30 @@ def _run_minimal_training(
         model=model,
         observation_dim=observation_dim,
         action_dim=action_dim,
+        observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
+        spec_bundle=cast(dict[str, Any], contract.spec_bundle),
         run_dir=artifacts.run_dir,
         performance_log_path=training_paths.performance_log_path,
     )
     latest_metrics: dict[str, float] = {}
+    last_checkpoint_guard_rollback_update: int | None = None
+    last_dev_eval_summary: Mapping[str, Any] | None = None
+    last_dev_eval_update_count: int | None = None
     start_time = time.time()
+    if int(learner.update_count) >= max_updates:
+        raise RuntimeError(
+            f"Resume checkpoint is already at update {learner.update_count}, which is >= --max-updates {max_updates}"
+        )
     try:
-        for _update_index in range(max_updates):
-            runtime_batch = runtime.collect_update_batch(
-                gamma=float(training_config.gamma),
-                truncation_bootstrap_value=bool(environment_config.truncation_bootstrap_value),
-                vtrace_rho_bar=float(training_config.vtrace_rho_bar),
-                vtrace_c_bar=float(training_config.vtrace_c_bar),
+        for _update_index in range(int(learner.update_count), max_updates):
+            learner.set_entropy_coef(
+                _entropy_coef_for_next_update(training_config, update_count=int(learner.update_count) + 1)
+            )
+            runtime_batch = _collect_training_batch(
+                runtime=runtime,
+                algorithm=algorithm,
+                training_config=training_config,
+                rewards_config=rewards_config,
             )
             latest_metrics = learner.update(runtime_batch.learner_batch)
             latest_metrics.update(runtime_batch.runtime_metrics)
@@ -2064,6 +3412,13 @@ def _run_minimal_training(
                 metrics=latest_metrics,
                 start_time=start_time,
             )
+            if tensorboard_logger is not None:
+                tensorboard_logger.log_training_step(
+                    update_count=int(learner.update_count),
+                    policy_version=int(learner.get_policy_version()),
+                    wall_clock_seconds=time.time() - start_time,
+                    metrics=latest_metrics,
+                )
             if learner.update_count % checkpoint_interval_updates == 0:
                 ckpt_path = training_paths.checkpoints_dir / f"checkpoint_{learner.update_count}.pt"
                 _write_checkpoint(
@@ -2071,7 +3426,19 @@ def _run_minimal_training(
                     learner=learner,
                     stack=stack,
                     device=device,
+                    spec_hash256=spec_hash256,
+                    algorithm=algorithm,
                 )
+                tracker_payload = _publish_checkpoint_aliases(
+                    stack=stack,
+                    training_paths=training_paths,
+                    artifacts=artifacts,
+                    checkpoint_path=ckpt_path,
+                    learner=learner,
+                    latest_metrics=latest_metrics,
+                )
+                if tensorboard_logger is not None:
+                    tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
 
                 if learner.model is None:
                     raise RuntimeError("Cannot persist a snapshot registry entry without a learner model")
@@ -2086,7 +3453,7 @@ def _run_minimal_training(
                     update=int(learner.update_count),
                     policy_version=int(learner.get_policy_version()),
                 )
-                if str(training_config.mode).strip() == "b1_no_league":
+                if _is_noleague_baseline_role(experiment_role):
                     _ensure_noleague_baseline_anchor(
                         stack=stack,
                         training_paths=training_paths,
@@ -2099,7 +3466,7 @@ def _run_minimal_training(
                         update=int(learner.update_count),
                     )
                 runtime.refresh_opponent_pool()
-                _run_snapshot_promotion_gate(
+                promotion_passed = _run_snapshot_promotion_gate(
                     stack=stack,
                     contract=contract,
                     artifacts=artifacts,
@@ -2107,11 +3474,18 @@ def _run_minimal_training(
                     learner=learner,
                     candidate_policy_id=candidate_policy_id,
                     update_count=int(learner.update_count),
+                    league_reference_update=(
+                        None
+                        if "league_effective_update" not in latest_metrics
+                        else int(latest_metrics["league_effective_update"])
+                    ),
                     policy_version=int(learner.get_policy_version()),
                     run_id256=run_id256,
                     config_hash256=config_hash256,
                     spec_hash256=spec_hash256,
                 )
+                if promotion_passed:
+                    runtime.refresh_opponent_pool()
 
             if _should_run_periodic_dev_eval(stack, update_count=int(learner.update_count)):
                 summary_payload = _run_periodic_dev_eval(
@@ -2127,15 +3501,102 @@ def _run_minimal_training(
                 )
                 print(
                     "Periodic dev eval: "
-                    f"update={learner.update_count} opponent=b0_randomlegal "
-                    f"games={summary_payload['summary']['games']} "
-                    f"mean={summary_payload['uncertainty']['mean']:.4f} "
-                    f"stop_reason={summary_payload['stop_reason']}"
+                    f"update={learner.update_count} aggregate={summary_payload['aggregate_score']:.4f} "
+                    f"anchors={','.join(sorted(cast(dict[str, Any], summary_payload['anchor_scores']).keys()))}"
                 )
+                effective_summary = summary_payload
+                tracker_before_dev_eval = _load_checkpoint_tracker(training_paths)
+                existing_best_record = tracker_before_dev_eval.get("best")
+                if not isinstance(existing_best_record, Mapping):
+                    existing_best_record = None
+                confirmatory_request = _confirmatory_dev_eval_request(
+                    stack=stack,
+                    existing_best_record=cast(Mapping[str, Any] | None, existing_best_record),
+                    dev_eval_summary=summary_payload,
+                )
+                if confirmatory_request is not None:
+                    seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
+                    confirmatory_pairs = _expand_periodic_dev_eval_paired_seeds(
+                        base_paired_seeds,
+                        requested_pairs=int(confirmatory_request["target_pairs"]),
+                        seed_file_sha256=seed_file_sha256,
+                        update_count=int(learner.update_count),
+                        policy_version=int(learner.get_policy_version()),
+                        scope="periodic_dev_eval_confirmatory",
+                    )
+                    effective_summary = _run_periodic_dev_eval(
+                        stack=stack,
+                        contract=contract,
+                        artifacts=artifacts,
+                        training_paths=training_paths,
+                        learner=learner,
+                        device=device,
+                        run_id256=run_id256,
+                        config_hash256=config_hash256,
+                        spec_hash256=spec_hash256,
+                        artifact_dir_name="dev_eval_confirmatory",
+                        artifact_scope="periodic_dev_eval_confirmatory",
+                        paired_seeds_override=confirmatory_pairs,
+                        persist_summary=False,
+                        update_stall_monitor=False,
+                    )
+                    print(
+                        "Confirmatory dev eval: "
+                        f"update={learner.update_count} paired_seeds={len(confirmatory_pairs)} "
+                        f"aggregate={effective_summary['aggregate_score']:.4f} "
+                        f"reasons={','.join(cast(list[str], confirmatory_request['reasons']))} "
+                        f"seed_file={seed_file.name}"
+                    )
+                last_dev_eval_summary = effective_summary
+                last_dev_eval_update_count = int(learner.update_count)
+                ckpt_path = _ensure_current_checkpoint(
+                    training_paths=training_paths,
+                    learner=learner,
+                    stack=stack,
+                    device=device,
+                    spec_hash256=spec_hash256,
+                    algorithm=algorithm,
+                )
+                tracker_payload = _publish_checkpoint_aliases(
+                    stack=stack,
+                    training_paths=training_paths,
+                    artifacts=artifacts,
+                    checkpoint_path=ckpt_path,
+                    learner=learner,
+                    latest_metrics=latest_metrics,
+                    dev_eval_summary=effective_summary,
+                )
+                guard_event = _maybe_rollback_to_best_checkpoint(
+                    stack=stack,
+                    training_paths=training_paths,
+                    artifacts=artifacts,
+                    runtime=runtime,
+                    learner=learner,
+                    model=model,
+                    device=device,
+                    spec_hash256=spec_hash256,
+                    algorithm=algorithm,
+                    latest_metrics=latest_metrics,
+                    dev_eval_summary=effective_summary,
+                    last_rollback_update=last_checkpoint_guard_rollback_update,
+                )
+                if guard_event is not None:
+                    last_checkpoint_guard_rollback_update = int(learner.update_count)
+                    print(
+                        "Checkpoint guard rollback: "
+                        f"update={guard_event['update_count']} "
+                        f"best_update={guard_event['best_update_count']} "
+                        f"current_score={float(guard_event['current_score']):.4f} "
+                        f"best_score={float(guard_event['best_score']):.4f} "
+                        f"reasons={','.join(cast(list[str], guard_event['reasons']))}"
+                    )
+                if tensorboard_logger is not None:
+                    tensorboard_logger.log_periodic_dev_eval(effective_summary, step=int(learner.update_count))
+                    tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
     finally:
         runtime.close()
 
-    if str(training_config.mode).strip() == "b1_no_league":
+    if _is_noleague_baseline_role(experiment_role):
         _ensure_noleague_baseline_anchor(
             stack=stack,
             training_paths=training_paths,
@@ -2148,12 +3609,55 @@ def _run_minimal_training(
         )
 
     if not latest_metrics:
-        raise RuntimeError("The minimal train smoke finished without producing learner metrics")
+        raise RuntimeError("The canonical single-node run finished without producing learner metrics")
+    final_checkpoint_path = _ensure_current_checkpoint(
+        training_paths=training_paths,
+        learner=learner,
+        stack=stack,
+        device=device,
+        spec_hash256=spec_hash256,
+        algorithm=algorithm,
+    )
+    final_dev_eval_summary = (
+        last_dev_eval_summary if last_dev_eval_update_count == int(learner.update_count) else None
+    )
+    tracker_payload = _publish_checkpoint_aliases(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        checkpoint_path=final_checkpoint_path,
+        learner=learner,
+        latest_metrics=latest_metrics,
+        dev_eval_summary=final_dev_eval_summary,
+    )
+    finalize_guard_event = _maybe_finalize_from_best_checkpoint(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        runtime=runtime,
+        learner=learner,
+        device=device,
+        spec_hash256=spec_hash256,
+        algorithm=algorithm,
+        latest_metrics=latest_metrics,
+        dev_eval_summary=final_dev_eval_summary,
+    )
+    if finalize_guard_event is not None:
+        print(
+            "Checkpoint guard final selection: "
+            f"update={finalize_guard_event['update_count']} "
+            f"best_update={finalize_guard_event['best_update_count']} "
+            f"current_score={float(finalize_guard_event['current_score']):.4f} "
+            f"best_score={float(finalize_guard_event['best_score']):.4f}"
+        )
+        tracker_payload = _load_checkpoint_tracker(training_paths)
+    if tensorboard_logger is not None:
+        tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
     return latest_metrics
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Minimal end-to-end M3-08 train smoke entrypoint")
+    parser = argparse.ArgumentParser(description="Canonical single-node thesis training entrypoint")
     parser.add_argument("--stack-config", type=Path, required=True)
     parser.add_argument("--spec-hash", type=str, default="", help="Expected spec hash or spec bundle SHA-256")
     parser.add_argument(
@@ -2169,7 +3673,15 @@ def main() -> None:
     )
     parser.add_argument("--run-label", type=str, default="", help="Optional run directory label override")
     parser.add_argument("--run-id", dest="run_id_alias", type=str, default="", help=argparse.SUPPRESS)
-    parser.add_argument("--num-envs", type=int, default=2, help="Tiny env count for the minimal smoke run")
+    parser.add_argument(
+        "--override",
+        "--config-override",
+        dest="config_override",
+        action="append",
+        default=None,
+        help="Deterministic config override in KEY=JSON_VALUE form, e.g. training.optimizer.learning_rate=0.0001",
+    )
+    parser.add_argument("--num-envs", type=int, default=2, help="Env count for the single-node training run")
     parser.add_argument("--unroll-length", type=int, default=4, help="Tiny rollout length for the smoke run")
     parser.add_argument("--max-updates", type=int, default=1, help="Number of learner updates to run")
     parser.add_argument(
@@ -2185,8 +3697,8 @@ def main() -> None:
     parser.add_argument(
         "--checkpoint-interval-updates",
         type=int,
-        default=1,
-        help="Checkpoint cadence for the minimal smoke run",
+        default=None,
+        help="Optional checkpoint cadence override for the single-node training run",
     )
     parser.add_argument(
         "--snapshot-registry-json",
@@ -2204,7 +3716,19 @@ def main() -> None:
         "--b1-baseline-run-dir",
         type=Path,
         default=None,
-        help="Completed b1_no_league run directory used to import the canonical B1 baseline anchor",
+        help="Completed baseline_noleague run directory used to import the canonical B1 baseline anchor",
+    )
+    parser.add_argument(
+        "--resume-run-dir",
+        type=Path,
+        default=None,
+        help="Resume training in-place inside an existing run directory",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default="",
+        help="Checkpoint path or alias (`latest`/`best`) to restore before continuing training",
     )
     args = parser.parse_args()
     run_label = _resolve_run_label(parser, args.run_label, args.run_id_alias)
@@ -2212,22 +3736,28 @@ def main() -> None:
     num_envs = _require_positive_int("--num-envs", args.num_envs)
     unroll_length = _require_positive_int("--unroll-length", args.unroll_length)
     max_updates = _require_positive_int("--max-updates", args.max_updates)
-    checkpoint_interval_updates = _require_positive_int(
-        "--checkpoint-interval-updates",
-        args.checkpoint_interval_updates,
-    )
-
     stack = load_stack_config(args.stack_config)
+    stack = apply_stack_overrides(stack, parse_override_tokens(args.config_override))
+    training_config = stack.config.training
+    manifest_only_reason = _manifest_scaffold_only_reason(stack)
+    if training_config is None and manifest_only_reason is None:
+        parser.error("stack config is missing training")
 
     public_demo_enabled = bool(args.public_demo)
+    resume_run_dir = None if args.resume_run_dir is None else args.resume_run_dir.resolve()
+    resume_checkpoint_path = _resolve_resume_checkpoint_path(
+        resume_from=str(args.resume_from),
+        resume_run_dir=resume_run_dir,
+    )
+    if public_demo_enabled and (resume_run_dir is not None or resume_checkpoint_path is not None):
+        parser.error("Public demo mode does not support checkpoint resume")
     if public_demo_enabled:
         public_demo_bundle = public_demo_spec_bundle()
         assert_spec_bundle_contract(args.spec_hash, public_demo_bundle)
         spec_hash256 = public_demo_spec_hash256()
         simulator_info = public_demo_simulator_info()
     else:
-        simulator_contract = load_simulator_contract(stack.root)
-        assert_spec_bundle_contract(args.spec_hash, simulator_contract.spec_bundle)
+        simulator_contract = load_verified_simulator_contract(stack.root, expected_spec_hash=args.spec_hash)
         spec_hash256 = simulator_contract.spec_hash256
         simulator_info = simulator_contract.simulator
     config_hash256 = compute_config_hash256(stack)
@@ -2239,16 +3769,34 @@ def main() -> None:
 
     git_commit = _git_commit()
     start_nonce = _start_nonce()
-    run_id256 = compute_run_id256(spec_hash256, config_hash256, git_commit or None, start_nonce)
-    run_id64 = f"{compute_run_id64(spec_hash256, config_hash256, git_commit or None, start_nonce):016x}"
-    run_dir_name = run_label or default_run_dir_name(run_id64)
+    manifest_dict: dict[str, Any] | None = None
+    if resume_run_dir is None:
+        run_id256 = compute_run_id256(spec_hash256, config_hash256, git_commit or None, start_nonce)
+        run_id64 = f"{compute_run_id64(spec_hash256, config_hash256, git_commit or None, start_nonce):016x}"
+        run_dir_name = run_label or default_run_dir_name(run_id64)
+    else:
+        artifacts = _run_artifacts_from_existing_run_dir(resume_run_dir)
+        manifest_dict = _load_json_object(artifacts.manifest_path, label="resume manifest")
+        run_id256 = str(manifest_dict.get("run_id256", "")).strip().lower()
+        run_id64 = str(manifest_dict.get("run_id64", "")).strip().lower()
+        run_dir_name = artifacts.run_dir_name
+        existing_spec_hash = str(manifest_dict.get("spec_hash256", "")).strip().lower()
+        existing_config_hash = str(manifest_dict.get("config_hash256", "")).strip().lower()
+        if existing_spec_hash != spec_hash256:
+            raise RuntimeError(
+                f"resume run spec hash mismatch: expected {spec_hash256}, found {existing_spec_hash} in {artifacts.manifest_path}"
+            )
+        if existing_config_hash != config_hash256:
+            raise RuntimeError(
+                f"resume run config hash mismatch: expected {config_hash256}, found {existing_config_hash} in {artifacts.manifest_path}"
+            )
 
     print_startup_banner(
         spec_hash256,
         config_hash256,
         run_id64=run_id64,
         run_id256=run_id256,
-        run_label=run_label,
+        run_label=run_label or ("" if resume_run_dir is None else run_dir_name),
         run_dir_name=run_dir_name,
         spec_mismatch_policy=_spec_mismatch_policy(stack),
     )
@@ -2258,6 +3806,7 @@ def main() -> None:
     print(spec_bundle_message + f"compat={simulator_info.get('compatibility_hash', '')} sha256={spec_hash256}")
     print(f"Loaded stack config with {len(stack.components)} components")
 
+    device = _resolve_device(stack, args.device)
     policy_set_selection, policy_set_selection_details = _resolve_policy_set_selection(
         stack,
         snapshot_registry_path=args.snapshot_registry_json,
@@ -2275,21 +3824,37 @@ def main() -> None:
         spec_bundle=public_demo_spec_bundle() if public_demo_enabled else simulator_contract.spec_bundle,
         config_canonical=canonical_config_dict(stack),
         seed_files=build_seed_file_manifest(stack.seed_sets, root=stack.root),
-        hardware=_hardware_summary(),
+        hardware=_hardware_summary(
+            device,
+            actor_device=(
+                "cpu"
+                if stack.config.system is None
+                else stack.config.system.actor_device
+            ),
+        ),
         evaluation_pinning=_evaluation_pinning(stack),
         policy_set_selection=policy_set_selection,
         policy_set_selection_details=policy_set_selection_details,
     )
-    artifacts = write_run_artifacts(
-        stack.root / "runs",
-        manifest,
-        run_label=run_label or None,
-    )
+    if resume_run_dir is None:
+        artifacts = write_run_artifacts(
+            stack.root / "runs",
+            manifest,
+            run_label=run_label or None,
+        )
+    else:
+        artifacts = _run_artifacts_from_existing_run_dir(resume_run_dir)
     run_summary_payload = _load_json_object(artifacts.run_summary_path, label="run summary")
     run_summary_payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(args.runtime_mode)
     run_summary_payload["policy_set_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
     if args.b1_baseline_run_dir is not None:
         run_summary_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
+    if resume_checkpoint_path is not None:
+        run_summary_payload["resume"] = {
+            "enabled": True,
+            "resume_run_dir": None if resume_run_dir is None else resume_run_dir.as_posix(),
+            "resume_checkpoint_path": resume_checkpoint_path.as_posix(),
+        }
     _write_json(artifacts.run_summary_path, run_summary_payload)
 
     determinism_payload = _load_json_object(artifacts.determinism_report_path, label="determinism report")
@@ -2297,61 +3862,98 @@ def main() -> None:
     determinism_payload["policy_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
     if args.b1_baseline_run_dir is not None:
         determinism_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
+    if resume_checkpoint_path is not None:
+        determinism_payload["resume_checkpoint_path"] = resume_checkpoint_path.as_posix()
     _write_json(artifacts.determinism_report_path, determinism_payload)
 
     environment_payload = _load_json_object(artifacts.environment_path, label="environment manifest")
     environment_payload["cwd"] = stack.root.as_posix()
     environment_payload["argv"] = sys.argv
     environment_payload["hardware"] = manifest.hardware
+    if resume_checkpoint_path is not None:
+        environment_payload["resume_checkpoint_path"] = resume_checkpoint_path.as_posix()
     _write_json(artifacts.environment_path, environment_payload)
-    print(f"Wrote manifest: {artifacts.manifest_path}")
-
-    if public_demo_enabled:
-        staged = stage_public_demo_run(artifacts.run_dir)
+    tensorboard_logger = TensorBoardLogger(artifacts.layout.tensorboard_dir)
+    if not tensorboard_logger.enabled:
+        unavailable_reason = tensorboard_unavailable_reason()
         print(
-            "Staged public-demo toy catalog and policy bundle: "
-            f"mode={PUBLIC_DEMO_MODE} policy_count={len(staged.policy_ids)} "
-            f"catalog={staged.catalog_path}"
+            "TensorBoard logging is disabled: "
+            + ("SummaryWriter unavailable" if unavailable_reason is None else unavailable_reason),
+            file=sys.stderr,
+        )
+    else:
+        tensorboard_logger.log_run_context(
+            manifest=manifest.to_dict(),
+            environment=environment_payload,
+            run_summary=run_summary_payload,
+            determinism_report=determinism_payload,
+        )
+    if resume_run_dir is None:
+        print(f"Wrote manifest: {artifacts.manifest_path}")
+    else:
+        print(f"Resuming existing run directory: {artifacts.run_dir}")
+
+    try:
+        if public_demo_enabled:
+            staged = stage_public_demo_run(artifacts.run_dir)
+            print(
+                "Staged public-demo toy catalog and policy bundle: "
+                f"mode={PUBLIC_DEMO_MODE} policy_count={len(staged.policy_ids)} "
+                f"catalog={staged.catalog_path}"
+            )
+            print(
+                "Public demo mode is intentionally synthetic and demo-only. "
+                "It does not execute simulator training or claim thesis-grade results."
+            )
+            return
+
+        if manifest_only_reason is not None:
+            _print_manifest_only_message(manifest_only_reason)
+            return
+
+        runtime_prerequisite_failure = _runtime_training_prerequisite_failure(stack)
+        if runtime_prerequisite_failure is not None:
+            _raise_runtime_prerequisite_failure(runtime_prerequisite_failure)
+
+        assert training_config is not None
+        checkpoint_interval_updates = _require_positive_int(
+            "--checkpoint-interval-updates",
+            args.checkpoint_interval_updates
+            if args.checkpoint_interval_updates is not None
+            else int(training_config.checkpoint_interval_updates),
+        )
+
+        profile = _resolve_runtime_profile(stack, args.profile)
+        seed = _resolve_seed(stack, args.seed)
+
+        metrics = _run_minimal_training(
+            stack=stack,
+            contract=simulator_contract,
+            artifacts=artifacts,
+            num_envs=num_envs,
+            unroll_length=unroll_length,
+            max_updates=max_updates,
+            profile=profile,
+            device=device,
+            seed=seed,
+            checkpoint_interval_updates=checkpoint_interval_updates,
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+            runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
+            b1_baseline_run_dir=None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve(),
+            resume_checkpoint_path=resume_checkpoint_path,
+            tensorboard_logger=tensorboard_logger,
         )
         print(
-            "Public demo mode is intentionally synthetic and demo-only. "
-            "It does not execute simulator training or claim thesis-grade results."
+            "Completed canonical single-node training run: "
+            f"loss={metrics.get('loss', 0.0):.6f} "
+            f"policy_loss={metrics.get('policy_loss', 0.0):.6f} "
+            f"value_loss={metrics.get('value_loss', 0.0):.6f} "
+            f"entropy={metrics.get('entropy', 0.0):.6f}"
         )
-        return
-
-    manifest_only_reason = _minimal_training_prerequisite_failure(stack)
-    if manifest_only_reason is not None:
-        _print_manifest_only_message(manifest_only_reason)
-        return
-
-    profile = _resolve_runtime_profile(stack, args.profile)
-    device = _resolve_device(stack, args.device)
-    seed = _resolve_seed(stack, args.seed)
-
-    metrics = _run_minimal_training(
-        stack=stack,
-        contract=simulator_contract,
-        artifacts=artifacts,
-        num_envs=num_envs,
-        unroll_length=unroll_length,
-        max_updates=max_updates,
-        profile=profile,
-        device=device,
-        seed=seed,
-        checkpoint_interval_updates=checkpoint_interval_updates,
-        run_id256=run_id256,
-        config_hash256=config_hash256,
-        spec_hash256=spec_hash256,
-        runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
-        b1_baseline_run_dir=None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve(),
-    )
-    print(
-        "Completed minimal training run: "
-        f"loss={metrics.get('loss', 0.0):.6f} "
-        f"policy_loss={metrics.get('policy_loss', 0.0):.6f} "
-        f"value_loss={metrics.get('value_loss', 0.0):.6f} "
-        f"entropy={metrics.get('entropy', 0.0):.6f}"
-    )
+    finally:
+        tensorboard_logger.close()
 
 
 if __name__ == "__main__":

@@ -15,8 +15,8 @@ class ExampleRunConfig:
     """Runtime config used by the loop example.
 
     Values come from:
-    1) `configs/rl_stack_locked.yaml` (component wiring)
-    2) component files (`environment_locked.yaml`, `evaluation_locked.yaml`)
+    1) `configs/presets/typed_local.yaml` or `configs/presets/typed_thesis_locked.yaml`
+    2) parent preset files via `extends`
     3) `configs/minimal_loop.yaml` (loop-specific overrides)
     """
 
@@ -49,6 +49,39 @@ def _load_yaml_file(path: Path) -> dict[str, Any]:
     return data
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_preset_document(path: Path, *, seen: set[Path] | None = None) -> dict[str, Any]:
+    resolved_path = path.resolve()
+    if seen is None:
+        seen = set()
+    if resolved_path in seen:
+        raise ValueError(f"Preset inheritance cycle detected at {resolved_path}")
+    seen.add(resolved_path)
+
+    doc = _load_yaml_file(resolved_path)
+    parent_name = doc.get("extends")
+    if parent_name is None:
+        return doc
+    if not isinstance(parent_name, str) or not parent_name.strip():
+        raise ValueError(f"Expected string extends target in {resolved_path}")
+
+    parent_path = (resolved_path.parent / parent_name).resolve()
+    parent_doc = _load_preset_document(parent_path, seen=seen)
+    child_doc = dict(doc)
+    child_doc.pop("extends", None)
+    return _deep_merge(parent_doc, child_doc)
+
+
 def _as_int(source: dict[str, Any], key: str, fallback: int) -> int:
     value = source.get(key, fallback)
     return int(value)
@@ -66,35 +99,19 @@ def _as_str(source: dict[str, Any], key: str, fallback: str) -> str:
 
 def load_example_config(
     *,
-    stack_config_path: Path | None = None,
+    preset_config_path: Path | None = None,
     loop_config_path: Path | None = None,
 ) -> ExampleRunConfig:
-    """Resolve example config from the split locked config stack."""
+    """Resolve example config from the grouped preset workflow."""
 
     root = repo_root()
-    stack_path = stack_config_path or (root / "configs" / "rl_stack_locked.yaml")
+    preset_path = preset_config_path or (root / "configs" / "presets" / "typed_local.yaml")
     loop_path = loop_config_path or (root / "configs" / "minimal_loop.yaml")
 
-    stack_doc = _load_yaml_file(stack_path)
-    stack = stack_doc.get("rl_stack_locked", stack_doc)
-    if not isinstance(stack, dict):
-        raise ValueError(f"Expected mapping in {stack_path} at key 'rl_stack_locked'")
-
-    components = stack.get("components", {})
-    if not isinstance(components, dict):
-        raise ValueError(f"Expected 'components' mapping in {stack_path}")
-
-    env_component = components.get("environment")
-    eval_component = components.get("evaluation")
-    if not isinstance(env_component, str) or not isinstance(eval_component, str):
-        raise ValueError("Stack config must define string component paths for environment/evaluation")
-
-    env_doc = _load_yaml_file(root / env_component)
-    eval_doc = _load_yaml_file(root / eval_component)
+    preset_doc = _load_preset_document(preset_path)
+    env_cfg = preset_doc.get("environment", {})
+    eval_cfg = preset_doc.get("evaluation", {})
     loop_doc = _load_yaml_file(loop_path)
-
-    env_cfg = env_doc.get("environment", env_doc)
-    eval_cfg = eval_doc.get("evaluation", eval_doc)
     loop_cfg = loop_doc.get("minimal_loop", loop_doc)
 
     if not isinstance(env_cfg, dict) or not isinstance(eval_cfg, dict) or not isinstance(loop_cfg, dict):
@@ -139,7 +156,7 @@ def load_example_config(
             f"{config.action_policy}. Expected 'first_legal', 'uniform_legal', or 'random_legal'."
         )
 
-    # Surface one evaluator setting as a sanity check that we read the new stack.
+    # Surface one evaluator setting as a sanity check that we read the grouped preset.
     if "eval_sampling_algorithm" not in eval_cfg:
         raise ValueError("evaluation config is missing required key: eval_sampling_algorithm")
 

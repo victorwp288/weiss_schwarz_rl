@@ -12,6 +12,7 @@ import numpy as np
 
 from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_legal_ids, masked_logp_from_mask
 from weiss_rl.repro import canonical_json_bytes, key256_to_hex, key256_to_short64, resolve_episode_key256, stable_hash64
+from weiss_rl.termination_reason import classify_episode_end_reason
 
 _CDF_RENORMALIZE_TOL = 1e-6
 _U32_MASK = (1 << 32) - 1
@@ -53,6 +54,15 @@ class GameResult:
     truncated: bool
     winner_seat: int | None
     engine_status: int = 0
+    decision_count: int = 0
+    tick_count: int = 0
+    no_progress_count: int = 0
+    termination_reason: str | None = None
+    total_actions: int = 0
+    pass_actions: int = 0
+    main_move_actions: int = 0
+    pass_with_nonpass_available: int = 0
+    max_consecutive_main_moves: int = 0
     simulator_episode_key: int | bytes | None = None
     replay_sample: "ReplaySampleResult | None" = None
 
@@ -92,6 +102,15 @@ class EvalGameRecord:
     terminated: bool
     truncated: bool
     engine_status: int
+    decision_count: int = 0
+    tick_count: int = 0
+    no_progress_count: int = 0
+    termination_reason: str = "terminated"
+    total_actions: int = 0
+    pass_actions: int = 0
+    main_move_actions: int = 0
+    pass_with_nonpass_available: int = 0
+    max_consecutive_main_moves: int = 0
     run_id256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -113,6 +132,15 @@ class EvalGameRecord:
             "swap_index": self.swap_index,
             "terminated": self.terminated,
             "truncated": self.truncated,
+            "decision_count": self.decision_count,
+            "tick_count": self.tick_count,
+            "no_progress_count": self.no_progress_count,
+            "termination_reason": self.termination_reason,
+            "total_actions": self.total_actions,
+            "pass_actions": self.pass_actions,
+            "main_move_actions": self.main_move_actions,
+            "pass_with_nonpass_available": self.pass_with_nonpass_available,
+            "max_consecutive_main_moves": self.max_consecutive_main_moves,
         }
         if self.run_id256 is not None:
             payload["run_id256"] = self.run_id256
@@ -134,6 +162,16 @@ class MatchupSummary:
     draws: int = 0
     truncations: int = 0
     engine_errors: int = 0
+    natural_timeouts: int = 0
+    no_progress_timeouts: int = 0
+    decision_limit_timeouts: int = 0
+    tick_limit_timeouts: int = 0
+    timeout_unknown: int = 0
+    total_actions: int = 0
+    pass_actions: int = 0
+    main_move_actions: int = 0
+    pass_with_nonpass_available: int = 0
+    max_consecutive_main_moves: int = 0
 
 
 def eval_sampler_logp_from_mask(
@@ -293,6 +331,15 @@ def record_completed_game(
         terminated=bool(result.terminated),
         truncated=bool(result.truncated),
         engine_status=int(result.engine_status),
+        decision_count=int(result.decision_count),
+        tick_count=int(result.tick_count),
+        no_progress_count=int(result.no_progress_count),
+        termination_reason=_game_result_reason(result),
+        total_actions=int(result.total_actions),
+        pass_actions=int(result.pass_actions),
+        main_move_actions=int(result.main_move_actions),
+        pass_with_nonpass_available=int(result.pass_with_nonpass_available),
+        max_consecutive_main_moves=int(result.max_consecutive_main_moves),
         run_id256=key256_to_hex(_coerce_run_id256(run_id256)),
     )
 
@@ -335,7 +382,28 @@ def summarize_pair_outcomes(outcomes: Sequence[str]) -> MatchupSummary:
 
 def summarize_game_records(records: Sequence[EvalGameRecord]) -> MatchupSummary:
     summary = summarize_pair_outcomes([record.outcome for record in records])
-    summary.engine_errors = sum(1 for record in records if record.engine_status != 0)
+    for record in records:
+        summary.total_actions += int(record.total_actions)
+        summary.pass_actions += int(record.pass_actions)
+        summary.main_move_actions += int(record.main_move_actions)
+        summary.pass_with_nonpass_available += int(record.pass_with_nonpass_available)
+        summary.max_consecutive_main_moves = max(
+            summary.max_consecutive_main_moves,
+            int(record.max_consecutive_main_moves),
+        )
+        if record.engine_status != 0:
+            summary.engine_errors += 1
+        if record.termination_reason == "no_progress_timeout":
+            summary.no_progress_timeouts += 1
+        elif record.termination_reason == "decision_limit_timeout":
+            summary.natural_timeouts += 1
+            summary.decision_limit_timeouts += 1
+        elif record.termination_reason == "tick_limit_timeout":
+            summary.natural_timeouts += 1
+            summary.tick_limit_timeouts += 1
+        elif record.termination_reason == "timeout_unknown":
+            summary.natural_timeouts += 1
+            summary.timeout_unknown += 1
     return summary
 
 
@@ -406,6 +474,9 @@ def game_result_from_step(
     env_index: int = 0,
     acting_seat: int | None = None,
     episode_seed: int | None = None,
+    max_decisions: int | None = None,
+    max_ticks: int | None = None,
+    max_no_progress_decisions: int | None = None,
 ) -> GameResult:
     """Decode one environment row into an evaluation result.
 
@@ -423,6 +494,12 @@ def game_result_from_step(
     terminated = _step_scalar(step, ("terminated",), env_index=env_index, cast_fn=bool)
     truncated = _step_scalar(step, ("truncated",), env_index=env_index, cast_fn=bool)
     engine_status = _step_scalar(step, ("engine_status",), env_index=env_index, cast_fn=int)
+    decision_count = _optional_step_scalar(step, ("decision_count",), env_index=env_index)
+    tick_count = _optional_step_scalar(step, ("tick_count",), env_index=env_index)
+    no_progress_count = _optional_step_scalar(step, ("no_progress_count",), env_index=env_index)
+    decision_count_i = 0 if decision_count is None else int(decision_count)
+    tick_count_i = 0 if tick_count is None else int(tick_count)
+    no_progress_count_i = 0 if no_progress_count is None else int(no_progress_count)
     resolved_episode_seed = _required_step_scalar_with_fallback(
         step,
         ("episode_seed",),
@@ -441,6 +518,17 @@ def game_result_from_step(
         truncated=truncated,
         acting_seat=acting_seat,
     )
+    termination_reason = classify_episode_end_reason(
+        terminated=terminated,
+        truncated=truncated,
+        engine_status=engine_status,
+        decision_count=decision_count_i,
+        tick_count=tick_count_i,
+        no_progress_count=no_progress_count_i,
+        max_decisions=max_decisions,
+        max_ticks=max_ticks,
+        max_no_progress_decisions=max_no_progress_decisions,
+    )
 
     return GameResult(
         episode_seed=resolved_episode_seed,
@@ -448,7 +536,24 @@ def game_result_from_step(
         truncated=truncated,
         winner_seat=winner_seat,
         engine_status=engine_status,
+        decision_count=decision_count_i,
+        tick_count=tick_count_i,
+        no_progress_count=no_progress_count_i,
+        termination_reason=termination_reason,
         simulator_episode_key=simulator_episode_key,
+    )
+
+
+def _game_result_reason(result: GameResult) -> str:
+    if result.termination_reason is not None:
+        return str(result.termination_reason)
+    return classify_episode_end_reason(
+        terminated=bool(result.terminated),
+        truncated=bool(result.truncated),
+        engine_status=int(result.engine_status),
+        decision_count=int(result.decision_count),
+        tick_count=int(result.tick_count),
+        no_progress_count=int(getattr(result, "no_progress_count", 0)),
     )
 
 

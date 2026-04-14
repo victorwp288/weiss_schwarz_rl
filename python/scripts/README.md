@@ -15,14 +15,14 @@ If you are doing an ad-hoc local invocation without installing the package, use 
 
 ### `train.py`
 
-Manifest/provenance scaffold entrypoint with an optional minimal inline training smoke path.
+Canonical single-node training entrypoint with a separate scaffold-only `stack_smoke` path.
 
 ```bash
 make train-min
 # or, when you want the real M3-08 inline smoke path
 make train-inline-smoke
 # or directly
-PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.py --stack-config configs/rl_stack_locked.yaml --run-label m3_08_smoke --device cpu
+PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.py --stack-config configs/presets/typed_thesis_locked.yaml --run-label m3_08_smoke --device cpu
 ```
 
 What it does today:
@@ -30,8 +30,10 @@ What it does today:
 - loads the stack config
 - probes `weiss_sim.export_spec_bundle()` and verifies the runtime contract, unless you use `--public-demo`
 - computes run IDs and writes `manifest.json`, `spec_bundle.json`, `config_canonical.json`, and scaffold directories under `runs/`
-- when the active interpreter can import a simulator runtime with stepping APIs and the stack contains the training/model/environment blocks, it runs a tiny inline training smoke and writes training artifacts under `runs/<run>/training/`
+- for locked simulator-backed stacks, it runs the canonical single-node queue runtime and writes training artifacts under `runs/<run>/training/`
 - with `--public-demo`, stages a built-in public-safe toy catalog and deterministic toy policy bundle under `runs/<run>/public_demo/`
+- always writes resumable checkpoint artifacts under `training/checkpoints/`, including `latest.pt`, `best.pt`, and `checkpoint_tracker.json`
+- writes TensorBoard event files under `runs/<run>/tensorboard/` with run metadata, learner/runtime scalars, checkpoint alias updates, and periodic dev-eval summaries
 
 What it does **not** do today:
 
@@ -45,13 +47,36 @@ What it does **not** do today:
 
 If `weiss_sim` is not installed in the active interpreter, the script still tries to collect provenance through a working local simulator interpreter/check-out when available. Configure `WEISS_SIM_PYTHONPATH` and optionally `WEISS_SIM_PYTHON` if your simulator lives elsewhere.
 
-Important: the **inline training smoke path** requires the active interpreter itself to import a simulator runtime with stepping APIs. `make train-inline-smoke` handles the usual sibling-checkout case by prepending `../weiss-schwarz-simulator/python` to `PYTHONPATH`. If only the provenance probe works, `train.py` falls back to manifest-only mode and prints why.
+Important: the simulator-backed training path requires the active interpreter itself to import a simulator runtime with stepping APIs. `make train-inline-smoke` handles the usual sibling-checkout case by prepending `../weiss-schwarz-simulator/python` to `PYTHONPATH`. The only supported manifest-only path is the explicit scaffold stack (`configs/stack_smoke.yaml`).
+
+Resume support:
+
+```bash
+uv run python python/scripts/train.py \
+  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --resume-run-dir runs/my_locked_run \
+  --resume-from latest \
+  --max-updates 200
+```
+
+That continues the existing run in-place. You can also pass a direct checkpoint path to `--resume-from` to start a fresh resumed run under a new `--run-label`.
+
+TensorBoard live view:
+
+```bash
+tensorboard --logdir runs/<run>/tensorboard
+```
+
+The same entrypoint also supports the shipped baseline stacks:
+- `configs/presets/baselines/noleague_impala.yaml`
+- `configs/presets/baselines/norecurrence_impala.yaml`
+- `configs/presets/baselines/ppo_lite.yaml`
 
 Public-safe toy/demo staging:
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/rl_stack_locked.yaml \
+  --stack-config configs/presets/typed_thesis_locked.yaml \
   --public-demo \
   --run-label toy_public_demo
 ```
@@ -65,14 +90,14 @@ Evaluation reporting and contract-check entrypoint.
 Contract-only smoke check:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/rl_stack_locked.yaml
+uv run python python/scripts/eval.py --stack-config configs/presets/typed_thesis_locked.yaml
 ```
 
 Summary export from an existing episodes file:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/rl_stack_locked.yaml \
+  --stack-config configs/presets/typed_thesis_locked.yaml \
   --episodes-jsonl runs/some_eval/episodes.jsonl \
   --summary-json runs/some_eval/summary.json \
   --summary-csv runs/some_eval/summary.csv \
@@ -85,6 +110,7 @@ What it does today:
 - reports the evaluation config/contract surface
 - summarizes an existing seat-swapped `episodes.jsonl` file into JSON/CSV and optional diagnostics
 - with `--public-demo`, generates a deterministic demo-only `final_eval/` artifact tree from the staged toy catalog/policies
+- appends final-eval, metagame, and readiness summaries to the run's TensorBoard stream under `runs/<run>/tensorboard/`
 
 What it does **not** do today:
 
@@ -98,12 +124,35 @@ Public-safe toy/demo eval:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/rl_stack_locked.yaml \
+  --stack-config configs/presets/typed_thesis_locked.yaml \
   --public-demo \
   --run-dir runs/toy_public_demo
 ```
 
 That path writes demo-only `final_eval/` artifacts and labels them clearly in metadata.
+
+### `thesis_run.py`
+
+Thin orchestration wrapper for the canonical thesis flow: `train.py -> eval.py -> compare_runs.py`.
+
+```bash
+uv run python python/scripts/thesis_run.py \
+  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --run-label thesis_seed1 \
+  --device cuda:0 \
+  --max-updates 200
+```
+
+Dry-run planning:
+
+```bash
+uv run python python/scripts/thesis_run.py \
+  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --run-label thesis_seed1 \
+  --dry-run
+```
+
+The wrapper writes one summary JSON so the exact command chain is inspectable before and after execution.
 
 ### `paper_readiness_check.py`
 
@@ -141,7 +190,7 @@ Compare two policies on the recorded states from a deterministic replay bundle.
 ```bash
 uv run python python/scripts/replay_inspector.py \
   --bundle runs/some_run/replays/regression/replay_deadbeef.zip \
-  --stack-config configs/rl_stack_locked.yaml \
+  --stack-config configs/presets/typed_thesis_locked.yaml \
   --run-dir runs/some_run \
   --policy-a policy_000123 \
   --policy-b policy_000456 \
@@ -166,7 +215,7 @@ Metagame sensitivity reporting over an existing `final_eval/` artifact tree.
 
 ```bash
 uv run python python/scripts/metagame.py \
-  --stack-config configs/rl_stack_locked.yaml \
+  --study-config configs/study/metagame_sensitivity.yaml \
   --final-eval-dir runs/some_run/eval/final_eval
 ```
 
@@ -218,6 +267,55 @@ Current behavior:
 - reads `training/logs/training_metrics.jsonl`
 - writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`
 - with `--public-demo`, renders a clearly-labeled demo-only placeholder bundle from `final_eval/summary.json`
+
+### `launch_experiments.py`
+
+Single-node launcher for multi-seed and multi-stack runs. It round-robins jobs across a provided device list and falls back cleanly to one GPU or CPU.
+
+```bash
+uv run python python/scripts/launch_experiments.py \
+  --group-label baseline_suite \
+  --stack-config configs/presets/baselines/noleague_impala.yaml \
+  --stack-config configs/presets/baselines/ppo_lite.yaml \
+  --seed 1 \
+  --seed 2 \
+  --device cuda:0 \
+  --device cuda:1
+```
+
+### `compare_runs.py`
+
+Cross-run comparison renderer for baseline and scaling artifacts. It writes seed-aggregated benchmark plots plus JSON/CSV/Markdown summaries from existing run directories.
+
+```bash
+uv run python python/scripts/compare_runs.py \
+  --run-dir runs/impala_main_seed1 \
+  --run-dir runs/ppo_baseline_seed1
+```
+
+Or directly from a launcher/sweep group summary:
+
+```bash
+uv run python python/scripts/compare_runs.py \
+  --launch-group-summary runs/launch_groups/impala_tune_a/summary.json
+```
+
+### `sweep_experiments.py`
+
+Compact reproducible sweep launcher for the thesis baselines. It uses deterministic config overrides so each sweep run still has a proper canonical config hash and manifest.
+
+```bash
+uv run python python/scripts/sweep_experiments.py \
+  --preset impala_compact \
+  --group-label impala_tune_a \
+  --seed 1 \
+  --seed 2 \
+  --device cuda:0
+```
+
+Shipped presets:
+- `impala_compact`
+- `ppo_compact`
 
 Current non-claim:
 

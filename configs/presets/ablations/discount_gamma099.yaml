@@ -1,0 +1,8 @@
+schema_version: 2
+extends: ../typed_thesis_locked.yaml
+description: "Discount ablation with gamma 0.99"
+experiment:
+  role: ablation_discount
+rewards:
+  discount:
+    gamma: 0.99

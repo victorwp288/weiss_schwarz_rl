@@ -10,6 +10,7 @@ from weiss_rl.spec import (
     compute_spec_hash256,
     parse_spec_bundle,
 )
+from weiss_rl.observation_layout import parse_observation_layout_from_spec_bundle
 
 
 def _nested_spec_bundle(*, spec_hash: int | str = 8590000130) -> dict[str, object]:
@@ -119,3 +120,41 @@ def test_spec_bundle_hash_is_key_order_independent() -> None:
         '"policy_version":3,"spec_hash":"8590000130"}'
     )
     assert compute_spec_hash256(left) == compute_spec_hash256(right)
+
+
+def test_parse_observation_layout_from_spec_bundle_reads_typed_sections() -> None:
+    layout = parse_observation_layout_from_spec_bundle(
+        {
+            "spec_hash": "8590000130",
+            "observation": {
+                "obs_encoding_version": 2,
+                "dtype": "f32",
+                "obs_len": 12,
+                "self_first": True,
+                "header_fields": [{"name": "phase", "index": 0}],
+                "player_blocks": [
+                    {
+                        "name": "self",
+                        "base": 1,
+                        "len": 5,
+                        "slices": [
+                            {"name": "level", "start": 0, "len": 1},
+                            {"name": "stage", "start": 1, "len": 4},
+                        ],
+                    }
+                ],
+                "tail_slices": [{"name": "choice_page", "start": 6, "len": 2}],
+            },
+            "action": {
+                "action_encoding_version": 1,
+                "action_space_size": 17,
+                "pass_action_id": 16,
+            },
+        }
+    )
+
+    assert layout.obs_len == 12
+    assert layout.self_first is True
+    assert layout.header_fields[0].name == "phase"
+    assert layout.player_blocks[0].slices[1].indices == (2, 3, 4, 5)
+    assert layout.tail_slices[0].indices == (6, 7)

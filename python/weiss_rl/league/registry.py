@@ -99,12 +99,28 @@ class SnapshotRegistry:
     def latest_ids(self, n: int = 1) -> list[str]:
         return [snapshot.policy_id for snapshot in self.latest(n)]
 
-    def latest_champions(self, n: int = 1) -> list[str]:
+    def latest_champions(
+        self,
+        n: int = 1,
+        *,
+        current_update: int | None = None,
+        max_age_updates: int | None = None,
+    ) -> list[str]:
         n = int(n)
         if n <= 0:
             return []
         self.normalize()
-        return self.champion_snapshots[-n:]
+        champion_ids = list(self.champion_snapshots)
+        if current_update is not None and max_age_updates is not None and int(max_age_updates) > 0:
+            updates_by_policy = self._updates_by_policy()
+            current_update_i = int(current_update)
+            max_age_updates_i = int(max_age_updates)
+            champion_ids = [
+                snapshot_id
+                for snapshot_id in champion_ids
+                if (current_update_i - int(updates_by_policy.get(snapshot_id, current_update_i))) <= max_age_updates_i
+            ]
+        return champion_ids[-n:]
 
     def has_snapshot(self, snapshot_id: str) -> bool:
         normalized_snapshot_id = str(snapshot_id).strip()
@@ -124,6 +140,54 @@ class SnapshotRegistry:
 
     def add(self, snapshot_id: str, *, is_champion: bool = False) -> None:
         self.add_champion(snapshot_id) if is_champion else None
+
+    def remove_champion(self, snapshot_id: str) -> bool:
+        normalized_snapshot_id = str(snapshot_id).strip()
+        if not normalized_snapshot_id:
+            return False
+        original = list(self.champion_snapshots)
+        self.champion_snapshots = [snapshot for snapshot in self.champion_snapshots if snapshot != normalized_snapshot_id]
+        self.normalize()
+        return self.champion_snapshots != original
+
+    def demote_champions_newer_than(self, update: int) -> list[str]:
+        update_i = int(update)
+        self.normalize()
+        updates_by_policy = self._updates_by_policy()
+        removed = [
+            snapshot_id
+            for snapshot_id in self.champion_snapshots
+            if int(updates_by_policy.get(snapshot_id, -1)) > update_i
+        ]
+        if not removed:
+            return []
+        removed_set = set(removed)
+        self.champion_snapshots = [
+            snapshot_id for snapshot_id in self.champion_snapshots if snapshot_id not in removed_set
+        ]
+        self.normalize()
+        return removed
+
+    def demote_stale_champions(self, *, current_update: int, max_age_updates: int) -> list[str]:
+        max_age_updates_i = int(max_age_updates)
+        if max_age_updates_i <= 0:
+            return []
+        current_update_i = int(current_update)
+        self.normalize()
+        updates_by_policy = self._updates_by_policy()
+        removed = [
+            snapshot_id
+            for snapshot_id in self.champion_snapshots
+            if (current_update_i - int(updates_by_policy.get(snapshot_id, current_update_i))) > max_age_updates_i
+        ]
+        if not removed:
+            return []
+        removed_set = set(removed)
+        self.champion_snapshots = [
+            snapshot_id for snapshot_id in self.champion_snapshots if snapshot_id not in removed_set
+        ]
+        self.normalize()
+        return removed
 
     def add_snapshot(
         self,
@@ -264,6 +328,9 @@ class SnapshotRegistry:
         if not self.has_snapshot(normalized_snapshot_id):
             raise ValueError(f"snapshot_id must reference an existing snapshot: {normalized_snapshot_id!r}")
         return normalized_snapshot_id
+
+    def _updates_by_policy(self) -> dict[str, int]:
+        return {snapshot.policy_id: int(snapshot.update) for snapshot in self.snapshots}
 
     @classmethod
     def load(cls, path: Path) -> "SnapshotRegistry":

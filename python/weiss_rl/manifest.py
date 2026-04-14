@@ -161,6 +161,7 @@ def default_run_summary_payload(*, manifest: RunManifest, layout: ArtifactLayout
             "training": layout.relative(layout.training_dir),
             "eval": layout.relative(layout.eval_dir),
             "replays": layout.relative(layout.replays_dir),
+            "tensorboard": layout.relative(layout.tensorboard_dir),
             "figures": layout.relative(layout.figures_dir),
         },
         "manifest_path": layout.relative(layout.manifest_path),
