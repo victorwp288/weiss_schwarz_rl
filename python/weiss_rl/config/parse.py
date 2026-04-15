@@ -301,6 +301,8 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
             "encoder_kind",
             "typed_feature_width",
             "recurrent_core",
+            "candidate_scoring_chunk_size",
+            "cuda_learner_candidate_scoring_chunk_size",
             "layer_norm",
             "dropout",
         },
@@ -326,6 +328,16 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
             body.get("recurrent_core", "gru"),
             field_name="model.recurrent_core",
             allowed=_MODEL_RECURRENT_CORES,
+        ),
+        candidate_scoring_chunk_size=_require_int(
+            body.get("candidate_scoring_chunk_size", 65536),
+            field_name="model.candidate_scoring_chunk_size",
+            minimum=1,
+        ),
+        cuda_learner_candidate_scoring_chunk_size=_require_int(
+            body.get("cuda_learner_candidate_scoring_chunk_size", 262144),
+            field_name="model.cuda_learner_candidate_scoring_chunk_size",
+            minimum=1,
         ),
         layer_norm=_require_bool(body["layer_norm"], field_name="model.layer_norm"),
         dropout=ModelDropoutConfig(

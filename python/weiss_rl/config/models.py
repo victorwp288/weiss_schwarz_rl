@@ -50,6 +50,8 @@ class ModelConfig:
     encoder_kind: str = "mlp"
     typed_feature_width: int = 64
     recurrent_core: str = "gru"
+    candidate_scoring_chunk_size: int = 65536
+    cuda_learner_candidate_scoring_chunk_size: int = 262144
 
 
 @dataclass(frozen=True, slots=True)

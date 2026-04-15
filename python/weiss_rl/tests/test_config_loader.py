@@ -30,6 +30,8 @@ def test_load_stack_config_reads_typed_thesis_preset() -> None:
     assert stack.config.experiment.role == "main"
     assert stack.config.model is not None
     assert stack.config.model.encoder_kind == "typed_v1"
+    assert stack.config.model.candidate_scoring_chunk_size == 65536
+    assert stack.config.model.cuda_learner_candidate_scoring_chunk_size == 262144
     assert stack.config.training is not None
     assert stack.config.training.algorithm == "impala_vtrace_gru"
     assert stack.config.training.profile_timers is False
@@ -154,6 +156,8 @@ def test_load_stack_config_supports_structured_v2_preset() -> None:
     assert stack.config.model is not None
     assert stack.config.model.encoder_kind == "structured_v2"
     assert stack.config.model.recurrent_core == "gru"
+    assert stack.config.model.candidate_scoring_chunk_size == 65536
+    assert stack.config.model.cuda_learner_candidate_scoring_chunk_size == 262144
     assert stack.config.training is not None
     assert stack.config.training.algorithm == "structured_v2"
     assert stack.seed_sets["dev_eval"] == repo_root / "configs/seeds/local_dev_eval_seeds.txt"
@@ -165,6 +169,8 @@ def test_load_stack_config_supports_typed_structured_v2_preset() -> None:
 
     assert stack.config.model is not None
     assert stack.config.model.encoder_kind == "structured_v2"
+    assert stack.config.model.candidate_scoring_chunk_size == 65536
+    assert stack.config.model.cuda_learner_candidate_scoring_chunk_size == 1048576
     assert stack.config.training is not None
     assert stack.config.training.algorithm == "impala_vtrace_structured_v1"
     assert stack.config.training.profile_timers is False
@@ -191,6 +197,8 @@ def test_load_stack_config_supports_structured_dev_fast_and_acceptance_presets()
     dev_fast = load_stack_config(repo_root / "configs/presets/structured_dev_fast.yaml")
     assert dev_fast.config.league is not None
     assert dev_fast.config.league.enabled is False
+    assert dev_fast.config.model is not None
+    assert dev_fast.config.model.cuda_learner_candidate_scoring_chunk_size == 1048576
     assert dev_fast.config.training is not None
     assert dev_fast.config.training.profile_timers is False
     assert dev_fast.config.training.torch_profiler is False
@@ -201,6 +209,8 @@ def test_load_stack_config_supports_structured_dev_fast_and_acceptance_presets()
     assert dev_fast.config.training.structured_warmstart.updates == 1
 
     acceptance = load_stack_config(repo_root / "configs/presets/structured_acceptance.yaml")
+    assert acceptance.config.model is not None
+    assert acceptance.config.model.cuda_learner_candidate_scoring_chunk_size == 1048576
     assert acceptance.config.training is not None
     assert acceptance.config.training.profile_timers is False
     assert acceptance.config.training.torch_profiler is False
@@ -276,6 +286,35 @@ def test_config_hash_changes_when_resolved_semantics_change(tmp_path: Path) -> N
     assert changed.config.rewards is not None
     assert changed.config.rewards.gamma == pytest.approx(0.98)
     assert compute_config_hash256(changed) != compute_config_hash256(baseline)
+
+
+def test_load_stack_config_supports_model_candidate_scoring_chunk_overrides(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    fake_repo = _temp_repo(tmp_path)
+    thesis_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
+    thesis_path.write_text(
+        (repo_root / "configs/presets/typed_thesis_locked.yaml")
+        .read_text(encoding="utf-8")
+        .replace(
+            "  recurrent_core: gru\n",
+            "  recurrent_core: gru\n"
+            "  candidate_scoring_chunk_size: 131072\n"
+            "  cuda_learner_candidate_scoring_chunk_size: 524288\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    stack_path = fake_repo / "configs" / "typed_local.yaml"
+    stack_path.write_text(
+        (repo_root / "configs/presets/typed_local.yaml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    stack = load_stack_config(stack_path)
+
+    assert stack.config.model is not None
+    assert stack.config.model.candidate_scoring_chunk_size == 131072
+    assert stack.config.model.cuda_learner_candidate_scoring_chunk_size == 524288
 
 
 def test_load_stack_config_rejects_unknown_top_level_keys(tmp_path: Path) -> None:

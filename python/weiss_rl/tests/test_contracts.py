@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 import numpy as np
 import torch
@@ -515,6 +517,24 @@ def test_structured_legal_policy_value_model_scores_legal_candidates() -> None:
     assert next_hidden.shape == (2, 2, 256)
     assert torch.isfinite(logits[:, [0, 4]]).all()
     assert torch.all(logits[:, [1, 2, 3, 5, 6, 7, 8]] < -1e8)
+
+
+def test_structured_legal_policy_value_model_applies_candidate_scoring_chunk_config() -> None:
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=replace(
+            _structured_model_config(),
+            candidate_scoring_chunk_size=131072,
+            cuda_learner_candidate_scoring_chunk_size=524288,
+        ),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    assert model.policy_head._candidate_scoring_chunk_size == 131072
+    assert model.policy_head._cuda_learner_candidate_scoring_chunk_size == 524288
 
 
 def test_structured_legal_policy_value_model_packed_legal_matches_mask() -> None:

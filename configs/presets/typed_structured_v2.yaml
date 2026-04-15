@@ -3,6 +3,7 @@ description: typed_structured_v2 local preset
 extends: typed_local.yaml
 model:
   encoder_kind: structured_v2
+  cuda_learner_candidate_scoring_chunk_size: 1048576
 training:
   algorithm: impala_vtrace_structured_v1
   profile_timers: false

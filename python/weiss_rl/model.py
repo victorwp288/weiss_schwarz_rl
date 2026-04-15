@@ -857,12 +857,23 @@ class _StructuredLegalActionHead(nn.Module):
         action_feature_width: int,
         layer_norm: bool,
         dropout_p: float,
+        candidate_scoring_chunk_size: int = 65536,
+        cuda_learner_candidate_scoring_chunk_size: int = 262144,
     ) -> None:
         super().__init__()
         if latent_width <= 0:
             raise ValueError(f"latent_width must be >= 1, got {latent_width}")
         if action_feature_width <= 0:
             raise ValueError(f"action_feature_width must be >= 1, got {action_feature_width}")
+        if candidate_scoring_chunk_size <= 0:
+            raise ValueError(
+                f"candidate_scoring_chunk_size must be >= 1, got {candidate_scoring_chunk_size}"
+            )
+        if cuda_learner_candidate_scoring_chunk_size <= 0:
+            raise ValueError(
+                "cuda_learner_candidate_scoring_chunk_size must be >= 1, "
+                f"got {cuda_learner_candidate_scoring_chunk_size}"
+            )
         self.action_dim = int(action_catalog.action_space_size)
         self._stage_slot_count = max(int(action_catalog.max_stage), 1)
         self._observation_contract = observation_contract
@@ -1011,8 +1022,8 @@ class _StructuredLegalActionHead(nn.Module):
         scorer_layers.append(nn.Linear(state_width, 1))
         self.joint_scorer = nn.Sequential(*scorer_layers)
         self.family_bias = nn.Parameter(torch.zeros(max(len(family_names), 1)))
-        self._candidate_scoring_chunk_size = 65536
-        self._cuda_learner_candidate_scoring_chunk_size = 262144
+        self._candidate_scoring_chunk_size = int(candidate_scoring_chunk_size)
+        self._cuda_learner_candidate_scoring_chunk_size = int(cuda_learner_candidate_scoring_chunk_size)
         self.register_buffer("_family_ids", torch.as_tensor(family_ids, dtype=torch.long))
         self.register_buffer("_action_arg0", torch.as_tensor(action_arg0, dtype=torch.long))
         self.register_buffer("_action_arg1", torch.as_tensor(action_arg1, dtype=torch.long))
@@ -2128,6 +2139,8 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
             action_feature_width=action_feature_width,
             layer_norm=bool(structured_config.layer_norm),
             dropout_p=float(encoder_dropout),
+            candidate_scoring_chunk_size=int(structured_config.candidate_scoring_chunk_size),
+            cuda_learner_candidate_scoring_chunk_size=int(structured_config.cuda_learner_candidate_scoring_chunk_size),
         )
         self.action_catalog = action_catalog
         self._structured_observation_contract = observation_contract
