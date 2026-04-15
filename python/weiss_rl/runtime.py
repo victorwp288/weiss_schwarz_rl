@@ -934,6 +934,7 @@ class QueueRuntime:
         self._pfsp_last_champion_envs = 0
         self._pfsp_last_recent_envs = 0
         self._pfsp_last_hard_negative_envs = 0
+        self._disable_mirror_policy_fusion = False
         self._opponent_champion_ids: tuple[str, ...] = ()
         self._opponent_recent_ids: tuple[str, ...] = ()
         self._opponent_hard_negative_ids: tuple[str, ...] = ()
@@ -1241,6 +1242,15 @@ class QueueRuntime:
                     self._reset_actor_state_for_fixed_opponents(actor)
             if inserted_teacher_heuristic:
                 self._opponent_heuristic_policies.pop(HEURISTIC_PUBLIC_POLICY_ID, None)
+
+    @contextmanager
+    def disable_mirror_policy_fusion(self) -> Any:
+        previous = bool(getattr(self, "_disable_mirror_policy_fusion", False))
+        self._disable_mirror_policy_fusion = True
+        try:
+            yield
+        finally:
+            self._disable_mirror_policy_fusion = previous
 
     def close(self) -> None:
         if self._collector_result_queue is not None:
@@ -2054,6 +2064,7 @@ class QueueRuntime:
     def _heuristic_public_actions_from_ids(
         self,
         *,
+        actor: _ActorState | None,
         heuristic_policy: HeuristicPublicPolicy,
         row_indices: np.ndarray,
         obs_step: np.ndarray,
@@ -2067,6 +2078,18 @@ class QueueRuntime:
         if counters is not None:
             counters["tactical_row_count"] += int(row_indices_array.shape[0])
             counters["fixed_opponent_tactical_row_count"] += int(row_indices_array.shape[0])
+        if actor is not None and str(getattr(self, "_fixed_opponent_backend", "python_batched")) == "simulator_native":
+            if counters is not None:
+                candidate_counts = np.maximum(
+                    np.asarray(legal_offsets[row_indices_array + 1], dtype=np.int64)
+                    - np.asarray(legal_offsets[row_indices_array], dtype=np.int64),
+                    0,
+                )
+                counters["packed_candidate_count"] += int(candidate_counts.sum())
+            return self._heuristic_public_actions_from_pool(
+                actor=actor,
+                row_indices=row_indices_array,
+            )
         batch_choose = getattr(heuristic_policy, "choose_actions_from_meta_batch", None)
         if callable(batch_choose):
             if legal_action_meta is None:
@@ -2115,6 +2138,7 @@ class QueueRuntime:
     def _heuristic_public_actions_from_mask(
         self,
         *,
+        actor: _ActorState | None,
         heuristic_policy: HeuristicPublicPolicy,
         row_indices: np.ndarray,
         obs_step: np.ndarray,
@@ -2122,15 +2146,45 @@ class QueueRuntime:
         counters: dict[str, int] | None = None,
     ) -> np.ndarray:
         actions = np.zeros((int(row_indices.shape[0]),), dtype=np.int64)
+        row_indices_array = np.asarray(row_indices, dtype=np.int64)
         if counters is not None:
-            counters["tactical_row_count"] += int(np.asarray(row_indices).shape[0])
-            counters["fixed_opponent_tactical_row_count"] += int(np.asarray(row_indices).shape[0])
-        for offset, row_index in enumerate(row_indices.tolist()):
+            counters["tactical_row_count"] += int(row_indices_array.shape[0])
+            counters["fixed_opponent_tactical_row_count"] += int(row_indices_array.shape[0])
+        if actor is not None and str(getattr(self, "_fixed_opponent_backend", "python_batched")) == "simulator_native":
+            if counters is not None:
+                counters["packed_candidate_count"] += int(
+                    np.count_nonzero(np.asarray(legal_mask[row_indices_array], dtype=np.bool_))
+                )
+            return self._heuristic_public_actions_from_pool(
+                actor=actor,
+                row_indices=row_indices_array,
+            )
+        for offset, row_index in enumerate(row_indices_array.tolist()):
             legal_ids = np.flatnonzero(np.asarray(legal_mask[int(row_index)], dtype=np.bool_)).astype(np.uint32, copy=False)
             if counters is not None:
                 counters["packed_candidate_count"] += int(legal_ids.shape[0])
             actions[offset] = int(heuristic_policy.choose_action(np.asarray(obs_step[int(row_index)]), legal_ids))
         return actions
+
+    def _heuristic_public_actions_from_pool(
+        self,
+        *,
+        actor: _ActorState | None,
+        row_indices: np.ndarray,
+    ) -> np.ndarray:
+        if actor is None:
+            raise RuntimeError("simulator_native fixed-opponent routing requires actor context")
+        choose_into = getattr(getattr(actor, "env", None), "pool", None)
+        choose_into = getattr(choose_into, "choose_heuristic_public_actions_into", None)
+        if not callable(choose_into):
+            raise RuntimeError(
+                "training.fixed_opponent_backend=simulator_native requires "
+                "pool.choose_heuristic_public_actions_into(...)"
+            )
+        env_indices = np.asarray(row_indices, dtype=np.uint32)
+        chosen_actions = np.zeros((int(env_indices.shape[0]),), dtype=np.uint16)
+        choose_into(env_indices, chosen_actions)
+        return chosen_actions.astype(np.int64, copy=False)
 
     def _teacher_label_arrays(self, num_rows: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         shape = (int(num_rows),)
@@ -2202,6 +2256,7 @@ class QueueRuntime:
         if counters is not None:
             counters["teacher_tactical_row_count"] += int(tactical_rows.size)
         chosen_actions = self._heuristic_public_actions_from_ids(
+            actor=None,
             heuristic_policy=self._teacher_policy,
             row_indices=tactical_rows,
             obs_step=obs_step,
@@ -2240,6 +2295,7 @@ class QueueRuntime:
         if counters is not None:
             counters["teacher_tactical_row_count"] += int(tactical_rows.size)
         chosen_actions = self._heuristic_public_actions_from_mask(
+            actor=None,
             heuristic_policy=self._teacher_policy,
             row_indices=tactical_rows,
             obs_step=obs_step,
@@ -2442,6 +2498,7 @@ class QueueRuntime:
                     actor_step=actor_step,
                 )
                 chosen_actions = self._heuristic_public_actions_from_mask(
+                    actor=actor,
                     heuristic_policy=heuristic_policy,
                     row_indices=policy_rows,
                     obs_step=obs_step,
@@ -2505,6 +2562,7 @@ class QueueRuntime:
         logp_out: np.ndarray | None,
         rng: np.random.Generator,
         sample_actions: bool = True,
+        heuristic_rows_hidden_already_advanced: bool = False,
     ) -> None:
         for policy_id in sorted({str(actor.opponent_policy_id_by_env[index]) for index in row_indices.tolist()}):
             policy_rows = row_indices[actor.opponent_policy_id_by_env[row_indices] == policy_id]
@@ -2530,14 +2588,16 @@ class QueueRuntime:
                 continue
             heuristic_policy = getattr(self, "_opponent_heuristic_policies", {}).get(policy_id)
             if heuristic_policy is not None:
-                self._advance_hidden_only(
-                    model=_actor_inference_model(actor),
-                    hidden_state=actor.seat_hidden,
-                    row_indices=policy_rows,
-                    obs_step=obs_step,
-                    actor_step=actor_step,
-                )
+                if not bool(heuristic_rows_hidden_already_advanced):
+                    self._advance_hidden_only(
+                        model=_actor_inference_model(actor),
+                        hidden_state=actor.seat_hidden,
+                        row_indices=policy_rows,
+                        obs_step=obs_step,
+                        actor_step=actor_step,
+                    )
                 chosen_actions = self._heuristic_public_actions_from_ids(
+                    actor=actor,
                     heuristic_policy=heuristic_policy,
                     row_indices=policy_rows,
                     obs_step=obs_step,
@@ -3094,55 +3154,79 @@ class QueueRuntime:
                     entry for entry in entries if entry[1].ids_offsets is None
                 ]
                 if packed_entries:
-                    packed_obs_parts: list[np.ndarray] = []
-                    packed_ids: list[np.ndarray] = []
-                    packed_meta: list[np.ndarray] = []
-                    packed_offsets = [np.array([0], dtype=np.uint32)]
-                    packed_entry_counts: list[int] = []
-                    for actor, batch, row_indices, obs_step, _actor_step, _logits_out, _values_out in packed_entries:
-                        legal_ids, legal_offsets = _require_ids_offsets(batch)
-                        subset_ids, subset_offsets, subset_meta = _slice_packed_rows_with_meta(
-                            legal_ids,
-                            legal_offsets,
-                            row_indices,
-                            legal_action_meta=_optional_legal_action_meta(batch),
+                    if str(getattr(self, "_fixed_opponent_backend", "python_batched")) == "simulator_native":
+                        for actor, batch, row_indices, obs_step, _actor_step, logits_out, values_out in packed_entries:
+                            legal_ids, legal_offsets = _require_ids_offsets(batch)
+                            chosen_actions = self._heuristic_public_actions_from_ids(
+                                actor=actor,
+                                heuristic_policy=heuristic_policy,
+                                row_indices=row_indices,
+                                obs_step=obs_step,
+                                legal_ids=legal_ids,
+                                legal_offsets=legal_offsets,
+                                legal_action_meta=_optional_legal_action_meta(batch),
+                            )
+                            self._write_deterministic_logits_from_packed(
+                                logits_out=logits_out,
+                                row_indices=row_indices,
+                                chosen_actions=chosen_actions,
+                                legal_ids=legal_ids,
+                                legal_offsets=legal_offsets,
+                            )
+                            values_out[row_indices] = 0.0
+                    else:
+                        packed_obs_parts: list[np.ndarray] = []
+                        packed_ids: list[np.ndarray] = []
+                        packed_meta: list[np.ndarray] = []
+                        packed_offsets = [np.array([0], dtype=np.uint32)]
+                        packed_entry_counts: list[int] = []
+                        for actor, batch, row_indices, obs_step, _actor_step, _logits_out, _values_out in packed_entries:
+                            legal_ids, legal_offsets = _require_ids_offsets(batch)
+                            subset_ids, subset_offsets, subset_meta = _slice_packed_rows_with_meta(
+                                legal_ids,
+                                legal_offsets,
+                                row_indices,
+                                legal_action_meta=_optional_legal_action_meta(batch),
+                            )
+                            offset_base = int(packed_offsets[-1][-1])
+                            packed_ids.append(subset_ids)
+                            packed_offsets.append(np.asarray(subset_offsets[1:] + offset_base, dtype=np.uint32))
+                            if subset_meta is not None:
+                                packed_meta.append(subset_meta)
+                            packed_obs_parts.append(np.asarray(obs_step[row_indices], dtype=np.int32))
+                            packed_entry_counts.append(int(row_indices.shape[0]))
+                        packed_chosen_actions = heuristic_policy.choose_actions_from_meta_batch(
+                            np.concatenate(packed_obs_parts, axis=0)
+                            if packed_obs_parts
+                            else np.zeros((0, 0), dtype=np.int32),
+                            np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
+                            np.concatenate(packed_offsets, axis=0),
+                            np.concatenate(packed_meta, axis=0) if packed_meta else None,
                         )
-                        offset_base = int(packed_offsets[-1][-1])
-                        packed_ids.append(subset_ids)
-                        packed_offsets.append(np.asarray(subset_offsets[1:] + offset_base, dtype=np.uint32))
-                        if subset_meta is not None:
-                            packed_meta.append(subset_meta)
-                        packed_obs_parts.append(np.asarray(obs_step[row_indices], dtype=np.int32))
-                        packed_entry_counts.append(int(row_indices.shape[0]))
-                    packed_chosen_actions = heuristic_policy.choose_actions_from_meta_batch(
-                        np.concatenate(packed_obs_parts, axis=0) if packed_obs_parts else np.zeros((0, 0), dtype=np.int32),
-                        np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
-                        np.concatenate(packed_offsets, axis=0),
-                        np.concatenate(packed_meta, axis=0) if packed_meta else None,
-                    )
-                    offset = 0
-                    for (actor, batch, row_indices, _obs_step, _actor_step, logits_out, values_out), count in zip(
-                        packed_entries,
-                        packed_entry_counts,
-                        strict=True,
-                    ):
-                        legal_ids, legal_offsets = _require_ids_offsets(batch)
-                        chosen_actions = np.asarray(
-                            packed_chosen_actions[offset : offset + count],
-                            dtype=np.int64,
-                        )
-                        self._write_deterministic_logits_from_packed(
-                            logits_out=logits_out,
-                            row_indices=row_indices,
-                            chosen_actions=chosen_actions,
-                            legal_ids=legal_ids,
-                            legal_offsets=legal_offsets,
-                        )
-                        values_out[row_indices] = 0.0
-                        offset += count
+                        offset = 0
+                        for (actor, batch, row_indices, _obs_step, _actor_step, logits_out, values_out), count in zip(
+                            packed_entries,
+                            packed_entry_counts,
+                            strict=True,
+                        ):
+                            legal_ids, legal_offsets = _require_ids_offsets(batch)
+                            chosen_actions = np.asarray(
+                                packed_chosen_actions[offset : offset + count],
+                                dtype=np.int64,
+                            )
+                            self._write_deterministic_logits_from_packed(
+                                logits_out=logits_out,
+                                row_indices=row_indices,
+                                chosen_actions=chosen_actions,
+                                legal_ids=legal_ids,
+                                legal_offsets=legal_offsets,
+                            )
+                            values_out[row_indices] = 0.0
+                            offset += count
                 for actor, batch, row_indices, obs_step, _actor_step, logits_out, values_out in mask_entries:
                     legal_mask = _require_mask(batch)
                     chosen_actions = self._heuristic_public_actions_from_mask(
+                        actor=actor,
                         heuristic_policy=heuristic_policy,
                         row_indices=row_indices,
                         obs_step=obs_step,
@@ -3257,17 +3341,61 @@ class QueueRuntime:
                 ]
                 for actor, row_indices in zip(actors, policy_row_indices, strict=True):
                     state_by_actor[int(actor.actor_id)]["counters"]["focal_row_count"] += int(row_indices.shape[0])
+                fuse_mirror_policy_rows = not bool(getattr(self, "_disable_mirror_policy_fusion", False))
+                heuristic_policy_ids = tuple(getattr(self, "_opponent_heuristic_policies", {}).keys())
+                heuristic_rows_by_actor: list[np.ndarray] = []
+                mirror_rows_by_actor: list[np.ndarray] = []
+                residual_rows_by_actor: list[np.ndarray] = []
+                for actor, actor_step in zip(actors, actor_steps, strict=True):
+                    opponent_indices = np.flatnonzero(actor_step != actor.focal_seat_by_env)
+                    if opponent_indices.size == 0:
+                        heuristic_rows_by_actor.append(np.zeros((0,), dtype=np.int64))
+                        mirror_rows_by_actor.append(np.zeros((0,), dtype=np.int64))
+                        residual_rows_by_actor.append(np.zeros((0,), dtype=np.int64))
+                        continue
+                    opponent_policy_ids = np.asarray(
+                        actor.opponent_policy_id_by_env[opponent_indices],
+                        dtype=object,
+                    )
+                    heuristic_mask = (
+                        np.isin(opponent_policy_ids, heuristic_policy_ids)
+                        if heuristic_policy_ids
+                        else np.zeros(opponent_policy_ids.shape, dtype=np.bool_)
+                    )
+                    mirror_mask = opponent_policy_ids == _MIRROR_OPPONENT_POLICY_ID
+                    heuristic_rows_by_actor.append(opponent_indices[heuristic_mask])
+                    mirror_rows_by_actor.append(opponent_indices[mirror_mask])
+                    residual_rows_by_actor.append(opponent_indices[~(heuristic_mask | mirror_mask)])
+                for actor, heuristic_rows, mirror_rows, residual_rows in zip(
+                    actors,
+                    heuristic_rows_by_actor,
+                    mirror_rows_by_actor,
+                    residual_rows_by_actor,
+                    strict=True,
+                ):
+                    state_by_actor[int(actor.actor_id)]["counters"]["opponent_row_count"] += int(
+                        heuristic_rows.shape[0] + mirror_rows.shape[0] + residual_rows.shape[0]
+                    )
+                sampled_policy_rows_by_actor = [
+                    (
+                        np.concatenate((focal_rows, mirror_rows), axis=0).astype(np.int64, copy=False)
+                        if fuse_mirror_policy_rows and mirror_rows.size > 0
+                        else focal_rows
+                    )
+                    for focal_rows, mirror_rows in zip(policy_row_indices, mirror_rows_by_actor, strict=True)
+                ]
                 forward_started = time.perf_counter()
-                self._central_sample_policy_rows_ids(
-                    actors=actors,
-                    batches=batches,
-                    obs_steps=obs_steps,
-                    actor_steps=actor_steps,
-                    row_indices_by_actor=policy_row_indices,
-                    values_outs=value_steps,
-                    actions_outs=action_steps,
-                    logp_outs=logp_steps,
-                )
+                if any(rows.size > 0 for rows in sampled_policy_rows_by_actor):
+                    self._central_sample_policy_rows_ids(
+                        actors=actors,
+                        batches=batches,
+                        obs_steps=obs_steps,
+                        actor_steps=actor_steps,
+                        row_indices_by_actor=sampled_policy_rows_by_actor,
+                        values_outs=value_steps,
+                        actions_outs=action_steps,
+                        logp_outs=logp_steps,
+                    )
                 self._record_batch_timer_ms("central_focal_policy", time.perf_counter() - forward_started)
                 per_actor_forward_ms = int(
                     ((time.perf_counter() - forward_started) * 1000.0) / max(len(actors), 1)
@@ -3276,7 +3404,32 @@ class QueueRuntime:
                     state["counters"]["actor_policy_forward_ms"] += per_actor_forward_ms
 
                 overwrite_started = time.perf_counter()
-                for actor, batch, obs_step, actor_step, value_step, action_step, logp_step in zip(
+                if fuse_mirror_policy_rows and heuristic_policy_ids:
+                    heuristic_actors: list[_ActorState] = []
+                    heuristic_obs_steps: list[np.ndarray] = []
+                    heuristic_actor_steps: list[np.ndarray] = []
+                    heuristic_row_indices_for_advance: list[np.ndarray] = []
+                    for actor, obs_step, actor_step, heuristic_rows in zip(
+                        actors,
+                        obs_steps,
+                        actor_steps,
+                        heuristic_rows_by_actor,
+                        strict=True,
+                    ):
+                        if heuristic_rows.size == 0:
+                            continue
+                        heuristic_actors.append(actor)
+                        heuristic_obs_steps.append(obs_step)
+                        heuristic_actor_steps.append(actor_step)
+                        heuristic_row_indices_for_advance.append(heuristic_rows)
+                    if heuristic_actors:
+                        self._central_advance_actor_rows(
+                            actors=heuristic_actors,
+                            obs_steps=heuristic_obs_steps,
+                            actor_steps=heuristic_actor_steps,
+                            row_indices_by_actor=heuristic_row_indices_for_advance,
+                        )
+                for actor, batch, obs_step, actor_step, value_step, action_step, logp_step, heuristic_rows, residual_rows in zip(
                     actors,
                     batches,
                     obs_steps,
@@ -3284,27 +3437,49 @@ class QueueRuntime:
                     value_steps,
                     action_steps,
                     logp_steps,
+                    heuristic_rows_by_actor,
+                    residual_rows_by_actor,
                     strict=True,
                 ):
-                    opponent_indices = np.flatnonzero(actor_step != actor.focal_seat_by_env)
-                    if opponent_indices.size == 0:
-                        continue
-                    state_by_actor[int(actor.actor_id)]["counters"]["opponent_row_count"] += int(opponent_indices.shape[0])
-                    self._apply_opponent_rows_ids(
-                        actor=actor,
-                        row_indices=opponent_indices,
-                        obs_step=obs_step,
-                        actor_step=actor_step,
-                        legal_ids=_require_ids_offsets(batch)[0],
-                        legal_offsets=_require_ids_offsets(batch)[1],
-                        legal_action_meta=_optional_legal_action_meta(batch),
-                        logits_out=None,
-                        values_out=value_step,
-                        actions_out=action_step,
-                        logp_out=logp_step,
-                        rng=actor.rng,
-                        sample_actions=True,
-                    )
+                    legal_ids, legal_offsets = _require_ids_offsets(batch)
+                    legal_action_meta = _optional_legal_action_meta(batch)
+                    if fuse_mirror_policy_rows:
+                        if heuristic_rows.size > 0:
+                            self._apply_opponent_rows_ids(
+                                actor=actor,
+                                row_indices=heuristic_rows,
+                                obs_step=obs_step,
+                                actor_step=actor_step,
+                                legal_ids=legal_ids,
+                                legal_offsets=legal_offsets,
+                                legal_action_meta=legal_action_meta,
+                                logits_out=None,
+                                values_out=value_step,
+                                actions_out=action_step,
+                                logp_out=logp_step,
+                                rng=actor.rng,
+                                sample_actions=True,
+                                heuristic_rows_hidden_already_advanced=True,
+                            )
+                        opponent_rows = residual_rows
+                    else:
+                        opponent_rows = np.flatnonzero(actor_step != actor.focal_seat_by_env)
+                    if opponent_rows.size > 0:
+                        self._apply_opponent_rows_ids(
+                            actor=actor,
+                            row_indices=opponent_rows,
+                            obs_step=obs_step,
+                            actor_step=actor_step,
+                            legal_ids=legal_ids,
+                            legal_offsets=legal_offsets,
+                            legal_action_meta=legal_action_meta,
+                            logits_out=None,
+                            values_out=value_step,
+                            actions_out=action_step,
+                            logp_out=logp_step,
+                            rng=actor.rng,
+                            sample_actions=True,
+                        )
                 self._record_batch_timer_ms("central_fixed_opponent_overwrite", time.perf_counter() - overwrite_started)
                 per_actor_overwrite_ms = int(
                     ((time.perf_counter() - overwrite_started) * 1000.0) / max(len(actors), 1)

@@ -33,6 +33,7 @@ def test_load_stack_config_reads_typed_thesis_preset() -> None:
     assert stack.config.training is not None
     assert stack.config.training.algorithm == "impala_vtrace_gru"
     assert stack.config.training.profile_timers is False
+    assert stack.config.training.torch_profiler is False
     assert stack.config.training.compile_actor_inference is False
     assert stack.config.training.structured_metrics_mode == "off"
     assert stack.config.training.teacher_aux_mode == "always"
@@ -167,6 +168,7 @@ def test_load_stack_config_supports_typed_structured_v2_preset() -> None:
     assert stack.config.training is not None
     assert stack.config.training.algorithm == "impala_vtrace_structured_v1"
     assert stack.config.training.profile_timers is False
+    assert stack.config.training.torch_profiler is False
     assert stack.config.training.compile_actor_inference is False
     assert stack.config.training.structured_metrics_mode == "sampled"
     assert stack.config.training.teacher_aux_mode == "always"
@@ -191,6 +193,7 @@ def test_load_stack_config_supports_structured_dev_fast_and_acceptance_presets()
     assert dev_fast.config.league.enabled is False
     assert dev_fast.config.training is not None
     assert dev_fast.config.training.profile_timers is False
+    assert dev_fast.config.training.torch_profiler is False
     assert dev_fast.config.training.compile_actor_inference is False
     assert dev_fast.config.training.structured_metrics_mode == "off"
     assert dev_fast.config.training.teacher_aux_mode == "warmstart_only"
@@ -200,6 +203,7 @@ def test_load_stack_config_supports_structured_dev_fast_and_acceptance_presets()
     acceptance = load_stack_config(repo_root / "configs/presets/structured_acceptance.yaml")
     assert acceptance.config.training is not None
     assert acceptance.config.training.profile_timers is False
+    assert acceptance.config.training.torch_profiler is False
     assert acceptance.config.training.compile_actor_inference is False
     assert acceptance.config.training.structured_metrics_mode == "sampled"
     assert acceptance.config.training.teacher_aux_mode == "always"

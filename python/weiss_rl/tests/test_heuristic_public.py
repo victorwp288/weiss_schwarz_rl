@@ -9,6 +9,7 @@ import torch
 
 from weiss_rl.action_catalog import ActionCatalog as SharedActionCatalog
 from weiss_rl.config import load_stack_config
+from weiss_rl.envs.decision_env import DecisionBoundaryEnv
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, RANDOM_LEGAL_POLICY_ID
 from weiss_rl.eval.simulator_runner import resolve_eval_policies
@@ -106,6 +107,9 @@ def _heuristic_spec_bundle() -> dict[str, object]:
 
 def _empty_obs() -> np.ndarray:
     return np.zeros((_heuristic_spec_bundle()["observation"]["obs_len"],), dtype=np.int32)  # type: ignore[index]
+
+
+_LEGAL_DECK = (list(range(1, 14)) * 4)[:50]
 
 
 def _set_stage(
@@ -257,6 +261,44 @@ def test_heuristic_public_batch_meta_fast_path_falls_back_on_invalid_meta() -> N
         policy.choose_action(obs_a, legal_ids),
         policy.choose_action(obs_b, legal_ids),
     ]
+
+
+def test_simulator_native_heuristic_pool_matches_python_oracle_across_live_steps() -> None:
+    import weiss_sim
+
+    env = DecisionBoundaryEnv.create(
+        legality="ids_offsets",
+        mode="train",
+        num_envs=4,
+        db_path=None,
+        deck_lists=[_LEGAL_DECK, _LEGAL_DECK],
+        deck_ids=[101, 102],
+        max_decisions=200,
+        max_ticks=10_000,
+        seed=321,
+    )
+    try:
+        policy = HeuristicPublicPolicy.from_spec_bundle(weiss_sim.spec_bundle())
+        batch = env.reset()
+        for _ in range(24):
+            assert batch.ids_offsets is not None
+            assert batch.legal_action_meta is not None
+            legal_ids, legal_offsets = batch.ids_offsets
+            native_actions = np.zeros((env.num_envs,), dtype=np.uint16)
+            env.pool.choose_heuristic_public_actions_into(
+                np.arange(env.num_envs, dtype=np.uint32),
+                native_actions,
+            )
+            oracle_actions = policy.choose_actions_from_meta_batch(
+                np.asarray(batch.obs, dtype=np.int32),
+                np.asarray(legal_ids, dtype=np.uint32),
+                np.asarray(legal_offsets, dtype=np.uint32),
+                np.asarray(batch.legal_action_meta, dtype=np.uint16),
+            )
+            npt.assert_array_equal(native_actions.astype(np.int64), oracle_actions)
+            batch = env.step(native_actions.astype(np.int64))
+    finally:
+        env.close()
 
 
 def test_action_catalog_is_shared_with_legacy_heuristic_export() -> None:

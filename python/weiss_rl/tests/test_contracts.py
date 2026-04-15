@@ -4,6 +4,7 @@ import pytest
 import numpy as np
 import torch
 
+from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
 from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.model import (
@@ -239,6 +240,31 @@ def _structured_hand_spec_bundle() -> dict[str, object]:
         },
         "compatibility_hash": "structured_v2_hand_test_hash",
     }
+
+
+def _packed_meta_from_ids(action_catalog: ActionCatalog, packed_ids: np.ndarray) -> np.ndarray:
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    attack_type_index = {name: index for index, name in enumerate(action_catalog.attack_type_names)}
+    unused = np.iinfo(np.uint16).max
+    rows = np.full((int(packed_ids.shape[0]), 4), unused, dtype=np.uint16)
+    for row_index, action_id in enumerate(np.asarray(packed_ids, dtype=np.int64).tolist()):
+        decoded = action_catalog.decode(int(action_id))
+        rows[row_index, 0] = np.uint16(family_index[decoded.family])
+        if decoded.hand_index is not None:
+            rows[row_index, 1] = np.uint16(decoded.hand_index)
+        if decoded.stage_slot is not None:
+            rows[row_index, 2] = np.uint16(decoded.stage_slot)
+        if decoded.from_slot is not None:
+            rows[row_index, 1] = np.uint16(decoded.from_slot)
+        if decoded.to_slot is not None:
+            rows[row_index, 2] = np.uint16(decoded.to_slot)
+        if decoded.slot is not None:
+            rows[row_index, 1] = np.uint16(decoded.slot)
+        if decoded.attack_type is not None:
+            rows[row_index, 2] = np.uint16(attack_type_index[decoded.attack_type])
+        if decoded.index is not None:
+            rows[row_index, 1] = np.uint16(decoded.index)
+    return rows
 
 
 def test_policy_value_model_forward_shapes() -> None:
@@ -526,6 +552,98 @@ def test_structured_legal_policy_value_model_packed_legal_matches_mask() -> None
     torch.testing.assert_close(logits_mask, logits_packed)
     torch.testing.assert_close(values_mask, values_packed)
     torch.testing.assert_close(next_hidden_mask, next_hidden_packed)
+
+
+def test_structured_legal_policy_value_model_packed_meta_matches_packed_ids() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((2, 18), dtype=torch.float32)
+    seat_hidden = model.initial_seat_hidden(2)
+    packed_ids = np.asarray([0, 4, 6, 8, 3, 5, 7, 8], dtype=np.int32)
+    packed_offsets = np.asarray([0, 4, 8], dtype=np.int32)
+    action_catalog = ActionCatalog.from_spec_bundle(_structured_spec_bundle())
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+
+    logits_packed, values_packed, next_hidden_packed = model.forward_seat_aware(
+        obs,
+        torch.tensor([0, 1]),
+        seat_hidden,
+        legal_actions=LegalActionBatch.from_packed(packed_ids, packed_offsets, action_space=9),
+    )
+    logits_meta, values_meta, next_hidden_meta = model.forward_seat_aware(
+        obs,
+        torch.tensor([0, 1]),
+        seat_hidden,
+        legal_actions=LegalActionBatch.from_packed(
+            packed_ids,
+            packed_offsets,
+            meta=packed_meta,
+            action_space=9,
+        ),
+    )
+
+    torch.testing.assert_close(logits_packed, logits_meta)
+    torch.testing.assert_close(values_packed, values_meta)
+    torch.testing.assert_close(next_hidden_packed, next_hidden_meta)
+
+
+def test_structured_legal_policy_value_model_actor_and_learner_packed_scorers_match() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((2, 18), dtype=torch.float32)
+    acting_seat = torch.tensor([0, 1], dtype=torch.long)
+    seat_hidden = model.initial_seat_hidden(2)
+    packed_ids = np.asarray([0, 4, 6, 8, 3, 5, 7, 8], dtype=np.int32)
+    packed_offsets = np.asarray([0, 4, 8], dtype=np.int32)
+    packed_meta = _packed_meta_from_ids(ActionCatalog.from_spec_bundle(_structured_spec_bundle()), packed_ids)
+    legal_actions = LegalActionBatch.from_packed(
+        packed_ids,
+        packed_offsets,
+        meta=packed_meta,
+        action_space=9,
+    )
+
+    recurrent_output, state_repr, observation_context, _value, _next_hidden = model.forward_trunk_packed_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+    )
+
+    learner_scores = model.score_packed_legal_candidates(
+        recurrent_output,
+        obs,
+        legal_actions,
+        state_repr=state_repr,
+        observation_context=observation_context,
+        scoring_mode="learner",
+    )
+    with torch.no_grad():
+        actor_scores = model.score_packed_legal_candidates(
+            recurrent_output,
+            obs,
+            legal_actions,
+            state_repr=state_repr,
+            observation_context=observation_context,
+            scoring_mode="actor",
+        )
+
+    torch.testing.assert_close(learner_scores, actor_scores)
 
 
 def test_structured_legal_policy_value_model_sequence_forward_matches_stepwise_packed() -> None:

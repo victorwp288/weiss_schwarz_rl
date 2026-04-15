@@ -2036,7 +2036,7 @@ def _run_structured_warmstart(
     )
     latest_metrics: dict[str, float] = {}
     try:
-        with runtime.structured_warmstart_source_mix() as warmstart_source_metrics:
+        with runtime.structured_warmstart_source_mix() as warmstart_source_metrics, runtime.disable_mirror_policy_fusion():
             for warmstart_step in range(updates):
                 with _profile_block(profile_timers, "collect_training_batch"):
                     runtime_batch = _collect_training_batch(
@@ -3481,6 +3481,7 @@ def _run_minimal_training(
     runtime_mode: QueueRuntimeMode,
     b1_baseline_run_dir: Path | None,
     profile_timers: bool = False,
+    torch_profiler: bool = False,
     resume_checkpoint_path: Path | None = None,
     tensorboard_logger: TensorBoardLogger | None = None,
 ) -> dict[str, float]:
@@ -3580,7 +3581,7 @@ def _run_minimal_training(
     last_dev_eval_update_count: int | None = None
     start_time = time.time()
     profiler, profiler_context, profiler_trace_dir = _build_training_profiler(
-        enabled=bool(profile_timers),
+        enabled=bool(torch_profiler),
         run_dir=artifacts.run_dir,
         device=device,
     )
@@ -3930,7 +3931,12 @@ def main() -> None:
     parser.add_argument(
         "--profile-timers",
         action="store_true",
-        help="Enable the structured profiling entrypoint and emit a torch profiler trace",
+        help="Enable cheap runtime/learner timers and record_function ranges without emitting a torch profiler trace",
+    )
+    parser.add_argument(
+        "--torch-profiler",
+        action="store_true",
+        help="Emit a torch profiler trace under profiling/torch_profiler/trace.json",
     )
     parser.add_argument("--profile", type=str, default="", help="Optional simulator profile override")
     parser.add_argument("--device", type=str, default="", help="Optional learner device override")
@@ -4091,6 +4097,7 @@ def main() -> None:
     if training_config is not None:
         run_summary_payload["training_controls"] = {
             "profile_timers": bool(training_config.profile_timers or bool(args.profile_timers)),
+            "torch_profiler": bool(training_config.torch_profiler or bool(args.torch_profiler)),
             "structured_metrics_mode": str(training_config.structured_metrics_mode),
             "teacher_aux_mode": str(training_config.teacher_aux_mode),
             "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
@@ -4111,6 +4118,7 @@ def main() -> None:
     if training_config is not None:
         determinism_payload["training_controls"] = {
             "profile_timers": bool(training_config.profile_timers or bool(args.profile_timers)),
+            "torch_profiler": bool(training_config.torch_profiler or bool(args.torch_profiler)),
             "structured_metrics_mode": str(training_config.structured_metrics_mode),
             "teacher_aux_mode": str(training_config.teacher_aux_mode),
             "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
@@ -4181,11 +4189,14 @@ def main() -> None:
         profile = _resolve_runtime_profile(stack, args.profile)
         seed = _resolve_seed(stack, args.seed)
         profile_timers = bool(training_config.profile_timers or bool(args.profile_timers))
+        torch_profiler = bool(training_config.torch_profiler or bool(args.torch_profiler))
         object.__setattr__(training_config, "profile_timers", bool(profile_timers))
-        if profile_timers:
+        object.__setattr__(training_config, "torch_profiler", bool(torch_profiler))
+        if profile_timers or torch_profiler:
             print(
                 "Structured profiling enabled: "
                 f"profile_timers={profile_timers} "
+                f"torch_profiler={torch_profiler} "
                 f"structured_metrics_mode={training_config.structured_metrics_mode} "
                 f"teacher_aux_mode={training_config.teacher_aux_mode} "
                 f"fixed_opponent_backend={training_config.fixed_opponent_backend}"
@@ -4208,6 +4219,7 @@ def main() -> None:
             runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
             b1_baseline_run_dir=None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve(),
             profile_timers=profile_timers,
+            torch_profiler=torch_profiler,
             resume_checkpoint_path=resume_checkpoint_path,
             tensorboard_logger=tensorboard_logger,
         )

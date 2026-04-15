@@ -1778,6 +1778,7 @@ class ImpalaLearner:
                 legal_actions,
                 state_repr=state_repr,
                 observation_context=observation_context,
+                scoring_mode="learner",
             )
             self._record_timing_ms("learner_packed_scorer", time.perf_counter() - scorer_started)
             self._record_timing_ms("learner_forward_time_major", time.perf_counter() - sequence_started)

@@ -182,6 +182,7 @@ class TrunkStructuredTeacherModel(TinyStructuredTeacherModel):
         *,
         state_repr: torch.Tensor | None = None,
         observation_context: dict[str, torch.Tensor] | None = None,
+        scoring_mode: str = "auto",
     ) -> torch.Tensor:
         self.scorer_calls += 1
         assert state_repr is not None

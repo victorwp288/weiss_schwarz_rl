@@ -454,6 +454,22 @@ def test_structured_warmstart_source_mix_process_collectors_pushes_fixed_sources
         assert restore_payload == {"kind": "set_fixed_opponents", "restore_defaults": True}
 
 
+def test_disable_mirror_policy_fusion_context_restores_previous_state() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._disable_mirror_policy_fusion = False
+
+    with QueueRuntime.disable_mirror_policy_fusion(runtime):
+        assert runtime_any._disable_mirror_policy_fusion is True
+
+    assert runtime_any._disable_mirror_policy_fusion is False
+
+    runtime_any._disable_mirror_policy_fusion = True
+    with QueueRuntime.disable_mirror_policy_fusion(runtime):
+        assert runtime_any._disable_mirror_policy_fusion is True
+    assert runtime_any._disable_mirror_policy_fusion is True
+
+
 def test_refresh_opponent_pool_excludes_fixed_b1_anchor(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     registry_path = run_dir / "training" / "snapshots" / "registry.json"
@@ -1442,6 +1458,95 @@ def test_overwrite_central_outputs_with_batched_opponents_batches_heuristic_publ
     assert logits_a[0, 11] < 0.0
     assert logits_b[1, 21] == pytest.approx(0.0)
     assert logits_b[1, 22] < 0.0
+
+
+def test_apply_opponent_rows_ids_uses_simulator_native_backend_for_heuristic_public() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._actor_amp_enabled = False
+    runtime_any._fixed_opponent_backend = "simulator_native"
+    runtime_any.action_dim = 32
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_model_locks = {}
+
+    class _AdvanceOnlyModel:
+        def advance_seat_hidden(self, obs_tensor, actor_tensor, hidden_tensor):
+            return hidden_tensor + 1.0
+
+    class _FailHeuristicPolicy:
+        def choose_actions_from_meta_batch(self, obs_rows, legal_ids, legal_offsets, legal_action_meta):
+            raise AssertionError("python heuristic batch path should not be used when simulator_native is enabled")
+
+    class _FakePool:
+        def __init__(self) -> None:
+            self.calls: list[np.ndarray] = []
+
+        def choose_heuristic_public_actions_into(self, env_indices: np.ndarray, actions_out: np.ndarray) -> None:
+            indices = np.asarray(env_indices, dtype=np.uint32)
+            self.calls.append(indices.copy())
+            actions_out[...] = np.asarray([11, 20], dtype=np.uint16)
+
+    fake_pool = _FakePool()
+    runtime_any._opponent_heuristic_policies = {HEURISTIC_PUBLIC_POLICY_ID: _FailHeuristicPolicy()}
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            model=_AdvanceOnlyModel(),
+            compiled_model=None,
+            env=SimpleNamespace(pool=fake_pool),
+            opponent_policy_id_by_env=np.asarray(
+                [HEURISTIC_PUBLIC_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID, _MIRROR_OPPONENT_POLICY_ID],
+                dtype=object,
+            ),
+            seat_hidden=torch.zeros((3, 2)),
+            opponent_hidden=torch.zeros((3, 2)),
+        ),
+    )
+    row_indices = np.asarray([0, 1], dtype=np.int64)
+    obs_step = np.asarray([[1, 0], [2, 0], [3, 0]], dtype=np.float32)
+    actor_step = np.asarray([1, 1, 0], dtype=np.int64)
+    legal_ids = np.asarray([10, 11, 12, 20, 21], dtype=np.uint32)
+    legal_offsets = np.asarray([0, 3, 5, 5], dtype=np.uint32)
+    legal_action_meta = np.asarray(
+        [
+            [0, 0, 0, 0],
+            [1, 0, 0, 0],
+            [2, 0, 0, 0],
+            [3, 0, 0, 0],
+            [4, 0, 0, 0],
+        ],
+        dtype=np.uint16,
+    )
+    values_out = np.ones((3,), dtype=np.float32)
+    actions_out = np.full((3,), 99, dtype=np.int64)
+    logp_out = np.full((3,), -1.0, dtype=np.float32)
+
+    QueueRuntime._apply_opponent_rows_ids(
+        runtime,
+        actor=actor,
+        row_indices=row_indices,
+        obs_step=obs_step,
+        actor_step=actor_step,
+        legal_ids=legal_ids,
+        legal_offsets=legal_offsets,
+        legal_action_meta=legal_action_meta,
+        logits_out=None,
+        values_out=values_out,
+        actions_out=actions_out,
+        logp_out=logp_out,
+        rng=np.random.default_rng(7),
+        sample_actions=True,
+    )
+
+    assert len(fake_pool.calls) == 1
+    assert np.array_equal(fake_pool.calls[0], np.asarray([0, 1], dtype=np.uint32))
+    assert actor.seat_hidden[0].tolist() == [1.0, 1.0]
+    assert actor.seat_hidden[1].tolist() == [1.0, 1.0]
+    assert values_out.tolist() == [0.0, 0.0, 1.0]
+    assert actions_out.tolist() == [11, 20, 99]
+    assert logp_out.tolist() == [0.0, 0.0, -1.0]
 
 
 def test_build_runtime_config_minimal_batch_uses_one_unroll_per_actor() -> None:

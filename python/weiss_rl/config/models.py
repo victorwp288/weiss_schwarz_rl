@@ -147,6 +147,7 @@ class TrainingConfig:
     teacher_aux: TrainingTeacherAuxConfig = field(default_factory=TrainingTeacherAuxConfig)
     fixed_opponent_backend: str = "python_scalar"
     profile_timers: bool = False
+    torch_profiler: bool = False
 
     @property
     def unroll_length(self) -> int:

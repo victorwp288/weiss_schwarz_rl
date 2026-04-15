@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 
 from weiss_rl.action_catalog import ActionCatalog
@@ -318,6 +319,26 @@ def _packed_row_indices(offsets: Tensor) -> Tensor:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _PackedScoringPlan:
+    row_indices: Tensor
+    family_ids: Tensor
+    arg0: Tensor
+    arg1: Tensor
+
+    @property
+    def candidate_count(self) -> int:
+        return int(self.family_ids.shape[0])
+
+    def slice(self, start: int, end: int) -> "_PackedScoringPlan":
+        return _PackedScoringPlan(
+            row_indices=self.row_indices[start:end],
+            family_ids=self.family_ids[start:end],
+            arg0=self.arg0[start:end],
+            arg1=self.arg1[start:end],
+        )
+
+
 def _packed_row_log_z(scores: Tensor, offsets: Tensor) -> Tensor:
     row_count = int(offsets.shape[0] - 1)
     if row_count < 0:
@@ -404,31 +425,22 @@ def _sample_packed_action_scores(
     repeated_thresholds = thresholds.index_select(0, row_indices)
     previous_cdf = local_cdf - probs
     chosen = (local_cdf >= repeated_thresholds) & (previous_cdf < repeated_thresholds)
-    chosen_counts = torch.segment_reduce(chosen.to(dtype=packed_scores.dtype), reduce="sum", lengths=non_empty_lengths)
-    missing_rows = torch.nonzero(chosen_counts == 0.0, as_tuple=False).squeeze(1)
+    packed_positions = torch.arange(packed_scores.shape[0], device=packed_scores.device, dtype=packed_scores.dtype)
+    sentinel = torch.full_like(packed_positions, float(packed_scores.shape[0]))
+    chosen_positions = torch.segment_reduce(
+        torch.where(chosen, packed_positions, sentinel),
+        reduce="amin",
+        lengths=non_empty_lengths,
+    ).to(dtype=torch.long)
+    missing_rows = torch.nonzero(chosen_positions == packed_scores.shape[0], as_tuple=False).squeeze(1)
     if missing_rows.numel() > 0:
         fallback_positions = packed_offsets[1:].to(device=packed_scores.device, dtype=torch.long).index_select(
             0, non_empty_rows.index_select(0, missing_rows)
         ) - 1
-        chosen = chosen.clone()
-        chosen[fallback_positions] = True
-        chosen_counts = torch.segment_reduce(chosen.to(dtype=packed_scores.dtype), reduce="sum", lengths=non_empty_lengths)
-    if bool((chosen_counts != 1.0).any().item()):
-        raise RuntimeError("packed categorical sampling did not select exactly one action per non-empty row")
-    chosen_actions = torch.segment_reduce(
-        torch.where(
-            chosen,
-            packed_ids.to(dtype=packed_scores.dtype),
-            torch.zeros_like(packed_scores),
-        ),
-        reduce="sum",
-        lengths=non_empty_lengths,
-    ).to(dtype=torch.long)
-    chosen_logp = torch.segment_reduce(
-        torch.where(chosen, log_probs, torch.zeros_like(log_probs)),
-        reduce="sum",
-        lengths=non_empty_lengths,
-    )
+        chosen_positions = chosen_positions.clone()
+        chosen_positions[missing_rows] = fallback_positions
+    chosen_actions = packed_ids.index_select(0, chosen_positions)
+    chosen_logp = log_probs.index_select(0, chosen_positions)
     actions[non_empty_rows] = chosen_actions
     selected_logp[non_empty_rows] = chosen_logp
     return actions, selected_logp
@@ -873,8 +885,20 @@ class _StructuredLegalActionHead(nn.Module):
         self._choice_select_family_id = int(family_index.get("choice_select", -1))
         self._level_up_family_id = int(family_index.get("level_up", -1))
         self._trigger_order_family_id = int(family_index.get("trigger_order", -1))
+        self._hand_family_ids = tuple(
+            family_id
+            for family_id in (
+                self._main_event_family_id,
+                self._clock_from_hand_family_id,
+                self._climax_play_family_id,
+                self._mulligan_select_family_id,
+            )
+            if family_id >= 0
+        )
 
         family_ids = np.zeros((self.action_dim,), dtype=np.int64)
+        action_arg0 = np.full((self.action_dim,), -1, dtype=np.int64)
+        action_arg1 = np.full((self.action_dim,), -1, dtype=np.int64)
         hand_indices = np.full((self.action_dim,), -1, dtype=np.int64)
         stage_slots = np.full((self.action_dim,), -1, dtype=np.int64)
         from_slots = np.full((self.action_dim,), -1, dtype=np.int64)
@@ -886,18 +910,25 @@ class _StructuredLegalActionHead(nn.Module):
             decoded = action_catalog.decode(action_id)
             family_ids[action_id] = family_index.get(decoded.family, 0)
             if decoded.hand_index is not None:
+                action_arg0[action_id] = int(decoded.hand_index)
                 hand_indices[action_id] = int(decoded.hand_index)
             if decoded.stage_slot is not None:
+                action_arg1[action_id] = int(decoded.stage_slot)
                 stage_slots[action_id] = int(decoded.stage_slot)
             if decoded.from_slot is not None:
+                action_arg0[action_id] = int(decoded.from_slot)
                 from_slots[action_id] = int(decoded.from_slot)
             if decoded.to_slot is not None:
+                action_arg1[action_id] = int(decoded.to_slot)
                 to_slots[action_id] = int(decoded.to_slot)
             if decoded.slot is not None:
+                action_arg0[action_id] = int(decoded.slot)
                 attack_slots[action_id] = int(decoded.slot)
             if decoded.attack_type is not None:
+                action_arg1[action_id] = int(attack_type_index.get(decoded.attack_type, -1))
                 attack_types[action_id] = int(attack_type_index.get(decoded.attack_type, -1))
             if decoded.index is not None:
+                action_arg0[action_id] = int(decoded.index)
                 generic_indices[action_id] = int(decoded.index)
 
         family_embed_dim = max(12, min(48, action_feature_width // 3))
@@ -949,6 +980,19 @@ class _StructuredLegalActionHead(nn.Module):
             layer_norm=layer_norm,
             dropout_p=dropout_p,
         )
+        self._family_feature_offset = 0
+        self._hand_card_feature_offset = self._family_feature_offset + family_embed_dim
+        self._stage_slot_feature_offset = self._hand_card_feature_offset + card_embed_dim
+        self._from_slot_feature_offset = self._stage_slot_feature_offset + slot_embed_dim
+        self._to_slot_feature_offset = self._from_slot_feature_offset + slot_embed_dim
+        self._attack_slot_feature_offset = self._to_slot_feature_offset + slot_embed_dim
+        self._attack_type_feature_offset = self._attack_slot_feature_offset + slot_embed_dim
+        self._play_target_context_offset = self._attack_type_feature_offset + slot_embed_dim
+        self._move_source_context_offset = self._play_target_context_offset + slot_context_dim
+        self._move_target_context_offset = self._move_source_context_offset + slot_context_dim
+        self._attack_source_context_offset = self._move_target_context_offset + slot_context_dim
+        self._defender_context_offset = self._attack_source_context_offset + slot_context_dim
+        self._numeric_feature_offset = self._defender_context_offset + slot_context_dim
         candidate_input_dim = family_embed_dim + card_embed_dim + slot_embed_dim * 5 + slot_context_dim * 5 + 11
         self._candidate_input_dim = int(candidate_input_dim)
         self.candidate_projection = _build_mlp_stack(
@@ -969,6 +1013,8 @@ class _StructuredLegalActionHead(nn.Module):
         self.family_bias = nn.Parameter(torch.zeros(max(len(family_names), 1)))
         self._candidate_scoring_chunk_size = 65536
         self.register_buffer("_family_ids", torch.as_tensor(family_ids, dtype=torch.long))
+        self.register_buffer("_action_arg0", torch.as_tensor(action_arg0, dtype=torch.long))
+        self.register_buffer("_action_arg1", torch.as_tensor(action_arg1, dtype=torch.long))
         self.register_buffer("_hand_indices", torch.as_tensor(hand_indices, dtype=torch.long))
         self.register_buffer("_stage_slots", torch.as_tensor(stage_slots, dtype=torch.long))
         self.register_buffer("_from_slots", torch.as_tensor(from_slots, dtype=torch.long))
@@ -1042,6 +1088,11 @@ class _StructuredLegalActionHead(nn.Module):
 
         if legal_actions.ids is not None and legal_actions.offsets is not None:
             offsets = torch.as_tensor(legal_actions.offsets, device=latent.device, dtype=torch.long)
+            if offsets.ndim != 1 or offsets.numel() != latent.shape[0] + 1:
+                raise ValueError(f"packed legal offsets must have shape ({latent.shape[0] + 1},)")
+            ids = torch.as_tensor(legal_actions.ids, device=latent.device, dtype=torch.long)
+            if int(offsets[0].item()) != 0 or int(offsets[-1].item()) != int(ids.numel()):
+                raise ValueError("packed legal offsets must be a valid prefix sum")
             row_scores = self.score_packed_candidates(
                 latent,
                 obs=obs,
@@ -1050,7 +1101,6 @@ class _StructuredLegalActionHead(nn.Module):
                 state_repr=resolved_state_repr,
             )
             if row_scores.numel() > 0:
-                ids = torch.as_tensor(legal_actions.ids, device=latent.device, dtype=torch.long)
                 lengths = offsets[1:] - offsets[:-1]
                 row_indices = torch.repeat_interleave(
                     torch.arange(latent.shape[0], device=latent.device, dtype=torch.long),
@@ -1085,6 +1135,7 @@ class _StructuredLegalActionHead(nn.Module):
         legal_actions: LegalActionBatch,
         observation_context: Mapping[str, Tensor] | None = None,
         state_repr: Tensor | None = None,
+        scoring_mode: str = "auto",
     ) -> Tensor:
         if legal_actions.ids is None or legal_actions.offsets is None:
             raise ValueError("score_packed_candidates requires packed legal ids and offsets")
@@ -1193,6 +1244,65 @@ class _StructuredLegalActionHead(nn.Module):
         stage_context = self.slot_encoder(torch.cat([card_embeddings, numeric], dim=-1))
         return stage_context, numeric
 
+    def _resolve_scoring_mode(self, scoring_mode: str) -> str:
+        resolved_mode = str(scoring_mode).strip().lower()
+        if resolved_mode == "auto":
+            return "actor" if not torch.is_grad_enabled() else "learner"
+        if resolved_mode not in {"actor", "learner"}:
+            raise ValueError("scoring_mode must be one of: auto, actor, learner")
+        return resolved_mode
+
+    def _build_packed_scoring_plan(
+        self,
+        *,
+        candidate_ids: Tensor,
+        offsets: Tensor,
+        candidate_meta: Tensor | None,
+    ) -> _PackedScoringPlan:
+        if candidate_meta is None:
+            family_ids = self._family_ids.index_select(0, candidate_ids)
+            arg0 = self._action_arg0.index_select(0, candidate_ids)
+            arg1 = self._action_arg1.index_select(0, candidate_ids)
+        else:
+            family_ids = candidate_meta[:, 0].to(dtype=torch.long)
+            arg0 = candidate_meta[:, 1].to(dtype=torch.long)
+            arg1 = candidate_meta[:, 2].to(dtype=torch.long)
+            meta_unused = torch.full_like(arg0, self._meta_unused)
+            arg0 = torch.where(arg0 == meta_unused, torch.full_like(arg0, -1), arg0)
+            arg1 = torch.where(arg1 == meta_unused, torch.full_like(arg1, -1), arg1)
+        return _PackedScoringPlan(
+            row_indices=_packed_row_indices(offsets),
+            family_ids=family_ids,
+            arg0=arg0,
+            arg1=arg1,
+        )
+
+    def _partition_candidate_family_indices(
+        self,
+        family_ids: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        device = family_ids.device
+        play_mask = family_ids == self._play_character_family_id
+        hand_mask = torch.zeros_like(play_mask)
+        for family_id in self._hand_family_ids:
+            hand_mask |= family_ids == family_id
+        move_mask = family_ids == self._main_move_family_id
+        attack_mask = family_ids == self._attack_family_id
+        default_mask = ~(play_mask | hand_mask | move_mask | attack_mask)
+
+        def _indices(mask: Tensor) -> Tensor:
+            if not torch.any(mask):
+                return torch.zeros((0,), device=device, dtype=torch.long)
+            return torch.nonzero(mask, as_tuple=False).squeeze(1)
+
+        return (
+            _indices(play_mask),
+            _indices(hand_mask),
+            _indices(move_mask),
+            _indices(attack_mask),
+            _indices(default_mask),
+        )
+
     def _score_candidates_chunked(
         self,
         state_repr: Tensor,
@@ -1219,6 +1329,365 @@ class _StructuredLegalActionHead(nn.Module):
             )
         return torch.cat(scores_chunks, dim=0)
 
+    def _score_packed_candidates_chunked(
+        self,
+        state_repr: Tensor,
+        scoring_plan: _PackedScoringPlan,
+        observation_context: Mapping[str, Tensor],
+        *,
+        scoring_mode: str = "auto",
+    ) -> Tensor:
+        if scoring_plan.candidate_count == 0:
+            return state_repr.new_zeros((0,))
+        scores_chunks: list[Tensor] = []
+        chunk_size = max(1, int(self._candidate_scoring_chunk_size))
+        for start in range(0, scoring_plan.candidate_count, chunk_size):
+            end = min(start + chunk_size, scoring_plan.candidate_count)
+            scores_chunks.append(
+                self._score_packed_candidates_plan(
+                    state_repr,
+                    scoring_plan.slice(start, end),
+                    observation_context,
+                    scoring_mode=scoring_mode,
+                )
+            )
+        return torch.cat(scores_chunks, dim=0)
+
+    def _score_packed_candidates_plan(
+        self,
+        state_repr: Tensor,
+        scoring_plan: _PackedScoringPlan,
+        observation_context: Mapping[str, Tensor],
+        *,
+        scoring_mode: str = "auto",
+    ) -> Tensor:
+        row_indices_long = scoring_plan.row_indices.to(dtype=torch.long)
+        row_states = state_repr.index_select(0, row_indices_long)
+        family_embeddings = self.family_embedding(scoring_plan.family_ids).to(dtype=row_states.dtype)
+        scores = row_states.new_empty((scoring_plan.candidate_count,), dtype=row_states.dtype)
+        play_indices, hand_indices, move_indices, attack_indices, default_indices = self._partition_candidate_family_indices(
+            scoring_plan.family_ids
+        )
+
+        if play_indices.numel() > 0:
+            play_rows = row_indices_long.index_select(0, play_indices)
+            play_row_states = row_states.index_select(0, play_indices)
+            play_hand_indices = scoring_plan.arg0.index_select(0, play_indices)
+            play_stage_slots = scoring_plan.arg1.index_select(0, play_indices)
+            play_hand_present, play_hand_card_embeddings = self._gather_hand_embeddings_from_rows(
+                observation_context["hand_ids"],
+                play_rows,
+                play_hand_indices,
+                dtype=row_states.dtype,
+            )
+            play_target_context, play_target_numeric = self._gather_stage_features_for_rows(
+                observation_context["self_stage_context"],
+                observation_context["self_stage_numeric"],
+                play_rows,
+                play_stage_slots,
+            )
+            scores.index_copy_(
+                0,
+                play_indices,
+                self._score_candidate_group(
+                    play_row_states,
+                    feature_sections=(
+                        (
+                            family_embeddings.index_select(0, play_indices),
+                            (self._family_feature_offset, self._hand_card_feature_offset),
+                        ),
+                        (
+                            play_hand_card_embeddings,
+                            (self._hand_card_feature_offset, self._stage_slot_feature_offset),
+                        ),
+                        (
+                            _optional_embedding(self.slot_embedding, play_stage_slots).to(dtype=row_states.dtype),
+                            (self._stage_slot_feature_offset, self._from_slot_feature_offset),
+                        ),
+                        (
+                            play_target_context.to(dtype=row_states.dtype),
+                            (self._play_target_context_offset, self._move_source_context_offset),
+                        ),
+                    ),
+                    numeric_sections=(
+                        (play_hand_present.to(dtype=row_states.dtype).unsqueeze(1), (0,)),
+                        ((1.0 - play_target_numeric[:, :1]).to(dtype=row_states.dtype), (8,)),
+                    ),
+                    constant_numeric_ones=(1, 9),
+                    scoring_mode=scoring_mode,
+                ),
+            )
+
+        if hand_indices.numel() > 0:
+            hand_rows = row_indices_long.index_select(0, hand_indices)
+            hand_row_states = row_states.index_select(0, hand_indices)
+            hand_family_indices = scoring_plan.arg0.index_select(0, hand_indices)
+            hand_present, hand_card_embeddings = self._gather_hand_embeddings_from_rows(
+                observation_context["hand_ids"],
+                hand_rows,
+                hand_family_indices,
+                dtype=row_states.dtype,
+            )
+            scores.index_copy_(
+                0,
+                hand_indices,
+                self._score_candidate_group(
+                    hand_row_states,
+                    feature_sections=(
+                        (
+                            family_embeddings.index_select(0, hand_indices),
+                            (self._family_feature_offset, self._hand_card_feature_offset),
+                        ),
+                        (
+                            hand_card_embeddings,
+                            (self._hand_card_feature_offset, self._stage_slot_feature_offset),
+                        ),
+                    ),
+                    numeric_sections=((hand_present.to(dtype=row_states.dtype).unsqueeze(1), (0,)),),
+                    constant_numeric_ones=(8, 9),
+                    scoring_mode=scoring_mode,
+                ),
+            )
+
+        if move_indices.numel() > 0:
+            move_rows = row_indices_long.index_select(0, move_indices)
+            move_row_states = row_states.index_select(0, move_indices)
+            move_from_slots = scoring_plan.arg0.index_select(0, move_indices)
+            move_to_slots = scoring_plan.arg1.index_select(0, move_indices)
+            move_source_context, move_source_numeric = self._gather_stage_features_for_rows(
+                observation_context["self_stage_context"],
+                observation_context["self_stage_numeric"],
+                move_rows,
+                move_from_slots,
+            )
+            move_target_context, move_target_numeric = self._gather_stage_features_for_rows(
+                observation_context["self_stage_context"],
+                observation_context["self_stage_numeric"],
+                move_rows,
+                move_to_slots,
+            )
+            scores.index_copy_(
+                0,
+                move_indices,
+                self._score_candidate_group(
+                    move_row_states,
+                    feature_sections=(
+                        (
+                            family_embeddings.index_select(0, move_indices),
+                            (self._family_feature_offset, self._hand_card_feature_offset),
+                        ),
+                        (
+                            _optional_embedding(self.slot_embedding, move_from_slots).to(dtype=row_states.dtype),
+                            (self._from_slot_feature_offset, self._to_slot_feature_offset),
+                        ),
+                        (
+                            _optional_embedding(self.slot_embedding, move_to_slots).to(dtype=row_states.dtype),
+                            (self._to_slot_feature_offset, self._attack_slot_feature_offset),
+                        ),
+                        (
+                            move_source_context.to(dtype=row_states.dtype),
+                            (self._move_source_context_offset, self._move_target_context_offset),
+                        ),
+                        (
+                            move_target_context.to(dtype=row_states.dtype),
+                            (self._move_target_context_offset, self._attack_source_context_offset),
+                        ),
+                    ),
+                    numeric_sections=(
+                        (move_source_numeric[:, :1].to(dtype=row_states.dtype), (7,)),
+                        ((1.0 - move_target_numeric[:, :1]).to(dtype=row_states.dtype), (9,)),
+                    ),
+                    constant_numeric_ones=(2, 3, 8),
+                    scoring_mode=scoring_mode,
+                ),
+            )
+
+        if attack_indices.numel() > 0:
+            attack_rows = row_indices_long.index_select(0, attack_indices)
+            attack_row_states = row_states.index_select(0, attack_indices)
+            attack_slot_values = scoring_plan.arg0.index_select(0, attack_indices)
+            attack_type_values = scoring_plan.arg1.index_select(0, attack_indices)
+            attack_source_context, _attack_source_numeric = self._gather_stage_features_for_rows(
+                observation_context["self_stage_context"],
+                observation_context["self_stage_numeric"],
+                attack_rows,
+                attack_slot_values,
+            )
+            defender_context, defender_numeric = self._gather_stage_features_for_rows(
+                observation_context["opponent_stage_context"],
+                observation_context["opponent_stage_numeric"],
+                attack_rows,
+                attack_slot_values,
+            )
+            scores.index_copy_(
+                0,
+                attack_indices,
+                self._score_candidate_group(
+                    attack_row_states,
+                    feature_sections=(
+                        (
+                            family_embeddings.index_select(0, attack_indices),
+                            (self._family_feature_offset, self._hand_card_feature_offset),
+                        ),
+                        (
+                            _optional_embedding(self.slot_embedding, attack_slot_values).to(dtype=row_states.dtype),
+                            (self._attack_slot_feature_offset, self._attack_type_feature_offset),
+                        ),
+                        (
+                            _optional_embedding(self.attack_type_embedding, attack_type_values).to(dtype=row_states.dtype),
+                            (self._attack_type_feature_offset, self._play_target_context_offset),
+                        ),
+                        (
+                            attack_source_context.to(dtype=row_states.dtype),
+                            (self._attack_source_context_offset, self._defender_context_offset),
+                        ),
+                        (
+                            defender_context.to(dtype=row_states.dtype),
+                            (self._defender_context_offset, self._numeric_feature_offset),
+                        ),
+                    ),
+                    numeric_sections=((defender_numeric[:, :1].to(dtype=row_states.dtype), (10,)),),
+                    constant_numeric_ones=(4, 5, 8, 9),
+                    scoring_mode=scoring_mode,
+                ),
+            )
+
+        if default_indices.numel() > 0:
+            default_row_states = row_states.index_select(0, default_indices)
+            default_generic_indices = scoring_plan.arg0.index_select(0, default_indices)
+            scores.index_copy_(
+                0,
+                default_indices,
+                self._score_candidate_group(
+                    default_row_states,
+                    feature_sections=(
+                        (
+                            family_embeddings.index_select(0, default_indices),
+                            (self._family_feature_offset, self._hand_card_feature_offset),
+                        ),
+                    ),
+                    numeric_sections=(
+                        ((default_generic_indices >= 0).to(dtype=row_states.dtype).unsqueeze(1), (6,)),
+                    ),
+                    constant_numeric_ones=(8, 9),
+                    scoring_mode=scoring_mode,
+                ),
+            )
+
+        return scores + self.family_bias.index_select(0, scoring_plan.family_ids).to(dtype=row_states.dtype)
+
+    def _project_candidate_sections(
+        self,
+        *,
+        feature_sections: Sequence[tuple[Tensor, tuple[int, int]]],
+        numeric_sections: Sequence[tuple[Tensor, Sequence[int]]] = (),
+        constant_numeric_ones: Sequence[int] = (),
+        scoring_mode: str = "auto",
+    ) -> Tensor:
+        if not isinstance(self.candidate_projection[0], nn.Linear):
+            raise RuntimeError("structured candidate projection must begin with nn.Linear")
+        linear = self.candidate_projection[0]
+        resolved_mode = self._resolve_scoring_mode(scoring_mode)
+        if resolved_mode == "actor":
+            inputs: list[Tensor] = []
+            weight_blocks: list[Tensor] = []
+            for tensor, (start, end) in feature_sections:
+                if tensor.numel() == 0:
+                    continue
+                inputs.append(tensor)
+                weight_blocks.append(linear.weight[:, start:end])
+            for tensor, numeric_indices in numeric_sections:
+                if tensor.numel() == 0:
+                    continue
+                inputs.append(tensor)
+                column_indices = torch.as_tensor(
+                    [self._numeric_feature_offset + int(index) for index in numeric_indices],
+                    device=linear.weight.device,
+                    dtype=torch.long,
+                )
+                weight_blocks.append(linear.weight.index_select(1, column_indices))
+            if not inputs or not weight_blocks:
+                raise ValueError("structured candidate projection requires at least one feature section")
+            projected = F.linear(
+                torch.cat(inputs, dim=1),
+                torch.cat(weight_blocks, dim=1),
+                linear.bias,
+            )
+            if constant_numeric_ones:
+                constant_columns = torch.as_tensor(
+                    [self._numeric_feature_offset + int(index) for index in constant_numeric_ones],
+                    device=linear.weight.device,
+                    dtype=torch.long,
+                )
+                projected = projected + linear.weight.index_select(1, constant_columns).sum(dim=1).to(dtype=projected.dtype)
+            for module in self.candidate_projection[1:]:
+                projected = module(projected)
+            return projected
+        projected: Tensor | None = None
+        for tensor, (start, end) in feature_sections:
+            if tensor.numel() == 0:
+                continue
+            if projected is None:
+                projected = tensor.new_zeros((tensor.shape[0], linear.out_features))
+                if linear.bias is not None:
+                    projected = projected + linear.bias.to(dtype=projected.dtype)
+            projected = projected + F.linear(tensor, linear.weight[:, start:end], None)
+        for tensor, numeric_indices in numeric_sections:
+            if tensor.numel() == 0:
+                continue
+            if projected is None:
+                projected = tensor.new_zeros((tensor.shape[0], linear.out_features))
+                if linear.bias is not None:
+                    projected = projected + linear.bias.to(dtype=projected.dtype)
+            column_indices = torch.as_tensor(
+                [self._numeric_feature_offset + int(index) for index in numeric_indices],
+                device=linear.weight.device,
+                dtype=torch.long,
+            )
+            projected = projected + F.linear(tensor, linear.weight.index_select(1, column_indices), None)
+        if projected is None:
+            raise ValueError("structured candidate projection requires at least one feature section")
+        if constant_numeric_ones:
+            constant_columns = torch.as_tensor(
+                [self._numeric_feature_offset + int(index) for index in constant_numeric_ones],
+                device=linear.weight.device,
+                dtype=torch.long,
+            )
+            projected = projected + linear.weight.index_select(1, constant_columns).sum(dim=1).to(dtype=projected.dtype)
+        for module in self.candidate_projection[1:]:
+            projected = module(projected)
+        return projected
+
+    def _score_candidate_group(
+        self,
+        row_states: Tensor,
+        *,
+        feature_sections: Sequence[tuple[Tensor, tuple[int, int]]],
+        numeric_sections: Sequence[tuple[Tensor, Sequence[int]]] = (),
+        constant_numeric_ones: Sequence[int] = (),
+        scoring_mode: str = "auto",
+    ) -> Tensor:
+        if row_states.numel() == 0:
+            return row_states.new_zeros((0,))
+        resolved_mode = self._resolve_scoring_mode(scoring_mode)
+        candidate_repr = self._project_candidate_sections(
+            feature_sections=feature_sections,
+            numeric_sections=numeric_sections,
+            constant_numeric_ones=constant_numeric_ones,
+            scoring_mode=resolved_mode,
+        )
+        if resolved_mode == "actor":
+            return self.joint_scorer(torch.cat([row_states, candidate_repr], dim=1)).squeeze(-1).to(dtype=row_states.dtype)
+        if not isinstance(self.joint_scorer[0], nn.Linear):
+            raise RuntimeError("structured joint scorer must begin with nn.Linear")
+        joint_linear = self.joint_scorer[0]
+        state_width = row_states.shape[1]
+        joint_hidden = F.linear(row_states, joint_linear.weight[:, :state_width], joint_linear.bias)
+        joint_hidden = joint_hidden + F.linear(candidate_repr, joint_linear.weight[:, state_width:], None)
+        for module in self.joint_scorer[1:]:
+            joint_hidden = module(joint_hidden)
+        return joint_hidden.squeeze(-1).to(dtype=row_states.dtype)
+
     def _score_candidates(
         self,
         state_repr: Tensor,
@@ -1229,112 +1698,206 @@ class _StructuredLegalActionHead(nn.Module):
     ) -> Tensor:
         row_indices_long = row_indices.to(dtype=torch.long)
         row_states = state_repr.index_select(0, row_indices_long)
-        (
-            family_ids,
-            hand_indices,
-            stage_slots,
-            from_slots,
-            to_slots,
-            attack_slots,
-            attack_types,
-            generic_indices,
-        ) = self._resolve_candidate_components(candidate_ids, candidate_meta)
+        hand_indices: Tensor | None = None
+        stage_slots: Tensor | None = None
+        from_slots: Tensor | None = None
+        to_slots: Tensor | None = None
+        attack_slots: Tensor | None = None
+        attack_types: Tensor | None = None
+        generic_indices: Tensor | None = None
+        meta_arg0: Tensor | None = None
+        meta_arg1: Tensor | None = None
+        if candidate_meta is None:
+            (
+                family_ids,
+                hand_indices,
+                stage_slots,
+                from_slots,
+                to_slots,
+                attack_slots,
+                attack_types,
+                generic_indices,
+            ) = self._resolve_candidate_components(candidate_ids, None)
+        else:
+            family_ids = candidate_meta[:, 0].to(dtype=torch.long)
+            meta_arg0 = candidate_meta[:, 1].to(dtype=torch.long)
+            meta_arg1 = candidate_meta[:, 2].to(dtype=torch.long)
+            meta_arg0 = torch.where(meta_arg0 == self._meta_unused, torch.full_like(meta_arg0, -1), meta_arg0)
+            meta_arg1 = torch.where(meta_arg1 == self._meta_unused, torch.full_like(meta_arg1, -1), meta_arg1)
+        family_embeddings = self.family_embedding(family_ids).to(dtype=row_states.dtype)
+        scores = row_states.new_empty((candidate_ids.shape[0],), dtype=row_states.dtype)
 
-        hand_present, hand_card_embeddings = self._gather_hand_embeddings_from_rows(
-            observation_context["hand_ids"],
-            row_indices_long,
-            hand_indices,
-            dtype=row_states.dtype,
-        )
-
-        numeric_width = int(observation_context["self_stage_numeric"].shape[-1])
-        zero_context = row_states.new_zeros((candidate_ids.shape[0], self._slot_context_dim))
-        zero_numeric = row_states.new_zeros((candidate_ids.shape[0], numeric_width))
-        play_target_context = zero_context.clone()
-        play_target_numeric = zero_numeric.clone()
-        move_source_context = zero_context.clone()
-        move_source_numeric = zero_numeric.clone()
-        move_target_context = zero_context.clone()
-        move_target_numeric = zero_numeric.clone()
-        attack_source_context = zero_context.clone()
-        defender_context = zero_context.clone()
-        defender_numeric = zero_numeric.clone()
-
-        play_mask = stage_slots >= 0
+        play_mask = family_ids == self._play_character_family_id
         if torch.any(play_mask):
-            play_target_context[play_mask], play_target_numeric[play_mask] = self._gather_stage_features_for_rows(
+            play_rows = row_indices_long[play_mask]
+            play_row_states = row_states[play_mask]
+            play_hand_indices = meta_arg0[play_mask] if meta_arg0 is not None else hand_indices[play_mask]
+            play_stage_slots = meta_arg1[play_mask] if meta_arg1 is not None else stage_slots[play_mask]
+            play_hand_present, play_hand_card_embeddings = self._gather_hand_embeddings_from_rows(
+                observation_context["hand_ids"],
+                play_rows,
+                play_hand_indices,
+                dtype=row_states.dtype,
+            )
+            play_target_context, play_target_numeric = self._gather_stage_features_for_rows(
                 observation_context["self_stage_context"],
                 observation_context["self_stage_numeric"],
-                row_indices_long[play_mask],
-                stage_slots[play_mask],
+                play_rows,
+                play_stage_slots,
             )
-        move_source_mask = from_slots >= 0
-        if torch.any(move_source_mask):
-            move_source_context[move_source_mask], move_source_numeric[move_source_mask] = self._gather_stage_features_for_rows(
+            scores[play_mask] = self._score_candidate_group(
+                play_row_states,
+                feature_sections=(
+                    (family_embeddings[play_mask], (self._family_feature_offset, self._hand_card_feature_offset)),
+                    (play_hand_card_embeddings, (self._hand_card_feature_offset, self._stage_slot_feature_offset)),
+                    (
+                        _optional_embedding(self.slot_embedding, play_stage_slots).to(dtype=row_states.dtype),
+                        (self._stage_slot_feature_offset, self._from_slot_feature_offset),
+                    ),
+                    (
+                        play_target_context.to(dtype=row_states.dtype),
+                        (self._play_target_context_offset, self._move_source_context_offset),
+                    ),
+                ),
+                numeric_sections=(
+                    (play_hand_present.to(dtype=row_states.dtype).unsqueeze(1), (0,)),
+                    ((1.0 - play_target_numeric[:, :1]).to(dtype=row_states.dtype), (8,)),
+                ),
+                constant_numeric_ones=(1, 9),
+            )
+
+        hand_family_ids = (
+            self._main_event_family_id,
+            self._clock_from_hand_family_id,
+            self._climax_play_family_id,
+            self._mulligan_select_family_id,
+        )
+        hand_mask = torch.zeros_like(play_mask)
+        for family_id in hand_family_ids:
+            if family_id >= 0:
+                hand_mask |= family_ids == family_id
+        if torch.any(hand_mask):
+            hand_rows = row_indices_long[hand_mask]
+            hand_row_states = row_states[hand_mask]
+            hand_family_indices = meta_arg0[hand_mask] if meta_arg0 is not None else hand_indices[hand_mask]
+            hand_present, hand_card_embeddings = self._gather_hand_embeddings_from_rows(
+                observation_context["hand_ids"],
+                hand_rows,
+                hand_family_indices,
+                dtype=row_states.dtype,
+            )
+            scores[hand_mask] = self._score_candidate_group(
+                hand_row_states,
+                feature_sections=(
+                    (family_embeddings[hand_mask], (self._family_feature_offset, self._hand_card_feature_offset)),
+                    (hand_card_embeddings, (self._hand_card_feature_offset, self._stage_slot_feature_offset)),
+                ),
+                numeric_sections=((hand_present.to(dtype=row_states.dtype).unsqueeze(1), (0,)),),
+                constant_numeric_ones=(8, 9),
+            )
+
+        move_mask = family_ids == self._main_move_family_id
+        if torch.any(move_mask):
+            move_rows = row_indices_long[move_mask]
+            move_row_states = row_states[move_mask]
+            move_from_slots = meta_arg0[move_mask] if meta_arg0 is not None else from_slots[move_mask]
+            move_to_slots = meta_arg1[move_mask] if meta_arg1 is not None else to_slots[move_mask]
+            move_source_context, move_source_numeric = self._gather_stage_features_for_rows(
                 observation_context["self_stage_context"],
                 observation_context["self_stage_numeric"],
-                row_indices_long[move_source_mask],
-                from_slots[move_source_mask],
+                move_rows,
+                move_from_slots,
             )
-        move_target_mask = to_slots >= 0
-        if torch.any(move_target_mask):
-            move_target_context[move_target_mask], move_target_numeric[move_target_mask] = self._gather_stage_features_for_rows(
+            move_target_context, move_target_numeric = self._gather_stage_features_for_rows(
                 observation_context["self_stage_context"],
                 observation_context["self_stage_numeric"],
-                row_indices_long[move_target_mask],
-                to_slots[move_target_mask],
+                move_rows,
+                move_to_slots,
             )
-        attack_mask = attack_slots >= 0
+            scores[move_mask] = self._score_candidate_group(
+                move_row_states,
+                feature_sections=(
+                    (family_embeddings[move_mask], (self._family_feature_offset, self._hand_card_feature_offset)),
+                    (
+                        _optional_embedding(self.slot_embedding, move_from_slots).to(dtype=row_states.dtype),
+                        (self._from_slot_feature_offset, self._to_slot_feature_offset),
+                    ),
+                    (
+                        _optional_embedding(self.slot_embedding, move_to_slots).to(dtype=row_states.dtype),
+                        (self._to_slot_feature_offset, self._attack_slot_feature_offset),
+                    ),
+                    (
+                        move_source_context.to(dtype=row_states.dtype),
+                        (self._move_source_context_offset, self._move_target_context_offset),
+                    ),
+                    (
+                        move_target_context.to(dtype=row_states.dtype),
+                        (self._move_target_context_offset, self._attack_source_context_offset),
+                    ),
+                ),
+                numeric_sections=(
+                    (move_source_numeric[:, :1].to(dtype=row_states.dtype), (7,)),
+                    ((1.0 - move_target_numeric[:, :1]).to(dtype=row_states.dtype), (9,)),
+                ),
+                constant_numeric_ones=(2, 3, 8),
+            )
+
+        attack_mask = family_ids == self._attack_family_id
         if torch.any(attack_mask):
-            attack_source_context[attack_mask], _attack_source_numeric = self._gather_stage_features_for_rows(
+            attack_rows = row_indices_long[attack_mask]
+            attack_row_states = row_states[attack_mask]
+            attack_slot_values = meta_arg0[attack_mask] if meta_arg0 is not None else attack_slots[attack_mask]
+            attack_type_values = meta_arg1[attack_mask] if meta_arg1 is not None else attack_types[attack_mask]
+            attack_source_context, _attack_source_numeric = self._gather_stage_features_for_rows(
                 observation_context["self_stage_context"],
                 observation_context["self_stage_numeric"],
-                row_indices_long[attack_mask],
-                attack_slots[attack_mask],
+                attack_rows,
+                attack_slot_values,
             )
-            defender_context[attack_mask], defender_numeric[attack_mask] = self._gather_stage_features_for_rows(
+            defender_context, defender_numeric = self._gather_stage_features_for_rows(
                 observation_context["opponent_stage_context"],
                 observation_context["opponent_stage_numeric"],
-                row_indices_long[attack_mask],
-                attack_slots[attack_mask],
+                attack_rows,
+                attack_slot_values,
+            )
+            scores[attack_mask] = self._score_candidate_group(
+                attack_row_states,
+                feature_sections=(
+                    (family_embeddings[attack_mask], (self._family_feature_offset, self._hand_card_feature_offset)),
+                    (
+                        _optional_embedding(self.slot_embedding, attack_slot_values).to(dtype=row_states.dtype),
+                        (self._attack_slot_feature_offset, self._attack_type_feature_offset),
+                    ),
+                    (
+                        _optional_embedding(self.attack_type_embedding, attack_type_values).to(dtype=row_states.dtype),
+                        (self._attack_type_feature_offset, self._play_target_context_offset),
+                    ),
+                    (
+                        attack_source_context.to(dtype=row_states.dtype),
+                        (self._attack_source_context_offset, self._defender_context_offset),
+                    ),
+                    (
+                        defender_context.to(dtype=row_states.dtype),
+                        (self._defender_context_offset, self._numeric_feature_offset),
+                    ),
+                ),
+                numeric_sections=((defender_numeric[:, :1].to(dtype=row_states.dtype), (10,)),),
+                constant_numeric_ones=(4, 5, 8, 9),
             )
 
-        candidate_inputs = torch.cat(
-            [
-                self.family_embedding(family_ids).to(dtype=row_states.dtype),
-                hand_card_embeddings,
-                _optional_embedding(self.slot_embedding, stage_slots).to(dtype=row_states.dtype),
-                _optional_embedding(self.slot_embedding, from_slots).to(dtype=row_states.dtype),
-                _optional_embedding(self.slot_embedding, to_slots).to(dtype=row_states.dtype),
-                _optional_embedding(self.slot_embedding, attack_slots).to(dtype=row_states.dtype),
-                _optional_embedding(self.attack_type_embedding, attack_types).to(dtype=row_states.dtype),
-                play_target_context.to(dtype=row_states.dtype),
-                move_source_context.to(dtype=row_states.dtype),
-                move_target_context.to(dtype=row_states.dtype),
-                attack_source_context.to(dtype=row_states.dtype),
-                defender_context.to(dtype=row_states.dtype),
-                torch.stack(
-                    [
-                        hand_present.to(dtype=row_states.dtype),
-                        (stage_slots >= 0).to(dtype=row_states.dtype),
-                        (from_slots >= 0).to(dtype=row_states.dtype),
-                        (to_slots >= 0).to(dtype=row_states.dtype),
-                        (attack_slots >= 0).to(dtype=row_states.dtype),
-                        (attack_types >= 0).to(dtype=row_states.dtype),
-                        (generic_indices >= 0).to(dtype=row_states.dtype),
-                        move_source_numeric[:, 0],
-                        1.0 - play_target_numeric[:, 0],
-                        1.0 - move_target_numeric[:, 0],
-                        defender_numeric[:, 0],
-                    ],
-                    dim=1,
+        default_mask = ~(play_mask | hand_mask | move_mask | attack_mask)
+        if torch.any(default_mask):
+            default_row_states = row_states[default_mask]
+            default_generic_indices = meta_arg0[default_mask] if meta_arg0 is not None else generic_indices[default_mask]
+            scores[default_mask] = self._score_candidate_group(
+                default_row_states,
+                feature_sections=((family_embeddings[default_mask], (self._family_feature_offset, self._hand_card_feature_offset)),),
+                numeric_sections=(
+                    ((default_generic_indices >= 0).to(dtype=row_states.dtype).unsqueeze(1), (6,)),
                 ),
-            ],
-            dim=1,
-        )
-        candidate_repr = self.candidate_projection(candidate_inputs)
-        scores = self.joint_scorer(torch.cat([row_states, candidate_repr], dim=1)).squeeze(-1)
-        scores = scores.to(dtype=row_states.dtype)
+                constant_numeric_ones=(8, 9),
+            )
+
         return scores + self.family_bias.index_select(0, family_ids).to(dtype=row_states.dtype)
 
     def _resolve_candidate_components(
@@ -1430,11 +1993,17 @@ class _StructuredLegalActionHead(nn.Module):
                 hand_ids.new_zeros((hand_indices.shape[0], self.card_embedding.embedding_dim), dtype=dtype),
             )
         hand_present = (hand_indices >= 0) & (hand_indices < hand_ids.shape[1])
-        hand_card_embeddings = hand_ids.new_zeros((hand_indices.shape[0], self.card_embedding.embedding_dim), dtype=dtype)
-        if torch.any(hand_present):
-            candidate_hand_ids = hand_ids[row_indices[hand_present], hand_indices[hand_present].to(dtype=torch.long)]
-            hand_card_embeddings[hand_present] = self._card_representation(candidate_hand_ids, dtype=dtype)
-        return hand_present, hand_card_embeddings
+        if not torch.any(hand_present):
+            return (
+                hand_present,
+                hand_ids.new_zeros((hand_indices.shape[0], self.card_embedding.embedding_dim), dtype=dtype),
+            )
+        safe_rows = torch.where(hand_present, row_indices, torch.zeros_like(row_indices)).to(dtype=torch.long)
+        safe_hand = torch.where(hand_present, hand_indices, torch.zeros_like(hand_indices)).to(dtype=torch.long)
+        flat_indices = safe_rows * int(hand_ids.shape[1]) + safe_hand
+        candidate_hand_ids = hand_ids.reshape(-1).index_select(0, flat_indices)
+        hand_card_embeddings = self._card_representation(candidate_hand_ids, dtype=dtype)
+        return hand_present, hand_card_embeddings * hand_present.unsqueeze(1).to(dtype=dtype)
 
     def _gather_stage_features_for_rows(
         self,
@@ -1444,18 +2013,20 @@ class _StructuredLegalActionHead(nn.Module):
         slot_indices: Tensor,
     ) -> tuple[Tensor, Tensor]:
         valid = (slot_indices >= 0) & (slot_indices < self._stage_slot_count)
-        gathered_context = slot_contexts.new_zeros((slot_indices.shape[0], slot_contexts.shape[-1]))
-        gathered_numeric = slot_numeric.new_zeros((slot_indices.shape[0], slot_numeric.shape[-1]))
-        if torch.any(valid):
-            gathered_context[valid] = slot_contexts[
-                row_indices[valid].to(dtype=torch.long),
-                slot_indices[valid].to(dtype=torch.long),
-            ]
-            gathered_numeric[valid] = slot_numeric[
-                row_indices[valid].to(dtype=torch.long),
-                slot_indices[valid].to(dtype=torch.long),
-            ]
-        return gathered_context, gathered_numeric
+        if not torch.any(valid):
+            return (
+                slot_contexts.new_zeros((slot_indices.shape[0], slot_contexts.shape[-1])),
+                slot_numeric.new_zeros((slot_indices.shape[0], slot_numeric.shape[-1])),
+            )
+        safe_rows = torch.where(valid, row_indices, torch.zeros_like(row_indices)).to(dtype=torch.long)
+        safe_slots = torch.where(valid, slot_indices, torch.zeros_like(slot_indices)).to(dtype=torch.long)
+        flat_indices = safe_rows * self._stage_slot_count + safe_slots
+        gathered_context = slot_contexts.reshape(-1, slot_contexts.shape[-1]).index_select(0, flat_indices)
+        gathered_numeric = slot_numeric.reshape(-1, slot_numeric.shape[-1]).index_select(0, flat_indices)
+        return (
+            gathered_context * valid.unsqueeze(1).to(dtype=slot_contexts.dtype),
+            gathered_numeric * valid.unsqueeze(1).to(dtype=slot_numeric.dtype),
+        )
 
     def _card_representation(self, card_ids: Tensor, *, dtype: torch.dtype) -> Tensor:
         bucketed_ids = _bucket_card_ids(card_ids, vocab_size=self._card_vocab_size)
@@ -1663,6 +2234,7 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
         seat_hidden_state: Tensor | None = None,
         *,
         legal_actions: LegalActionBatch,
+        scoring_mode: str = "learner",
     ) -> tuple[Tensor, Tensor, Tensor]:
         recurrent_flat, state_repr, observation_context, values, seat_hidden = self.forward_trunk_sequence_seat_aware(
             obs,
@@ -1675,6 +2247,7 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
             legal_actions,
             state_repr=state_repr,
             observation_context=observation_context,
+            scoring_mode=scoring_mode,
         )
         return packed_logits, values, seat_hidden
 
@@ -1733,6 +2306,7 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
         *,
         state_repr: Tensor | None = None,
         observation_context: Mapping[str, Tensor] | None = None,
+        scoring_mode: str = "auto",
     ) -> Tensor:
         recurrent_batch = recurrent_outputs
         if recurrent_batch.ndim != 2:
@@ -1746,6 +2320,7 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
             legal_actions=legal_actions,
             state_repr=state_repr,
             observation_context=observation_context,
+            scoring_mode=scoring_mode,
         )
 
     def forward_packed_seat_aware(
@@ -1755,6 +2330,7 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
         seat_hidden_state: Tensor | None = None,
         *,
         legal_actions: LegalActionBatch,
+        scoring_mode: str = "actor",
     ) -> tuple[Tensor, Tensor, Tensor]:
         recurrent_output, state_repr, observation_context, value, next_seat_hidden = self.forward_trunk_packed_seat_aware(
             obs,
@@ -1767,6 +2343,7 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
             legal_actions,
             state_repr=state_repr,
             observation_context=observation_context,
+            scoring_mode=scoring_mode,
         )
         return packed_logits, value, next_seat_hidden
 
@@ -1785,6 +2362,7 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
             acting_seat,
             seat_hidden_state,
             legal_actions=legal_actions,
+            scoring_mode="actor",
         )
         if legal_actions.ids is None or legal_actions.offsets is None:
             raise ValueError("sample_packed_seat_aware requires packed ids and offsets")

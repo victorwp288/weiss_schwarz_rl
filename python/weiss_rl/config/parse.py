@@ -345,6 +345,7 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             "exploration",
             "precision",
             "profile_timers",
+            "torch_profiler",
             "checkpointing",
             "vtrace",
             "ppo",
@@ -415,6 +416,7 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
     _reject_unknown_keys(teacher_aux, allowed={"mode"}, context="training.teacher_aux")
 
     profile_timers = _require_bool(body.get("profile_timers", False), field_name="training.profile_timers")
+    torch_profiler = _require_bool(body.get("torch_profiler", False), field_name="training.torch_profiler")
     fixed_opponent_backend = _require_choice(
         body.get("fixed_opponent_backend", "python_scalar"),
         field_name="training.fixed_opponent_backend",
@@ -463,6 +465,7 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             ),
         ),
         profile_timers=profile_timers,
+        torch_profiler=torch_profiler,
         checkpointing=TrainingCheckpointingConfig(
             checkpoint_interval_updates=_require_int(
                 checkpointing["checkpoint_interval_updates"],
