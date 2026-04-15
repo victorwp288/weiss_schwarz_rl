@@ -45,6 +45,7 @@ training:
   precision:
     mixed_precision: true
     compile_learner: false
+    compile_actor_inference: false
     masking_math_float32: true
   checkpointing:
     checkpoint_interval_updates: 50000

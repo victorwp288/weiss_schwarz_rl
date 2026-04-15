@@ -82,6 +82,7 @@ class UnrollBatch:
     # Legality storage (one of these, depending on meta.legal_repr)
     legal_mask: Optional[np.ndarray] = None  # (T, N, A) uint8/bool
     legal_ids: Optional[np.ndarray] = None  # (L,) uint16/uint32 packed
+    legal_action_meta: Optional[np.ndarray] = None  # (L, M) uint16 packed, aligned with legal_ids
     legal_offsets: Optional[np.ndarray] = None  # (T, N+1) uint32 offsets per (t,row)
 
     _write_t: int = 0  # internal cursor
@@ -101,6 +102,7 @@ def allocate_unroll_batch(
     #  - preallocate a max packed capacity (recommended for fixed footprint), or
     #  - start empty and append, which defeats the point of M3-04.
     max_packed_legal: int = 0,
+    legal_action_meta_width: int = 4,
 ) -> UnrollBatch:
     if T <= 0 or N <= 0:
         raise ValueError("T and N must be > 0")
@@ -146,6 +148,11 @@ def allocate_unroll_batch(
         if max_packed_legal <= 0:
             raise ValueError("max_packed_legal must be set for legal_repr='ids_offsets'")
         batch.legal_ids = np.zeros((max_packed_legal,), dtype=_legal_ids_dtype(action_space))
+        batch.legal_action_meta = np.full(
+            (max_packed_legal, int(legal_action_meta_width)),
+            np.iinfo(np.uint16).max,
+            dtype=np.uint16,
+        )
         batch.legal_offsets = np.zeros((T, N + 1), dtype=np.uint32)
     elif legal_repr == "none":
         pass
@@ -223,6 +230,7 @@ def write_step_ids_offsets(
     *,
     obs: np.ndarray,
     legal_ids: np.ndarray,
+    legal_action_meta: np.ndarray | None = None,
     legal_offsets: np.ndarray,
     to_play_seat: np.ndarray,
     decision_id: np.ndarray,
@@ -270,6 +278,21 @@ def write_step_ids_offsets(
         legal_offsets_arr,
         action_space=batch.action_space,
     )
+    if legal_action_meta is not None:
+        if batch.legal_action_meta is None:
+            raise RuntimeError("batch legal_action_meta is None but packed legal action meta was provided")
+        legal_action_meta_arr = np.asarray(legal_action_meta, dtype=np.uint16)
+        if legal_action_meta_arr.ndim != 2:
+            raise ValueError("legal_action_meta must be 2D")
+        if int(legal_action_meta_arr.shape[0]) != int(legal_ids_arr.shape[0]):
+            raise ValueError("legal_action_meta must align 1:1 with legal_ids")
+        if int(legal_action_meta_arr.shape[1]) != int(batch.legal_action_meta.shape[1]):
+            raise ValueError(
+                "legal_action_meta width mismatch: "
+                f"expected {batch.legal_action_meta.shape[1]}, got {legal_action_meta_arr.shape[1]}"
+            )
+    else:
+        legal_action_meta_arr = None
     if int(legal_offsets_arr[-1]) != int(legal_ids_arr.shape[0]):
         raise ValueError("legal_offsets[-1] must equal len(legal_ids)")
 
@@ -289,6 +312,10 @@ def write_step_ids_offsets(
     batch._packed_legal_write = end
 
     batch.legal_ids[base:end] = legal_ids_arr[:seg_len].astype(batch.legal_ids.dtype, copy=False)
+    if batch.legal_action_meta is not None:
+        batch.legal_action_meta[base:end] = np.iinfo(batch.legal_action_meta.dtype).max
+        if legal_action_meta_arr is not None and seg_len > 0:
+            batch.legal_action_meta[base:end] = legal_action_meta_arr[:seg_len]
 
     # Store per-row offsets shifted by base into (T, N+1)
     batch.legal_offsets[t, :] = (legal_offsets_arr + base).astype(np.uint32, copy=False)

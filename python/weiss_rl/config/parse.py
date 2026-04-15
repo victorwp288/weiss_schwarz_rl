@@ -54,6 +54,10 @@ from .models import (
     TrainingPpoConfig,
     TrainingPrecisionConfig,
     TrainingRolloutConfig,
+    TrainingStructuredAuxConfig,
+    TrainingStructuredMetricsConfig,
+    TrainingStructuredWarmstartConfig,
+    TrainingTeacherAuxConfig,
     TrainingVTraceConfig,
 )
 
@@ -67,9 +71,14 @@ _EXPERIMENT_ROLES = frozenset(
         "ablation_reward",
     }
 )
-_MODEL_ENCODER_KINDS = frozenset({"mlp", "typed_v1"})
+_MODEL_ENCODER_KINDS = frozenset({"mlp", "typed_v1", "structured_v2"})
 _MODEL_RECURRENT_CORES = frozenset({"gru", "none"})
-_TRAINING_ALGORITHMS = frozenset({"impala_vtrace_gru", "impala_vtrace_ff", "ppo_lite_masked_v1"})
+_TRAINING_ALGORITHMS = frozenset(
+    {"impala_vtrace_gru", "impala_vtrace_ff", "ppo_lite_masked_v1", "structured_v2", "impala_vtrace_structured_v1"}
+)
+_TRAINING_STRUCTURED_METRICS_MODES = frozenset({"off", "sampled", "full"})
+_TRAINING_TEACHER_AUX_MODES = frozenset({"off", "warmstart_only", "always"})
+_TRAINING_FIXED_OPPONENT_BACKENDS = frozenset({"python_scalar", "python_batched", "simulator_native"})
 _TOP_LEVEL_KEYS = frozenset(
     {
         "schema_version",
@@ -329,7 +338,22 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
 def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
     _reject_unknown_keys(
         body,
-        allowed={"algorithm", "rollout", "optimizer", "exploration", "precision", "checkpointing", "vtrace", "ppo"},
+        allowed={
+            "algorithm",
+            "rollout",
+            "optimizer",
+            "exploration",
+            "precision",
+            "profile_timers",
+            "checkpointing",
+            "vtrace",
+            "ppo",
+            "structured_aux",
+            "structured_warmstart",
+            "structured_metrics",
+            "teacher_aux",
+            "fixed_opponent_backend",
+        },
         context="training",
     )
     rollout = _require_mapping(body["rollout"], context="training.rollout")
@@ -339,6 +363,16 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
     checkpointing = _require_mapping(body["checkpointing"], context="training.checkpointing")
     vtrace = _require_mapping(body["vtrace"], context="training.vtrace")
     ppo = _require_mapping(body.get("ppo", {}), context="training.ppo")
+    structured_aux = _require_mapping(body.get("structured_aux", {}), context="training.structured_aux")
+    structured_warmstart = _require_mapping(
+        body.get("structured_warmstart", {}),
+        context="training.structured_warmstart",
+    )
+    structured_metrics = _require_mapping(
+        body.get("structured_metrics", {}),
+        context="training.structured_metrics",
+    )
+    teacher_aux = _require_mapping(body.get("teacher_aux", {}), context="training.teacher_aux")
 
     _reject_unknown_keys(rollout, allowed={"unroll_length", "batch_unrolls_per_update"}, context="training.rollout")
     _reject_unknown_keys(
@@ -353,7 +387,7 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
     )
     _reject_unknown_keys(
         precision,
-        allowed={"mixed_precision", "compile_learner", "masking_math_float32"},
+        allowed={"mixed_precision", "compile_learner", "compile_actor_inference", "masking_math_float32"},
         context="training.precision",
     )
     _reject_unknown_keys(
@@ -366,6 +400,25 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         ppo,
         allowed={"clip_epsilon", "value_clip_epsilon", "gae_lambda", "epochs", "target_kl", "normalize_advantages"},
         context="training.ppo",
+    )
+    _reject_unknown_keys(
+        structured_aux,
+        allowed={"enabled", "teacher_family_coef", "teacher_slot_coef", "teacher_attack_type_coef"},
+        context="training.structured_aux",
+    )
+    _reject_unknown_keys(
+        structured_warmstart,
+        allowed={"enabled", "updates", "teacher_family_coef", "teacher_slot_coef", "teacher_attack_type_coef"},
+        context="training.structured_warmstart",
+    )
+    _reject_unknown_keys(structured_metrics, allowed={"mode"}, context="training.structured_metrics")
+    _reject_unknown_keys(teacher_aux, allowed={"mode"}, context="training.teacher_aux")
+
+    profile_timers = _require_bool(body.get("profile_timers", False), field_name="training.profile_timers")
+    fixed_opponent_backend = _require_choice(
+        body.get("fixed_opponent_backend", "python_scalar"),
+        field_name="training.fixed_opponent_backend",
+        allowed=_TRAINING_FIXED_OPPONENT_BACKENDS,
     )
 
     return TrainingConfig(
@@ -400,11 +453,16 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         precision=TrainingPrecisionConfig(
             mixed_precision=_require_bool(precision["mixed_precision"], field_name="training.precision.mixed_precision"),
             compile_learner=_require_bool(precision["compile_learner"], field_name="training.precision.compile_learner"),
+            compile_actor_inference=_require_bool(
+                precision.get("compile_actor_inference", False),
+                field_name="training.precision.compile_actor_inference",
+            ),
             masking_math_float32=_require_bool(
                 precision["masking_math_float32"],
                 field_name="training.precision.masking_math_float32",
             ),
         ),
+        profile_timers=profile_timers,
         checkpointing=TrainingCheckpointingConfig(
             checkpoint_interval_updates=_require_int(
                 checkpointing["checkpoint_interval_updates"],
@@ -440,6 +498,62 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
                 field_name="training.ppo.normalize_advantages",
             ),
         ),
+        structured_aux=TrainingStructuredAuxConfig(
+            enabled=_require_bool(
+                structured_aux.get("enabled", False),
+                field_name="training.structured_aux.enabled",
+            ),
+            teacher_family_coef=_require_float(
+                structured_aux.get("teacher_family_coef", 0.0),
+                field_name="training.structured_aux.teacher_family_coef",
+            ),
+            teacher_slot_coef=_require_float(
+                structured_aux.get("teacher_slot_coef", 0.0),
+                field_name="training.structured_aux.teacher_slot_coef",
+            ),
+            teacher_attack_type_coef=_require_float(
+                structured_aux.get("teacher_attack_type_coef", 0.0),
+                field_name="training.structured_aux.teacher_attack_type_coef",
+            ),
+        ),
+        structured_warmstart=TrainingStructuredWarmstartConfig(
+            enabled=_require_bool(
+                structured_warmstart.get("enabled", False),
+                field_name="training.structured_warmstart.enabled",
+            ),
+            updates=_require_int(
+                structured_warmstart.get("updates", 0),
+                field_name="training.structured_warmstart.updates",
+                minimum=0,
+            ),
+            teacher_family_coef=_require_float(
+                structured_warmstart.get("teacher_family_coef", 0.0),
+                field_name="training.structured_warmstart.teacher_family_coef",
+            ),
+            teacher_slot_coef=_require_float(
+                structured_warmstart.get("teacher_slot_coef", 0.0),
+                field_name="training.structured_warmstart.teacher_slot_coef",
+            ),
+            teacher_attack_type_coef=_require_float(
+                structured_warmstart.get("teacher_attack_type_coef", 0.0),
+                field_name="training.structured_warmstart.teacher_attack_type_coef",
+            ),
+        ),
+        structured_metrics=TrainingStructuredMetricsConfig(
+            mode=_require_choice(
+                structured_metrics.get("mode", "off"),
+                field_name="training.structured_metrics.mode",
+                allowed=_TRAINING_STRUCTURED_METRICS_MODES,
+            ),
+        ),
+        teacher_aux=TrainingTeacherAuxConfig(
+            mode=_require_choice(
+                teacher_aux.get("mode", "always"),
+                field_name="training.teacher_aux.mode",
+                allowed=_TRAINING_TEACHER_AUX_MODES,
+            ),
+        ),
+        fixed_opponent_backend=fixed_opponent_backend,
     )
 
 

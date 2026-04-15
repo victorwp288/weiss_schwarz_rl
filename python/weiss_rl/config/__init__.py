@@ -55,6 +55,10 @@ from .models import (
     TrainingPpoConfig,
     TrainingPrecisionConfig,
     TrainingRolloutConfig,
+    TrainingStructuredAuxConfig,
+    TrainingStructuredMetricsConfig,
+    TrainingStructuredWarmstartConfig,
+    TrainingTeacherAuxConfig,
     TrainingVTraceConfig,
 )
 from .overrides import apply_stack_overrides, parse_override_tokens
@@ -110,6 +114,10 @@ __all__ = [
     "TrainingPpoConfig",
     "TrainingPrecisionConfig",
     "TrainingRolloutConfig",
+    "TrainingStructuredAuxConfig",
+    "TrainingStructuredMetricsConfig",
+    "TrainingStructuredWarmstartConfig",
+    "TrainingTeacherAuxConfig",
     "TrainingVTraceConfig",
     "canonical_config_dict",
     "canonical_config_bytes",

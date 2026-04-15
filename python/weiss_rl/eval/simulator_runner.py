@@ -35,7 +35,7 @@ from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, NO_LEAGUE_POLIC
 from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
 from weiss_rl.league.registry import SnapshotMeta, SnapshotRegistry
 from weiss_rl.masking import assert_strictly_increasing_legal_ids
-from weiss_rl.model import PolicyValueModel
+from weiss_rl.model import PolicyValueModel, build_policy_value_model
 from weiss_rl.replay.bundles import (
     ReplayRerunContract,
     ReplayStep,
@@ -129,6 +129,7 @@ def resolve_eval_policies(
             observation_dim=observation_dim,
             action_dim=action_dim,
             observation_spec=_observation_spec_from_bundle(spec_bundle),
+            spec_bundle=spec_bundle,
         )
         resolved[policy_id] = ResolvedEvalPolicy(
             policy_id=policy_id,
@@ -536,6 +537,7 @@ def _resolve_b1_policy(
             observation_dim=observation_dim,
             action_dim=action_dim,
             observation_spec=_observation_spec_from_bundle(spec_bundle, run_dir=candidate_run_dir),
+            spec_bundle=spec_bundle,
         )
         return ResolvedEvalPolicy(
             policy_id=NO_LEAGUE_POLICY_ID,
@@ -605,6 +607,7 @@ def _load_snapshot_eval_model(
     observation_dim: int,
     action_dim: int,
     observation_spec: Mapping[str, object] | None = None,
+    spec_bundle: Mapping[str, object] | None = None,
 ) -> PolicyValueModel:
     payload = torch.load(run_dir / snapshot_path, map_location="cpu", weights_only=True)
     model_state_dict = payload.get("model_state_dict")
@@ -613,11 +616,12 @@ def _load_snapshot_eval_model(
     model_config = stack.config.model
     if model_config is None:
         raise RuntimeError("The locked stack is missing the model config block")
-    eval_model = PolicyValueModel(
+    eval_model = build_policy_value_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
         observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
     ).to(torch.device("cpu"))
     eval_model.load_state_dict(model_state_dict)
     eval_model.eval()

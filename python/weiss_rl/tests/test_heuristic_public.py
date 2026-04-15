@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 
 import numpy as np
+import numpy.testing as npt
 import torch
 
+from weiss_rl.action_catalog import ActionCatalog as SharedActionCatalog
 from weiss_rl.config import load_stack_config
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, RANDOM_LEGAL_POLICY_ID
@@ -126,6 +128,32 @@ def _set_stage(
     obs[stage_base + 6] = int(side_attack_allowed)
 
 
+def _packed_meta(action_ids: np.ndarray) -> np.ndarray:
+    catalog = SharedActionCatalog.from_spec_bundle(_heuristic_spec_bundle())
+    family_index = {family.name: index for index, family in enumerate(catalog.families)}
+    attack_type_index = {name: index for index, name in enumerate(catalog.attack_type_names)}
+    unused = np.iinfo(np.uint16).max
+    rows = np.full((int(action_ids.shape[0]), 4), unused, dtype=np.uint16)
+    for row_index, action_id in enumerate(np.asarray(action_ids, dtype=np.int64).tolist()):
+        decoded = catalog.decode(int(action_id))
+        rows[row_index, 0] = np.uint16(family_index[decoded.family])
+        if decoded.hand_index is not None:
+            rows[row_index, 1] = np.uint16(decoded.hand_index)
+        if decoded.stage_slot is not None:
+            rows[row_index, 2] = np.uint16(decoded.stage_slot)
+        if decoded.from_slot is not None:
+            rows[row_index, 1] = np.uint16(decoded.from_slot)
+        if decoded.to_slot is not None:
+            rows[row_index, 2] = np.uint16(decoded.to_slot)
+        if decoded.slot is not None:
+            rows[row_index, 1] = np.uint16(decoded.slot)
+        if decoded.attack_type is not None:
+            rows[row_index, 2] = np.uint16(attack_type_index[decoded.attack_type])
+        if decoded.index is not None:
+            rows[row_index, 1] = np.uint16(decoded.index)
+    return rows
+
+
 def test_heuristic_public_prefers_center_front_character_play() -> None:
     policy = HeuristicPublicPolicy.from_spec_bundle(_heuristic_spec_bundle())
     obs = _empty_obs()
@@ -166,6 +194,81 @@ def test_heuristic_public_prefers_pass_over_main_move_loops() -> None:
     legal_ids = np.array([51, 402], dtype=np.uint32)
 
     assert policy.choose_action(obs, legal_ids) == 51
+
+
+def test_heuristic_public_meta_fast_path_matches_scalar_policy() -> None:
+    policy = HeuristicPublicPolicy.from_spec_bundle(_heuristic_spec_bundle())
+    obs = _empty_obs()
+    _set_stage(obs, player_index=0, slot=0, occupied=True, power=5000, effective_soul=1)
+
+    legal_ids = np.array([472, 473, 474, 51, 402], dtype=np.uint32)
+
+    assert policy.choose_action_from_meta(obs, legal_ids, _packed_meta(legal_ids)) == policy.choose_action(obs, legal_ids)
+
+
+def test_heuristic_public_batch_meta_fast_path_matches_scalar_policy() -> None:
+    policy = HeuristicPublicPolicy.from_spec_bundle(_heuristic_spec_bundle())
+    obs_attack = _empty_obs()
+    _set_stage(obs_attack, player_index=0, slot=0, occupied=True, power=5000, effective_soul=1)
+    obs_play = _empty_obs()
+    _set_stage(obs_play, player_index=0, slot=1, occupied=True, power=2500)
+    obs_clock = _empty_obs()
+    obs_clock[16] = 0
+    obs_clock[17] = 3
+    obs_clock[14] = 16
+    obs_clock[15] = 40
+
+    row_legal_ids = [
+        np.array([472, 473, 474, 51, 402], dtype=np.uint32),
+        np.array([102, 103, 104, 105, 106], dtype=np.uint32),
+        np.array([52, 53, 524, 525, 51], dtype=np.uint32),
+    ]
+    obs_rows = np.stack([obs_attack, obs_play, obs_clock], axis=0)
+    legal_ids = np.concatenate(row_legal_ids, axis=0)
+    offsets = np.asarray([0, row_legal_ids[0].size, row_legal_ids[0].size + row_legal_ids[1].size, legal_ids.size], dtype=np.uint32)
+    meta = _packed_meta(legal_ids)
+
+    batch_actions = policy.choose_actions_from_meta_batch(obs_rows, legal_ids, offsets, meta)
+    scalar_actions = np.asarray(
+        [
+            policy.choose_action_from_meta(obs_rows[row_index], row_legal_ids[row_index], _packed_meta(row_legal_ids[row_index]))
+            for row_index in range(len(row_legal_ids))
+        ],
+        dtype=np.int64,
+    )
+
+    npt.assert_array_equal(batch_actions, scalar_actions)
+
+
+def test_heuristic_public_batch_meta_fast_path_falls_back_on_invalid_meta() -> None:
+    policy = HeuristicPublicPolicy.from_spec_bundle(_heuristic_spec_bundle())
+    obs_a = _empty_obs()
+    obs_b = _empty_obs()
+    _set_stage(obs_a, player_index=0, slot=0, occupied=True, power=4000, effective_soul=1)
+    legal_ids = np.array([472, 473, 474, 51], dtype=np.uint32)
+    obs_rows = np.stack([obs_a, obs_b], axis=0)
+    offsets = np.asarray([0, 4, 8], dtype=np.uint32)
+    repeated_ids = np.concatenate([legal_ids, legal_ids], axis=0)
+    malformed_meta = np.zeros((int(repeated_ids.shape[0]), 2), dtype=np.uint16)
+
+    batch_actions = policy.choose_actions_from_meta_batch(obs_rows, repeated_ids, offsets, malformed_meta)
+
+    assert batch_actions.tolist() == [
+        policy.choose_action(obs_a, legal_ids),
+        policy.choose_action(obs_b, legal_ids),
+    ]
+
+
+def test_action_catalog_is_shared_with_legacy_heuristic_export() -> None:
+    from weiss_rl.eval.heuristic_public import ActionCatalog as LegacyActionCatalog
+
+    assert LegacyActionCatalog is SharedActionCatalog
+    catalog = SharedActionCatalog.from_spec_bundle(_heuristic_spec_bundle())
+
+    decoded = catalog.decode(474)
+
+    assert decoded.family == "attack"
+    assert decoded.attack_type == "direct"
 
 
 def test_resolve_eval_policies_supports_b2_without_snapshot_weights(tmp_path: Path) -> None:

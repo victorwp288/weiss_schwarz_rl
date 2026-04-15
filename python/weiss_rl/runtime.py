@@ -9,6 +9,7 @@ import multiprocessing as mp
 import queue
 import threading
 import time
+from contextlib import contextmanager
 from multiprocessing import shared_memory
 from collections import deque
 from collections.abc import Sequence
@@ -20,6 +21,7 @@ from typing import Any, Literal
 import numpy as np
 import torch
 
+from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.action_diagnostics import (
     make_action_sequence_state,
     reset_action_sequence_state,
@@ -44,7 +46,7 @@ from weiss_rl.masking import (
     sample_actions_from_legal_ids,
     sample_actions_from_mask,
 )
-from weiss_rl.model import PolicyValueModel
+from weiss_rl.model import PolicyValueModel, build_policy_value_model
 from weiss_rl.termination_reason import classify_episode_end_reason
 
 QueueRuntimeMode = Literal["train_ordered", "train_async_fast"]
@@ -54,6 +56,8 @@ _FIXED_OPPONENT_EXCLUSIONS = frozenset({"b1_noleague_baseline"})
 _PFSP_TIMEOUT_FILTER_MIN_SAMPLES = 32
 _PROMOTION_GATED_RECENT_RESERVOIR_MIN_SIZE = 2
 _PFSP_DIVERSITY_FLOOR_SIZE = 2
+_TACTICAL_TEACHER_DECISION_KINDS = frozenset({1, 2, 3, 4})
+_DEFAULT_ACTION_META_WIDTH = 4
 
 
 def _configure_runtime_actor_torch_threads(actor_torch_threads: int) -> None:
@@ -107,6 +111,10 @@ class RuntimeUnroll:
     final_hidden_state: np.ndarray
     episode_seed: np.ndarray
     policy_train_mask: np.ndarray
+    teacher_family: np.ndarray | None = None
+    teacher_slot: np.ndarray | None = None
+    teacher_attack_type: np.ndarray | None = None
+    teacher_valid: np.ndarray | None = None
     behavior_logits: np.ndarray | None = None
     counters: dict[str, int] | None = None
 
@@ -136,7 +144,12 @@ class _SharedCollectorSlot:
     final_hidden_state: np.ndarray
     episode_seed: np.ndarray
     policy_train_mask: np.ndarray
+    teacher_family: np.ndarray
+    teacher_slot: np.ndarray
+    teacher_attack_type: np.ndarray
+    teacher_valid: np.ndarray
     legal_ids: np.ndarray | None
+    legal_action_meta: np.ndarray | None
     legal_offsets: np.ndarray | None
     legal_mask: np.ndarray | None
     _segments: tuple[shared_memory.SharedMemory, ...]
@@ -198,6 +211,40 @@ def _collector_counter_template() -> dict[str, int]:
         "main_move_actions": 0,
         "pass_with_nonpass_available": 0,
         "max_consecutive_main_moves": 0,
+        "focal_row_count": 0,
+        "opponent_row_count": 0,
+        "tactical_row_count": 0,
+        "teacher_tactical_row_count": 0,
+        "fixed_opponent_tactical_row_count": 0,
+        "packed_candidate_count": 0,
+        "copied_bytes_estimate": 0,
+        "collect_actor_unroll_ms": 0,
+        "actor_policy_forward_ms": 0,
+        "actor_env_step_ms": 0,
+        "actor_action_summary_ms": 0,
+        "actor_done_reset_ms": 0,
+        "actor_bootstrap_ms": 0,
+        "teacher_label_ms": 0,
+        "fixed_opponent_routing_ms": 0,
+        "simulator_select_actions_from_logits_count": 0,
+        "simulator_select_actions_from_logits_ns": 0,
+        "simulator_sample_actions_from_logits_count": 0,
+        "simulator_sample_actions_from_logits_ns": 0,
+        "simulator_step_select_from_logits_into_i16_legal_ids_count": 0,
+        "simulator_step_select_from_logits_into_i16_legal_ids_ns": 0,
+        "simulator_step_sample_from_logits_into_i16_legal_ids_count": 0,
+        "simulator_step_sample_from_logits_into_i16_legal_ids_ns": 0,
+        "simulator_step_sample_from_logits_with_logp_into_i16_legal_ids_count": 0,
+        "simulator_step_sample_from_logits_with_logp_into_i16_legal_ids_ns": 0,
+        "simulator_legal_ids_materialize_count": 0,
+        "simulator_legal_ids_materialize_ns": 0,
+        "simulator_legal_action_meta_materialize_count": 0,
+        "simulator_legal_action_meta_materialize_ns": 0,
+        "simulator_python_reset": 0,
+        "simulator_python_step": 0,
+        "simulator_python_step_sample_from_logits": 0,
+        "simulator_python_step_sample_from_logits_with_logp": 0,
+        "simulator_python_reset_done": 0,
     }
 
 
@@ -213,6 +260,51 @@ def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _merge_simulator_timing_counters(counters: dict[str, int], env: DecisionBoundaryEnv) -> None:
+    drain_timing_counters = getattr(env, "drain_timing_counters", None)
+    if not callable(drain_timing_counters):
+        return
+    for key, value in drain_timing_counters().items():
+        counters[f"simulator_{str(key)}"] = counters.get(f"simulator_{str(key)}", 0) + int(value)
+
+
+def _sample_actions_from_packed_scores(
+    packed_logits: np.ndarray,
+    legal_ids: np.ndarray,
+    legal_offsets: np.ndarray,
+    *,
+    rng: np.random.Generator,
+    pass_action_id: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    packed_scores = np.asarray(packed_logits, dtype=np.float32)
+    packed_ids = np.asarray(legal_ids, dtype=np.uint32)
+    offsets = np.asarray(legal_offsets, dtype=np.uint32)
+    row_count = max(int(offsets.shape[0]) - 1, 0)
+    actions = np.empty((row_count,), dtype=np.int64)
+    logp = np.empty((row_count,), dtype=np.float32)
+    for row_index in range(row_count):
+        start = int(offsets[row_index])
+        end = int(offsets[row_index + 1])
+        if start == end:
+            actions[row_index] = int(pass_action_id)
+            logp[row_index] = 0.0
+            continue
+        row_scores = packed_scores[start:end]
+        row_ids = packed_ids[start:end]
+        row_max = float(np.max(row_scores))
+        shifted = (row_scores - row_max).astype(np.float32, copy=False)
+        exps = np.exp(shifted, dtype=np.float32)
+        denom = float(np.sum(exps, dtype=np.float32))
+        if denom <= 0.0:
+            raise ValueError(f"row {row_index} has zero denom in softmax over packed legal logits")
+        row_logp = shifted - np.log(denom)
+        probs = np.exp(row_logp, dtype=np.float32)
+        choice = int(rng.choice(probs.shape[0], p=probs))
+        actions[row_index] = int(row_ids[choice])
+        logp[row_index] = np.float32(row_logp[choice])
+    return actions, logp
 
 
 def _accumulate_timeout_counters(
@@ -261,7 +353,16 @@ def _accumulate_timeout_counters(
             counters["timeout_unknown_rows"] += 1
 
 
-def _handle_collector_commands(*, actor: _ActorState, control_queue: Any) -> bool:
+def _handle_collector_commands(
+    *,
+    runtime: Any,
+    actor: _ActorState,
+    control_queue: Any,
+    default_fixed_slots: np.ndarray | None,
+    default_forced_policy_ids: tuple[str, ...],
+    default_teacher_active: bool,
+    default_has_noleague_baseline: bool,
+) -> bool:
     while True:
         try:
             command = control_queue.get_nowait()
@@ -274,6 +375,47 @@ def _handle_collector_commands(*, actor: _ActorState, control_queue: Any) -> boo
             actor.model.load_state_dict(command["model_state_dict"])
             actor.model.eval()
             actor.snapshot_version = int(command.get("update", actor.snapshot_version))
+            continue
+        if kind == "set_fixed_opponents":
+            restore_defaults = bool(command.get("restore_defaults", False))
+            activate_teacher = default_teacher_active if restore_defaults else bool(command.get("activate_teacher_heuristic", False))
+            if activate_teacher and runtime._teacher_policy is not None:
+                runtime._opponent_heuristic_policies[HEURISTIC_PUBLIC_POLICY_ID] = runtime._teacher_policy
+            elif not default_teacher_active:
+                runtime._opponent_heuristic_policies.pop(HEURISTIC_PUBLIC_POLICY_ID, None)
+
+            if restore_defaults:
+                runtime._forced_fixed_opponent_policy_ids = tuple(default_forced_policy_ids)
+            else:
+                runtime._forced_fixed_opponent_policy_ids = tuple(str(policy_id) for policy_id in command.get("forced_policy_ids", ()))
+
+            baseline_state_dict = None if restore_defaults else command.get("noleague_baseline_state_dict")
+            if baseline_state_dict is not None:
+                baseline_model = build_policy_value_model(
+                    observation_dim=int(runtime.observation_dim),
+                    config=runtime.stack.config.model,
+                    action_dim=int(runtime.action_dim),
+                    observation_spec=runtime._observation_spec,
+                    spec_bundle=runtime._spec_bundle,
+                ).to(runtime._device)
+                baseline_model.load_state_dict(baseline_state_dict)
+                baseline_model.eval()
+                runtime._opponent_models[_NOLEAGUE_BASELINE_POLICY_ID] = baseline_model
+                runtime._opponent_model_locks[_NOLEAGUE_BASELINE_POLICY_ID] = threading.Lock()
+            elif restore_defaults and not default_has_noleague_baseline:
+                runtime._opponent_models.pop(_NOLEAGUE_BASELINE_POLICY_ID, None)
+                runtime._opponent_model_locks.pop(_NOLEAGUE_BASELINE_POLICY_ID, None)
+
+            if restore_defaults:
+                actor.fixed_opponent_policy_id_by_env = (
+                    None if default_fixed_slots is None else np.asarray(default_fixed_slots, dtype=object).copy()
+                )
+            else:
+                fixed_slots = command.get("fixed_opponent_policy_id_by_env")
+                actor.fixed_opponent_policy_id_by_env = (
+                    None if fixed_slots is None else np.asarray(fixed_slots, dtype=object)
+                )
+            runtime._reset_actor_state_for_fixed_opponents(actor)
 
 
 def _obs_numpy_dtype_for_profile(profile: str) -> np.dtype[Any]:
@@ -296,6 +438,15 @@ def _resolve_runtime_actor_device(stack: StackConfig) -> torch.device:
 def _maybe_compile_runtime_actor_model(model: PolicyValueModel, *, enabled: bool) -> Any | None:
     if not enabled:
         return None
+    if bool(getattr(model, "supports_legal_candidate_scoring", False)):
+        enable_trunk_compile = getattr(model, "enable_trunk_compile", None)
+        if not callable(enable_trunk_compile):
+            return None
+        try:
+            enable_trunk_compile(mode="reduce-overhead")
+        except Exception:
+            return None
+        return model
     try:
         return torch.compile(model, mode="reduce-overhead")
     except Exception:
@@ -326,6 +477,7 @@ def _create_shared_collector_slot_config(
     action_dim: int,
     hidden_size: int,
     layout_name: str,
+    legal_action_meta_width: int = _DEFAULT_ACTION_META_WIDTH,
 ) -> dict[str, Any]:
     rows = int(unroll_length * envs_per_actor)
     obs_dtype = _obs_numpy_dtype_for_profile(profile)
@@ -350,9 +502,19 @@ def _create_shared_collector_slot_config(
         "final_hidden_state": _shared_segment_spec(actor_id=actor_id, name="final_hidden_state", shape=(int(envs_per_actor), 2, int(hidden_size)), dtype=np.dtype(np.float32)),
         "episode_seed": _shared_segment_spec(actor_id=actor_id, name="episode_seed", shape=(int(unroll_length), int(envs_per_actor)), dtype=np.dtype(np.uint64)),
         "policy_train_mask": _shared_segment_spec(actor_id=actor_id, name="policy_train_mask", shape=(int(unroll_length), int(envs_per_actor)), dtype=np.dtype(np.bool_)),
+        "teacher_family": _shared_segment_spec(actor_id=actor_id, name="teacher_family", shape=(int(unroll_length), int(envs_per_actor)), dtype=np.dtype(np.int32)),
+        "teacher_slot": _shared_segment_spec(actor_id=actor_id, name="teacher_slot", shape=(int(unroll_length), int(envs_per_actor)), dtype=np.dtype(np.int32)),
+        "teacher_attack_type": _shared_segment_spec(actor_id=actor_id, name="teacher_attack_type", shape=(int(unroll_length), int(envs_per_actor)), dtype=np.dtype(np.int32)),
+        "teacher_valid": _shared_segment_spec(actor_id=actor_id, name="teacher_valid", shape=(int(unroll_length), int(envs_per_actor)), dtype=np.dtype(np.bool_)),
     }
     if str(layout_name) == "i16_legal_ids":
         specs["legal_ids"] = _shared_segment_spec(actor_id=actor_id, name="legal_ids", shape=(rows * int(action_dim),), dtype=np.dtype(np.uint32))
+        specs["legal_action_meta"] = _shared_segment_spec(
+            actor_id=actor_id,
+            name="legal_action_meta",
+            shape=(rows * int(action_dim), int(legal_action_meta_width)),
+            dtype=np.dtype(np.uint16),
+        )
         specs["legal_offsets"] = _shared_segment_spec(actor_id=actor_id, name="legal_offsets", shape=(rows + 1,), dtype=np.dtype(np.uint32))
     else:
         specs["legal_mask"] = _shared_segment_spec(
@@ -396,7 +558,12 @@ def _open_shared_collector_slot(config: dict[str, Any], *, create: bool = False)
         final_hidden_state=arrays["final_hidden_state"],
         episode_seed=arrays["episode_seed"],
         policy_train_mask=arrays["policy_train_mask"],
+        teacher_family=arrays["teacher_family"],
+        teacher_slot=arrays["teacher_slot"],
+        teacher_attack_type=arrays["teacher_attack_type"],
+        teacher_valid=arrays["teacher_valid"],
         legal_ids=arrays.get("legal_ids"),
+        legal_action_meta=arrays.get("legal_action_meta"),
         legal_offsets=arrays.get("legal_offsets"),
         legal_mask=arrays.get("legal_mask"),
         _segments=tuple(segments),
@@ -410,14 +577,24 @@ def _shared_unroll_metadata(unroll: RuntimeUnroll) -> dict[str, Any]:
         "unroll_seq": int(unroll.unroll_seq),
         "behavior_policy_version": int(unroll.behavior_policy_version),
         "unroll_hash": str(unroll.unroll_hash),
+        "action_space": int(unroll.legal_actions.action_space)
+        if unroll.legal_actions.action_space is not None
+        else None,
     }
     if unroll.legal_actions.ids is not None and unroll.legal_actions.offsets is not None:
         metadata["legal_kind"] = "packed"
         metadata["legal_ids_size"] = int(unroll.legal_actions.ids.size)
+        metadata["has_legal_action_meta"] = bool(unroll.legal_actions.meta is not None)
     else:
         metadata["legal_kind"] = "mask"
     if unroll.counters:
         metadata["counters"] = {str(key): int(value) for key, value in unroll.counters.items()}
+    metadata["has_teacher_labels"] = bool(
+        unroll.teacher_family is not None
+        and unroll.teacher_slot is not None
+        and unroll.teacher_attack_type is not None
+        and unroll.teacher_valid is not None
+    )
     return metadata
 
 
@@ -437,11 +614,31 @@ def _write_unroll_to_shared_slot(slot: _SharedCollectorSlot, unroll: RuntimeUnro
     slot.final_hidden_state[...] = unroll.final_hidden_state
     slot.episode_seed[...] = unroll.episode_seed
     slot.policy_train_mask[...] = unroll.policy_train_mask
+    if (
+        unroll.teacher_family is None
+        or unroll.teacher_slot is None
+        or unroll.teacher_attack_type is None
+        or unroll.teacher_valid is None
+    ):
+        slot.teacher_family.fill(-1)
+        slot.teacher_slot.fill(-1)
+        slot.teacher_attack_type.fill(-1)
+        slot.teacher_valid.fill(False)
+    else:
+        slot.teacher_family[...] = unroll.teacher_family
+        slot.teacher_slot[...] = unroll.teacher_slot
+        slot.teacher_attack_type[...] = unroll.teacher_attack_type
+        slot.teacher_valid[...] = unroll.teacher_valid
     if slot.legal_ids is not None and slot.legal_offsets is not None:
         assert unroll.legal_actions.ids is not None and unroll.legal_actions.offsets is not None
         ids = np.asarray(unroll.legal_actions.ids, dtype=np.uint32)
+        meta = None if unroll.legal_actions.meta is None else np.asarray(unroll.legal_actions.meta, dtype=np.uint16)
         offsets = np.asarray(unroll.legal_actions.offsets, dtype=np.uint32)
         slot.legal_ids[: ids.size] = ids
+        if slot.legal_action_meta is not None:
+            slot.legal_action_meta[...] = np.iinfo(slot.legal_action_meta.dtype).max
+            if meta is not None and meta.size:
+                slot.legal_action_meta[: meta.shape[0]] = meta
         slot.legal_offsets[:] = offsets
         return
     assert slot.legal_mask is not None
@@ -452,16 +649,26 @@ def _write_unroll_to_shared_slot(slot: _SharedCollectorSlot, unroll: RuntimeUnro
 
 
 def _read_unroll_from_shared_slot(slot: _SharedCollectorSlot, metadata: dict[str, Any]) -> RuntimeUnroll:
+    action_space = metadata.get("action_space")
     if str(metadata.get("legal_kind", "")) == "packed":
         assert slot.legal_ids is not None and slot.legal_offsets is not None
         ids_size = int(metadata["legal_ids_size"])
         legal_actions = LegalActionBatch.from_packed(
             np.array(slot.legal_ids[:ids_size], copy=True),
             np.array(slot.legal_offsets, copy=True),
+            meta=(
+                None
+                if slot.legal_action_meta is None or not bool(metadata.get("has_legal_action_meta", False))
+                else np.array(slot.legal_action_meta[:ids_size], copy=True)
+            ),
+            action_space=None if action_space is None else int(action_space),
         )
     else:
         assert slot.legal_mask is not None
-        legal_actions = LegalActionBatch.from_mask(np.array(slot.legal_mask, copy=True))
+        legal_actions = LegalActionBatch.from_mask(
+            np.array(slot.legal_mask, copy=True),
+            action_space=None if action_space is None else int(action_space),
+        )
     return RuntimeUnroll(
         actor_id=int(metadata["actor_id"]),
         unroll_seq=int(metadata["unroll_seq"]),
@@ -483,6 +690,26 @@ def _read_unroll_from_shared_slot(slot: _SharedCollectorSlot, metadata: dict[str
         final_hidden_state=np.array(slot.final_hidden_state, copy=True),
         episode_seed=np.array(slot.episode_seed, copy=True),
         policy_train_mask=np.array(slot.policy_train_mask, copy=True),
+        teacher_family=(
+            np.array(slot.teacher_family, copy=True)
+            if bool(metadata.get("has_teacher_labels", False))
+            else None
+        ),
+        teacher_slot=(
+            np.array(slot.teacher_slot, copy=True)
+            if bool(metadata.get("has_teacher_labels", False))
+            else None
+        ),
+        teacher_attack_type=(
+            np.array(slot.teacher_attack_type, copy=True)
+            if bool(metadata.get("has_teacher_labels", False))
+            else None
+        ),
+        teacher_valid=(
+            np.array(slot.teacher_valid, copy=True)
+            if bool(metadata.get("has_teacher_labels", False))
+            else None
+        ),
         behavior_logits=None,
         counters=(
             None
@@ -510,11 +737,12 @@ def _collector_process_main(
     model_config = stack.config.model
     if model_config is None:
         raise RuntimeError("stack config is missing model config")
-    model = PolicyValueModel(
+    model = build_policy_value_model(
         observation_dim=int(observation_dim),
         config=model_config,
         action_dim=int(action_dim),
         observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
     ).to(torch.device("cpu"))
     model.load_state_dict(model_state_dict)
     model.eval()
@@ -546,16 +774,40 @@ def _collector_process_main(
         runtime._actors[0].env.close()
         runtime._actors[0] = runtime._build_actor_state(model=model, actor_id=int(actor_id))
     actor = runtime._actors[0]
+    default_fixed_slots = (
+        None
+        if actor.fixed_opponent_policy_id_by_env is None
+        else np.asarray(actor.fixed_opponent_policy_id_by_env, dtype=object).copy()
+    )
+    default_forced_policy_ids = tuple(getattr(runtime, "_forced_fixed_opponent_policy_ids", ()))
+    default_teacher_active = HEURISTIC_PUBLIC_POLICY_ID in runtime._opponent_heuristic_policies
+    default_has_noleague_baseline = _NOLEAGUE_BASELINE_POLICY_ID in runtime._opponent_models
     try:
         while True:
-            if _handle_collector_commands(actor=actor, control_queue=control_queue):
+            if _handle_collector_commands(
+                runtime=runtime,
+                actor=actor,
+                control_queue=control_queue,
+                default_fixed_slots=default_fixed_slots,
+                default_forced_policy_ids=default_forced_policy_ids,
+                default_teacher_active=default_teacher_active,
+                default_has_noleague_baseline=default_has_noleague_baseline,
+            ):
                 return
             unroll = runtime._collect_actor_unroll(actor)
             if shared_slot is None or free_queue is None:
                 result_queue.put(unroll)
                 continue
             while True:
-                if _handle_collector_commands(actor=actor, control_queue=control_queue):
+                if _handle_collector_commands(
+                    runtime=runtime,
+                    actor=actor,
+                    control_queue=control_queue,
+                    default_fixed_slots=default_fixed_slots,
+                    default_forced_policy_ids=default_forced_policy_ids,
+                    default_teacher_active=default_teacher_active,
+                    default_has_noleague_baseline=default_has_noleague_baseline,
+                ):
                     return
                 try:
                     token = free_queue.get(timeout=0.1)
@@ -605,6 +857,10 @@ class QueueRuntime:
         self.action_dim = int(action_dim)
         self._observation_spec = None if observation_spec is None else dict(observation_spec)
         self._spec_bundle = None if spec_bundle is None else dict(spec_bundle)
+        action_meta_spec = (
+            {} if self._spec_bundle is None else dict(self._spec_bundle.get("action_meta_v1", {}))
+        )
+        self._action_meta_width = int(action_meta_spec.get("width", _DEFAULT_ACTION_META_WIDTH))
         self._device = _resolve_runtime_actor_device(stack)
         self._run_dir = None if run_dir is None else Path(run_dir)
         self._artifact_layout = None if self._run_dir is None else ArtifactLayout.from_run_dir(self._run_dir)
@@ -618,7 +874,7 @@ class QueueRuntime:
         )
         self._compile_actor_inference = bool(
             training_config is not None
-            and bool(getattr(training_config, "compile_learner", False))
+            and bool(getattr(training_config, "compile_actor_inference", False))
             and self._device.type == "cpu"
         )
         self._league_config = stack.config.league
@@ -634,6 +890,29 @@ class QueueRuntime:
         self._opponent_models: dict[str, PolicyValueModel] = {}
         self._opponent_model_locks: dict[str, threading.Lock] = {}
         self._opponent_heuristic_policies: dict[str, HeuristicPublicPolicy] = {}
+        self._teacher_guidance_enabled = bool(
+            training_config is not None and bool(getattr(training_config, "structured_aux_enabled", False))
+        )
+        self._teacher_policy: HeuristicPublicPolicy | None = None
+        self._teacher_action_catalog: ActionCatalog | None = None
+        self._teacher_family_index: dict[str, int] = {}
+        self._teacher_attack_type_index: dict[str, int] = {}
+        if self._teacher_guidance_enabled:
+            if self._spec_bundle is None:
+                raise RuntimeError("structured_aux.enabled requires the runtime spec bundle")
+            try:
+                self._teacher_policy = HeuristicPublicPolicy.from_spec_bundle(self._spec_bundle)
+                self._teacher_action_catalog = ActionCatalog.from_spec_bundle(self._spec_bundle)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Structured teacher guidance requires a heuristic-compatible simulator contract"
+                ) from exc
+            self._teacher_family_index = {
+                family.name: index for index, family in enumerate(self._teacher_action_catalog.families)
+            }
+            self._teacher_attack_type_index = {
+                name: index for index, name in enumerate(self._teacher_action_catalog.attack_type_names)
+            }
         self._opponent_sampler: OpponentPoolSampler | None = None
         self._opponent_candidate_ids: tuple[str, ...] = ()
         self._outcomes = OnlineOutcomeTracker(
@@ -693,6 +972,16 @@ class QueueRuntime:
         ):
             raise ValueError("league.sampling reserved env counts per actor cannot exceed training.envs_per_actor")
         model_kind = "" if stack.config.model is None else str(stack.config.model.encoder_kind).strip().lower()
+        structured_warmstart_cfg = getattr(stack.config.training, "structured_warmstart", None)
+        structured_fixed_opponents_expected = bool(
+            model_kind == "structured_v2"
+            and (
+                bool(getattr(structured_warmstart_cfg, "enabled", False))
+                or self._heuristic_public_reserved_envs_per_actor > 0
+                or self._noleague_baseline_reserved_envs_per_actor > 0
+            )
+        )
+        self._structured_fixed_opponents_expected = structured_fixed_opponents_expected
         self._use_process_collectors = bool(
             config.mode == "train_async_fast"
             and int(config.actor_count) > 1
@@ -702,9 +991,14 @@ class QueueRuntime:
         )
         self._use_central_batched_collection = bool(
             config.mode == "train_async_fast"
-            and self._device.type == "cpu"
-            and model_kind == "typed_v1"
+            and (
+                (self._device.type == "cpu" and model_kind in {"typed_v1", "structured_v2"})
+                or (self._device.type == "cuda" and model_kind == "structured_v2")
+            )
+            and (model_kind != "structured_v2" or structured_fixed_opponents_expected)
         )
+        if self._use_central_batched_collection:
+            self._use_process_collectors = False
         self._use_shared_collector_transport = False
         self._use_simulator_fused_logits_step = bool(
             config.mode == "train_async_fast"
@@ -719,6 +1013,15 @@ class QueueRuntime:
         self._collector_shared_slots: dict[int, _SharedCollectorSlot] = {}
         self._shared_actor_model = None
         self._shared_compiled_actor_model = None
+        fixed_opponent_backend = str(getattr(stack.config.training, "fixed_opponent_backend", "python_scalar")).strip().lower()
+        if fixed_opponent_backend not in {"python_scalar", "python_batched", "simulator_native"}:
+            raise ValueError(
+                "training.fixed_opponent_backend must be one of: "
+                "python_scalar, python_batched, simulator_native"
+            )
+        self._fixed_opponent_backend = fixed_opponent_backend
+        self._profile_timers = bool(getattr(stack.config.training, "profile_timers", False))
+        self._batch_timer_metrics: dict[str, float] = {}
         if self._use_central_batched_collection:
             self._shared_actor_model = copy.deepcopy(model).to(self._device)
             self._shared_actor_model.eval()
@@ -750,12 +1053,194 @@ class QueueRuntime:
             _configure_runtime_actor_torch_threads(int(stack.config.system.actor_torch_threads))
         self._last_published_snapshot_version = 0
         self._performance_logger = None if performance_log_path is None else PerformanceLogger(performance_log_path)
+        if self._performance_logger is not None:
+            self._performance_logger.log(
+                {
+                    "kind": "runtime_startup_v1",
+                    "actor_device": self._device.type,
+                    "compile_actor_inference": bool(self._compile_actor_inference),
+                    "fixed_opponent_backend": self._fixed_opponent_backend,
+                    "league_enabled": bool(self._league_enabled),
+                    "model_kind": model_kind,
+                    "structured_fixed_opponents_expected": bool(self._structured_fixed_opponents_expected),
+                    "structured_warmstart_enabled": bool(
+                        training_config is not None
+                        and bool(getattr(training_config, "structured_warmstart_enabled", False))
+                    ),
+                    "structured_warmstart_flag_enabled": bool(
+                        structured_warmstart_cfg is not None
+                        and bool(getattr(structured_warmstart_cfg, "enabled", False))
+                    ),
+                    "use_central_batched_collection": bool(self._use_central_batched_collection),
+                    "use_process_collectors": bool(self._use_process_collectors),
+                }
+            )
         self._runtime_start = time.time()
         self._runtime_last_metrics_time = self._runtime_start
         self._runtime_cumulative_env_steps = 0
         self.refresh_opponent_pool()
         if self._use_process_collectors:
             self._start_process_collectors(model)
+
+    def _reset_batch_timer_metrics(self) -> None:
+        self._batch_timer_metrics = {}
+
+    def _record_batch_timer_ms(self, name: str, elapsed_seconds: float) -> None:
+        if not bool(getattr(self, "_profile_timers", False)):
+            return
+        if not hasattr(self, "_batch_timer_metrics"):
+            self._batch_timer_metrics = {}
+        key = f"timer_runtime_{name}_ms"
+        self._batch_timer_metrics[key] = self._batch_timer_metrics.get(key, 0.0) + (float(elapsed_seconds) * 1000.0)
+
+    def _overwrite_central_outputs_with_configured_opponents(
+        self,
+        *,
+        actors: Sequence[_ActorState],
+        batches: Sequence[DecisionBoundaryBatch],
+        obs_steps: Sequence[np.ndarray],
+        actor_steps: Sequence[np.ndarray],
+        logits_outs: Sequence[np.ndarray | None],
+        values_outs: Sequence[np.ndarray],
+    ) -> None:
+        if str(getattr(self, "_fixed_opponent_backend", "python_batched")) == "python_scalar":
+            for actor, batch, obs_step, actor_step, logits_out, values_out in zip(
+                actors,
+                batches,
+                obs_steps,
+                actor_steps,
+                logits_outs,
+                values_outs,
+                strict=True,
+            ):
+                self._overwrite_central_outputs_with_batched_opponents(
+                    actors=[actor],
+                    batches=[batch],
+                    obs_steps=[obs_step],
+                    actor_steps=[actor_step],
+                    logits_outs=[logits_out],
+                    values_outs=[values_out],
+                )
+            return
+        self._overwrite_central_outputs_with_batched_opponents(
+            actors=actors,
+            batches=batches,
+            obs_steps=obs_steps,
+            actor_steps=actor_steps,
+            logits_outs=logits_outs,
+            values_outs=values_outs,
+        )
+
+    def _set_process_collector_fixed_opponents(
+        self,
+        *,
+        slots: np.ndarray | None,
+        forced_policy_ids: Sequence[str],
+        activate_teacher_heuristic: bool,
+    ) -> None:
+        if self._collector_result_queue is None:
+            return
+        baseline_model = self._opponent_models.get(_NOLEAGUE_BASELINE_POLICY_ID)
+        baseline_state_dict = (
+            None
+            if baseline_model is None or _NOLEAGUE_BASELINE_POLICY_ID not in forced_policy_ids
+            else {key: value.detach().cpu().clone() for key, value in baseline_model.state_dict().items()}
+        )
+        payload = {
+            "kind": "set_fixed_opponents",
+            "restore_defaults": False,
+            "fixed_opponent_policy_id_by_env": None if slots is None else np.asarray(slots, dtype=object).tolist(),
+            "forced_policy_ids": tuple(str(policy_id) for policy_id in forced_policy_ids),
+            "activate_teacher_heuristic": bool(activate_teacher_heuristic),
+            "noleague_baseline_state_dict": baseline_state_dict,
+        }
+        for control_queue in self._collector_control_queues:
+            control_queue.put(payload)
+
+    def _restore_process_collector_fixed_opponents(self) -> None:
+        if self._collector_result_queue is None:
+            return
+        payload = {
+            "kind": "set_fixed_opponents",
+            "restore_defaults": True,
+        }
+        for control_queue in self._collector_control_queues:
+            control_queue.put(payload)
+
+    @contextmanager
+    def structured_warmstart_source_mix(self) -> Any:
+        inserted_teacher_heuristic = False
+        if (
+            self._teacher_policy is not None
+            and HEURISTIC_PUBLIC_POLICY_ID not in self._opponent_heuristic_policies
+        ):
+            self._opponent_heuristic_policies[HEURISTIC_PUBLIC_POLICY_ID] = self._teacher_policy
+            inserted_teacher_heuristic = True
+
+        previous_forced_policy_ids = tuple(getattr(self, "_forced_fixed_opponent_policy_ids", ()))
+        previous_fixed_slots = [
+            (
+                None
+                if actor.fixed_opponent_policy_id_by_env is None
+                else np.asarray(actor.fixed_opponent_policy_id_by_env, dtype=object).copy()
+            )
+            for actor in self._actors
+        ]
+
+        available_sources = ["self_play"]
+        if _NOLEAGUE_BASELINE_POLICY_ID in self._opponent_models:
+            available_sources.append(_NOLEAGUE_BASELINE_POLICY_ID)
+        if HEURISTIC_PUBLIC_POLICY_ID in self._opponent_heuristic_policies:
+            available_sources.append(HEURISTIC_PUBLIC_POLICY_ID)
+
+        envs_per_actor = int(self.config.envs_per_actor)
+        source_count = max(1, len(available_sources))
+        counts_by_source: dict[str, int] = {}
+        remaining = envs_per_actor
+        for source_index, source_name in enumerate(available_sources):
+            slots_left = max(1, source_count - source_index)
+            count = int(np.ceil(float(remaining) / float(slots_left)))
+            count = max(0, min(count, remaining))
+            counts_by_source[source_name] = count
+            remaining -= count
+
+        slots = np.full((envs_per_actor,), "", dtype=object)
+        cursor = 0
+        for source_name in (_NOLEAGUE_BASELINE_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID):
+            count = int(counts_by_source.get(source_name, 0))
+            if count <= 0:
+                continue
+            slots[cursor : cursor + count] = source_name
+            cursor += count
+        forced_policy_ids = tuple(policy_id for policy_id in (_NOLEAGUE_BASELINE_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID) if counts_by_source.get(policy_id, 0) > 0)
+        self._forced_fixed_opponent_policy_ids = forced_policy_ids
+        try:
+            if self._collector_result_queue is not None:
+                self._set_process_collector_fixed_opponents(
+                    slots=(None if cursor <= 0 else slots.copy()),
+                    forced_policy_ids=forced_policy_ids,
+                    activate_teacher_heuristic=counts_by_source.get(HEURISTIC_PUBLIC_POLICY_ID, 0) > 0,
+                )
+            else:
+                for actor in self._actors:
+                    actor.fixed_opponent_policy_id_by_env = (None if cursor <= 0 else slots.copy())
+                    self._reset_actor_state_for_fixed_opponents(actor)
+            yield {
+                "structured_warmstart_source_count": float(source_count),
+                "structured_warmstart_self_play_envs_per_actor": float(counts_by_source.get("self_play", 0)),
+                "structured_warmstart_b1_envs_per_actor": float(counts_by_source.get(_NOLEAGUE_BASELINE_POLICY_ID, 0)),
+                "structured_warmstart_b2_envs_per_actor": float(counts_by_source.get(HEURISTIC_PUBLIC_POLICY_ID, 0)),
+            }
+        finally:
+            self._forced_fixed_opponent_policy_ids = previous_forced_policy_ids
+            if self._collector_result_queue is not None:
+                self._restore_process_collector_fixed_opponents()
+            else:
+                for actor, saved_slots in zip(self._actors, previous_fixed_slots, strict=True):
+                    actor.fixed_opponent_policy_id_by_env = saved_slots
+                    self._reset_actor_state_for_fixed_opponents(actor)
+            if inserted_teacher_heuristic:
+                self._opponent_heuristic_policies.pop(HEURISTIC_PUBLIC_POLICY_ID, None)
 
     def close(self) -> None:
         if self._collector_result_queue is not None:
@@ -994,6 +1479,12 @@ class QueueRuntime:
         policy_id = str(policy_id).strip()
         if not policy_id:
             return False
+        forced_policy_ids = tuple(getattr(self, "_forced_fixed_opponent_policy_ids", ()))
+        if policy_id in forced_policy_ids:
+            if policy_id == HEURISTIC_PUBLIC_POLICY_ID:
+                return policy_id in self._opponent_heuristic_policies
+            if policy_id == _NOLEAGUE_BASELINE_POLICY_ID:
+                return policy_id in self._opponent_models
         reference_update = self._league_reference_update()
         if policy_id == HEURISTIC_PUBLIC_POLICY_ID:
             if self._league_config is None:
@@ -1112,11 +1603,15 @@ class QueueRuntime:
         vtrace_rho_bar: float,
         vtrace_c_bar: float,
     ) -> RuntimeBatch:
+        batch_started = time.perf_counter()
+        self._reset_batch_timer_metrics()
         occupancy_samples: list[float] = []
+        fill_started = time.perf_counter()
         self._fill_pending_unrolls(
             target_count=int(self.config.batch_unrolls_per_update),
             occupancy_samples=occupancy_samples,
         )
+        self._record_batch_timer_ms("fill_pending_unrolls", time.perf_counter() - fill_started)
 
         selected = self._select_pending_unrolls()
         selected_keys = {(item.actor_id, item.unroll_seq) for item in selected}
@@ -1124,6 +1619,7 @@ class QueueRuntime:
             item for item in self._pending_unrolls if (item.actor_id, item.unroll_seq) not in selected_keys
         )
 
+        build_started = time.perf_counter()
         learner_batch = self._build_learner_batch(
             selected,
             gamma=gamma,
@@ -1132,16 +1628,22 @@ class QueueRuntime:
             vtrace_rho_bar=vtrace_rho_bar,
             vtrace_c_bar=vtrace_c_bar,
         )
+        self._record_batch_timer_ms("build_learner_batch", time.perf_counter() - build_started)
         runtime_metrics = self._runtime_metrics(selected, occupancy_samples=occupancy_samples)
+        self._record_batch_timer_ms("collect_update_batch_total", time.perf_counter() - batch_started)
         if self._performance_logger is not None:
             elapsed = time.time() - self._runtime_start
+            log_started = time.perf_counter()
             self._performance_logger.log(
                 {
                     "kind": "runtime_performance_v1",
                     "wall_clock_seconds": elapsed,
                     **runtime_metrics,
+                    **self._batch_timer_metrics,
                 }
             )
+            self._record_batch_timer_ms("performance_log", time.perf_counter() - log_started)
+        runtime_metrics.update(self._batch_timer_metrics)
         return RuntimeBatch(learner_batch=learner_batch, runtime_metrics=runtime_metrics)
 
     def collect_policy_batch(
@@ -1152,11 +1654,15 @@ class QueueRuntime:
         truncation_reward: float,
         truncation_bootstrap_value: bool,
     ) -> RuntimeBatch:
+        batch_started = time.perf_counter()
+        self._reset_batch_timer_metrics()
         occupancy_samples: list[float] = []
+        fill_started = time.perf_counter()
         self._fill_pending_unrolls(
             target_count=int(self.config.batch_unrolls_per_update),
             occupancy_samples=occupancy_samples,
         )
+        self._record_batch_timer_ms("fill_pending_unrolls", time.perf_counter() - fill_started)
 
         selected = self._select_pending_unrolls()
         selected_keys = {(item.actor_id, item.unroll_seq) for item in selected}
@@ -1164,6 +1670,7 @@ class QueueRuntime:
             item for item in self._pending_unrolls if (item.actor_id, item.unroll_seq) not in selected_keys
         )
 
+        build_started = time.perf_counter()
         learner_batch = self._build_ppo_batch(
             selected,
             gamma=gamma,
@@ -1171,16 +1678,22 @@ class QueueRuntime:
             truncation_reward=truncation_reward,
             truncation_bootstrap_value=truncation_bootstrap_value,
         )
+        self._record_batch_timer_ms("build_ppo_batch", time.perf_counter() - build_started)
         runtime_metrics = self._runtime_metrics(selected, occupancy_samples=occupancy_samples)
+        self._record_batch_timer_ms("collect_policy_batch_total", time.perf_counter() - batch_started)
         if self._performance_logger is not None:
             elapsed = time.time() - self._runtime_start
+            log_started = time.perf_counter()
             self._performance_logger.log(
                 {
                     "kind": "runtime_performance_v1",
                     "wall_clock_seconds": elapsed,
                     **runtime_metrics,
+                    **self._batch_timer_metrics,
                 }
             )
+            self._record_batch_timer_ms("performance_log", time.perf_counter() - log_started)
+        runtime_metrics.update(self._batch_timer_metrics)
         return RuntimeBatch(learner_batch=learner_batch, runtime_metrics=runtime_metrics)
 
     def _select_pending_unrolls(self) -> list[RuntimeUnroll]:
@@ -1281,6 +1794,7 @@ class QueueRuntime:
                     action_dim=int(self.action_dim),
                     hidden_size=hidden_size,
                     layout_name=("i16_legal_ids" if str(self.config.profile) == "fast" else "mask"),
+                    legal_action_meta_width=int(self._action_meta_width),
                 )
                 self._collector_shared_slots[int(actor_id)] = _open_shared_collector_slot(slot_config, create=True)
                 slot_configs[int(actor_id)] = slot_config
@@ -1374,6 +1888,7 @@ class QueueRuntime:
             max_decisions=int(env_config["max_decisions"]),
             max_ticks=int(env_config["max_ticks"]),
             max_no_progress_decisions=max_no_progress_decisions,
+            profile_timers=self._profile_timers,
         )
         return env, str(layout_name)
 
@@ -1387,11 +1902,12 @@ class QueueRuntime:
         model_config = self.stack.config.model
         if model_config is None:
             raise RuntimeError("stack config is missing model config")
-        model = PolicyValueModel(
+        model = build_policy_value_model(
             observation_dim=self.observation_dim,
             config=model_config,
             action_dim=self.action_dim,
             observation_spec=self._observation_spec,
+            spec_bundle=self._spec_bundle,
         ).to(self._device)
         model.load_state_dict(model_state_dict)
         model.eval()
@@ -1543,15 +2059,55 @@ class QueueRuntime:
         obs_step: np.ndarray,
         legal_ids: np.ndarray,
         legal_offsets: np.ndarray,
+        legal_action_meta: np.ndarray | None = None,
+        counters: dict[str, int] | None = None,
     ) -> np.ndarray:
         actions = np.zeros((int(row_indices.shape[0]),), dtype=np.int64)
-        for offset, row_index in enumerate(row_indices.tolist()):
+        row_indices_array = np.asarray(row_indices, dtype=np.int64)
+        if counters is not None:
+            counters["tactical_row_count"] += int(row_indices_array.shape[0])
+            counters["fixed_opponent_tactical_row_count"] += int(row_indices_array.shape[0])
+        batch_choose = getattr(heuristic_policy, "choose_actions_from_meta_batch", None)
+        if callable(batch_choose):
+            if legal_action_meta is None:
+                subset_ids, subset_offsets = _slice_packed_rows(
+                    legal_ids,
+                    legal_offsets,
+                    row_indices_array,
+                )
+                subset_meta = None
+            else:
+                subset_ids, subset_offsets, subset_meta = _slice_packed_rows_with_meta(
+                    legal_ids,
+                    legal_offsets,
+                    row_indices_array,
+                    legal_action_meta=legal_action_meta,
+                )
+            if counters is not None:
+                counters["packed_candidate_count"] += int(subset_ids.shape[0])
+            return np.asarray(
+                batch_choose(
+                    np.asarray(obs_step[row_indices_array], dtype=np.int32),
+                    subset_ids,
+                    subset_offsets,
+                    subset_meta,
+                ),
+                dtype=np.int64,
+            )
+        for offset, row_index in enumerate(row_indices_array):
             start = int(legal_offsets[int(row_index)])
             stop = int(legal_offsets[int(row_index) + 1])
+            if counters is not None:
+                counters["packed_candidate_count"] += max(0, stop - start)
             actions[offset] = int(
-                heuristic_policy.choose_action(
+                heuristic_policy.choose_action_from_meta(
                     np.asarray(obs_step[int(row_index)]),
                     np.asarray(legal_ids[start:stop], dtype=np.uint32),
+                    (
+                        None
+                        if legal_action_meta is None
+                        else np.asarray(legal_action_meta[start:stop], dtype=np.uint16)
+                    ),
                 )
             )
         return actions
@@ -1563,12 +2119,138 @@ class QueueRuntime:
         row_indices: np.ndarray,
         obs_step: np.ndarray,
         legal_mask: np.ndarray,
+        counters: dict[str, int] | None = None,
     ) -> np.ndarray:
         actions = np.zeros((int(row_indices.shape[0]),), dtype=np.int64)
+        if counters is not None:
+            counters["tactical_row_count"] += int(np.asarray(row_indices).shape[0])
+            counters["fixed_opponent_tactical_row_count"] += int(np.asarray(row_indices).shape[0])
         for offset, row_index in enumerate(row_indices.tolist()):
             legal_ids = np.flatnonzero(np.asarray(legal_mask[int(row_index)], dtype=np.bool_)).astype(np.uint32, copy=False)
+            if counters is not None:
+                counters["packed_candidate_count"] += int(legal_ids.shape[0])
             actions[offset] = int(heuristic_policy.choose_action(np.asarray(obs_step[int(row_index)]), legal_ids))
         return actions
+
+    def _teacher_label_arrays(self, num_rows: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        shape = (int(num_rows),)
+        return (
+            np.full(shape, -1, dtype=np.int32),
+            np.full(shape, -1, dtype=np.int32),
+            np.full(shape, -1, dtype=np.int32),
+            np.zeros(shape, dtype=np.bool_),
+        )
+
+    def _teacher_labels_from_actions(
+        self,
+        *,
+        row_indices: np.ndarray,
+        chosen_actions: np.ndarray,
+        num_rows: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        teacher_family, teacher_slot, teacher_attack_type, teacher_valid = self._teacher_label_arrays(num_rows)
+        if (
+            not bool(getattr(self, "_teacher_guidance_enabled", False))
+            or self._teacher_action_catalog is None
+        ):
+            return teacher_family, teacher_slot, teacher_attack_type, teacher_valid
+        for row_index, action_id in zip(
+            np.asarray(row_indices, dtype=np.int64).tolist(),
+            np.asarray(chosen_actions, dtype=np.int64).tolist(),
+            strict=True,
+        ):
+            decoded = self._teacher_action_catalog.decode(int(action_id))
+            family_index = self._teacher_family_index.get(decoded.family)
+            if family_index is None:
+                continue
+            teacher_valid[int(row_index)] = True
+            teacher_family[int(row_index)] = int(family_index)
+            if decoded.family == "main_play_character" and decoded.stage_slot is not None:
+                teacher_slot[int(row_index)] = int(decoded.stage_slot)
+            elif decoded.family == "attack":
+                if decoded.slot is not None:
+                    teacher_slot[int(row_index)] = int(decoded.slot)
+                if decoded.attack_type is not None:
+                    attack_type_index = self._teacher_attack_type_index.get(decoded.attack_type)
+                    if attack_type_index is not None:
+                        teacher_attack_type[int(row_index)] = int(attack_type_index)
+        return teacher_family, teacher_slot, teacher_attack_type, teacher_valid
+
+    def _teacher_labels_from_ids(
+        self,
+        *,
+        focal_rows: np.ndarray,
+        decision_kind: np.ndarray,
+        obs_step: np.ndarray,
+        legal_ids: np.ndarray,
+        legal_offsets: np.ndarray,
+        legal_action_meta: np.ndarray | None = None,
+        counters: dict[str, int] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        teacher_family, teacher_slot, teacher_attack_type, teacher_valid = self._teacher_label_arrays(
+            int(decision_kind.shape[0])
+        )
+        if not bool(getattr(self, "_teacher_guidance_enabled", False)) or self._teacher_policy is None:
+            return teacher_family, teacher_slot, teacher_attack_type, teacher_valid
+        decision_kind_array = np.asarray(decision_kind, dtype=np.int32)
+        tactical_rows = np.flatnonzero(
+            np.asarray(focal_rows, dtype=np.bool_)
+            & np.isin(decision_kind_array, tuple(_TACTICAL_TEACHER_DECISION_KINDS))
+        )
+        if tactical_rows.size == 0:
+            return teacher_family, teacher_slot, teacher_attack_type, teacher_valid
+        if counters is not None:
+            counters["teacher_tactical_row_count"] += int(tactical_rows.size)
+        chosen_actions = self._heuristic_public_actions_from_ids(
+            heuristic_policy=self._teacher_policy,
+            row_indices=tactical_rows,
+            obs_step=obs_step,
+            legal_ids=legal_ids,
+            legal_offsets=legal_offsets,
+            legal_action_meta=legal_action_meta,
+            counters=counters,
+        )
+        return self._teacher_labels_from_actions(
+            row_indices=tactical_rows,
+            chosen_actions=chosen_actions,
+            num_rows=int(decision_kind.shape[0]),
+        )
+
+    def _teacher_labels_from_mask(
+        self,
+        *,
+        focal_rows: np.ndarray,
+        decision_kind: np.ndarray,
+        obs_step: np.ndarray,
+        legal_mask: np.ndarray,
+        counters: dict[str, int] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        teacher_family, teacher_slot, teacher_attack_type, teacher_valid = self._teacher_label_arrays(
+            int(decision_kind.shape[0])
+        )
+        if not bool(getattr(self, "_teacher_guidance_enabled", False)) or self._teacher_policy is None:
+            return teacher_family, teacher_slot, teacher_attack_type, teacher_valid
+        decision_kind_array = np.asarray(decision_kind, dtype=np.int32)
+        tactical_rows = np.flatnonzero(
+            np.asarray(focal_rows, dtype=np.bool_)
+            & np.isin(decision_kind_array, tuple(_TACTICAL_TEACHER_DECISION_KINDS))
+        )
+        if tactical_rows.size == 0:
+            return teacher_family, teacher_slot, teacher_attack_type, teacher_valid
+        if counters is not None:
+            counters["teacher_tactical_row_count"] += int(tactical_rows.size)
+        chosen_actions = self._heuristic_public_actions_from_mask(
+            heuristic_policy=self._teacher_policy,
+            row_indices=tactical_rows,
+            obs_step=obs_step,
+            legal_mask=legal_mask,
+            counters=counters,
+        )
+        return self._teacher_labels_from_actions(
+            row_indices=tactical_rows,
+            chosen_actions=chosen_actions,
+            num_rows=int(decision_kind.shape[0]),
+        )
 
     def _write_deterministic_logits(
         self,
@@ -1592,6 +2274,28 @@ class QueueRuntime:
                 row_logits[legal_ids_np] = -100.0
             row_logits[int(chosen_action)] = 0.0
             logits_out[int(row_index)] = row_logits
+
+    def _write_deterministic_logits_from_packed(
+        self,
+        *,
+        logits_out: np.ndarray | None,
+        row_indices: np.ndarray,
+        chosen_actions: np.ndarray,
+        legal_ids: np.ndarray,
+        legal_offsets: np.ndarray,
+    ) -> None:
+        if logits_out is None:
+            return
+        row_indices_array = np.asarray(row_indices, dtype=np.int64)
+        chosen_actions_array = np.asarray(chosen_actions, dtype=np.int64)
+        for row_index, chosen_action in zip(row_indices_array, chosen_actions_array, strict=True):
+            row_logits = logits_out[int(row_index)]
+            row_logits.fill(-1.0e9)
+            start = int(legal_offsets[int(row_index)])
+            stop = int(legal_offsets[int(row_index) + 1])
+            if stop > start:
+                row_logits[np.asarray(legal_ids[start:stop], dtype=np.int64)] = -100.0
+            row_logits[int(chosen_action)] = 0.0
 
     def _fill_policy_outputs_mask(
         self,
@@ -1649,6 +2353,7 @@ class QueueRuntime:
         focal_rows: np.ndarray,
         legal_ids: np.ndarray,
         legal_offsets: np.ndarray,
+        legal_action_meta: np.ndarray | None,
         logits_out: np.ndarray | None,
         values_out: np.ndarray,
         actions_out: np.ndarray | None,
@@ -1666,6 +2371,7 @@ class QueueRuntime:
                 actor_step=actor_step,
                 legal_ids=legal_ids,
                 legal_offsets=legal_offsets,
+                legal_action_meta=legal_action_meta,
                 logits_out=logits_out,
                 values_out=values_out,
                 actions_out=actions_out,
@@ -1682,6 +2388,7 @@ class QueueRuntime:
                 actor_step=actor_step,
                 legal_ids=legal_ids,
                 legal_offsets=legal_offsets,
+                legal_action_meta=legal_action_meta,
                 logits_out=logits_out,
                 values_out=values_out,
                 actions_out=actions_out,
@@ -1791,6 +2498,7 @@ class QueueRuntime:
         actor_step: np.ndarray,
         legal_ids: np.ndarray,
         legal_offsets: np.ndarray,
+        legal_action_meta: np.ndarray | None,
         logits_out: np.ndarray | None,
         values_out: np.ndarray,
         actions_out: np.ndarray | None,
@@ -1811,6 +2519,7 @@ class QueueRuntime:
                     actor_step=actor_step,
                     legal_ids=legal_ids,
                     legal_offsets=legal_offsets,
+                    legal_action_meta=legal_action_meta,
                     logits_out=logits_out,
                     values_out=values_out,
                     actions_out=actions_out,
@@ -1834,19 +2543,14 @@ class QueueRuntime:
                     obs_step=obs_step,
                     legal_ids=legal_ids,
                     legal_offsets=legal_offsets,
+                    legal_action_meta=legal_action_meta,
                 )
-                legal_action_ids = [
-                    np.asarray(
-                        legal_ids[int(legal_offsets[int(row_index)]): int(legal_offsets[int(row_index) + 1])],
-                        dtype=np.uint32,
-                    )
-                    for row_index in policy_rows.tolist()
-                ]
-                self._write_deterministic_logits(
+                self._write_deterministic_logits_from_packed(
                     logits_out=logits_out,
                     row_indices=policy_rows,
                     chosen_actions=chosen_actions,
-                    legal_action_ids=legal_action_ids,
+                    legal_ids=legal_ids,
+                    legal_offsets=legal_offsets,
                 )
                 values_out[policy_rows] = 0.0
                 if sample_actions:
@@ -1873,6 +2577,7 @@ class QueueRuntime:
                     actor_step=actor_step,
                     legal_ids=legal_ids,
                     legal_offsets=legal_offsets,
+                    legal_action_meta=legal_action_meta,
                     logits_out=logits_out,
                     values_out=values_out,
                     actions_out=actions_out,
@@ -1901,10 +2606,16 @@ class QueueRuntime:
             device_type=self._device.type,
             enabled=self._actor_amp_enabled,
         ):
+            legal_actions = (
+                _structured_legal_batch_from_mask(legal_mask, row_indices)
+                if bool(getattr(model, "supports_legal_candidate_scoring", False))
+                else None
+            )
             logits_tensor, value_tensor, next_hidden = model.forward_seat_aware(
                 torch.as_tensor(obs_step[row_indices], device=self._device),
                 torch.as_tensor(actor_step[row_indices], device=self._device, dtype=torch.long),
                 hidden_state[row_indices],
+                legal_actions=legal_actions,
             )
         hidden_state[row_indices] = torch.as_tensor(
             next_hidden,
@@ -1937,6 +2648,7 @@ class QueueRuntime:
         actor_step: np.ndarray,
         legal_ids: np.ndarray,
         legal_offsets: np.ndarray,
+        legal_action_meta: np.ndarray | None,
         logits_out: np.ndarray | None,
         values_out: np.ndarray,
         actions_out: np.ndarray | None,
@@ -1944,35 +2656,78 @@ class QueueRuntime:
         rng: np.random.Generator,
         sample_actions: bool = True,
     ) -> None:
+        legal_actions = (
+            _structured_legal_batch_from_packed(
+                legal_ids,
+                legal_offsets,
+                row_indices,
+                legal_action_meta,
+            )
+            if bool(getattr(model, "supports_legal_candidate_scoring", False))
+            else None
+        )
         with torch.inference_mode(), torch.amp.autocast(
             device_type=self._device.type,
             enabled=self._actor_amp_enabled,
         ):
-            logits_tensor, value_tensor, next_hidden = model.forward_seat_aware(
-                torch.as_tensor(obs_step[row_indices], device=self._device),
-                torch.as_tensor(actor_step[row_indices], device=self._device, dtype=torch.long),
-                hidden_state[row_indices],
-            )
+            if (
+                legal_actions is not None
+                and sample_actions
+                and logits_out is None
+                and hasattr(model, "sample_packed_seat_aware")
+            ):
+                action_tensor, logp_tensor, value_tensor, next_hidden = model.sample_packed_seat_aware(
+                    torch.as_tensor(obs_step[row_indices], device=self._device),
+                    torch.as_tensor(actor_step[row_indices], device=self._device, dtype=torch.long),
+                    hidden_state[row_indices],
+                    legal_actions=legal_actions,
+                    sample_seeds=torch.as_tensor(
+                        rng.integers(0, np.iinfo(np.int64).max, size=row_indices.shape[0], dtype=np.int64),
+                        device=self._device,
+                        dtype=torch.long,
+                    ),
+                    pass_action_id=int(self.config.pass_action_id),
+                )
+                logits_subset = None
+            elif legal_actions is None:
+                logits_tensor, value_tensor, next_hidden = model.forward_seat_aware(
+                    torch.as_tensor(obs_step[row_indices], device=self._device),
+                    torch.as_tensor(actor_step[row_indices], device=self._device, dtype=torch.long),
+                    hidden_state[row_indices],
+                )
+                logits_subset = logits_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+            else:
+                logits_tensor, value_tensor, next_hidden = model.forward_seat_aware(
+                    torch.as_tensor(obs_step[row_indices], device=self._device),
+                    torch.as_tensor(actor_step[row_indices], device=self._device, dtype=torch.long),
+                    hidden_state[row_indices],
+                    legal_actions=legal_actions,
+                )
+                logits_subset = logits_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
         hidden_state[row_indices] = torch.as_tensor(
             next_hidden,
             device=self._device,
             dtype=hidden_state.dtype,
         ).clone()
-        logits_subset = logits_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
         value_subset = value_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
         if logits_out is not None:
+            assert logits_subset is not None
             logits_out[row_indices] = logits_subset
         values_out[row_indices] = value_subset
         if sample_actions:
             assert actions_out is not None and logp_out is not None
-            subset_ids, subset_offsets = _slice_packed_rows(legal_ids, legal_offsets, row_indices)
-            action_subset, logp_subset, _entropy = sample_actions_from_legal_ids(
-                logits_subset,
-                subset_ids,
-                subset_offsets,
-                rng=rng,
-                pass_action_id=self.config.pass_action_id,
-            )
+            if logits_subset is None:
+                action_subset = action_tensor.detach().cpu().numpy().astype(np.int64, copy=False)
+                logp_subset = logp_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+            else:
+                subset_ids, subset_offsets = _slice_packed_rows(legal_ids, legal_offsets, row_indices)
+                action_subset, logp_subset, _entropy = sample_actions_from_legal_ids(
+                    logits_subset,
+                    subset_ids,
+                    subset_offsets,
+                    rng=rng,
+                    pass_action_id=self.config.pass_action_id,
+                )
             actions_out[row_indices] = action_subset
             logp_out[row_indices] = logp_subset
 
@@ -2019,21 +2774,218 @@ class QueueRuntime:
             device_type=self._device.type,
             enabled=self._actor_amp_enabled,
         ):
-            _logits_tensor, _value_tensor, next_hidden = model.forward_seat_aware(
-                torch.as_tensor(obs_step[row_indices], device=self._device),
-                torch.as_tensor(actor_step[row_indices], device=self._device, dtype=torch.long),
-                hidden_state[row_indices],
-            )
+            advance_hidden = getattr(model, "advance_seat_hidden", None)
+            if callable(advance_hidden):
+                next_hidden = advance_hidden(
+                    torch.as_tensor(obs_step[row_indices], device=self._device),
+                    torch.as_tensor(actor_step[row_indices], device=self._device, dtype=torch.long),
+                    hidden_state[row_indices],
+                )
+            else:
+                _logits_tensor, _value_tensor, next_hidden = model.forward_seat_aware(
+                    torch.as_tensor(obs_step[row_indices], device=self._device),
+                    torch.as_tensor(actor_step[row_indices], device=self._device, dtype=torch.long),
+                    hidden_state[row_indices],
+                )
         hidden_state[row_indices] = torch.as_tensor(
             next_hidden,
             device=self._device,
             dtype=hidden_state.dtype,
         ).clone()
 
+    def _central_sample_policy_rows_ids(
+        self,
+        *,
+        actors: Sequence[_ActorState],
+        batches: Sequence[DecisionBoundaryBatch],
+        obs_steps: Sequence[np.ndarray],
+        actor_steps: Sequence[np.ndarray],
+        row_indices_by_actor: Sequence[np.ndarray],
+        values_outs: Sequence[np.ndarray],
+        actions_outs: Sequence[np.ndarray],
+        logp_outs: Sequence[np.ndarray],
+    ) -> None:
+        entries: list[tuple[int, _ActorState, np.ndarray]] = []
+        packed_ids: list[np.ndarray] = []
+        packed_meta: list[np.ndarray] = []
+        packed_offsets = [np.array([0], dtype=np.uint32)]
+        obs_parts: list[np.ndarray] = []
+        actor_parts: list[np.ndarray] = []
+        hidden_parts: list[torch.Tensor] = []
+        seed_parts: list[np.ndarray] = []
+        model = _actor_inference_model(actors[0])
+        for actor_index, (actor, batch, obs_step, actor_step, row_indices) in enumerate(
+            zip(
+            actors,
+            batches,
+            obs_steps,
+            actor_steps,
+            row_indices_by_actor,
+            strict=True,
+            )
+        ):
+            if row_indices.size == 0:
+                continue
+            legal_ids, legal_offsets = _require_ids_offsets(batch)
+            legal_action_meta = _optional_legal_action_meta(batch)
+            subset_ids, subset_offsets, subset_meta = _slice_packed_rows_with_meta(
+                legal_ids,
+                legal_offsets,
+                row_indices,
+                legal_action_meta=legal_action_meta,
+            )
+            offset_base = int(packed_offsets[-1][-1])
+            packed_ids.append(subset_ids)
+            packed_offsets.append(np.asarray(subset_offsets[1:] + offset_base, dtype=np.uint32))
+            if subset_meta is not None:
+                packed_meta.append(subset_meta)
+            obs_parts.append(np.asarray(obs_step[row_indices], dtype=np.float32))
+            actor_parts.append(np.asarray(actor_step[row_indices], dtype=np.int64))
+            hidden_parts.append(actor.seat_hidden[row_indices])
+            seed_parts.append(actor.rng.integers(0, np.iinfo(np.int64).max, size=row_indices.shape[0], dtype=np.int64))
+            entries.append((actor_index, actor, row_indices))
+        if not entries:
+            return
+        legal_actions = LegalActionBatch.from_packed(
+            np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
+            np.concatenate(packed_offsets, axis=0),
+            meta=(np.concatenate(packed_meta, axis=0) if packed_meta else None),
+            action_space=int(self.action_dim),
+        )
+        hidden_concat = torch.cat(hidden_parts, dim=0)
+        with torch.inference_mode(), torch.amp.autocast(
+            device_type=self._device.type,
+            enabled=self._actor_amp_enabled,
+        ):
+            actions_tensor, logp_tensor, value_tensor, next_hidden = model.sample_packed_seat_aware(
+                torch.as_tensor(np.concatenate(obs_parts, axis=0), device=self._device),
+                torch.as_tensor(np.concatenate(actor_parts, axis=0), device=self._device, dtype=torch.long),
+                hidden_concat,
+                legal_actions=legal_actions,
+                sample_seeds=torch.as_tensor(np.concatenate(seed_parts, axis=0), device=self._device, dtype=torch.long),
+                pass_action_id=int(self.config.pass_action_id),
+            )
+        actions_concat = actions_tensor.detach().cpu().numpy().astype(np.int64, copy=False)
+        logp_concat = logp_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+        values_concat = value_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+        next_hidden_tensor = torch.as_tensor(next_hidden, device=self._device, dtype=hidden_concat.dtype)
+        offset = 0
+        for actor_index, actor, row_indices in entries:
+            count = int(row_indices.shape[0])
+            actor.seat_hidden[row_indices] = next_hidden_tensor[offset : offset + count]
+            values_outs[actor_index][row_indices] = values_concat[offset : offset + count]
+            actions_outs[actor_index][row_indices] = actions_concat[offset : offset + count]
+            logp_outs[actor_index][row_indices] = logp_concat[offset : offset + count]
+            offset += count
+
+    def _central_value_actor_rows(
+        self,
+        *,
+        actors: Sequence[_ActorState],
+        obs_steps: Sequence[np.ndarray],
+        actor_steps: Sequence[np.ndarray],
+        row_indices_by_actor: Sequence[np.ndarray],
+        values_outs: Sequence[np.ndarray],
+    ) -> None:
+        entries: list[tuple[int, np.ndarray]] = []
+        obs_parts: list[np.ndarray] = []
+        actor_parts: list[np.ndarray] = []
+        hidden_parts: list[torch.Tensor] = []
+        model = _actor_inference_model(actors[0])
+        for actor_index, (actor, obs_step, actor_step, row_indices) in enumerate(
+            zip(actors, obs_steps, actor_steps, row_indices_by_actor, strict=True)
+        ):
+            if row_indices.size == 0:
+                continue
+            obs_parts.append(np.asarray(obs_step[row_indices], dtype=np.float32))
+            actor_parts.append(np.asarray(actor_step[row_indices], dtype=np.int64))
+            hidden_parts.append(actor.seat_hidden[row_indices])
+            entries.append((actor_index, row_indices))
+        if not entries:
+            return
+        hidden_concat = torch.cat(hidden_parts, dim=0)
+        with torch.inference_mode(), torch.amp.autocast(
+            device_type=self._device.type,
+            enabled=self._actor_amp_enabled,
+        ):
+            value_seat_aware = getattr(model, "value_seat_aware", None)
+            if callable(value_seat_aware):
+                value_tensor = value_seat_aware(
+                    torch.as_tensor(np.concatenate(obs_parts, axis=0), device=self._device),
+                    torch.as_tensor(np.concatenate(actor_parts, axis=0), device=self._device, dtype=torch.long),
+                    hidden_concat,
+                )
+            else:
+                _logits_tensor, value_tensor, _next_hidden = model.forward_seat_aware(
+                    torch.as_tensor(np.concatenate(obs_parts, axis=0), device=self._device),
+                    torch.as_tensor(np.concatenate(actor_parts, axis=0), device=self._device, dtype=torch.long),
+                    hidden_concat,
+                )
+        values_concat = value_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+        offset = 0
+        for actor_index, row_indices in entries:
+            count = int(row_indices.shape[0])
+            values_outs[actor_index][row_indices] = values_concat[offset : offset + count]
+            offset += count
+
+    def _central_advance_actor_rows(
+        self,
+        *,
+        actors: Sequence[_ActorState],
+        obs_steps: Sequence[np.ndarray],
+        actor_steps: Sequence[np.ndarray],
+        row_indices_by_actor: Sequence[np.ndarray],
+    ) -> None:
+        entries: list[tuple[_ActorState, np.ndarray]] = []
+        obs_parts: list[np.ndarray] = []
+        actor_parts: list[np.ndarray] = []
+        hidden_parts: list[torch.Tensor] = []
+        model = _actor_inference_model(actors[0])
+        for actor, obs_step, actor_step, row_indices in zip(
+            actors,
+            obs_steps,
+            actor_steps,
+            row_indices_by_actor,
+            strict=True,
+        ):
+            if row_indices.size == 0:
+                continue
+            obs_parts.append(np.asarray(obs_step[row_indices], dtype=np.float32))
+            actor_parts.append(np.asarray(actor_step[row_indices], dtype=np.int64))
+            hidden_parts.append(actor.seat_hidden[row_indices])
+            entries.append((actor, row_indices))
+        if not entries:
+            return
+        hidden_concat = torch.cat(hidden_parts, dim=0)
+        with torch.inference_mode(), torch.amp.autocast(
+            device_type=self._device.type,
+            enabled=self._actor_amp_enabled,
+        ):
+            advance_hidden = getattr(model, "advance_seat_hidden", None)
+            if callable(advance_hidden):
+                next_hidden = advance_hidden(
+                    torch.as_tensor(np.concatenate(obs_parts, axis=0), device=self._device),
+                    torch.as_tensor(np.concatenate(actor_parts, axis=0), device=self._device, dtype=torch.long),
+                    hidden_concat,
+                )
+            else:
+                _logits_tensor, _value_tensor, next_hidden = model.forward_seat_aware(
+                    torch.as_tensor(np.concatenate(obs_parts, axis=0), device=self._device),
+                    torch.as_tensor(np.concatenate(actor_parts, axis=0), device=self._device, dtype=torch.long),
+                    hidden_concat,
+                )
+        next_hidden_tensor = torch.as_tensor(next_hidden, device=self._device, dtype=hidden_concat.dtype)
+        offset = 0
+        for actor, row_indices in entries:
+            count = int(row_indices.shape[0])
+            actor.seat_hidden[row_indices] = next_hidden_tensor[offset : offset + count]
+            offset += count
+
     def _central_forward_all_rows(
         self,
         *,
         actors: Sequence[_ActorState],
+        batches: Sequence[DecisionBoundaryBatch] | None,
         obs_steps: Sequence[np.ndarray],
         actor_steps: Sequence[np.ndarray],
         logits_outs: Sequence[np.ndarray],
@@ -2045,6 +2997,9 @@ class QueueRuntime:
         actor_concat = np.concatenate(actor_steps, axis=0)
         hidden_concat = torch.cat([actor.seat_hidden for actor in actors], dim=0)
         model = _actor_inference_model(actors[0])
+        legal_actions = None
+        if bool(getattr(model, "supports_legal_candidate_scoring", False)) and batches is not None:
+            legal_actions = _concatenate_batch_legal_actions(batches, action_space=int(self.action_dim))
         with torch.inference_mode(), torch.amp.autocast(
             device_type=self._device.type,
             enabled=self._actor_amp_enabled,
@@ -2053,6 +3008,7 @@ class QueueRuntime:
                 torch.as_tensor(obs_concat, device=self._device),
                 torch.as_tensor(actor_concat, device=self._device, dtype=torch.long),
                 hidden_concat,
+                legal_actions=legal_actions,
             )
         logits_concat = logits_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
         values_concat = value_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
@@ -2075,7 +3031,7 @@ class QueueRuntime:
         logits_out: np.ndarray | None,
         values_out: np.ndarray,
     ) -> None:
-        self._overwrite_central_outputs_with_batched_opponents(
+        self._overwrite_central_outputs_with_configured_opponents(
             actors=[actor],
             batches=[batch],
             obs_steps=[obs_step],
@@ -2094,6 +3050,7 @@ class QueueRuntime:
         logits_outs: Sequence[np.ndarray | None],
         values_outs: Sequence[np.ndarray],
     ) -> None:
+        overwrite_started = time.perf_counter()
         policy_groups: dict[
             str,
             list[tuple[_ActorState, DecisionBoundaryBatch, np.ndarray, np.ndarray, np.ndarray | None, np.ndarray]],
@@ -2124,38 +3081,80 @@ class QueueRuntime:
         for policy_id, entries in sorted(policy_groups.items()):
             heuristic_policy = getattr(self, "_opponent_heuristic_policies", {}).get(policy_id)
             if heuristic_policy is not None:
-                for actor, batch, row_indices, obs_step, actor_step, logits_out, values_out in entries:
-                    if batch.ids_offsets is not None:
+                self._central_advance_actor_rows(
+                    actors=[actor for actor, *_rest in entries],
+                    obs_steps=[obs_step for _actor, _batch, _row_indices, obs_step, _actor_step, _logits_out, _values_out in entries],
+                    actor_steps=[actor_step for _actor, _batch, _row_indices, _obs_step, actor_step, _logits_out, _values_out in entries],
+                    row_indices_by_actor=[row_indices for _actor, _batch, row_indices, _obs_step, _actor_step, _logits_out, _values_out in entries],
+                )
+                packed_entries = [
+                    entry for entry in entries if entry[1].ids_offsets is not None
+                ]
+                mask_entries = [
+                    entry for entry in entries if entry[1].ids_offsets is None
+                ]
+                if packed_entries:
+                    packed_obs_parts: list[np.ndarray] = []
+                    packed_ids: list[np.ndarray] = []
+                    packed_meta: list[np.ndarray] = []
+                    packed_offsets = [np.array([0], dtype=np.uint32)]
+                    packed_entry_counts: list[int] = []
+                    for actor, batch, row_indices, obs_step, _actor_step, _logits_out, _values_out in packed_entries:
                         legal_ids, legal_offsets = _require_ids_offsets(batch)
-                        chosen_actions = self._heuristic_public_actions_from_ids(
-                            heuristic_policy=heuristic_policy,
+                        subset_ids, subset_offsets, subset_meta = _slice_packed_rows_with_meta(
+                            legal_ids,
+                            legal_offsets,
+                            row_indices,
+                            legal_action_meta=_optional_legal_action_meta(batch),
+                        )
+                        offset_base = int(packed_offsets[-1][-1])
+                        packed_ids.append(subset_ids)
+                        packed_offsets.append(np.asarray(subset_offsets[1:] + offset_base, dtype=np.uint32))
+                        if subset_meta is not None:
+                            packed_meta.append(subset_meta)
+                        packed_obs_parts.append(np.asarray(obs_step[row_indices], dtype=np.int32))
+                        packed_entry_counts.append(int(row_indices.shape[0]))
+                    packed_chosen_actions = heuristic_policy.choose_actions_from_meta_batch(
+                        np.concatenate(packed_obs_parts, axis=0) if packed_obs_parts else np.zeros((0, 0), dtype=np.int32),
+                        np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
+                        np.concatenate(packed_offsets, axis=0),
+                        np.concatenate(packed_meta, axis=0) if packed_meta else None,
+                    )
+                    offset = 0
+                    for (actor, batch, row_indices, _obs_step, _actor_step, logits_out, values_out), count in zip(
+                        packed_entries,
+                        packed_entry_counts,
+                        strict=True,
+                    ):
+                        legal_ids, legal_offsets = _require_ids_offsets(batch)
+                        chosen_actions = np.asarray(
+                            packed_chosen_actions[offset : offset + count],
+                            dtype=np.int64,
+                        )
+                        self._write_deterministic_logits_from_packed(
+                            logits_out=logits_out,
                             row_indices=row_indices,
-                            obs_step=obs_step,
+                            chosen_actions=chosen_actions,
                             legal_ids=legal_ids,
                             legal_offsets=legal_offsets,
                         )
-                        legal_action_ids = [
-                            np.asarray(
-                                legal_ids[int(legal_offsets[int(row_index)]): int(legal_offsets[int(row_index) + 1])],
-                                dtype=np.uint32,
-                            )
-                            for row_index in row_indices.tolist()
-                        ]
-                    else:
-                        legal_mask = _require_mask(batch)
-                        chosen_actions = self._heuristic_public_actions_from_mask(
-                            heuristic_policy=heuristic_policy,
-                            row_indices=row_indices,
-                            obs_step=obs_step,
-                            legal_mask=legal_mask,
+                        values_out[row_indices] = 0.0
+                        offset += count
+                for actor, batch, row_indices, obs_step, _actor_step, logits_out, values_out in mask_entries:
+                    legal_mask = _require_mask(batch)
+                    chosen_actions = self._heuristic_public_actions_from_mask(
+                        heuristic_policy=heuristic_policy,
+                        row_indices=row_indices,
+                        obs_step=obs_step,
+                        legal_mask=legal_mask,
+                    )
+                    legal_action_ids = [
+                        np.flatnonzero(np.asarray(legal_mask[int(row_index)], dtype=np.bool_)).astype(
+                            np.uint32,
+                            copy=False,
                         )
-                        legal_action_ids = [
-                            np.flatnonzero(np.asarray(legal_mask[int(row_index)], dtype=np.bool_)).astype(
-                                np.uint32,
-                                copy=False,
-                            )
-                            for row_index in row_indices.tolist()
-                        ]
+                        for row_index in row_indices.tolist()
+                    ]
                     self._write_deterministic_logits(
                         logits_out=logits_out,
                         row_indices=row_indices,
@@ -2200,8 +3199,10 @@ class QueueRuntime:
                 if logits_out is not None:
                     logits_out[row_indices] = logits_concat[offset : offset + count]
                 offset += count
+        self._record_batch_timer_ms("central_fixed_opponent_overwrite", time.perf_counter() - overwrite_started)
 
     def _collect_actor_unrolls_central(self, actors: Sequence[_ActorState]) -> list[RuntimeUnroll]:
+        central_started = time.perf_counter()
         if not actors:
             return []
         if len({str(actor.layout_name) for actor in actors}) != 1:
@@ -2223,7 +3224,12 @@ class QueueRuntime:
                 "values": np.zeros((T, N), dtype=np.float32),
                 "episode_seed": np.zeros((T, N), dtype=np.uint64),
                 "policy_train_mask": np.zeros((T, N), dtype=np.bool_),
+                "teacher_family": np.full((T, N), -1, dtype=np.int32),
+                "teacher_slot": np.full((T, N), -1, dtype=np.int32),
+                "teacher_attack_type": np.full((T, N), -1, dtype=np.int32),
+                "teacher_valid": np.zeros((T, N), dtype=np.bool_),
                 "packed_ids": [],
+                "packed_meta": [],
                 "packed_offsets": [np.array([0], dtype=np.uint32)],
                 "mask_steps": [],
                 "initial_hidden_state": actor.seat_hidden.detach().cpu().numpy().copy(),
@@ -2233,66 +3239,190 @@ class QueueRuntime:
         timeout_limits_by_actor = {int(actor.actor_id): _timeout_limits_for_env(actor.env) for actor in actors}
 
         batches = [actor.current_batch for actor in actors]
+        structured_central_packed = bool(
+            all(actor.layout_name == "i16_legal_ids" for actor in actors)
+            and bool(getattr(_actor_inference_model(actors[0]), "supports_legal_candidate_scoring", False))
+        )
         for step_index in range(T):
             obs_storage_steps = [np.asarray(batch.obs) for batch in batches]
             obs_steps = [np.asarray(batch.obs, dtype=np.float32) for batch in batches]
             actor_steps = [np.asarray(batch.actor, dtype=np.int64) for batch in batches]
-            logits_steps = [np.empty((N, self.action_dim), dtype=np.float32) for _ in actors]
-            value_steps = [np.empty((N,), dtype=np.float32) for _ in actors]
-            self._central_forward_all_rows(
-                actors=actors,
-                obs_steps=obs_steps,
-                actor_steps=actor_steps,
-                logits_outs=logits_steps,
-                values_outs=value_steps,
-            )
+            if structured_central_packed:
+                action_steps = [np.zeros((N,), dtype=np.int64) for _ in actors]
+                logp_steps = [np.zeros((N,), dtype=np.float32) for _ in actors]
+                value_steps = [np.zeros((N,), dtype=np.float32) for _ in actors]
+                policy_row_indices = [
+                    np.flatnonzero(actor_step == actor.focal_seat_by_env)
+                    for actor, actor_step in zip(actors, actor_steps, strict=True)
+                ]
+                for actor, row_indices in zip(actors, policy_row_indices, strict=True):
+                    state_by_actor[int(actor.actor_id)]["counters"]["focal_row_count"] += int(row_indices.shape[0])
+                forward_started = time.perf_counter()
+                self._central_sample_policy_rows_ids(
+                    actors=actors,
+                    batches=batches,
+                    obs_steps=obs_steps,
+                    actor_steps=actor_steps,
+                    row_indices_by_actor=policy_row_indices,
+                    values_outs=value_steps,
+                    actions_outs=action_steps,
+                    logp_outs=logp_steps,
+                )
+                self._record_batch_timer_ms("central_focal_policy", time.perf_counter() - forward_started)
+                per_actor_forward_ms = int(
+                    ((time.perf_counter() - forward_started) * 1000.0) / max(len(actors), 1)
+                )
+                for state in state_by_actor.values():
+                    state["counters"]["actor_policy_forward_ms"] += per_actor_forward_ms
 
-            self._overwrite_central_outputs_with_batched_opponents(
-                actors=actors,
-                batches=batches,
-                obs_steps=obs_steps,
-                actor_steps=actor_steps,
-                logits_outs=logits_steps,
-                values_outs=value_steps,
-            )
+                overwrite_started = time.perf_counter()
+                for actor, batch, obs_step, actor_step, value_step, action_step, logp_step in zip(
+                    actors,
+                    batches,
+                    obs_steps,
+                    actor_steps,
+                    value_steps,
+                    action_steps,
+                    logp_steps,
+                    strict=True,
+                ):
+                    opponent_indices = np.flatnonzero(actor_step != actor.focal_seat_by_env)
+                    if opponent_indices.size == 0:
+                        continue
+                    state_by_actor[int(actor.actor_id)]["counters"]["opponent_row_count"] += int(opponent_indices.shape[0])
+                    self._apply_opponent_rows_ids(
+                        actor=actor,
+                        row_indices=opponent_indices,
+                        obs_step=obs_step,
+                        actor_step=actor_step,
+                        legal_ids=_require_ids_offsets(batch)[0],
+                        legal_offsets=_require_ids_offsets(batch)[1],
+                        legal_action_meta=_optional_legal_action_meta(batch),
+                        logits_out=None,
+                        values_out=value_step,
+                        actions_out=action_step,
+                        logp_out=logp_step,
+                        rng=actor.rng,
+                        sample_actions=True,
+                    )
+                self._record_batch_timer_ms("central_fixed_opponent_overwrite", time.perf_counter() - overwrite_started)
+                per_actor_overwrite_ms = int(
+                    ((time.perf_counter() - overwrite_started) * 1000.0) / max(len(actors), 1)
+                )
+                for state in state_by_actor.values():
+                    state["counters"]["fixed_opponent_routing_ms"] += per_actor_overwrite_ms
+                logits_steps: list[np.ndarray | None] = [None for _ in actors]
+            else:
+                logits_steps = [np.empty((N, self.action_dim), dtype=np.float32) for _ in actors]
+                value_steps = [np.empty((N,), dtype=np.float32) for _ in actors]
+                for actor, actor_step in zip(actors, actor_steps, strict=True):
+                    focal_rows = np.flatnonzero(actor_step == actor.focal_seat_by_env)
+                    opponent_rows = np.flatnonzero(actor_step != actor.focal_seat_by_env)
+                    state_by_actor[int(actor.actor_id)]["counters"]["focal_row_count"] += int(focal_rows.shape[0])
+                    state_by_actor[int(actor.actor_id)]["counters"]["opponent_row_count"] += int(opponent_rows.shape[0])
+                forward_started = time.perf_counter()
+                self._central_forward_all_rows(
+                    actors=actors,
+                    batches=batches,
+                    obs_steps=obs_steps,
+                    actor_steps=actor_steps,
+                    logits_outs=cast(Sequence[np.ndarray], logits_steps),
+                    values_outs=value_steps,
+                )
+                self._record_batch_timer_ms("central_focal_policy", time.perf_counter() - forward_started)
+                per_actor_forward_ms = int(
+                    ((time.perf_counter() - forward_started) * 1000.0) / max(len(actors), 1)
+                )
+                for state in state_by_actor.values():
+                    state["counters"]["actor_policy_forward_ms"] += per_actor_forward_ms
+
+                overwrite_started = time.perf_counter()
+                self._overwrite_central_outputs_with_configured_opponents(
+                    actors=actors,
+                    batches=batches,
+                    obs_steps=obs_steps,
+                    actor_steps=actor_steps,
+                    logits_outs=cast(Sequence[np.ndarray | None], logits_steps),
+                    values_outs=value_steps,
+                )
+                per_actor_overwrite_ms = int(
+                    ((time.perf_counter() - overwrite_started) * 1000.0) / max(len(actors), 1)
+                )
+                for state in state_by_actor.values():
+                    state["counters"]["fixed_opponent_routing_ms"] += per_actor_overwrite_ms
 
             next_batches: list[DecisionBoundaryBatch] = []
-            for actor, batch, obs_storage_step, actor_step, logits_step, value_step in zip(
-                actors,
-                batches,
-                obs_storage_steps,
-                actor_steps,
-                logits_steps,
-                value_steps,
-                strict=True,
+            for actor_index, (actor, batch, obs_storage_step, actor_step, logits_step, value_step) in enumerate(
+                zip(
+                    actors,
+                    batches,
+                    obs_storage_steps,
+                    actor_steps,
+                    logits_steps,
+                    value_steps,
+                    strict=True,
+                )
             ):
                 state = state_by_actor[int(actor.actor_id)]
+                obs_step = np.asarray(obs_storage_step, dtype=np.float32)
                 focal_rows = actor_step == actor.focal_seat_by_env
                 state["policy_train_mask"][step_index] = focal_rows
                 if actor.layout_name == "i16_legal_ids":
                     legal_ids, legal_offsets = _require_ids_offsets(batch)
+                    legal_action_meta = _optional_legal_action_meta(batch)
+                    teacher_started = time.perf_counter()
+                    teacher_family, teacher_slot, teacher_attack_type, teacher_valid = self._teacher_labels_from_ids(
+                        focal_rows=focal_rows,
+                        decision_kind=np.asarray(batch.decision_kind, dtype=np.int32),
+                        obs_step=obs_step,
+                        legal_ids=legal_ids,
+                        legal_offsets=legal_offsets,
+                        legal_action_meta=legal_action_meta,
+                        counters=state["counters"],
+                    )
+                    state["counters"]["teacher_label_ms"] += int((time.perf_counter() - teacher_started) * 1000.0)
+                    state["counters"]["packed_candidate_count"] += int(np.asarray(legal_ids).shape[0])
                     packed_legal_ids = np.asarray(legal_ids, dtype=np.int64)
                     packed_legal_offsets = np.asarray(legal_offsets, dtype=np.int64)
                     offset_base = int(state["packed_offsets"][-1][-1])
                     state["packed_ids"].append(np.asarray(legal_ids, dtype=np.uint32))
+                    if legal_action_meta is not None:
+                        state["packed_meta"].append(np.asarray(legal_action_meta, dtype=np.uint16))
                     state["packed_offsets"].append(np.asarray(legal_offsets[1:] + offset_base, dtype=np.uint32))
-                    if hasattr(actor.env, "step_sample_from_logits_with_logp"):
+                    if structured_central_packed:
+                        action_step = np.asarray(action_steps[actor_index], dtype=np.int64)
+                        logp_step = np.asarray(logp_steps[actor_index], dtype=np.float32)
+                        env_started = time.perf_counter()
+                        next_batch = actor.env.step(np.asarray(action_step, dtype=np.uint32))
+                        state["counters"]["actor_env_step_ms"] += int(
+                            (time.perf_counter() - env_started) * 1000.0
+                        )
+                    elif hasattr(actor.env, "step_sample_from_logits_with_logp"):
                         sample_seeds = actor.rng.integers(0, np.iinfo(np.int64).max, size=N, dtype=np.int64)
+                        env_started = time.perf_counter()
                         next_batch, fused_actions, fused_logp = actor.env.step_sample_from_logits_with_logp(
-                            logits_step,
+                            cast(np.ndarray, logits_step),
                             sample_seeds,
+                        )
+                        state["counters"]["actor_env_step_ms"] += int(
+                            (time.perf_counter() - env_started) * 1000.0
                         )
                         action_step = np.asarray(fused_actions, dtype=np.int64)
                         logp_step = np.asarray(fused_logp, dtype=np.float32)
                     else:
+                        env_started = time.perf_counter()
                         action_step, logp_step, _entropy = sample_actions_from_legal_ids(
-                            logits_step,
+                            cast(np.ndarray, logits_step),
                             legal_ids,
                             legal_offsets,
                             rng=actor.rng,
                             pass_action_id=self.config.pass_action_id,
                         )
                         next_batch = actor.env.step(np.asarray(action_step, dtype=np.uint32))
+                        state["counters"]["actor_env_step_ms"] += int(
+                            (time.perf_counter() - env_started) * 1000.0
+                        )
+                    summary_started = time.perf_counter()
                     update_action_summary_from_ids(
                         counters=state["counters"],
                         state=state["action_sequence_state"],
@@ -2301,16 +3431,33 @@ class QueueRuntime:
                         legal_offsets=packed_legal_offsets,
                         pass_action_id=self.config.pass_action_id,
                     )
+                    state["counters"]["actor_action_summary_ms"] += int(
+                        (time.perf_counter() - summary_started) * 1000.0
+                    )
                 else:
                     legal_mask = _require_mask(batch)
                     legal_mask_array = np.asarray(legal_mask, dtype=np.bool_)
+                    teacher_started = time.perf_counter()
+                    teacher_family, teacher_slot, teacher_attack_type, teacher_valid = self._teacher_labels_from_mask(
+                        focal_rows=focal_rows,
+                        decision_kind=np.asarray(batch.decision_kind, dtype=np.int32),
+                        obs_step=obs_step,
+                        legal_mask=legal_mask_array,
+                        counters=state["counters"],
+                    )
+                    state["counters"]["teacher_label_ms"] += int((time.perf_counter() - teacher_started) * 1000.0)
                     state["mask_steps"].append(legal_mask_array)
+                    env_started = time.perf_counter()
                     action_step, logp_step, _entropy = sample_actions_from_mask(
                         logits_step,
                         legal_mask,
                         rng=actor.rng,
                         pass_action_id=self.config.pass_action_id,
                     )
+                    state["counters"]["actor_env_step_ms"] += int(
+                        (time.perf_counter() - env_started) * 1000.0
+                    )
+                    summary_started = time.perf_counter()
                     update_action_summary_from_mask(
                         counters=state["counters"],
                         state=state["action_sequence_state"],
@@ -2318,7 +3465,14 @@ class QueueRuntime:
                         legal_mask=legal_mask_array,
                         pass_action_id=self.config.pass_action_id,
                     )
+                    state["counters"]["actor_action_summary_ms"] += int(
+                        (time.perf_counter() - summary_started) * 1000.0
+                    )
+                    env_started = time.perf_counter()
                     next_batch = actor.env.step(np.asarray(action_step, dtype=np.uint32))
+                    state["counters"]["actor_env_step_ms"] += int(
+                        (time.perf_counter() - env_started) * 1000.0
+                    )
                 done = np.logical_or(next_batch.terminated, next_batch.truncated)
 
                 state["obs"][step_index] = obs_storage_step
@@ -2330,6 +3484,10 @@ class QueueRuntime:
                 state["behavior_logp"][step_index] = np.asarray(logp_step, dtype=np.float32)
                 state["values"][step_index] = value_step
                 state["episode_seed"][step_index] = np.asarray(next_batch.episode_seed, dtype=np.uint64)
+                state["teacher_family"][step_index] = teacher_family
+                state["teacher_slot"][step_index] = teacher_slot
+                state["teacher_attack_type"][step_index] = teacher_attack_type
+                state["teacher_valid"][step_index] = teacher_valid
 
                 if np.any(done):
                     _accumulate_timeout_counters(
@@ -2338,6 +3496,7 @@ class QueueRuntime:
                         done=done,
                         timeout_limits=timeout_limits_by_actor[int(actor.actor_id)],
                     )
+                    reset_started = time.perf_counter()
                     reset_hidden = actor.model.initial_seat_hidden(int(np.count_nonzero(done)), device=self._device)
                     done_mask = torch.as_tensor(done, dtype=torch.bool, device=self._device)
                     actor.seat_hidden[done_mask] = reset_hidden
@@ -2345,32 +3504,80 @@ class QueueRuntime:
                     self._assign_episode_roles(actor, done.astype(np.bool_, copy=False))
                     reset_action_sequence_state(state["action_sequence_state"], done.astype(np.bool_, copy=False))
                     next_batch = self._reset_done_rows(actor, done.astype(np.bool_, copy=False))
+                    state["counters"]["actor_done_reset_ms"] += int(
+                        (time.perf_counter() - reset_started) * 1000.0
+                    )
                 next_batches.append(next_batch)
             batches = next_batches
 
         bootstrap_obs_steps = [np.asarray(batch.obs, dtype=np.float32) for batch in batches]
         bootstrap_actor_steps = [np.asarray(batch.actor, dtype=np.int64) for batch in batches]
         bootstrap_values = [np.empty((N,), dtype=np.float32) for _ in actors]
-        self._central_forward_all_rows(
-            actors=actors,
-            obs_steps=bootstrap_obs_steps,
-            actor_steps=bootstrap_actor_steps,
-            logits_outs=[np.empty((N, self.action_dim), dtype=np.float32) for _ in actors],
-            values_outs=bootstrap_values,
-        )
-        self._overwrite_central_outputs_with_batched_opponents(
-            actors=actors,
-            batches=batches,
-            obs_steps=bootstrap_obs_steps,
-            actor_steps=bootstrap_actor_steps,
-            logits_outs=[None for _ in actors],
-            values_outs=bootstrap_values,
-        )
+        bootstrap_started = time.perf_counter()
+        if structured_central_packed:
+            self._central_value_actor_rows(
+                actors=actors,
+                obs_steps=bootstrap_obs_steps,
+                actor_steps=bootstrap_actor_steps,
+                row_indices_by_actor=[np.arange(N, dtype=np.int64) for _ in actors],
+                values_outs=bootstrap_values,
+            )
+        else:
+            self._central_forward_all_rows(
+                actors=actors,
+                batches=batches,
+                obs_steps=bootstrap_obs_steps,
+                actor_steps=bootstrap_actor_steps,
+                logits_outs=[np.empty((N, self.action_dim), dtype=np.float32) for _ in actors],
+                values_outs=bootstrap_values,
+            )
+        bootstrap_forward_ms = int(((time.perf_counter() - bootstrap_started) * 1000.0) / max(len(actors), 1))
+        for state in state_by_actor.values():
+            state["counters"]["actor_bootstrap_ms"] += bootstrap_forward_ms
+
+        if not structured_central_packed:
+            overwrite_started = time.perf_counter()
+            self._overwrite_central_outputs_with_configured_opponents(
+                actors=actors,
+                batches=batches,
+                obs_steps=bootstrap_obs_steps,
+                actor_steps=bootstrap_actor_steps,
+                logits_outs=[None for _ in actors],
+                values_outs=bootstrap_values,
+            )
+            bootstrap_overwrite_ms = int(
+                ((time.perf_counter() - overwrite_started) * 1000.0) / max(len(actors), 1)
+            )
+            for state in state_by_actor.values():
+                state["counters"]["fixed_opponent_routing_ms"] += bootstrap_overwrite_ms
 
         unrolls: list[RuntimeUnroll] = []
         for actor, batch, bootstrap_value in zip(actors, batches, bootstrap_values, strict=True):
             state = state_by_actor[int(actor.actor_id)]
             actor.current_batch = batch
+            state["counters"]["copied_bytes_estimate"] += int(
+                state["obs"].nbytes
+                + state["actions"].nbytes
+                + state["rewards"].nbytes
+                + state["terminated"].nbytes
+                + state["truncated"].nbytes
+                + state["to_play_seat"].nbytes
+                + state["behavior_logp"].nbytes
+                + state["values"].nbytes
+                + state["episode_seed"].nbytes
+                + state["policy_train_mask"].nbytes
+                + state["teacher_family"].nbytes
+                + state["teacher_slot"].nbytes
+                + state["teacher_attack_type"].nbytes
+                + state["teacher_valid"].nbytes
+                + np.asarray(batch.obs, dtype=np.float32).nbytes
+                + np.asarray(batch.actor, dtype=np.int64).nbytes
+                + np.asarray(bootstrap_value, dtype=np.float32).nbytes
+            )
+            _merge_simulator_timing_counters(state["counters"], actor.env)
+            state["counters"]["collect_actor_unroll_ms"] += int(
+                ((time.perf_counter() - central_started) * 1000.0) / max(len(actors), 1)
+            )
             unrolls.append(
                 RuntimeUnroll(
                     actor_id=actor.actor_id,
@@ -2395,9 +3602,18 @@ class QueueRuntime:
                             if state["packed_ids"]
                             else np.zeros((0,), dtype=np.uint32),
                             np.concatenate(state["packed_offsets"], axis=0),
+                            meta=(
+                                np.concatenate(state["packed_meta"], axis=0)
+                                if state["packed_meta"]
+                                else None
+                            ),
+                            action_space=int(self.action_dim),
                         )
                         if actor.layout_name == "i16_legal_ids"
-                        else LegalActionBatch.from_mask(np.stack(state["mask_steps"], axis=0))
+                        else LegalActionBatch.from_mask(
+                            np.stack(state["mask_steps"], axis=0),
+                            action_space=int(self.action_dim),
+                        )
                     ),
                     bootstrap_obs=np.asarray(batch.obs, dtype=np.float32),
                     bootstrap_actor=np.asarray(batch.actor, dtype=np.int64),
@@ -2406,6 +3622,10 @@ class QueueRuntime:
                     final_hidden_state=actor.seat_hidden.detach().cpu().numpy().copy(),
                     episode_seed=state["episode_seed"],
                     policy_train_mask=state["policy_train_mask"],
+                    teacher_family=state["teacher_family"],
+                    teacher_slot=state["teacher_slot"],
+                    teacher_attack_type=state["teacher_attack_type"],
+                    teacher_valid=state["teacher_valid"],
                     behavior_logits=None,
                     counters=dict(state["counters"]),
                 )
@@ -2414,6 +3634,7 @@ class QueueRuntime:
         return unrolls
 
     def _collect_actor_unroll(self, actor: _ActorState) -> RuntimeUnroll:
+        unroll_started = time.perf_counter()
         T = int(self.config.unroll_length)
         N = int(self.config.envs_per_actor)
         obs_dtype = np.asarray(actor.current_batch.obs).dtype
@@ -2427,7 +3648,12 @@ class QueueRuntime:
         values = np.zeros((T, N), dtype=np.float32)
         episode_seed = np.zeros((T, N), dtype=np.uint64)
         policy_train_mask = np.zeros((T, N), dtype=np.bool_)
+        teacher_family = np.full((T, N), -1, dtype=np.int32)
+        teacher_slot = np.full((T, N), -1, dtype=np.int32)
+        teacher_attack_type = np.full((T, N), -1, dtype=np.int32)
+        teacher_valid = np.zeros((T, N), dtype=np.bool_)
         packed_ids: list[np.ndarray] = []
+        packed_meta: list[np.ndarray] = []
         packed_offsets: list[np.ndarray] = [np.array([0], dtype=np.uint32)]
         mask_steps: list[np.ndarray] = []
         counters = _collector_counter_template()
@@ -2453,12 +3679,33 @@ class QueueRuntime:
 
             if actor.layout_name == "i16_legal_ids":
                 legal_ids, legal_offsets = _require_ids_offsets(batch)
+                legal_action_meta = _optional_legal_action_meta(batch)
+                teacher_started = time.perf_counter()
+                (
+                    teacher_family_step,
+                    teacher_slot_step,
+                    teacher_attack_type_step,
+                    teacher_valid_step,
+                ) = self._teacher_labels_from_ids(
+                    focal_rows=focal_rows,
+                    decision_kind=np.asarray(batch.decision_kind, dtype=np.int32),
+                    obs_step=obs_step,
+                    legal_ids=legal_ids,
+                    legal_offsets=legal_offsets,
+                    legal_action_meta=legal_action_meta,
+                    counters=counters,
+                )
+                counters["teacher_label_ms"] += int((time.perf_counter() - teacher_started) * 1000.0)
+                counters["packed_candidate_count"] += int(np.asarray(legal_ids).shape[0])
                 packed_legal_ids = np.asarray(legal_ids, dtype=np.int64)
                 packed_legal_offsets = np.asarray(legal_offsets, dtype=np.int64)
                 offset_base = int(packed_offsets[-1][-1])
                 if self._use_simulator_fused_logits_step and hasattr(actor.env, "step_sample_from_logits_with_logp"):
                     packed_ids.append(np.asarray(legal_ids, dtype=np.uint32))
+                    if legal_action_meta is not None:
+                        packed_meta.append(np.asarray(legal_action_meta, dtype=np.uint16))
                     packed_offsets.append(np.asarray(legal_offsets[1:] + offset_base, dtype=np.uint32))
+                    policy_started = time.perf_counter()
                     self._fill_policy_outputs_ids(
                         actor=actor,
                         obs_step=obs_step,
@@ -2466,6 +3713,7 @@ class QueueRuntime:
                         focal_rows=focal_rows,
                         legal_ids=legal_ids,
                         legal_offsets=legal_offsets,
+                        legal_action_meta=legal_action_meta,
                         logits_out=logits_step,
                         values_out=value_step,
                         actions_out=None,
@@ -2473,13 +3721,17 @@ class QueueRuntime:
                         rng=actor.rng,
                         sample_actions=False,
                     )
+                    counters["actor_policy_forward_ms"] += int((time.perf_counter() - policy_started) * 1000.0)
                     sample_seeds = actor.rng.integers(0, np.iinfo(np.int64).max, size=N, dtype=np.int64)
+                    env_started = time.perf_counter()
                     next_batch, fused_actions, fused_logp = actor.env.step_sample_from_logits_with_logp(
                         logits_step,
                         sample_seeds,
                     )
+                    counters["actor_env_step_ms"] += int((time.perf_counter() - env_started) * 1000.0)
                     action_step = np.asarray(fused_actions, dtype=np.int64)
                     logp_step = np.asarray(fused_logp, dtype=np.float32)
+                    summary_started = time.perf_counter()
                     update_action_summary_from_ids(
                         counters=counters,
                         state=action_sequence_state,
@@ -2488,9 +3740,15 @@ class QueueRuntime:
                         legal_offsets=packed_legal_offsets,
                         pass_action_id=self.config.pass_action_id,
                     )
+                    counters["actor_action_summary_ms"] += int(
+                        (time.perf_counter() - summary_started) * 1000.0
+                    )
                 else:
                     packed_ids.append(np.asarray(legal_ids, dtype=np.uint32))
+                    if legal_action_meta is not None:
+                        packed_meta.append(np.asarray(legal_action_meta, dtype=np.uint16))
                     packed_offsets.append(np.asarray(legal_offsets[1:] + offset_base, dtype=np.uint32))
+                    policy_started = time.perf_counter()
                     self._fill_policy_outputs_ids(
                         actor=actor,
                         obs_step=obs_step,
@@ -2498,13 +3756,18 @@ class QueueRuntime:
                         focal_rows=focal_rows,
                         legal_ids=legal_ids,
                         legal_offsets=legal_offsets,
+                        legal_action_meta=legal_action_meta,
                         logits_out=None,
                         values_out=value_step,
                         actions_out=action_step,
                         logp_out=logp_step,
                         rng=actor.rng,
                     )
+                    counters["actor_policy_forward_ms"] += int((time.perf_counter() - policy_started) * 1000.0)
+                    env_started = time.perf_counter()
                     next_batch = actor.env.step(action_step.astype(np.uint32, copy=False))
+                    counters["actor_env_step_ms"] += int((time.perf_counter() - env_started) * 1000.0)
+                    summary_started = time.perf_counter()
                     update_action_summary_from_ids(
                         counters=counters,
                         state=action_sequence_state,
@@ -2513,11 +3776,29 @@ class QueueRuntime:
                         legal_offsets=packed_legal_offsets,
                         pass_action_id=self.config.pass_action_id,
                     )
+                    counters["actor_action_summary_ms"] += int(
+                        (time.perf_counter() - summary_started) * 1000.0
+                    )
             else:
                 legal_mask = _require_mask(batch)
+                teacher_started = time.perf_counter()
+                (
+                    teacher_family_step,
+                    teacher_slot_step,
+                    teacher_attack_type_step,
+                    teacher_valid_step,
+                ) = self._teacher_labels_from_mask(
+                    focal_rows=focal_rows,
+                    decision_kind=np.asarray(batch.decision_kind, dtype=np.int32),
+                    obs_step=obs_step,
+                    legal_mask=np.asarray(legal_mask, dtype=np.bool_),
+                    counters=counters,
+                )
+                counters["teacher_label_ms"] += int((time.perf_counter() - teacher_started) * 1000.0)
                 if self._use_simulator_fused_logits_step:
                     current_legal_mask = np.asarray(legal_mask, dtype=np.bool_).copy()
                     mask_steps.append(current_legal_mask)
+                    policy_started = time.perf_counter()
                     self._fill_policy_outputs_mask(
                         actor=actor,
                         obs_step=obs_step,
@@ -2531,8 +3812,11 @@ class QueueRuntime:
                         rng=actor.rng,
                         sample_actions=False,
                     )
+                    counters["actor_policy_forward_ms"] += int((time.perf_counter() - policy_started) * 1000.0)
                     sample_seeds = actor.rng.integers(0, np.iinfo(np.int64).max, size=N, dtype=np.int64)
+                    env_started = time.perf_counter()
                     next_batch, fused_actions = actor.env.step_sample_from_logits(logits_step, sample_seeds)
+                    counters["actor_env_step_ms"] += int((time.perf_counter() - env_started) * 1000.0)
                     action_step = np.asarray(fused_actions, dtype=np.int64)
                     logp_step = masked_logp_from_mask(
                         logits_step,
@@ -2540,6 +3824,7 @@ class QueueRuntime:
                         action_step.astype(np.uint32, copy=False),
                         pass_action_id=self.config.pass_action_id,
                     )
+                    summary_started = time.perf_counter()
                     update_action_summary_from_mask(
                         counters=counters,
                         state=action_sequence_state,
@@ -2547,9 +3832,13 @@ class QueueRuntime:
                         legal_mask=current_legal_mask,
                         pass_action_id=self.config.pass_action_id,
                     )
+                    counters["actor_action_summary_ms"] += int(
+                        (time.perf_counter() - summary_started) * 1000.0
+                    )
                 else:
                     legal_mask_array = np.asarray(legal_mask, dtype=np.bool_)
                     mask_steps.append(legal_mask_array)
+                    policy_started = time.perf_counter()
                     self._fill_policy_outputs_mask(
                         actor=actor,
                         obs_step=obs_step,
@@ -2562,6 +3851,8 @@ class QueueRuntime:
                         logp_out=logp_step,
                         rng=actor.rng,
                     )
+                    counters["actor_policy_forward_ms"] += int((time.perf_counter() - policy_started) * 1000.0)
+                    summary_started = time.perf_counter()
                     update_action_summary_from_mask(
                         counters=counters,
                         state=action_sequence_state,
@@ -2569,7 +3860,12 @@ class QueueRuntime:
                         legal_mask=legal_mask_array,
                         pass_action_id=self.config.pass_action_id,
                     )
+                    counters["actor_action_summary_ms"] += int(
+                        (time.perf_counter() - summary_started) * 1000.0
+                    )
+                    env_started = time.perf_counter()
                     next_batch = actor.env.step(action_step.astype(np.uint32, copy=False))
+                    counters["actor_env_step_ms"] += int((time.perf_counter() - env_started) * 1000.0)
             done = np.logical_or(next_batch.terminated, next_batch.truncated)
 
             obs[step_index] = obs_storage_step
@@ -2581,6 +3877,10 @@ class QueueRuntime:
             behavior_logp[step_index] = logp_step
             values[step_index] = value_step
             episode_seed[step_index] = np.asarray(next_batch.episode_seed, dtype=np.uint64)
+            teacher_family[step_index] = teacher_family_step
+            teacher_slot[step_index] = teacher_slot_step
+            teacher_attack_type[step_index] = teacher_attack_type_step
+            teacher_valid[step_index] = teacher_valid_step
 
             if np.any(done):
                 _accumulate_timeout_counters(
@@ -2595,6 +3895,7 @@ class QueueRuntime:
                     terminal_batch=next_batch,
                     done=done.astype(np.bool_, copy=False),
                 )
+                reset_started = time.perf_counter()
                 reset_hidden = actor.model.initial_seat_hidden(int(np.count_nonzero(done)), device=self._device)
                 done_mask = torch.as_tensor(done, dtype=torch.bool, device=self._device)
                 actor.seat_hidden[done_mask] = reset_hidden
@@ -2602,6 +3903,7 @@ class QueueRuntime:
                 self._assign_episode_roles(actor, done.astype(np.bool_, copy=False))
                 reset_action_sequence_state(action_sequence_state, done.astype(np.bool_, copy=False))
                 batch = self._reset_done_rows(actor, done.astype(np.bool_, copy=False))
+                counters["actor_done_reset_ms"] += int((time.perf_counter() - reset_started) * 1000.0)
             else:
                 batch = next_batch
 
@@ -2611,18 +3913,29 @@ class QueueRuntime:
         bootstrap_actor = np.asarray(batch.actor, dtype=np.int64)
         valid_bootstrap_rows = (bootstrap_actor == 0) | (bootstrap_actor == 1)
         if np.any(valid_bootstrap_rows):
+            bootstrap_started = time.perf_counter()
             with torch.inference_mode(), torch.amp.autocast(
                 device_type=self._device.type,
                 enabled=self._actor_amp_enabled,
             ):
-                _, bootstrap_value_tensor, _ = _actor_inference_model(actor).forward_seat_aware(
-                    torch.as_tensor(bootstrap_obs[valid_bootstrap_rows], device=self._device),
-                    torch.as_tensor(bootstrap_actor[valid_bootstrap_rows], device=self._device, dtype=torch.long),
-                    actor.seat_hidden[valid_bootstrap_rows],
-                )
+                actor_model = _actor_inference_model(actor)
+                value_seat_aware = getattr(actor_model, "value_seat_aware", None)
+                if callable(value_seat_aware):
+                    bootstrap_value_tensor = value_seat_aware(
+                        torch.as_tensor(bootstrap_obs[valid_bootstrap_rows], device=self._device),
+                        torch.as_tensor(bootstrap_actor[valid_bootstrap_rows], device=self._device, dtype=torch.long),
+                        actor.seat_hidden[valid_bootstrap_rows],
+                    )
+                else:
+                    _, bootstrap_value_tensor, _ = actor_model.forward_seat_aware(
+                        torch.as_tensor(bootstrap_obs[valid_bootstrap_rows], device=self._device),
+                        torch.as_tensor(bootstrap_actor[valid_bootstrap_rows], device=self._device, dtype=torch.long),
+                        actor.seat_hidden[valid_bootstrap_rows],
+                    )
             bootstrap_value[valid_bootstrap_rows] = (
                 bootstrap_value_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
             )
+            counters["actor_bootstrap_ms"] += int((time.perf_counter() - bootstrap_started) * 1000.0)
         unroll = RuntimeUnroll(
             actor_id=actor.actor_id,
             unroll_seq=actor.next_unroll_seq,
@@ -2640,9 +3953,11 @@ class QueueRuntime:
                 LegalActionBatch.from_packed(
                     np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
                     np.concatenate(packed_offsets, axis=0),
+                    meta=(np.concatenate(packed_meta, axis=0) if packed_meta else None),
+                    action_space=int(self.action_dim),
                 )
                 if actor.layout_name == "i16_legal_ids"
-                else LegalActionBatch.from_mask(np.stack(mask_steps, axis=0))
+                else LegalActionBatch.from_mask(np.stack(mask_steps, axis=0), action_space=int(self.action_dim))
             ),
             bootstrap_obs=bootstrap_obs,
             bootstrap_actor=bootstrap_actor,
@@ -2651,9 +3966,34 @@ class QueueRuntime:
             final_hidden_state=actor.seat_hidden.detach().cpu().numpy().copy(),
             episode_seed=episode_seed,
             policy_train_mask=policy_train_mask,
+            teacher_family=teacher_family,
+            teacher_slot=teacher_slot,
+            teacher_attack_type=teacher_attack_type,
+            teacher_valid=teacher_valid,
             behavior_logits=None,
             counters=counters,
         )
+        counters["copied_bytes_estimate"] += int(
+            obs.nbytes
+            + actions.nbytes
+            + rewards.nbytes
+            + terminated.nbytes
+            + truncated.nbytes
+            + to_play_seat.nbytes
+            + behavior_logp.nbytes
+            + values.nbytes
+            + episode_seed.nbytes
+            + policy_train_mask.nbytes
+            + teacher_family.nbytes
+            + teacher_slot.nbytes
+            + teacher_attack_type.nbytes
+            + teacher_valid.nbytes
+            + bootstrap_obs.nbytes
+            + bootstrap_actor.nbytes
+            + bootstrap_value.nbytes
+        )
+        _merge_simulator_timing_counters(counters, actor.env)
+        counters["collect_actor_unroll_ms"] += int((time.perf_counter() - unroll_started) * 1000.0)
         actor.next_unroll_seq += 1
         return unroll
 
@@ -2667,6 +4007,7 @@ class QueueRuntime:
         vtrace_rho_bar: float,
         vtrace_c_bar: float,
     ) -> dict[str, Any]:
+        concat_started = time.perf_counter()
         obs = _concat_time_major_field(unrolls, "obs")
         actions = _concat_time_major_field(unrolls, "actions")
         rewards = _concat_time_major_field(unrolls, "rewards")
@@ -2678,7 +4019,12 @@ class QueueRuntime:
         bootstrap_value = np.concatenate([np.asarray(unroll.bootstrap_value, dtype=np.float32) for unroll in unrolls], axis=0)
         initial_hidden_state = _concat_batch_major_field(unrolls, "initial_hidden_state")
         policy_train_mask = _concat_time_major_field(unrolls, "policy_train_mask")
+        teacher_family = _concat_optional_time_major_field(unrolls, "teacher_family")
+        teacher_slot = _concat_optional_time_major_field(unrolls, "teacher_slot")
+        teacher_attack_type = _concat_optional_time_major_field(unrolls, "teacher_attack_type")
+        teacher_valid = _concat_optional_time_major_field(unrolls, "teacher_valid")
         legal_actions = _concatenate_legal_actions(unrolls, action_space=int(self.action_dim))
+        self._record_batch_timer_ms("legal_concatenation", time.perf_counter() - concat_started)
         legal_mask = None if legal_actions.mask is None else legal_actions.mask
         discounts = np.logical_not(terminated).astype(np.float32) * float(gamma)
         if not truncation_bootstrap_value:
@@ -2689,6 +4035,7 @@ class QueueRuntime:
             "actions": actions,
             "legal_actions": legal_actions,
             "legal_mask": legal_mask,
+            "legal_action_meta": legal_actions.meta,
             "to_play_seat": to_play_seat,
             "actor": to_play_seat,
             "initial_hidden_state": initial_hidden_state,
@@ -2700,6 +4047,10 @@ class QueueRuntime:
             "vtrace_rho_bar": float(vtrace_rho_bar),
             "vtrace_c_bar": float(vtrace_c_bar),
             "policy_train_mask": policy_train_mask,
+            "teacher_family": teacher_family,
+            "teacher_slot": teacher_slot,
+            "teacher_attack_type": teacher_attack_type,
+            "teacher_valid": teacher_valid,
         }
 
     def _build_ppo_batch(
@@ -2712,6 +4063,7 @@ class QueueRuntime:
         truncation_bootstrap_value: bool,
     ) -> dict[str, Any]:
         bootstrap_values = [self._bootstrap_values(unroll) for unroll in unrolls]
+        concat_started = time.perf_counter()
         obs = _concat_time_major_field(unrolls, "obs")
         actions = _concat_time_major_field(unrolls, "actions")
         rewards = _concat_time_major_field(unrolls, "rewards")
@@ -2722,7 +4074,12 @@ class QueueRuntime:
         old_values = _concat_time_major_field(unrolls, "values")
         initial_hidden_state = _concat_batch_major_field(unrolls, "initial_hidden_state")
         policy_train_mask = _concat_time_major_field(unrolls, "policy_train_mask")
+        teacher_family = _concat_optional_time_major_field(unrolls, "teacher_family")
+        teacher_slot = _concat_optional_time_major_field(unrolls, "teacher_slot")
+        teacher_attack_type = _concat_optional_time_major_field(unrolls, "teacher_attack_type")
+        teacher_valid = _concat_optional_time_major_field(unrolls, "teacher_valid")
         legal_actions = _concatenate_legal_actions(unrolls, action_space=int(self.action_dim))
+        self._record_batch_timer_ms("legal_concatenation", time.perf_counter() - concat_started)
         legal_mask = None if legal_actions.mask is None else legal_actions.mask
 
         discounts = np.logical_not(terminated).astype(np.float32) * float(gamma)
@@ -2744,6 +4101,7 @@ class QueueRuntime:
             "actions": actions,
             "legal_actions": legal_actions,
             "legal_mask": legal_mask,
+            "legal_action_meta": legal_actions.meta,
             "to_play_seat": to_play_seat,
             "actor": to_play_seat,
             "initial_hidden_state": initial_hidden_state,
@@ -2754,6 +4112,10 @@ class QueueRuntime:
             "returns": returns,
             "advantages": advantages,
             "policy_train_mask": policy_train_mask,
+            "teacher_family": teacher_family,
+            "teacher_slot": teacher_slot,
+            "teacher_attack_type": teacher_attack_type,
+            "teacher_valid": teacher_valid,
         }
 
     def _bootstrap_values(self, unroll: RuntimeUnroll) -> np.ndarray:
@@ -2769,11 +4131,19 @@ class QueueRuntime:
             device_type=self._device.type,
             enabled=self._actor_amp_enabled,
         ):
-            _, value_tensor, _ = actor_model.forward_seat_aware(
-                torch.as_tensor(unroll.bootstrap_obs[valid_rows], device=self._device),
-                torch.as_tensor(unroll.bootstrap_actor[valid_rows], device=self._device, dtype=torch.long),
-                torch.as_tensor(unroll.final_hidden_state[valid_rows], device=self._device),
-            )
+            value_seat_aware = getattr(actor_model, "value_seat_aware", None)
+            if callable(value_seat_aware):
+                value_tensor = value_seat_aware(
+                    torch.as_tensor(unroll.bootstrap_obs[valid_rows], device=self._device),
+                    torch.as_tensor(unroll.bootstrap_actor[valid_rows], device=self._device, dtype=torch.long),
+                    torch.as_tensor(unroll.final_hidden_state[valid_rows], device=self._device),
+                )
+            else:
+                _, value_tensor, _ = actor_model.forward_seat_aware(
+                    torch.as_tensor(unroll.bootstrap_obs[valid_rows], device=self._device),
+                    torch.as_tensor(unroll.bootstrap_actor[valid_rows], device=self._device, dtype=torch.long),
+                    torch.as_tensor(unroll.final_hidden_state[valid_rows], device=self._device),
+                )
         bootstrap_value[valid_rows] = value_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
         return bootstrap_value
 
@@ -2802,7 +4172,12 @@ class QueueRuntime:
                 continue
             for key, value in counters.items():
                 counter_totals[key] = counter_totals.get(key, 0.0) + float(value)
-        return {
+        tactical_rows = float(counter_totals.get("tactical_row_count", 0.0))
+        packed_candidates = float(counter_totals.get("packed_candidate_count", 0.0))
+        row_count_total = float(counter_totals.get("focal_row_count", 0.0) + counter_totals.get("opponent_row_count", 0.0))
+        if row_count_total <= 0.0:
+            row_count_total = tactical_rows
+        metrics = {
             "actor_env_steps_per_sec": float(batch_env_steps / elapsed_window),
             "actor_env_steps_per_sec_cumulative": float(self._runtime_cumulative_env_steps / elapsed),
             "batch_env_steps": float(batch_env_steps),
@@ -2825,8 +4200,18 @@ class QueueRuntime:
             "pfsp_recent_envs": float(self._pfsp_last_recent_envs),
             "pfsp_hard_negative_envs": float(self._pfsp_last_hard_negative_envs),
             "pfsp_epoch": float(self._pfsp_epoch),
+            "tactical_row_count": tactical_rows,
+            "packed_candidate_count": packed_candidates,
+            "copied_bytes_estimate": float(counter_totals.get("copied_bytes_estimate", 0.0)),
+            "avg_legal_actions_per_row": float(packed_candidates / max(row_count_total, 1.0)),
             **{f"collector_{key}": value for key, value in counter_totals.items()},
         }
+        for key, value in counter_totals.items():
+            if key.startswith("simulator_") and key.endswith("_ns"):
+                metrics[f"timer_{key[:-3]}_ms"] = float(value / 1_000_000.0)
+            elif key.startswith("simulator_python_"):
+                metrics[f"timer_{key}_ms"] = float(value / 1_000_000.0)
+        return metrics
 
     def _reset_done_rows(self, actor: _ActorState, done: np.ndarray) -> DecisionBoundaryBatch:
         try:
@@ -2842,6 +4227,17 @@ class QueueRuntime:
             self._assign_episode_roles(actor, full_reset, initial=True)
             fallback_seed = int(actor.rng.integers(0, np.iinfo(np.int32).max, dtype=np.int64))
             return actor.env.reset(seed=fallback_seed)
+
+    def _reset_actor_state_for_fixed_opponents(self, actor: _ActorState) -> None:
+        full_reset = np.ones(actor.focal_seat_by_env.shape, dtype=np.bool_)
+        initial_hidden = actor.model.initial_seat_hidden(
+            int(self.config.envs_per_actor),
+            device=self._device,
+        ).clone()
+        actor.seat_hidden = initial_hidden.clone()
+        actor.opponent_hidden = initial_hidden
+        self._assign_episode_roles(actor, full_reset, initial=True)
+        actor.current_batch = self._reset_done_rows(actor, full_reset)
 
 
 def build_runtime_config(
@@ -2936,6 +4332,26 @@ def _concat_time_major_field(unrolls: Sequence[RuntimeUnroll], field_name: str) 
     return result
 
 
+def _concat_optional_time_major_field(unrolls: Sequence[RuntimeUnroll], field_name: str) -> np.ndarray | None:
+    present_values = [getattr(unroll, field_name) for unroll in unrolls if getattr(unroll, field_name) is not None]
+    if not present_values:
+        return None
+    template = np.asarray(present_values[0])
+    total_batch = sum(
+        int(np.asarray(getattr(unroll, field_name) if getattr(unroll, field_name) is not None else template).shape[1])
+        for unroll in unrolls
+    )
+    result = np.empty((template.shape[0], total_batch, *template.shape[2:]), dtype=template.dtype)
+    offset = 0
+    for unroll in unrolls:
+        raw_value = getattr(unroll, field_name)
+        value = template if raw_value is None else np.asarray(raw_value, dtype=template.dtype)
+        width = int(value.shape[1])
+        result[:, offset : offset + width, ...] = value
+        offset += width
+    return result
+
+
 def _concat_batch_major_field(unrolls: Sequence[RuntimeUnroll], field_name: str) -> np.ndarray:
     if not unrolls:
         raise ValueError("unrolls must be non-empty")
@@ -2978,14 +4394,57 @@ def _concatenate_legal_actions(unrolls: Sequence[RuntimeUnroll], *, action_space
         for unroll in unrolls[1:]:
             if int(unroll.obs.shape[0]) != total_time_steps:
                 raise RuntimeError("packed legal-action concatenation requires aligned unroll lengths")
+        if not all(unroll.legal_actions.row_count == int(unroll.obs.shape[0] * unroll.obs.shape[1]) for unroll in unrolls):
+            packed_ids: list[np.ndarray] = []
+            packed_meta: list[np.ndarray] = []
+            packed_offsets = [np.array([0], dtype=np.uint32)]
+            any_meta = any(unroll.legal_actions.meta is not None for unroll in unrolls)
+            for unroll in unrolls:
+                legal_actions = unroll.legal_actions
+                assert legal_actions.ids is not None and legal_actions.offsets is not None
+                row_limit = int(unroll.obs.shape[0] * unroll.obs.shape[1])
+                offsets = np.asarray(legal_actions.offsets, dtype=np.uint32)
+                ids_limit = int(offsets[min(row_limit, max(offsets.size - 1, 0))])
+                ids = np.asarray(legal_actions.ids[:ids_limit], dtype=np.uint32)
+                offset_base = int(packed_offsets[-1][-1])
+                packed_ids.append(ids)
+                packed_offsets.append(np.asarray(offsets[1 : row_limit + 1] + offset_base, dtype=np.uint32))
+                if any_meta and legal_actions.meta is not None:
+                    packed_meta.append(np.asarray(legal_actions.meta[:ids_limit], dtype=np.uint16))
+            return LegalActionBatch.from_packed(
+                np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
+                np.concatenate(packed_offsets, axis=0),
+                meta=(
+                    np.concatenate(packed_meta, axis=0)
+                    if packed_meta
+                    else (np.zeros((0, _infer_packed_meta_width(unrolls)), dtype=np.uint16) if any_meta else None)
+                ),
+                action_space=int(action_space),
+            )
 
         total_ids = sum(int(np.asarray(unroll.legal_actions.ids, dtype=np.uint32).size) for unroll in unrolls)
         total_rows = sum(int(unroll.obs.shape[0] * unroll.obs.shape[1]) for unroll in unrolls)
+        total_batch = sum(int(unroll.obs.shape[1]) for unroll in unrolls)
         ordered_packed_ids = np.empty((total_ids,), dtype=np.uint32)
+        any_meta = any(unroll.legal_actions.meta is not None for unroll in unrolls)
+        ordered_packed_meta = (
+            np.empty((total_ids, _infer_packed_meta_width(unrolls)), dtype=np.uint16)
+            if any_meta and total_ids > 0
+            else None
+        )
         ordered_packed_offsets = np.empty((total_rows + 1,), dtype=np.uint32)
         ordered_packed_offsets[0] = 0
+        ordered_widths = np.empty((total_time_steps, total_batch), dtype=np.uint32)
+        batch_offset = 0
+        for unroll in unrolls:
+            legal_actions = unroll.legal_actions
+            assert legal_actions.offsets is not None
+            env_count = int(unroll.obs.shape[1])
+            widths = np.diff(np.asarray(legal_actions.offsets, dtype=np.uint32)).reshape(total_time_steps, env_count)
+            ordered_widths[:, batch_offset : batch_offset + env_count] = widths
+            batch_offset += env_count
+        ordered_packed_offsets[1:] = np.cumsum(ordered_widths.reshape(-1), dtype=np.uint64).astype(np.uint32, copy=False)
         ids_offset = 0
-        row_offset = 1
         for time_index in range(total_time_steps):
             for unroll in unrolls:
                 legal_actions = unroll.legal_actions
@@ -2994,19 +4453,24 @@ def _concatenate_legal_actions(unrolls: Sequence[RuntimeUnroll], *, action_space
                 row_base = int(time_index * env_count)
                 offsets = np.asarray(legal_actions.offsets, dtype=np.uint32)
                 ids = np.asarray(legal_actions.ids, dtype=np.uint32)
-                for env_index in range(env_count):
-                    start = int(offsets[row_base + env_index])
-                    end = int(offsets[row_base + env_index + 1])
-                    width = end - start
-                    if width > 0:
-                        ordered_packed_ids[ids_offset : ids_offset + width] = ids[start:end]
-                    ids_offset += width
-                    ordered_packed_offsets[row_offset] = ids_offset
-                    row_offset += 1
+                meta = None if legal_actions.meta is None else np.asarray(legal_actions.meta, dtype=np.uint16)
+                start = int(offsets[row_base])
+                end = int(offsets[row_base + env_count])
+                width = end - start
+                if width > 0:
+                    ordered_packed_ids[ids_offset : ids_offset + width] = ids[start:end]
+                    if ordered_packed_meta is not None:
+                        if meta is None:
+                            ordered_packed_meta[ids_offset : ids_offset + width] = np.iinfo(np.uint16).max
+                        else:
+                            ordered_packed_meta[ids_offset : ids_offset + width] = meta[start:end]
+                ids_offset += width
 
         return LegalActionBatch.from_packed(
             ordered_packed_ids[:ids_offset],
-            ordered_packed_offsets[:row_offset],
+            ordered_packed_offsets,
+            meta=None if ordered_packed_meta is None else ordered_packed_meta[:ids_offset],
+            action_space=int(action_space),
         )
 
     if saw_packed:
@@ -3020,7 +4484,7 @@ def _concatenate_legal_actions(unrolls: Sequence[RuntimeUnroll], *, action_space
 
     if not mask_parts:
         raise RuntimeError("runtime learner batch requires at least one legal-action payload")
-    return LegalActionBatch.from_mask(np.concatenate(mask_parts, axis=1))
+    return LegalActionBatch.from_mask(np.concatenate(mask_parts, axis=1), action_space=int(action_space))
 
 
 def _require_ids_offsets(batch: DecisionBoundaryBatch) -> tuple[np.ndarray, np.ndarray]:
@@ -3030,10 +4494,50 @@ def _require_ids_offsets(batch: DecisionBoundaryBatch) -> tuple[np.ndarray, np.n
     return np.asarray(legal_ids, dtype=np.uint32), np.asarray(legal_offsets, dtype=np.uint32)
 
 
+def _optional_legal_action_meta(batch: DecisionBoundaryBatch) -> np.ndarray | None:
+    if batch.legal_action_meta is None:
+        return None
+    return np.asarray(batch.legal_action_meta, dtype=np.uint16)
+
+
 def _require_mask(batch: DecisionBoundaryBatch) -> np.ndarray:
     if batch.mask is None:
         raise RuntimeError("QueueRuntime expected dense mask legality for this actor batch")
     return np.asarray(batch.mask, dtype=np.bool_)
+
+
+def _concatenate_batch_legal_actions(
+    batches: Sequence[DecisionBoundaryBatch],
+    *,
+    action_space: int,
+) -> LegalActionBatch | None:
+    if not batches:
+        return None
+    if all(batch.mask is not None for batch in batches):
+        masks = [np.asarray(batch.mask, dtype=np.bool_) for batch in batches]
+        return LegalActionBatch.from_mask(
+            np.expand_dims(np.concatenate(masks, axis=0), axis=0),
+            action_space=int(action_space),
+        )
+    if all(batch.ids_offsets is not None for batch in batches):
+        packed_ids: list[np.ndarray] = []
+        packed_meta: list[np.ndarray] = []
+        packed_offsets = [np.array([0], dtype=np.uint32)]
+        for batch in batches:
+            legal_ids, legal_offsets = _require_ids_offsets(batch)
+            offset_base = int(packed_offsets[-1][-1])
+            packed_ids.append(np.asarray(legal_ids, dtype=np.uint32))
+            legal_action_meta = _optional_legal_action_meta(batch)
+            if legal_action_meta is not None:
+                packed_meta.append(np.asarray(legal_action_meta, dtype=np.uint16))
+            packed_offsets.append(np.asarray(legal_offsets[1:] + offset_base, dtype=np.uint32))
+        return LegalActionBatch.from_packed(
+            np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
+            np.concatenate(packed_offsets, axis=0),
+            meta=(np.concatenate(packed_meta, axis=0) if packed_meta else None),
+            action_space=int(action_space),
+        )
+    return None
 
 
 def _slice_packed_rows(
@@ -3053,6 +4557,56 @@ def _slice_packed_rows(
         np.concatenate(selected_ids, axis=0) if selected_ids else np.zeros((0,), dtype=np.uint32),
         np.asarray(offsets, dtype=np.uint32),
     )
+
+
+def _slice_packed_rows_with_meta(
+    legal_ids: np.ndarray,
+    legal_offsets: np.ndarray,
+    row_indices: np.ndarray,
+    *,
+    legal_action_meta: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    subset_ids, subset_offsets = _slice_packed_rows(legal_ids, legal_offsets, row_indices)
+    subset_meta = None
+    if legal_action_meta is not None:
+        selected_meta: list[np.ndarray] = []
+        for row_index in row_indices.tolist():
+            start = int(legal_offsets[int(row_index)])
+            stop = int(legal_offsets[int(row_index) + 1])
+            selected_meta.append(np.asarray(legal_action_meta[start:stop], dtype=np.uint16))
+        subset_meta = (
+            np.concatenate(selected_meta, axis=0)
+            if selected_meta
+            else np.zeros((0, legal_action_meta.shape[1]), dtype=np.uint16)
+        )
+    return subset_ids, subset_offsets, subset_meta
+
+
+def _structured_legal_batch_from_mask(legal_mask: np.ndarray, row_indices: np.ndarray) -> LegalActionBatch:
+    row_mask = np.asarray(legal_mask[row_indices], dtype=np.bool_)
+    return LegalActionBatch.from_mask(np.expand_dims(row_mask, axis=0))
+
+
+def _structured_legal_batch_from_packed(
+    legal_ids: np.ndarray,
+    legal_offsets: np.ndarray,
+    row_indices: np.ndarray,
+    legal_action_meta: np.ndarray | None = None,
+) -> LegalActionBatch:
+    subset_ids, subset_offsets, subset_meta = _slice_packed_rows_with_meta(
+        legal_ids,
+        legal_offsets,
+        row_indices,
+        legal_action_meta=legal_action_meta,
+    )
+    return LegalActionBatch.from_packed(subset_ids, subset_offsets, meta=subset_meta)
+
+
+def _infer_packed_meta_width(unrolls: Sequence[RuntimeUnroll]) -> int:
+    for unroll in unrolls:
+        if unroll.legal_actions.meta is not None:
+            return int(np.asarray(unroll.legal_actions.meta).shape[1])
+    return _DEFAULT_ACTION_META_WIDTH
 
 
 def _hash_unroll(*, actions: np.ndarray, rewards: np.ndarray, episode_seed: np.ndarray) -> str:

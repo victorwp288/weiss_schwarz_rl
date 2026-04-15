@@ -86,3 +86,56 @@ def test_large_action_spaces_store_packed_legal_ids_without_uint16_wrap() -> Non
     assert finalized.legal_ids.dtype == np.uint32
     assert np.array_equal(finalized.legal_ids, np.array([0, 69_999, 42], dtype=np.uint32))
     assert np.array_equal(finalized.legal_offsets, np.array([[0, 2, 3]], dtype=np.uint32))
+
+
+def test_write_step_ids_offsets_stores_aligned_action_meta() -> None:
+    batch = allocate_unroll_batch(
+        T=1,
+        N=2,
+        obs_len=4,
+        action_space=16,
+        obs_dtype="i16",
+        legal_repr="ids_offsets",
+        max_packed_legal=3,
+        legal_action_meta_width=4,
+    )
+
+    write_step_ids_offsets(
+        batch,
+        obs=np.zeros((batch.N, batch.obs_len), dtype=batch.obs.dtype),
+        legal_ids=np.array([1, 4, 7], dtype=np.uint32),
+        legal_action_meta=np.array(
+            [
+                [2, 0, 0, 0],
+                [6, 1, 2, 65535],
+                [8, 0, 1, 0],
+            ],
+            dtype=np.uint16,
+        ),
+        legal_offsets=np.array([0, 2, 3], dtype=np.int32),
+        to_play_seat=np.zeros((batch.N,), dtype=np.int8),
+        decision_id=np.zeros((batch.N,), dtype=np.int32),
+        action=np.zeros((batch.N,), dtype=np.uint32),
+        reward=np.zeros((batch.N,), dtype=np.float32),
+        terminated=np.zeros((batch.N,), dtype=np.bool_),
+        truncated=np.zeros((batch.N,), dtype=np.bool_),
+        engine_status=np.zeros((batch.N,), dtype=np.int32),
+        episode_seed=np.zeros((batch.N,), dtype=np.uint64),
+        episode_key=np.zeros((batch.N,), dtype=np.uint64),
+        behavior_logp=np.zeros((batch.N,), dtype=np.float32),
+    )
+
+    finalized = finalize_unroll(batch)
+
+    assert finalized.legal_action_meta is not None
+    assert np.array_equal(
+        finalized.legal_action_meta[:3],
+        np.array(
+            [
+                [2, 0, 0, 0],
+                [6, 1, 2, 65535],
+                [8, 0, 1, 0],
+            ],
+            dtype=np.uint16,
+        ),
+    )

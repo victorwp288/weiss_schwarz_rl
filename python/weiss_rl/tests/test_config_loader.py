@@ -32,6 +32,11 @@ def test_load_stack_config_reads_typed_thesis_preset() -> None:
     assert stack.config.model.encoder_kind == "typed_v1"
     assert stack.config.training is not None
     assert stack.config.training.algorithm == "impala_vtrace_gru"
+    assert stack.config.training.profile_timers is False
+    assert stack.config.training.compile_actor_inference is False
+    assert stack.config.training.structured_metrics_mode == "off"
+    assert stack.config.training.teacher_aux_mode == "always"
+    assert stack.config.training.fixed_opponent_backend == "python_scalar"
     assert stack.config.rewards is not None
     assert stack.config.rewards.gamma == pytest.approx(1.0)
     assert stack.config.league is not None
@@ -139,6 +144,67 @@ def test_load_stack_config_applies_longhorizon_v1_overrides() -> None:
     assert stack.config.rewards.gamma == pytest.approx(1.0)
     assert stack.config.rewards.shaping.damage_reward == pytest.approx(0.0)
     assert stack.config.rewards.shaping.no_progress_penalty == pytest.approx(0.01)
+
+
+def test_load_stack_config_supports_structured_v2_preset() -> None:
+    repo_root = _repo_root()
+    stack = load_stack_config(repo_root / "configs/presets/structured_v2.yaml")
+
+    assert stack.config.model is not None
+    assert stack.config.model.encoder_kind == "structured_v2"
+    assert stack.config.model.recurrent_core == "gru"
+    assert stack.config.training is not None
+    assert stack.config.training.algorithm == "structured_v2"
+    assert stack.seed_sets["dev_eval"] == repo_root / "configs/seeds/local_dev_eval_seeds.txt"
+
+
+def test_load_stack_config_supports_typed_structured_v2_preset() -> None:
+    repo_root = _repo_root()
+    stack = load_stack_config(repo_root / "configs/presets/typed_structured_v2.yaml")
+
+    assert stack.config.model is not None
+    assert stack.config.model.encoder_kind == "structured_v2"
+    assert stack.config.training is not None
+    assert stack.config.training.algorithm == "impala_vtrace_structured_v1"
+    assert stack.config.training.profile_timers is False
+    assert stack.config.training.compile_actor_inference is False
+    assert stack.config.training.structured_metrics_mode == "sampled"
+    assert stack.config.training.teacher_aux_mode == "always"
+    assert stack.config.training.fixed_opponent_backend == "python_scalar"
+    assert stack.config.training.structured_aux_enabled is True
+    assert stack.config.training.teacher_family_coef == pytest.approx(0.20)
+    assert stack.config.training.teacher_slot_coef == pytest.approx(0.10)
+    assert stack.config.training.teacher_attack_type_coef == pytest.approx(0.05)
+    assert stack.config.training.structured_warmstart_enabled is True
+    assert stack.config.training.structured_warmstart.updates == 32
+    assert stack.config.training.structured_warmstart.teacher_family_coef == pytest.approx(0.75)
+    assert stack.config.training.structured_warmstart.teacher_slot_coef == pytest.approx(0.35)
+    assert stack.config.training.structured_warmstart.teacher_attack_type_coef == pytest.approx(0.20)
+    assert stack.seed_sets["dev_eval"] == repo_root / "configs/seeds/local_dev_eval_seeds.txt"
+
+
+def test_load_stack_config_supports_structured_dev_fast_and_acceptance_presets() -> None:
+    repo_root = _repo_root()
+
+    dev_fast = load_stack_config(repo_root / "configs/presets/structured_dev_fast.yaml")
+    assert dev_fast.config.league is not None
+    assert dev_fast.config.league.enabled is False
+    assert dev_fast.config.training is not None
+    assert dev_fast.config.training.profile_timers is False
+    assert dev_fast.config.training.compile_actor_inference is False
+    assert dev_fast.config.training.structured_metrics_mode == "off"
+    assert dev_fast.config.training.teacher_aux_mode == "warmstart_only"
+    assert dev_fast.config.training.fixed_opponent_backend == "python_batched"
+    assert dev_fast.config.training.structured_warmstart.updates == 1
+
+    acceptance = load_stack_config(repo_root / "configs/presets/structured_acceptance.yaml")
+    assert acceptance.config.training is not None
+    assert acceptance.config.training.profile_timers is False
+    assert acceptance.config.training.compile_actor_inference is False
+    assert acceptance.config.training.structured_metrics_mode == "sampled"
+    assert acceptance.config.training.teacher_aux_mode == "always"
+    assert acceptance.config.training.fixed_opponent_backend == "python_batched"
+    assert acceptance.config.training.structured_warmstart.updates == 32
 
 
 def test_load_stack_config_applies_anchorlane_v1_overrides() -> None:

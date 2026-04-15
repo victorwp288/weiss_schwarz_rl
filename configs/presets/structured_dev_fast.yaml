@@ -1,0 +1,14 @@
+schema_version: 2
+description: structured_dev_fast local preset
+extends: typed_structured_v2.yaml
+league:
+  enabled: false
+training:
+  profile_timers: false
+  structured_metrics:
+    mode: "off"
+  teacher_aux:
+    mode: warmstart_only
+  fixed_opponent_backend: python_batched
+  structured_warmstart:
+    updates: 1

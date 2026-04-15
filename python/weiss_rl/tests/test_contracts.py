@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import pytest
+import numpy as np
 import torch
 
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
-from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, SEAT_COUNT, PolicyValueModel
+from weiss_rl.legal_actions import LegalActionBatch
+from weiss_rl.model import (
+    GLOBAL_ACTION_SPACE_SIZE,
+    SEAT_COUNT,
+    PolicyValueModel,
+    StructuredLegalPolicyValueModel,
+    _negative_logits_fill_value,
+    build_policy_value_model,
+)
 from weiss_rl.spec import (
     HARD_FAIL_SPEC_MISMATCH_POLICY,
     assert_spec_bundle_contract,
@@ -107,6 +116,18 @@ def _feedforward_model_config() -> ModelConfig:
     )
 
 
+def _structured_model_config() -> ModelConfig:
+    return ModelConfig(
+        gru_hidden_size=256,
+        encoder_mlp_width=128,
+        encoder_mlp_layers=2,
+        layer_norm=True,
+        dropout=ModelDropoutConfig(family_a=0.0, ablation=0.1),
+        encoder_kind="structured_v2",
+        typed_feature_width=64,
+    )
+
+
 def _typed_observation_spec() -> dict[str, object]:
     return {
         "obs_encoding_version": 2,
@@ -142,6 +163,81 @@ def _typed_observation_spec() -> dict[str, object]:
         "tail_slices": [
             {"name": "choice_page", "start": 16, "len": 2},
         ],
+    }
+
+
+def _structured_spec_bundle() -> dict[str, object]:
+    observation = _typed_observation_spec()
+    action = {
+        "action_encoding_version": 1,
+        "action_space_size": 9,
+        "pass_action_id": 8,
+        "constants": [["MAX_HAND", 2], ["MAX_STAGE", 2], ["ATTACK_SLOT_COUNT", 1]],
+        "families": [
+            {"name": "main_play_character", "base": 0, "count": 4},
+            {"name": "main_move", "base": 4, "count": 2},
+            {"name": "attack", "base": 6, "count": 2},
+            {"name": "pass", "base": 8, "count": 1},
+        ],
+        "attack_type_encoding": [["frontal", 0]],
+    }
+    return {
+        "action": action,
+        "observation": observation,
+        "compatibility_hash": "structured_v2_test_hash",
+    }
+
+
+def _structured_hand_observation_spec() -> dict[str, object]:
+    return {
+        "obs_encoding_version": 2,
+        "dtype": "f32",
+        "obs_len": 8,
+        "self_first": True,
+        "sentinel_hidden": -1,
+        "sentinel_empty_card": 0,
+        "header_fields": [
+            {"name": "phase", "index": 0},
+            {"name": "choice_total", "index": 1},
+        ],
+        "player_blocks": [
+            {
+                "name": "self",
+                "base": 2,
+                "len": 4,
+                "slices": [
+                    {"name": "stage", "start": 0, "len": 2},
+                    {"name": "hand", "start": 2, "len": 2},
+                ],
+            },
+            {
+                "name": "opponent",
+                "base": 6,
+                "len": 2,
+                "slices": [
+                    {"name": "stage", "start": 0, "len": 2},
+                ],
+            },
+        ],
+        "tail_slices": [],
+    }
+
+
+def _structured_hand_spec_bundle() -> dict[str, object]:
+    return {
+        "observation": _structured_hand_observation_spec(),
+        "action": {
+            "action_encoding_version": 1,
+            "action_space_size": 5,
+            "pass_action_id": 4,
+            "constants": [["MAX_HAND", 2], ["MAX_STAGE", 2], ["ATTACK_SLOT_COUNT", 1]],
+            "families": [
+                {"name": "main_play_character", "base": 0, "count": 4},
+                {"name": "pass", "base": 4, "count": 1},
+            ],
+            "attack_type_encoding": [["frontal", 0]],
+        },
+        "compatibility_hash": "structured_v2_hand_test_hash",
     }
 
 
@@ -364,3 +460,199 @@ def test_policy_value_model_seat_aware_shape_checks(
 
     with pytest.raises(ValueError, match=message):
         model.forward_seat_aware(obs, acting_seat, seat_hidden_state)
+
+
+def test_structured_legal_policy_value_model_scores_legal_candidates() -> None:
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((2, 18), dtype=torch.float32)
+    seat_hidden = model.initial_seat_hidden(2)
+    legal_mask = np.zeros((1, 2, 9), dtype=np.bool_)
+    legal_mask[0, 0, 0] = True
+    legal_mask[0, 1, 4] = True
+    logits, values, next_hidden = model.forward_seat_aware(
+        obs,
+        torch.tensor([0, 1]),
+        seat_hidden,
+        legal_actions=LegalActionBatch.from_mask(legal_mask),
+    )
+
+    assert logits.shape == (2, 9)
+    assert values.shape == (2,)
+    assert next_hidden.shape == (2, 2, 256)
+    assert torch.isfinite(logits[:, [0, 4]]).all()
+    assert torch.all(logits[:, [1, 2, 3, 5, 6, 7, 8]] < -1e8)
+
+
+def test_structured_legal_policy_value_model_packed_legal_matches_mask() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((2, 18), dtype=torch.float32)
+    seat_hidden = model.initial_seat_hidden(2)
+    legal_mask = np.zeros((1, 2, 9), dtype=np.bool_)
+    legal_mask[0, 0, [0, 3, 5]] = True
+    legal_mask[0, 1, [1, 4, 8]] = True
+    packed_ids = np.asarray([0, 3, 5, 1, 4, 8], dtype=np.int32)
+    packed_offsets = np.asarray([0, 3, 6], dtype=np.int32)
+
+    logits_mask, values_mask, next_hidden_mask = model.forward_seat_aware(
+        obs,
+        torch.tensor([0, 1]),
+        seat_hidden,
+        legal_actions=LegalActionBatch.from_mask(legal_mask),
+    )
+    logits_packed, values_packed, next_hidden_packed = model.forward_seat_aware(
+        obs,
+        torch.tensor([0, 1]),
+        seat_hidden,
+        legal_actions=LegalActionBatch.from_packed(packed_ids, packed_offsets, action_space=9),
+    )
+
+    torch.testing.assert_close(logits_mask, logits_packed)
+    torch.testing.assert_close(values_mask, values_packed)
+    torch.testing.assert_close(next_hidden_mask, next_hidden_packed)
+
+
+def test_structured_legal_policy_value_model_sequence_forward_matches_stepwise_packed() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((2, 2, 18), dtype=torch.float32)
+    acting_seat = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+    seat_hidden = model.initial_seat_hidden(2)
+    packed_ids = np.asarray([0, 3, 1, 4, 2, 5, 6, 8], dtype=np.int32)
+    packed_offsets = np.asarray([0, 2, 4, 6, 8], dtype=np.int32)
+    legal_actions = LegalActionBatch.from_packed(packed_ids, packed_offsets, action_space=9)
+
+    logits_sequence, values_sequence, next_hidden_sequence = model.forward_sequence_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+        legal_actions=legal_actions,
+    )
+
+    step_hidden = seat_hidden.clone()
+    logits_steps: list[torch.Tensor] = []
+    value_steps: list[torch.Tensor] = []
+    row_cursor = 0
+    for step_index in range(obs.shape[0]):
+        step_offsets = packed_offsets[row_cursor : row_cursor + obs.shape[1] + 1]
+        step_ids = packed_ids[int(step_offsets[0]) : int(step_offsets[-1])]
+        step_legal_actions = LegalActionBatch.from_packed(
+            step_ids,
+            step_offsets - int(step_offsets[0]),
+            action_space=9,
+        )
+        step_logits, step_values, step_hidden = model.forward_seat_aware(
+            obs[step_index],
+            acting_seat[step_index],
+            step_hidden,
+            legal_actions=step_legal_actions,
+        )
+        logits_steps.append(step_logits)
+        value_steps.append(step_values)
+        row_cursor += int(obs.shape[1])
+
+    torch.testing.assert_close(logits_sequence, torch.stack(logits_steps, dim=0))
+    torch.testing.assert_close(values_sequence, torch.stack(value_steps, dim=0))
+    torch.testing.assert_close(next_hidden_sequence, step_hidden)
+
+
+def test_structured_legal_policy_value_model_accepts_card_table_features() -> None:
+    model = build_policy_value_model(
+        observation_dim=8,
+        config=_structured_model_config(),
+        action_dim=5,
+        observation_spec=_structured_hand_observation_spec(),
+        spec_bundle=_structured_hand_spec_bundle(),
+        card_table={
+            "rows": [
+                {
+                    "card_id": 11,
+                    "level": 1,
+                    "cost": 0,
+                    "power": 4500,
+                    "soul": 1,
+                    "color": "yellow",
+                    "card_type": "character",
+                    "traits": ["music"],
+                }
+            ]
+        },
+    )
+
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+    assert model.policy_head._card_static_features.shape[1] > 0
+
+
+def test_structured_v2_treats_hand_order_as_non_semantic_for_matching_card_and_slot() -> None:
+    spec_bundle = _structured_hand_spec_bundle()
+    model = build_policy_value_model(
+        observation_dim=8,
+        config=_structured_model_config(),
+        action_dim=5,
+        observation_spec=_structured_hand_observation_spec(),
+        spec_bundle=spec_bundle,
+    )
+
+    obs_a = torch.zeros((1, 8), dtype=torch.float32)
+    obs_a[0, 4] = 11
+    obs_a[0, 5] = 22
+    obs_b = torch.zeros((1, 8), dtype=torch.float32)
+    obs_b[0, 4] = 22
+    obs_b[0, 5] = 11
+
+    logits_a, _value_a, _hidden_a = model(obs_a)
+    logits_b, _value_b, _hidden_b = model(obs_b)
+
+    torch.testing.assert_close(logits_a[0, 0], logits_b[0, 2], atol=1e-5, rtol=1e-5)
+
+
+def test_structured_v2_uses_target_slot_context_when_scoring_play_actions() -> None:
+    spec_bundle = _structured_hand_spec_bundle()
+    model = build_policy_value_model(
+        observation_dim=8,
+        config=_structured_model_config(),
+        action_dim=5,
+        observation_spec=_structured_hand_observation_spec(),
+        spec_bundle=spec_bundle,
+    )
+
+    obs_open = torch.zeros((1, 8), dtype=torch.float32)
+    obs_open[0, 4] = 11
+    obs_blocked = obs_open.clone()
+    obs_blocked[0, 2] = 99
+
+    logits_open, _value_open, _hidden_open = model(obs_open)
+    logits_blocked, _value_blocked, _hidden_blocked = model(obs_blocked)
+
+    assert not torch.isclose(logits_open[0, 0], logits_blocked[0, 0], atol=1e-6, rtol=1e-6)
+
+
+def test_negative_logits_fill_value_is_safe_for_float16_masks() -> None:
+    fill_value = _negative_logits_fill_value(torch.float16)
+
+    assert np.isfinite(fill_value)
+    assert fill_value <= -60000.0

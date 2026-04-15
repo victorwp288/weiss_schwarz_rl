@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from weiss_rl.eval import build_paper_readiness_summary
 
@@ -73,6 +76,233 @@ def test_compare_runs_entrypoint_expands_launch_group_and_deduplicates(monkeypat
 
     assert observed["run_dirs"] == [run_a, run_b]
     assert observed["out_dir"] == run_a / "figures" / "benchmark_compare"
+
+
+def test_structured_v2_baseline_entrypoint_writes_contract(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module("structured_v2_baseline.py")
+    baseline_run_dir = tmp_path / "runs" / "baseline"
+    summary_path = baseline_run_dir / "eval" / "dev_eval" / "update_300" / "summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "aggregate_score": 0.375,
+                "anchor_scores": {
+                    "B0 RandomLegal": 0.6875,
+                    "B1 NoLeague baseline": 0.4375,
+                    "B2 HeuristicPublic": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    audit_summary = tmp_path / "audit_summary.json"
+    audit_summary.write_text(
+        json.dumps(
+            {
+                "top_family_pairs": [
+                    {"policy_a_family": "main_move", "policy_b_family": "pass", "count": 101},
+                    {
+                        "policy_a_family": "main_move",
+                        "policy_b_family": "main_play_character",
+                        "count": 98,
+                    },
+                ],
+                "top_action_label_pairs": [
+                    {
+                        "policy_a_action_label": "main_move(from_slot=0, to_slot=2)",
+                        "policy_b_action_label": "pass",
+                        "count": 78,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    out_path = tmp_path / "baseline_contract.json"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "structured_v2_baseline.py",
+            "--baseline-run-dir",
+            str(baseline_run_dir),
+            "--audit-summary",
+            str(audit_summary),
+            "--out-json",
+            str(out_path),
+        ],
+    )
+
+    module.main()
+
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["mismatch_baseline"]["main_move_to_pass"] == 101
+    assert payload["acceptance_targets"]["u120"]["max_main_move_to_main_play_character"] == 39
+
+
+def test_structured_v2_campaign_entrypoint_writes_dry_run_summary(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module("structured_v2_campaign.py")
+    repo_root = tmp_path / "weiss_schwarz_rl"
+    stack_config = repo_root / "configs" / "presets" / "typed_structured_v2.yaml"
+    stack_config.parent.mkdir(parents=True, exist_ok=True)
+    stack_config.write_text("config: {}\n", encoding="utf-8")
+    baseline_run_dir = repo_root / "runs" / "baseline_ref"
+    summary_path = baseline_run_dir / "eval" / "dev_eval" / "update_300" / "summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "aggregate_score": 0.375,
+                "anchor_scores": {
+                    "B0 RandomLegal": 0.6875,
+                    "B1 NoLeague baseline": 0.4375,
+                    "B2 HeuristicPublic": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    audit_summary = tmp_path / "audit_summary.json"
+    audit_summary.write_text(
+        json.dumps(
+            {
+                "top_family_pairs": [
+                    {"policy_a_family": "main_move", "policy_b_family": "pass", "count": 101},
+                    {
+                        "policy_a_family": "main_move",
+                        "policy_b_family": "main_play_character",
+                        "count": 98,
+                    },
+                ],
+                "top_action_label_pairs": [
+                    {
+                        "policy_a_action_label": "main_move(from_slot=0, to_slot=2)",
+                        "policy_b_action_label": "pass",
+                        "count": 78,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "structured_v2_campaign.py",
+            "--repo-root",
+            str(repo_root),
+            "--stack-config",
+            str(stack_config),
+            "--campaign-label",
+            "structured_campaign_cli",
+            "--seed",
+            "7",
+            "--frozen-baseline-run-dir",
+            str(baseline_run_dir),
+            "--frozen-audit-summary",
+            str(audit_summary),
+            "--dry-run",
+        ],
+    )
+
+    assert module.main() == 0
+
+    campaign_summary = tmp_path / "runs" / "launch_groups" / "structured_campaign_cli" / "summary.json"
+    payload = json.loads(campaign_summary.read_text(encoding="utf-8"))
+    assert payload["status"] == "planned"
+    assert payload["baseline_contract"]["mismatch_baseline"]["main_move_to_pass"] == 101
+    assert [step["label"] for step in payload["steps"]] == [
+        "baseline_seed_7",
+        "canary_seed_7",
+        "audit_seed_7",
+    ]
+
+
+def test_structured_v2_campaign_entrypoint_records_failed_step(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module("structured_v2_campaign.py")
+    repo_root = tmp_path / "weiss_schwarz_rl"
+    stack_config = repo_root / "configs" / "presets" / "typed_structured_v2.yaml"
+    stack_config.parent.mkdir(parents=True, exist_ok=True)
+    stack_config.write_text("config: {}\n", encoding="utf-8")
+    baseline_run_dir = repo_root / "runs" / "baseline_ref"
+    summary_path = baseline_run_dir / "eval" / "dev_eval" / "update_300" / "summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "aggregate_score": 0.375,
+                "anchor_scores": {
+                    "B0 RandomLegal": 0.6875,
+                    "B1 NoLeague baseline": 0.4375,
+                    "B2 HeuristicPublic": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    audit_summary = tmp_path / "audit_summary.json"
+    audit_summary.write_text(
+        json.dumps(
+            {
+                "top_family_pairs": [
+                    {"policy_a_family": "main_move", "policy_b_family": "pass", "count": 101},
+                    {
+                        "policy_a_family": "main_move",
+                        "policy_b_family": "main_play_character",
+                        "count": 98,
+                    },
+                ],
+                "top_action_label_pairs": [
+                    {
+                        "policy_a_action_label": "main_move(from_slot=0, to_slot=2)",
+                        "policy_b_action_label": "pass",
+                        "count": 78,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _boom(*args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=17, cmd=kwargs.get("args", args[0] if args else "boom"))
+
+    monkeypatch.setattr(module.subprocess, "run", _boom)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "structured_v2_campaign.py",
+            "--repo-root",
+            str(repo_root),
+            "--stack-config",
+            str(stack_config),
+            "--campaign-label",
+            "structured_campaign_fail",
+            "--seed",
+            "7",
+            "--frozen-baseline-run-dir",
+            str(baseline_run_dir),
+            "--frozen-audit-summary",
+            str(audit_summary),
+        ],
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        module.main()
+
+    campaign_summary = tmp_path / "runs" / "launch_groups" / "structured_campaign_fail" / "summary.json"
+    payload = json.loads(campaign_summary.read_text(encoding="utf-8"))
+    assert payload["status"] == "failed"
+    assert payload["failed_step"] == "baseline_seed_7"
+    assert payload["failed_seed"] == 7
+    assert payload["current_stage"] == "baseline_seed_7"
+    assert payload["current_seed"] == 7
+    assert payload["steps"][0]["status"] == "failed"
 
 
 def test_launch_experiments_entrypoint_dry_run_plumbs_devices(monkeypatch, tmp_path: Path) -> None:

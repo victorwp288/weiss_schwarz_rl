@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import contextmanager, nullcontext
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,7 +60,7 @@ from weiss_rl.manifest import (
     write_run_artifacts,
 )
 from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_mask, sample_actions_from_mask
-from weiss_rl.model import PolicyValueModel
+from weiss_rl.model import PolicyValueModel, build_policy_value_model
 from weiss_rl.runtime import QueueRuntime, QueueRuntimeMode, build_runtime_config
 from weiss_rl.repro import (
     canonical_json_bytes,
@@ -98,7 +99,7 @@ _PROMOTION_GATE_NOLEAGUE_BASELINE_CHECKPOINT = "baseline_checkpoint.pt"
 _LATEST_CHECKPOINT_FILENAME = "latest.pt"
 _BEST_CHECKPOINT_FILENAME = "best.pt"
 _CHECKPOINT_TRACKER_FILENAME = "checkpoint_tracker.json"
-_IMPALA_ALGORITHMS = frozenset({"impala_vtrace_gru", "impala_vtrace_ff"})
+_IMPALA_ALGORITHMS = frozenset({"impala_vtrace_gru", "impala_vtrace_ff", "structured_v2", "impala_vtrace_structured_v1"})
 _PPO_ALGORITHMS = frozenset({"ppo_lite_masked_v1"})
 _CONFIRMATORY_DEV_EVAL_MAX_PROB_SHORTFALL = 0.1
 _CONFIRMATORY_DEV_EVAL_MAX_CI_EXCESS = 0.05
@@ -266,6 +267,7 @@ class _PeriodicDevEvalRunner:
             self._baseline_logits,
             legal_ids,
             rng=rng,
+            pass_action_id=self.pass_action_id,
         )
         return action, focal_hidden, opponent_hidden
 
@@ -290,6 +292,7 @@ class _PeriodicDevEvalRunner:
             logits,
             legal_ids,
             rng=rng,
+            pass_action_id=self.pass_action_id,
         )
         return action, next_seat_hidden
 
@@ -1712,6 +1715,60 @@ def _append_checkpoint_guard_event(training_paths: TrainingPaths, payload: Mappi
         handle.write(json.dumps(dict(payload), sort_keys=True) + "\n")
 
 
+def _maybe_log_structured_mainmove_guard(
+    *,
+    training_paths: TrainingPaths,
+    learner: ImpalaLearner,
+    latest_metrics: Mapping[str, float] | None,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if latest_metrics is None:
+        return None
+    top1_rate = latest_metrics.get("structured_main_move_0_2_top1_rate")
+    move_share = latest_metrics.get("structured_main_move_share_when_play_available")
+    if top1_rate is None or move_share is None:
+        return None
+    if not np.isfinite(float(top1_rate)) or not np.isfinite(float(move_share)):
+        return None
+    if float(top1_rate) < 0.15 and float(move_share) < 0.35:
+        return None
+
+    aggregate_score = _dev_eval_aggregate_score(dev_eval_summary) if dev_eval_summary is not None else None
+    b2_score = _extract_structured_guard_b2_anchor_score(dev_eval_summary)
+    if b2_score is not None and float(b2_score) > 0.10:
+        return None
+    if b2_score is None and aggregate_score is not None and float(aggregate_score) > 0.40:
+        return None
+
+    payload = {
+        "format": "checkpoint_guard_event_v1",
+        "event_kind": "structured_mainmove_warning_v1",
+        "update_count": int(learner.update_count),
+        "policy_version": int(learner.get_policy_version()),
+        "structured_main_move_0_2_top1_rate": float(top1_rate),
+        "structured_main_move_share_when_play_available": float(move_share),
+        "dev_eval_aggregate_score": None if aggregate_score is None else float(aggregate_score),
+        "b2_anchor_score": None if b2_score is None else float(b2_score),
+    }
+    _append_checkpoint_guard_event(training_paths, payload)
+    return payload
+
+
+def _extract_structured_guard_b2_anchor_score(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
+    if dev_eval_summary is None:
+        return None
+    anchor_scores = dev_eval_summary.get("anchor_scores")
+    if not isinstance(anchor_scores, Mapping):
+        return None
+    for key, value in anchor_scores.items():
+        key_text = str(key).strip().lower()
+        if "b2" not in key_text:
+            continue
+        if isinstance(value, (int, float)) and np.isfinite(float(value)):
+            return float(value)
+    return None
+
+
 def _demote_registry_champions_newer_than(training_paths: TrainingPaths, *, update_count: int) -> list[str]:
     registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
     if not registry_path.is_file():
@@ -1830,6 +1887,12 @@ def _build_training_learner(
         "logs_dir": training_paths.logs_dir,
         "logging_interval_updates": 1,
         "pass_action_id": pass_action_id,
+        "teacher_family_coef": training_config.teacher_family_coef,
+        "teacher_slot_coef": training_config.teacher_slot_coef,
+        "teacher_attack_type_coef": training_config.teacher_attack_type_coef,
+        "profile_timers": bool(getattr(training_config, "profile_timers", False)),
+        "structured_metrics_mode": str(getattr(training_config, "structured_metrics_mode", "full")),
+        "teacher_aux_mode": str(getattr(training_config, "teacher_aux_mode", "always")),
     }
     if algorithm in _IMPALA_ALGORITHMS:
         return ImpalaLearner(
@@ -1868,9 +1931,53 @@ def _maybe_compile_learner_model(
     if device.type != "cuda":
         print("Learner compile note: compile_learner is enabled but the learner device is not CUDA; skipping torch.compile.")
         return None
+    if bool(getattr(model, "supports_legal_candidate_scoring", False)):
+        enable_trunk_compile = getattr(model, "enable_trunk_compile", None)
+        if callable(enable_trunk_compile):
+            try:
+                enable_trunk_compile(mode="reduce-overhead")
+            except Exception as exc:
+                print(f"Learner compile note: structured trunk compile failed; skipping torch.compile ({exc!r}).")
+                return None
+            print("Enabled torch.compile for the structured learner trunk (mode=reduce-overhead).")
+            return model
+        print("Learner compile note: structured legal scoring is enabled but no trunk compile hook exists; skipping torch.compile.")
+        return None
     compiled = torch.compile(model, mode="reduce-overhead")
     print("Enabled torch.compile for the learner forward path (mode=reduce-overhead).")
     return compiled
+
+
+@contextmanager
+def _profile_block(enabled: bool, name: str):
+    if not enabled:
+        yield
+        return
+    with torch.autograd.profiler.record_function(name):
+        yield
+
+
+def _build_training_profiler(
+    *,
+    enabled: bool,
+    run_dir: Path,
+    device: torch.device,
+) -> tuple[torch.profiler.profile | None, Any, Path | None]:
+    if not enabled:
+        return None, nullcontext(), None
+
+    profile_dir = run_dir / "profiling" / "torch_profiler"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    activities = [torch.profiler.ProfilerActivity.CPU]
+    if device.type == "cuda":
+        activities.append(torch.profiler.ProfilerActivity.CUDA)
+    profiler = torch.profiler.profile(
+        activities=activities,
+        record_shapes=False,
+        profile_memory=False,
+        with_stack=False,
+    )
+    return profiler, profiler, profile_dir
 
 
 def _collect_training_batch(
@@ -1898,12 +2005,85 @@ def _collect_training_batch(
     raise RuntimeError(f"Unsupported training.algorithm: {algorithm}")
 
 
-def _validate_algorithm_model_contract(*, algorithm: str, recurrent_core: str) -> None:
+def _run_structured_warmstart(
+    *,
+    learner: ImpalaLearner,
+    runtime: QueueRuntime,
+    algorithm: str,
+    training_config: Any,
+    rewards_config: Any,
+    training_paths: TrainingPaths,
+    tensorboard_logger: TensorBoardLogger | None,
+    start_time: float,
+    profile_timers: bool = False,
+) -> dict[str, float]:
+    if not bool(getattr(training_config, "structured_warmstart_enabled", False)):
+        return {}
+    if algorithm not in _IMPALA_ALGORITHMS:
+        raise RuntimeError("structured warmstart currently supports only IMPALA learners")
+    warmstart_cfg = training_config.structured_warmstart
+    updates = int(warmstart_cfg.updates)
+    if updates <= 0:
+        return {}
+
+    previous_family = float(training_config.teacher_family_coef)
+    previous_slot = float(training_config.teacher_slot_coef)
+    previous_attack_type = float(training_config.teacher_attack_type_coef)
+    learner.set_teacher_aux_coefs(
+        family=float(warmstart_cfg.teacher_family_coef),
+        slot=float(warmstart_cfg.teacher_slot_coef),
+        attack_type=float(warmstart_cfg.teacher_attack_type_coef),
+    )
+    latest_metrics: dict[str, float] = {}
+    try:
+        with runtime.structured_warmstart_source_mix() as warmstart_source_metrics:
+            for warmstart_step in range(updates):
+                with _profile_block(profile_timers, "collect_training_batch"):
+                    runtime_batch = _collect_training_batch(
+                        runtime=runtime,
+                        algorithm=algorithm,
+                        training_config=training_config,
+                        rewards_config=rewards_config,
+                    )
+                with _profile_block(profile_timers, "learner_auxiliary_update"):
+                    latest_metrics = learner.auxiliary_update(runtime_batch.learner_batch)
+                latest_metrics.update(runtime_batch.runtime_metrics)
+                latest_metrics.update(warmstart_source_metrics)
+                latest_metrics["warmstart_phase"] = 1.0
+                latest_metrics["warmstart_step"] = float(warmstart_step + 1)
+                _write_scalars_record(
+                    scalars_path=training_paths.scalars_path,
+                    learner=learner,
+                    metrics=latest_metrics,
+                    start_time=start_time,
+                )
+                if tensorboard_logger is not None:
+                    tensorboard_logger.log_training_step(
+                        update_count=int(learner.update_count),
+                        policy_version=int(learner.get_policy_version()),
+                        wall_clock_seconds=time.time() - start_time,
+                        metrics=latest_metrics,
+                    )
+    finally:
+        learner.set_teacher_aux_coefs(
+            family=previous_family,
+            slot=previous_slot,
+            attack_type=previous_attack_type,
+        )
+    return latest_metrics
+
+
+def _validate_algorithm_model_contract(*, algorithm: str, recurrent_core: str, encoder_kind: str) -> None:
     normalized_core = str(recurrent_core).strip().lower()
+    normalized_encoder = str(encoder_kind).strip().lower()
     if algorithm == "impala_vtrace_gru" and normalized_core != "gru":
         raise RuntimeError("impala_vtrace_gru requires model.recurrent_core=gru")
     if algorithm == "impala_vtrace_ff" and normalized_core != "none":
         raise RuntimeError("impala_vtrace_ff requires model.recurrent_core=none")
+    if algorithm in {"structured_v2", "impala_vtrace_structured_v1"} and normalized_core not in {"gru", "none"}:
+        raise RuntimeError(f"{algorithm} requires a supported model.recurrent_core value")
+    if algorithm in {"structured_v2", "impala_vtrace_structured_v1"} and normalized_encoder != "structured_v2":
+        raise RuntimeError(f"{algorithm} requires model.encoder_kind=structured_v2")
 
 
 def _json_relative_path(path: Path, *, root: Path) -> str:
@@ -2212,6 +2392,7 @@ def _load_snapshot_eval_model(
     action_dim: int,
     stack: StackConfig,
     observation_spec: dict[str, Any] | None = None,
+    spec_bundle: dict[str, Any] | None = None,
 ) -> PolicyValueModel:
     payload = torch.load(run_dir / snapshot_path, map_location="cpu", weights_only=True)
     model_state_dict = payload.get("model_state_dict")
@@ -2222,11 +2403,12 @@ def _load_snapshot_eval_model(
     if model_config is None:
         raise RuntimeError("The locked stack is missing the model config block")
 
-    eval_model = PolicyValueModel(
+    eval_model = build_policy_value_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
         observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
     ).to(torch.device("cpu"))
     eval_model.load_state_dict(model_state_dict)
     eval_model.eval()
@@ -2340,6 +2522,7 @@ class _PromotionGateRunner:
                 self._baseline_logits,
                 legal_ids,
                 rng=rng,
+                pass_action_id=self.pass_action_id,
             )
             return action, seat_hidden
 
@@ -2357,6 +2540,7 @@ class _PromotionGateRunner:
             logits,
             legal_ids,
             rng=rng,
+            pass_action_id=self.pass_action_id,
         )
         return action, next_seat_hidden
 
@@ -2514,15 +2698,17 @@ def _clone_cpu_eval_model(
     action_dim: int,
     stack: StackConfig,
     observation_spec: dict[str, Any] | None = None,
+    spec_bundle: dict[str, Any] | None = None,
 ) -> PolicyValueModel:
     model_config = stack.config.model
     if model_config is None:
         raise RuntimeError("The locked stack is missing the model config block")
-    eval_model = PolicyValueModel(
+    eval_model = build_policy_value_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
         observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
     ).to(torch.device("cpu"))
     cpu_state_dict = {name: value.detach().cpu().clone() for name, value in learner_model.state_dict().items()}
     eval_model.load_state_dict(cpu_state_dict)
@@ -2605,6 +2791,7 @@ def _periodic_dev_eval_opponents(
                     observation_dim=observation_dim,
                     action_dim=action_dim,
                     observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
+                    spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
                 ),
                 None,
             )
@@ -3000,6 +3187,7 @@ def _run_periodic_dev_eval(
         action_dim=action_dim,
         stack=stack,
         observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
+        spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
     )
     opponents = _periodic_dev_eval_opponents(
         stack=stack,
@@ -3198,6 +3386,7 @@ def _run_snapshot_promotion_gate(
             action_dim=action_dim,
             stack=stack,
             observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
+            spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
         )
         for policy_id in set(anchor_policy_ids.values())
         if policy_id not in {_PROMOTION_GATE_RANDOMLEGAL_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID}
@@ -3230,6 +3419,7 @@ def _run_snapshot_promotion_gate(
             action_dim=action_dim,
             stack=stack,
             observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
+            spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
         ),
         anchor_models=anchor_models,
         heuristic_policies=heuristic_policies,
@@ -3290,6 +3480,7 @@ def _run_minimal_training(
     spec_hash256: str,
     runtime_mode: QueueRuntimeMode,
     b1_baseline_run_dir: Path | None,
+    profile_timers: bool = False,
     resume_checkpoint_path: Path | None = None,
     tensorboard_logger: TensorBoardLogger | None = None,
 ) -> dict[str, float]:
@@ -3309,12 +3500,17 @@ def _run_minimal_training(
     training_paths = _training_paths(artifacts.run_dir)
     pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
     algorithm = str(training_config.algorithm).strip()
-    _validate_algorithm_model_contract(algorithm=algorithm, recurrent_core=model_config.recurrent_core)
-    model = PolicyValueModel(
+    _validate_algorithm_model_contract(
+        algorithm=algorithm,
+        recurrent_core=model_config.recurrent_core,
+        encoder_kind=model_config.encoder_kind,
+    )
+    model = build_policy_value_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
         observation_spec=contract.spec_bundle.get("observation"),
+        spec_bundle=contract.spec_bundle,
     ).to(device)
     compiled_model = _maybe_compile_learner_model(
         model=model,
@@ -3383,148 +3579,138 @@ def _run_minimal_training(
     last_dev_eval_summary: Mapping[str, Any] | None = None
     last_dev_eval_update_count: int | None = None
     start_time = time.time()
-    if int(learner.update_count) >= max_updates:
-        raise RuntimeError(
-            f"Resume checkpoint is already at update {learner.update_count}, which is >= --max-updates {max_updates}"
-        )
-    try:
-        for _update_index in range(int(learner.update_count), max_updates):
-            learner.set_entropy_coef(
-                _entropy_coef_for_next_update(training_config, update_count=int(learner.update_count) + 1)
-            )
-            runtime_batch = _collect_training_batch(
+    profiler, profiler_context, profiler_trace_dir = _build_training_profiler(
+        enabled=bool(profile_timers),
+        run_dir=artifacts.run_dir,
+        device=device,
+    )
+    with profiler_context:
+        if int(learner.update_count) == 0:
+            latest_metrics = _run_structured_warmstart(
+                learner=learner,
                 runtime=runtime,
                 algorithm=algorithm,
                 training_config=training_config,
                 rewards_config=rewards_config,
-            )
-            latest_metrics = learner.update(runtime_batch.learner_batch)
-            latest_metrics.update(runtime_batch.runtime_metrics)
-            latest_metrics.update(
-                runtime.maybe_publish_snapshot(
-                    learner_model=model,
-                    learner_update_count=int(learner.update_count),
-                )
-            )
-            _write_scalars_record(
-                scalars_path=training_paths.scalars_path,
-                learner=learner,
-                metrics=latest_metrics,
+                training_paths=training_paths,
+                tensorboard_logger=tensorboard_logger,
                 start_time=start_time,
+                profile_timers=bool(profile_timers),
             )
-            if tensorboard_logger is not None:
-                tensorboard_logger.log_training_step(
-                    update_count=int(learner.update_count),
-                    policy_version=int(learner.get_policy_version()),
-                    wall_clock_seconds=time.time() - start_time,
+        if int(learner.update_count) >= max_updates:
+            raise RuntimeError(
+                f"Resume checkpoint is already at update {learner.update_count}, which is >= --max-updates {max_updates}"
+            )
+        try:
+            for _update_index in range(int(learner.update_count), max_updates):
+                learner.set_entropy_coef(
+                    _entropy_coef_for_next_update(training_config, update_count=int(learner.update_count) + 1)
+                )
+                with _profile_block(profile_timers, "collect_update_batch"):
+                    runtime_batch = _collect_training_batch(
+                        runtime=runtime,
+                        algorithm=algorithm,
+                        training_config=training_config,
+                        rewards_config=rewards_config,
+                    )
+                with _profile_block(profile_timers, "learner_update"):
+                    latest_metrics = learner.update(runtime_batch.learner_batch)
+                with _profile_block(profile_timers, "runtime_snapshot_publish"):
+                    latest_metrics.update(
+                        runtime.maybe_publish_snapshot(
+                            learner_model=model,
+                            learner_update_count=int(learner.update_count),
+                        )
+                    )
+                _write_scalars_record(
+                    scalars_path=training_paths.scalars_path,
+                    learner=learner,
                     metrics=latest_metrics,
-                )
-            if learner.update_count % checkpoint_interval_updates == 0:
-                ckpt_path = training_paths.checkpoints_dir / f"checkpoint_{learner.update_count}.pt"
-                _write_checkpoint(
-                    checkpoint_path=ckpt_path,
-                    learner=learner,
-                    stack=stack,
-                    device=device,
-                    spec_hash256=spec_hash256,
-                    algorithm=algorithm,
-                )
-                tracker_payload = _publish_checkpoint_aliases(
-                    stack=stack,
-                    training_paths=training_paths,
-                    artifacts=artifacts,
-                    checkpoint_path=ckpt_path,
-                    learner=learner,
-                    latest_metrics=latest_metrics,
+                    start_time=start_time,
                 )
                 if tensorboard_logger is not None:
-                    tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
+                    tensorboard_logger.log_training_step(
+                        update_count=int(learner.update_count),
+                        policy_version=int(learner.get_policy_version()),
+                        wall_clock_seconds=time.time() - start_time,
+                        metrics=latest_metrics,
+                    )
+                if learner.update_count % checkpoint_interval_updates == 0:
+                    ckpt_path = training_paths.checkpoints_dir / f"checkpoint_{learner.update_count}.pt"
+                    _write_checkpoint(
+                        checkpoint_path=ckpt_path,
+                        learner=learner,
+                        stack=stack,
+                        device=device,
+                        spec_hash256=spec_hash256,
+                        algorithm=algorithm,
+                    )
+                    tracker_payload = _publish_checkpoint_aliases(
+                        stack=stack,
+                        training_paths=training_paths,
+                        artifacts=artifacts,
+                        checkpoint_path=ckpt_path,
+                        learner=learner,
+                        latest_metrics=latest_metrics,
+                    )
+                    _maybe_log_structured_mainmove_guard(
+                        training_paths=training_paths,
+                        learner=learner,
+                        latest_metrics=latest_metrics,
+                        dev_eval_summary=last_dev_eval_summary,
+                    )
+                    if tensorboard_logger is not None:
+                        tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
 
-                if learner.model is None:
-                    raise RuntimeError("Cannot persist a snapshot registry entry without a learner model")
-                candidate_policy_id = _persist_snapshot_registry_entry(
-                    stack=stack,
-                    training_paths=training_paths,
-                    run_dir=artifacts.run_dir,
-                    checkpoint_path=ckpt_path,
-                    model_state_dict=learner.model.state_dict(),
-                    config_hash256=config_hash256,
-                    device=device,
-                    update=int(learner.update_count),
-                    policy_version=int(learner.get_policy_version()),
-                )
-                if _is_noleague_baseline_role(experiment_role):
-                    _ensure_noleague_baseline_anchor(
+                    if learner.model is None:
+                        raise RuntimeError("Cannot persist a snapshot registry entry without a learner model")
+                    candidate_policy_id = _persist_snapshot_registry_entry(
                         stack=stack,
                         training_paths=training_paths,
                         run_dir=artifacts.run_dir,
-                        learner=learner,
-                        device=device,
+                        checkpoint_path=ckpt_path,
+                        model_state_dict=learner.model.state_dict(),
                         config_hash256=config_hash256,
-                        permit_current_run_alias=True,
-                        source_checkpoint_path=ckpt_path,
+                        device=device,
                         update=int(learner.update_count),
-                    )
-                runtime.refresh_opponent_pool()
-                promotion_passed = _run_snapshot_promotion_gate(
-                    stack=stack,
-                    contract=contract,
-                    artifacts=artifacts,
-                    training_paths=training_paths,
-                    learner=learner,
-                    candidate_policy_id=candidate_policy_id,
-                    update_count=int(learner.update_count),
-                    league_reference_update=(
-                        None
-                        if "league_effective_update" not in latest_metrics
-                        else int(latest_metrics["league_effective_update"])
-                    ),
-                    policy_version=int(learner.get_policy_version()),
-                    run_id256=run_id256,
-                    config_hash256=config_hash256,
-                    spec_hash256=spec_hash256,
-                )
-                if promotion_passed:
-                    runtime.refresh_opponent_pool()
-
-            if _should_run_periodic_dev_eval(stack, update_count=int(learner.update_count)):
-                summary_payload = _run_periodic_dev_eval(
-                    stack=stack,
-                    contract=contract,
-                    artifacts=artifacts,
-                    training_paths=training_paths,
-                    learner=learner,
-                    device=device,
-                    run_id256=run_id256,
-                    config_hash256=config_hash256,
-                    spec_hash256=spec_hash256,
-                )
-                print(
-                    "Periodic dev eval: "
-                    f"update={learner.update_count} aggregate={summary_payload['aggregate_score']:.4f} "
-                    f"anchors={','.join(sorted(cast(dict[str, Any], summary_payload['anchor_scores']).keys()))}"
-                )
-                effective_summary = summary_payload
-                tracker_before_dev_eval = _load_checkpoint_tracker(training_paths)
-                existing_best_record = tracker_before_dev_eval.get("best")
-                if not isinstance(existing_best_record, Mapping):
-                    existing_best_record = None
-                confirmatory_request = _confirmatory_dev_eval_request(
-                    stack=stack,
-                    existing_best_record=cast(Mapping[str, Any] | None, existing_best_record),
-                    dev_eval_summary=summary_payload,
-                )
-                if confirmatory_request is not None:
-                    seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
-                    confirmatory_pairs = _expand_periodic_dev_eval_paired_seeds(
-                        base_paired_seeds,
-                        requested_pairs=int(confirmatory_request["target_pairs"]),
-                        seed_file_sha256=seed_file_sha256,
-                        update_count=int(learner.update_count),
                         policy_version=int(learner.get_policy_version()),
-                        scope="periodic_dev_eval_confirmatory",
                     )
-                    effective_summary = _run_periodic_dev_eval(
+                    if _is_noleague_baseline_role(experiment_role):
+                        _ensure_noleague_baseline_anchor(
+                            stack=stack,
+                            training_paths=training_paths,
+                            run_dir=artifacts.run_dir,
+                            learner=learner,
+                            device=device,
+                            config_hash256=config_hash256,
+                            permit_current_run_alias=True,
+                            source_checkpoint_path=ckpt_path,
+                            update=int(learner.update_count),
+                        )
+                    runtime.refresh_opponent_pool()
+                    promotion_passed = _run_snapshot_promotion_gate(
+                        stack=stack,
+                        contract=contract,
+                        artifacts=artifacts,
+                        training_paths=training_paths,
+                        learner=learner,
+                        candidate_policy_id=candidate_policy_id,
+                        update_count=int(learner.update_count),
+                        league_reference_update=(
+                            None
+                            if "league_effective_update" not in latest_metrics
+                            else int(latest_metrics["league_effective_update"])
+                        ),
+                        policy_version=int(learner.get_policy_version()),
+                        run_id256=run_id256,
+                        config_hash256=config_hash256,
+                        spec_hash256=spec_hash256,
+                    )
+                    if promotion_passed:
+                        runtime.refresh_opponent_pool()
+
+                if _should_run_periodic_dev_eval(stack, update_count=int(learner.update_count)):
+                    summary_payload = _run_periodic_dev_eval(
                         stack=stack,
                         contract=contract,
                         artifacts=artifacts,
@@ -3534,67 +3720,117 @@ def _run_minimal_training(
                         run_id256=run_id256,
                         config_hash256=config_hash256,
                         spec_hash256=spec_hash256,
-                        artifact_dir_name="dev_eval_confirmatory",
-                        artifact_scope="periodic_dev_eval_confirmatory",
-                        paired_seeds_override=confirmatory_pairs,
-                        persist_summary=False,
-                        update_stall_monitor=False,
                     )
+                    anchor_keys = sorted(cast(dict[str, Any], summary_payload["anchor_scores"]).keys())
+                    opponent_fragment = f" opponent={_slug_policy_id(anchor_keys[0])}" if anchor_keys else ""
                     print(
-                        "Confirmatory dev eval: "
-                        f"update={learner.update_count} paired_seeds={len(confirmatory_pairs)} "
-                        f"aggregate={effective_summary['aggregate_score']:.4f} "
-                        f"reasons={','.join(cast(list[str], confirmatory_request['reasons']))} "
-                        f"seed_file={seed_file.name}"
+                        "Periodic dev eval: "
+                        f"update={learner.update_count}{opponent_fragment} "
+                        f"aggregate={summary_payload['aggregate_score']:.4f} "
+                        f"anchors={','.join(anchor_keys)}"
                     )
-                last_dev_eval_summary = effective_summary
-                last_dev_eval_update_count = int(learner.update_count)
-                ckpt_path = _ensure_current_checkpoint(
-                    training_paths=training_paths,
-                    learner=learner,
-                    stack=stack,
-                    device=device,
-                    spec_hash256=spec_hash256,
-                    algorithm=algorithm,
-                )
-                tracker_payload = _publish_checkpoint_aliases(
-                    stack=stack,
-                    training_paths=training_paths,
-                    artifacts=artifacts,
-                    checkpoint_path=ckpt_path,
-                    learner=learner,
-                    latest_metrics=latest_metrics,
-                    dev_eval_summary=effective_summary,
-                )
-                guard_event = _maybe_rollback_to_best_checkpoint(
-                    stack=stack,
-                    training_paths=training_paths,
-                    artifacts=artifacts,
-                    runtime=runtime,
-                    learner=learner,
-                    model=model,
-                    device=device,
-                    spec_hash256=spec_hash256,
-                    algorithm=algorithm,
-                    latest_metrics=latest_metrics,
-                    dev_eval_summary=effective_summary,
-                    last_rollback_update=last_checkpoint_guard_rollback_update,
-                )
-                if guard_event is not None:
-                    last_checkpoint_guard_rollback_update = int(learner.update_count)
-                    print(
-                        "Checkpoint guard rollback: "
-                        f"update={guard_event['update_count']} "
-                        f"best_update={guard_event['best_update_count']} "
-                        f"current_score={float(guard_event['current_score']):.4f} "
-                        f"best_score={float(guard_event['best_score']):.4f} "
-                        f"reasons={','.join(cast(list[str], guard_event['reasons']))}"
+                    effective_summary = summary_payload
+                    tracker_before_dev_eval = _load_checkpoint_tracker(training_paths)
+                    existing_best_record = tracker_before_dev_eval.get("best")
+                    if not isinstance(existing_best_record, Mapping):
+                        existing_best_record = None
+                    confirmatory_request = _confirmatory_dev_eval_request(
+                        stack=stack,
+                        existing_best_record=cast(Mapping[str, Any] | None, existing_best_record),
+                        dev_eval_summary=summary_payload,
                     )
-                if tensorboard_logger is not None:
-                    tensorboard_logger.log_periodic_dev_eval(effective_summary, step=int(learner.update_count))
-                    tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
-    finally:
-        runtime.close()
+                    if confirmatory_request is not None:
+                        seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
+                        confirmatory_pairs = _expand_periodic_dev_eval_paired_seeds(
+                            base_paired_seeds,
+                            requested_pairs=int(confirmatory_request["target_pairs"]),
+                            seed_file_sha256=seed_file_sha256,
+                            update_count=int(learner.update_count),
+                            policy_version=int(learner.get_policy_version()),
+                            scope="periodic_dev_eval_confirmatory",
+                        )
+                        effective_summary = _run_periodic_dev_eval(
+                            stack=stack,
+                            contract=contract,
+                            artifacts=artifacts,
+                            training_paths=training_paths,
+                            learner=learner,
+                            device=device,
+                            run_id256=run_id256,
+                            config_hash256=config_hash256,
+                            spec_hash256=spec_hash256,
+                            artifact_dir_name="dev_eval_confirmatory",
+                            artifact_scope="periodic_dev_eval_confirmatory",
+                            paired_seeds_override=confirmatory_pairs,
+                            persist_summary=False,
+                            update_stall_monitor=False,
+                        )
+                        print(
+                            "Confirmatory dev eval: "
+                            f"update={learner.update_count} paired_seeds={len(confirmatory_pairs)} "
+                            f"aggregate={effective_summary['aggregate_score']:.4f} "
+                            f"reasons={','.join(cast(list[str], confirmatory_request['reasons']))} "
+                            f"seed_file={seed_file.name}"
+                        )
+                    last_dev_eval_summary = effective_summary
+                    last_dev_eval_update_count = int(learner.update_count)
+                    ckpt_path = _ensure_current_checkpoint(
+                        training_paths=training_paths,
+                        learner=learner,
+                        stack=stack,
+                        device=device,
+                        spec_hash256=spec_hash256,
+                        algorithm=algorithm,
+                    )
+                    tracker_payload = _publish_checkpoint_aliases(
+                        stack=stack,
+                        training_paths=training_paths,
+                        artifacts=artifacts,
+                        checkpoint_path=ckpt_path,
+                        learner=learner,
+                        latest_metrics=latest_metrics,
+                        dev_eval_summary=effective_summary,
+                    )
+                    _maybe_log_structured_mainmove_guard(
+                        training_paths=training_paths,
+                        learner=learner,
+                        latest_metrics=latest_metrics,
+                        dev_eval_summary=effective_summary,
+                    )
+                    guard_event = _maybe_rollback_to_best_checkpoint(
+                        stack=stack,
+                        training_paths=training_paths,
+                        artifacts=artifacts,
+                        runtime=runtime,
+                        learner=learner,
+                        model=model,
+                        device=device,
+                        spec_hash256=spec_hash256,
+                        algorithm=algorithm,
+                        latest_metrics=latest_metrics,
+                        dev_eval_summary=effective_summary,
+                        last_rollback_update=last_checkpoint_guard_rollback_update,
+                    )
+                    if guard_event is not None:
+                        last_checkpoint_guard_rollback_update = int(learner.update_count)
+                        print(
+                            "Checkpoint guard rollback: "
+                            f"update={guard_event['update_count']} "
+                            f"best_update={guard_event['best_update_count']} "
+                            f"current_score={float(guard_event['current_score']):.4f} "
+                            f"best_score={float(guard_event['best_score']):.4f} "
+                            f"reasons={','.join(cast(list[str], guard_event['reasons']))}"
+                        )
+                    if tensorboard_logger is not None:
+                        tensorboard_logger.log_periodic_dev_eval(effective_summary, step=int(learner.update_count))
+                        tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
+        finally:
+            runtime.close()
+
+    if profiler is not None and profiler_trace_dir is not None:
+        trace_path = profiler_trace_dir / "trace.json"
+        profiler.export_chrome_trace(str(trace_path))
+        print(f"Wrote torch profiler trace: {trace_path}")
 
     if _is_noleague_baseline_role(experiment_role):
         _ensure_noleague_baseline_anchor(
@@ -3690,6 +3926,11 @@ def main() -> None:
         default="train_ordered",
         choices=("train_ordered", "train_async_fast"),
         help="Queue runtime mode: deterministic ordered collection or throughput-oriented async-fast collection",
+    )
+    parser.add_argument(
+        "--profile-timers",
+        action="store_true",
+        help="Enable the structured profiling entrypoint and emit a torch profiler trace",
     )
     parser.add_argument("--profile", type=str, default="", help="Optional simulator profile override")
     parser.add_argument("--device", type=str, default="", help="Optional learner device override")
@@ -3847,6 +4088,13 @@ def main() -> None:
     run_summary_payload = _load_json_object(artifacts.run_summary_path, label="run summary")
     run_summary_payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(args.runtime_mode)
     run_summary_payload["policy_set_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
+    if training_config is not None:
+        run_summary_payload["training_controls"] = {
+            "profile_timers": bool(training_config.profile_timers or bool(args.profile_timers)),
+            "structured_metrics_mode": str(training_config.structured_metrics_mode),
+            "teacher_aux_mode": str(training_config.teacher_aux_mode),
+            "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
+        }
     if args.b1_baseline_run_dir is not None:
         run_summary_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
     if resume_checkpoint_path is not None:
@@ -3860,6 +4108,13 @@ def main() -> None:
     determinism_payload = _load_json_object(artifacts.determinism_report_path, label="determinism report")
     determinism_payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(args.runtime_mode)
     determinism_payload["policy_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
+    if training_config is not None:
+        determinism_payload["training_controls"] = {
+            "profile_timers": bool(training_config.profile_timers or bool(args.profile_timers)),
+            "structured_metrics_mode": str(training_config.structured_metrics_mode),
+            "teacher_aux_mode": str(training_config.teacher_aux_mode),
+            "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
+        }
     if args.b1_baseline_run_dir is not None:
         determinism_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
     if resume_checkpoint_path is not None:
@@ -3925,6 +4180,16 @@ def main() -> None:
 
         profile = _resolve_runtime_profile(stack, args.profile)
         seed = _resolve_seed(stack, args.seed)
+        profile_timers = bool(training_config.profile_timers or bool(args.profile_timers))
+        object.__setattr__(training_config, "profile_timers", bool(profile_timers))
+        if profile_timers:
+            print(
+                "Structured profiling enabled: "
+                f"profile_timers={profile_timers} "
+                f"structured_metrics_mode={training_config.structured_metrics_mode} "
+                f"teacher_aux_mode={training_config.teacher_aux_mode} "
+                f"fixed_opponent_backend={training_config.fixed_opponent_backend}"
+            )
 
         metrics = _run_minimal_training(
             stack=stack,
@@ -3942,6 +4207,7 @@ def main() -> None:
             spec_hash256=spec_hash256,
             runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
             b1_baseline_run_dir=None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve(),
+            profile_timers=profile_timers,
             resume_checkpoint_path=resume_checkpoint_path,
             tensorboard_logger=tensorboard_logger,
         )

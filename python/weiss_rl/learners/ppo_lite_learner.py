@@ -134,6 +134,7 @@ class PpoLiteLearner(ImpalaLearner):
             initial_hidden_state=_batch_value(batch, "initial_hidden_state"),
             to_play_seat=_batch_value(batch, "to_play_seat"),
             actor=_batch_value(batch, "actor"),
+            legal_actions=_batch_value(batch, "legal_actions"),
         )
         packed_legal = self._resolve_packed_legal_actions(batch, expected_shape=obs.shape[:2])
         legal_mask = None if packed_legal is not None else self._resolve_legal_mask(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 import importlib
+import time
 from typing import Any, Literal, cast
 
 import numpy as np
@@ -83,8 +84,10 @@ class DecisionBoundaryBatch:
     decision_kind: np.ndarray = field(default_factory=lambda: np.zeros((0,), dtype=np.int32))
     no_progress_count: np.ndarray = field(default_factory=lambda: np.zeros((0,), dtype=np.uint32))
     episode_identity_source: EpisodeIdentitySource = "missing"
+    action_space: int | None = None
     mask: np.ndarray | None = None
     ids_offsets: tuple[np.ndarray, np.ndarray] | None = None
+    legal_action_meta: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         num_envs = _require_obs_rows(self.obs)
@@ -108,7 +111,24 @@ class DecisionBoundaryBatch:
         if self.episode_identity_source not in _VALID_EPISODE_IDENTITY_SOURCES:
             expected = ", ".join(sorted(_VALID_EPISODE_IDENTITY_SOURCES))
             raise ValueError(f"episode_identity_source must be one of: {expected}")
-        _require_legality(self.mask, self.ids_offsets, num_envs)
+        _require_legality(self.mask, self.ids_offsets, self.legal_action_meta, num_envs)
+        if self.action_space is not None:
+            action_space = int(self.action_space)
+            if action_space <= 0:
+                raise ValueError("action_space must be positive")
+            if self.mask is not None:
+                mask_action_space = int(self.mask.shape[-1])
+                if mask_action_space != action_space:
+                    raise ValueError(
+                        f"action_space mismatch: expected {action_space}, got {mask_action_space}"
+                    )
+            elif self.ids_offsets is not None:
+                legal_ids, _legal_offsets = self.ids_offsets
+                if legal_ids.size and np.any(np.asarray(legal_ids, dtype=np.int64) >= action_space):
+                    raise ValueError(f"ids_offsets legal ids must be in [0, {action_space})")
+            object.__setattr__(self, "action_space", action_space)
+        elif self.mask is not None:
+            object.__setattr__(self, "action_space", int(self.mask.shape[-1]))
 
     @property
     def num_envs(self) -> int:
@@ -130,6 +150,7 @@ class DecisionBoundaryEnv:
         max_decisions: int | None = None,
         max_ticks: int | None = None,
         max_no_progress_decisions: int | None = None,
+        profile_timers: bool = False,
     ) -> None:
         self.pool = pool
         self.legality = _normalize_legality(legality)
@@ -147,6 +168,9 @@ class DecisionBoundaryEnv:
         self._reset_out: Any | None = None
         self._action_buffer: np.ndarray | None = None
         self._action_logp_buffer: np.ndarray | None = None
+        self._simulator_timing_enabled = bool(profile_timers)
+        self._python_timing_counters: dict[str, int] = {}
+        self._configure_simulator_timing(self._simulator_timing_enabled)
 
     @classmethod
     def create(
@@ -155,6 +179,7 @@ class DecisionBoundaryEnv:
         legality: LegalMode = "mask",
         engine_status_policy: EngineStatusPolicy = "best_effort_reset",
         counters: EngineStatusCounters | None = None,
+        profile_timers: bool = False,
         **kwargs: Any,
     ) -> "DecisionBoundaryEnv":
         if "layout" in kwargs:
@@ -179,6 +204,7 @@ class DecisionBoundaryEnv:
             max_decisions=None if "max_decisions" not in kwargs else int(kwargs["max_decisions"]),
             max_ticks=None if "max_ticks" not in kwargs else int(kwargs["max_ticks"]),
             max_no_progress_decisions=max_no_progress_decisions,
+            profile_timers=profile_timers,
         )
 
     @property
@@ -190,6 +216,7 @@ class DecisionBoundaryEnv:
         return int(self.pool.action_space)
 
     def reset(self, seed: int | None = None) -> DecisionBoundaryBatch:
+        started = time.perf_counter_ns()
         weiss_sim = _load_weiss_sim()
         step_out = self._require_step_out(weiss_sim)
         if seed is None:
@@ -210,9 +237,11 @@ class DecisionBoundaryEnv:
             step = step_out
         batch = _pack_batch(step, legality=self.legality, pool=self.pool, copy_arrays=self.copy_arrays)
         self._last_batch = batch
+        self._record_python_timing("python_reset", time.perf_counter_ns() - started)
         return batch
 
     def step(self, actions: Sequence[int] | np.ndarray | int) -> DecisionBoundaryBatch:
+        started = time.perf_counter_ns()
         batch = self._require_batch()
         action_array = _coerce_actions(actions, num_envs=self.num_envs, action_space=self.action_space)
         _validate_actions(action_array, batch, pass_action_id=self.pass_action_id)
@@ -227,6 +256,7 @@ class DecisionBoundaryEnv:
         self._handle_engine_status(step, weiss_sim=weiss_sim)
         next_batch = _pack_batch(step, legality=self.legality, pool=self.pool, copy_arrays=self.copy_arrays)
         self._last_batch = next_batch
+        self._record_python_timing("python_step", time.perf_counter_ns() - started)
         return next_batch
 
     def step_sample_from_logits(
@@ -234,6 +264,7 @@ class DecisionBoundaryEnv:
         logits: object,
         seeds: int | Sequence[int] | np.ndarray,
     ) -> tuple[DecisionBoundaryBatch, np.ndarray]:
+        started = time.perf_counter_ns()
         self._require_batch()
         weiss_sim = _load_weiss_sim()
         actions = self._require_action_buffer()
@@ -248,6 +279,7 @@ class DecisionBoundaryEnv:
         self._handle_engine_status(step, weiss_sim=weiss_sim)
         next_batch = _pack_batch(step, legality=self.legality, pool=self.pool, copy_arrays=self.copy_arrays)
         self._last_batch = next_batch
+        self._record_python_timing("python_step_sample_from_logits", time.perf_counter_ns() - started)
         return next_batch, np.array(actions, copy=self.copy_arrays)
 
     def step_sample_from_logits_with_logp(
@@ -255,6 +287,7 @@ class DecisionBoundaryEnv:
         logits: object,
         seeds: int | Sequence[int] | np.ndarray,
     ) -> tuple[DecisionBoundaryBatch, np.ndarray, np.ndarray]:
+        started = time.perf_counter_ns()
         self._require_batch()
         if self.legality != "ids_offsets":
             raise RuntimeError("step_sample_from_logits_with_logp requires legality='ids_offsets'")
@@ -273,6 +306,10 @@ class DecisionBoundaryEnv:
         self._handle_engine_status(step, weiss_sim=weiss_sim)
         next_batch = _pack_batch(step, legality=self.legality, pool=self.pool, copy_arrays=self.copy_arrays)
         self._last_batch = next_batch
+        self._record_python_timing(
+            "python_step_sample_from_logits_with_logp",
+            time.perf_counter_ns() - started,
+        )
         return (
             next_batch,
             np.array(actions, copy=self.copy_arrays),
@@ -280,10 +317,12 @@ class DecisionBoundaryEnv:
         )
 
     def reset_done(self, done: np.ndarray) -> DecisionBoundaryBatch:
+        started = time.perf_counter_ns()
         done_array = np.asarray(done, dtype=np.bool_)
         if done_array.ndim != 1 or int(done_array.shape[0]) != self.num_envs:
             raise ValueError(f"done must have shape ({self.num_envs},)")
         if not np.any(done_array):
+            self._record_python_timing("python_reset_done", time.perf_counter_ns() - started)
             return self._require_batch()
 
         resetter = getattr(self.pool, _RESET_DONE_METHOD_NAMES[self.legality], None)
@@ -295,6 +334,7 @@ class DecisionBoundaryEnv:
         resetter(np.ascontiguousarray(done_array), step_out)
         batch = _pack_batch(step_out, legality=self.legality, pool=self.pool, copy_arrays=self.copy_arrays)
         self._last_batch = batch
+        self._record_python_timing("python_reset_done", time.perf_counter_ns() - started)
         return batch
 
     def close(self) -> None:
@@ -302,10 +342,47 @@ class DecisionBoundaryEnv:
         if callable(close_fn):
             close_fn()
 
+    def drain_timing_counters(self) -> dict[str, int]:
+        snapshot: dict[str, int] = dict(self._python_timing_counters)
+        self._python_timing_counters.clear()
+        if not self._simulator_timing_enabled:
+            return snapshot
+        getter = getattr(self.pool, "timing_counters", None)
+        if callable(getter):
+            raw_snapshot = getter()
+            snapshot.update(
+                {
+                    str(key): int(value)
+                    for key, value in dict(raw_snapshot).items()
+                    if str(key) != "timing_enabled"
+                }
+            )
+        resetter = getattr(self.pool, "reset_timing_counters", None)
+        if callable(resetter):
+            resetter()
+        return snapshot
+
     def _require_batch(self) -> DecisionBoundaryBatch:
         if self._last_batch is None:
             raise RuntimeError("reset() must be called before step()")
         return self._last_batch
+
+    def _configure_simulator_timing(self, enabled: bool) -> None:
+        self._python_timing_counters.clear()
+        setter = getattr(self.pool, "set_timing_enabled", None)
+        if callable(setter):
+            setter(bool(enabled))
+        resetter = getattr(self.pool, "reset_timing_counters", None)
+        if bool(enabled) and callable(resetter):
+            resetter()
+
+    def _record_python_timing(self, key: str, elapsed_ns: int) -> None:
+        if not self._simulator_timing_enabled:
+            return
+        self._python_timing_counters[key] = self._python_timing_counters.get(key, 0) + max(
+            int(elapsed_ns),
+            0,
+        )
 
     def _require_step_out(self, weiss_sim: Any) -> Any:
         if self._step_out is None:
@@ -387,6 +464,9 @@ class DecisionBoundaryEnv:
             num_envs=self.num_envs,
         )
         refill_legal_ids(refill_out.legal_ids, refill_out.legal_offsets)
+        refill_legal_action_meta = getattr(self.pool, "legal_action_meta_into", None)
+        if callable(refill_legal_action_meta) and hasattr(refill_out, "legal_action_meta"):
+            refill_legal_action_meta(refill_out.legal_action_meta)
         _merge_packed_legality_rows(
             dst=step_out,
             current=step_out,
@@ -445,19 +525,45 @@ def _copy_rows(
 def _merge_packed_legality_rows(*, dst: Any, current: Any, replacement: Any, rows: np.ndarray) -> None:
     current_ids = np.asarray(current.legal_ids)
     current_offsets = np.asarray(current.legal_offsets)
+    current_meta_raw = getattr(current, "legal_action_meta", None)
+    current_meta = None if current_meta_raw is None else np.asarray(current_meta_raw)
     replacement_ids = np.asarray(replacement.legal_ids)
     replacement_offsets = np.asarray(replacement.legal_offsets)
+    replacement_meta_raw = getattr(replacement, "legal_action_meta", None)
+    replacement_meta = None if replacement_meta_raw is None else np.asarray(replacement_meta_raw)
 
     merged_ids_parts: list[np.ndarray] = []
+    merged_meta_parts: list[np.ndarray] = []
     merged_offsets = np.zeros((rows.shape[0] + 1,), dtype=current_offsets.dtype)
     cursor = 0
+    meta_template = current_meta if current_meta is not None else replacement_meta
     for row_index, replace_row in enumerate(rows.tolist()):
         if replace_row:
             row_ids = replacement_ids[int(replacement_offsets[row_index]) : int(replacement_offsets[row_index + 1])]
+            row_meta = (
+                None
+                if replacement_meta is None
+                else replacement_meta[int(replacement_offsets[row_index]) : int(replacement_offsets[row_index + 1])]
+            )
         else:
             row_ids = current_ids[int(current_offsets[row_index]) : int(current_offsets[row_index + 1])]
+            row_meta = (
+                None
+                if current_meta is None
+                else current_meta[int(current_offsets[row_index]) : int(current_offsets[row_index + 1])]
+            )
         row_ids = np.array(row_ids, copy=True)
         merged_ids_parts.append(row_ids)
+        if meta_template is not None:
+            if row_meta is None:
+                row_meta = np.full(
+                    (int(row_ids.size), int(meta_template.shape[1])),
+                    np.iinfo(meta_template.dtype).max,
+                    dtype=meta_template.dtype,
+                )
+            else:
+                row_meta = np.array(row_meta, copy=True)
+            merged_meta_parts.append(row_meta)
         cursor += int(row_ids.size)
         merged_offsets[row_index + 1] = cursor
 
@@ -466,12 +572,30 @@ def _merge_packed_legality_rows(*, dst: Any, current: Any, replacement: Any, row
         if merged_ids_parts
         else np.zeros((0,), dtype=current_ids.dtype)
     )
-    _write_packed_legality(dst=dst, legal_ids=merged_ids, legal_offsets=merged_offsets)
+    merged_meta = (
+        np.concatenate(merged_meta_parts, axis=0)
+        if merged_meta_parts
+        else None
+    )
+    _write_packed_legality(
+        dst=dst,
+        legal_ids=merged_ids,
+        legal_offsets=merged_offsets,
+        legal_action_meta=merged_meta,
+    )
 
 
-def _write_packed_legality(*, dst: Any, legal_ids: np.ndarray, legal_offsets: np.ndarray) -> None:
+def _write_packed_legality(
+    *,
+    dst: Any,
+    legal_ids: np.ndarray,
+    legal_offsets: np.ndarray,
+    legal_action_meta: np.ndarray | None = None,
+) -> None:
     dst_ids = np.asarray(dst.legal_ids)
     dst_offsets = np.asarray(dst.legal_offsets)
+    dst_meta_raw = getattr(dst, "legal_action_meta", None)
+    dst_meta = None if dst_meta_raw is None else np.asarray(dst_meta_raw)
 
     if dst_offsets.shape != legal_offsets.shape:
         raise RuntimeError(
@@ -485,6 +609,25 @@ def _write_packed_legality(*, dst: Any, legal_ids: np.ndarray, legal_offsets: np
         np.copyto(dst_ids[: legal_ids.size], legal_ids.astype(dst_ids.dtype, copy=False), casting="unsafe")
     if legal_ids.size < dst_ids.shape[0]:
         dst_ids[legal_ids.size :] = 0
+    if dst_meta is not None:
+        fill_value = np.iinfo(dst_meta.dtype).max
+        dst_meta[...] = fill_value
+        if legal_action_meta is not None:
+            meta = np.asarray(legal_action_meta, dtype=dst_meta.dtype)
+            if meta.ndim != 2:
+                raise RuntimeError(f"packed legal_action_meta must be 2D, got {meta.shape}")
+            if int(meta.shape[0]) != int(legal_ids.size):
+                raise RuntimeError(
+                    "packed legal_action_meta must align with packed legal ids: "
+                    f"expected first dim {legal_ids.size}, got {meta.shape[0]}"
+                )
+            if int(meta.shape[1]) != int(dst_meta.shape[1]):
+                raise RuntimeError(
+                    "packed legal_action_meta width mismatch: "
+                    f"expected {dst_meta.shape[1]}, got {meta.shape[1]}"
+                )
+            if meta.size:
+                np.copyto(dst_meta[: meta.shape[0]], meta, casting="unsafe")
 
 
 def _normalize_legality(legality: str) -> LegalMode:
@@ -527,6 +670,7 @@ def _require_vector(values: np.ndarray, name: str, num_envs: int) -> None:
 def _require_legality(
     mask: np.ndarray | None,
     ids_offsets: tuple[np.ndarray, np.ndarray] | None,
+    legal_action_meta: np.ndarray | None,
     num_envs: int,
 ) -> None:
     has_mask = mask is not None
@@ -545,6 +689,14 @@ def _require_legality(
         raise ValueError("ids_offsets legal_ids must be 1D")
     if legal_offsets.ndim != 1 or int(legal_offsets.shape[0]) != num_envs + 1:
         raise ValueError(f"ids_offsets legal_offsets must have shape ({num_envs + 1},)")
+    if legal_action_meta is not None:
+        if legal_action_meta.ndim != 2:
+            raise ValueError("legal_action_meta must be 2D when present")
+        if int(legal_action_meta.shape[0]) != int(legal_ids.shape[0]):
+            raise ValueError(
+                "legal_action_meta must align 1:1 with packed legal ids: "
+                f"expected first dim {legal_ids.shape[0]}, got {legal_action_meta.shape[0]}"
+            )
 
 
 def _mix_u64(values: np.ndarray) -> np.ndarray:
@@ -631,6 +783,25 @@ def _packed_legal_ids_prefix(legal_ids: Any, legal_offsets: Any, *, copy_arrays:
     return np.array(prefix, copy=True) if copy_arrays else prefix
 
 
+def _packed_legal_action_meta_prefix(
+    legal_action_meta: Any | None,
+    legal_offsets: Any,
+    *,
+    copy_arrays: bool,
+) -> np.ndarray | None:
+    if legal_action_meta is None:
+        return None
+    meta = np.asarray(legal_action_meta)
+    offsets = np.asarray(legal_offsets)
+    if meta.ndim != 2:
+        raise RuntimeError(f"packed legal_action_meta must be 2D, got {meta.shape}")
+    used = 0 if offsets.size == 0 else int(offsets[-1])
+    if used < 0 or used > meta.shape[0]:
+        raise RuntimeError(f"packed legal_action_meta prefix out of bounds: used={used}, capacity={meta.shape[0]}")
+    prefix = meta[:used]
+    return np.array(prefix, copy=True) if copy_arrays else prefix
+
+
 def _pack_batch(
     step: Any,
     *,
@@ -668,6 +839,7 @@ def _pack_batch(
         mask = getattr(step, "masks", None)
         if mask is None:
             raise RuntimeError("mask layout did not return masks")
+        mask_action_space = int(np.asarray(mask).shape[-1])
         return DecisionBoundaryBatch(
             obs=_array_view_or_copy(step.obs, copy_arrays=copy_arrays),
             reward=_array_view_or_copy(step.rewards, copy_arrays=copy_arrays),
@@ -683,6 +855,7 @@ def _pack_batch(
             episode_seed=episode_seed,
             episode_key=episode_key,
             episode_identity_source=episode_identity_source,
+            action_space=mask_action_space,
             no_progress_count=no_progress_count,
             mask=_array_view_or_copy(mask, copy_arrays=copy_arrays),
         )
@@ -691,6 +864,7 @@ def _pack_batch(
     legal_offsets = getattr(step, "legal_offsets", None)
     if legal_ids is None or legal_offsets is None:
         raise RuntimeError("ids_offsets layout did not return legal_ids/legal_offsets")
+    legal_action_meta = getattr(step, "legal_action_meta", None)
     return DecisionBoundaryBatch(
         obs=_array_view_or_copy(step.obs, copy_arrays=copy_arrays),
         reward=_array_view_or_copy(step.rewards, copy_arrays=copy_arrays),
@@ -706,10 +880,16 @@ def _pack_batch(
         episode_seed=episode_seed,
         episode_key=episode_key,
         episode_identity_source=episode_identity_source,
+        action_space=int(getattr(pool, "action_space")) if pool is not None and hasattr(pool, "action_space") else None,
         no_progress_count=no_progress_count,
         ids_offsets=(
             _packed_legal_ids_prefix(legal_ids, legal_offsets, copy_arrays=copy_arrays),
             _array_view_or_copy(legal_offsets, copy_arrays=copy_arrays),
+        ),
+        legal_action_meta=_packed_legal_action_meta_prefix(
+            legal_action_meta,
+            legal_offsets,
+            copy_arrays=copy_arrays,
         ),
     )
 

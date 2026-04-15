@@ -1534,6 +1534,21 @@ def test_train_entrypoint_uses_configured_checkpoint_interval_by_default(tmp_pat
     assert not (run_root / "eval" / "promotion_gate" / "update_1").exists()
 
 
+def test_train_entrypoint_public_demo_accepts_profile_timers_flag(tmp_path: Path) -> None:
+    stack_config = _copy_repo_configs(tmp_path)
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="train.py",
+        stack_config=stack_config,
+        spec_hash=public_demo_spec_hash256(),
+        run_label="toy_public_demo_profile_timers",
+        extra_args=["--public-demo", "--profile-timers"],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Staged public-demo toy catalog and policy bundle" in result.stdout
+
+
 def _run_public_demo_train(
     tmp_path: Path,
     *,

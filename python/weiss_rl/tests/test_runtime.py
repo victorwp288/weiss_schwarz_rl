@@ -10,7 +10,10 @@ from typing import Any, cast
 import numpy as np
 import pytest
 import torch
+import numpy.testing as npt
 
+import weiss_rl.model as model_module
+from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.league.outcomes import OnlineOutcomeTracker
 from weiss_rl.legal_actions import LegalActionBatch
@@ -19,9 +22,11 @@ from weiss_rl.runtime import (
     QueueRuntimeConfig,
     RuntimeUnroll,
     _MIRROR_OPPONENT_POLICY_ID,
+    _NOLEAGUE_BASELINE_POLICY_ID,
     _create_shared_collector_slot_config,
     _concatenate_legal_actions,
     _gae_advantages,
+    _maybe_compile_runtime_actor_model,
     _open_shared_collector_slot,
     _read_unroll_from_shared_slot,
     _resolve_actor_topology,
@@ -29,6 +34,7 @@ from weiss_rl.runtime import (
     _write_unroll_to_shared_slot,
     build_runtime_config,
 )
+from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
 
 
 def _make_runtime_unroll(
@@ -61,6 +67,51 @@ def _make_runtime_unroll(
         policy_train_mask=np.ones((1, 1), dtype=np.bool_),
         behavior_logits=None,
         counters=counters,
+    )
+
+
+class _CompileStructuredActorModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bias = torch.nn.Parameter(torch.zeros(()))
+        self.supports_legal_candidate_scoring = True
+        self.compile_calls = 0
+        self.compile_mode: str | None = None
+
+    def enable_trunk_compile(self, *, mode: str = "reduce-overhead") -> _CompileStructuredActorModel:
+        self.compile_calls += 1
+        self.compile_mode = mode
+        return self
+
+
+def test_maybe_compile_runtime_actor_model_uses_structured_trunk_compile_hook() -> None:
+    model = _CompileStructuredActorModel()
+
+    compiled = _maybe_compile_runtime_actor_model(model, enabled=True)
+
+    assert compiled is model
+    assert model.compile_calls == 1
+    assert model.compile_mode == "reduce-overhead"
+
+
+def _teacher_test_catalog() -> ActionCatalog:
+    return ActionCatalog.from_spec_bundle(
+        {
+            "action": {
+                "action_encoding_version": 1,
+                "action_space_size": 41,
+                "pass_action_id": 40,
+                "constants": [["MAX_HAND", 2], ["MAX_STAGE", 5], ["ATTACK_SLOT_COUNT", 3]],
+                "families": [
+                    {"name": "main_play_character", "base": 0, "count": 10},
+                    {"name": "attack", "base": 10, "count": 9},
+                    {"name": "main_move", "base": 19, "count": 20},
+                    {"name": "climax_play", "base": 39, "count": 1},
+                    {"name": "pass", "base": 40, "count": 1},
+                ],
+                "attack_type_encoding": [["frontal", 0], ["direct", 1], ["side", 2]],
+            }
+        }
     )
 
 
@@ -157,6 +208,250 @@ def test_reset_done_rows_fallback_reinitializes_full_actor_state() -> None:
     assert assign_calls[0][1] is True
     assert actor.focal_seat_by_env.tolist() == [0, 1]
     assert actor.opponent_policy_id_by_env.tolist() == ["mirror", "policy_000007"]
+
+
+def test_advance_hidden_only_prefers_hidden_only_model_path() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._actor_amp_enabled = False
+
+    class _FakeModel:
+        def __init__(self) -> None:
+            self.advance_calls = 0
+            self.forward_calls = 0
+
+        def advance_seat_hidden(self, obs, acting_seat, hidden_state):
+            self.advance_calls += 1
+            assert tuple(obs.shape) == (2, 3)
+            assert tuple(acting_seat.shape) == (2,)
+            return hidden_state + 5.0
+
+        def forward_seat_aware(self, obs, acting_seat, hidden_state):
+            self.forward_calls += 1
+            raise AssertionError("forward_seat_aware should not run when advance_seat_hidden exists")
+
+    hidden = torch.zeros((4, 2), dtype=torch.float32)
+    model = _FakeModel()
+
+    QueueRuntime._advance_hidden_only(
+        runtime,
+        model=model,
+        hidden_state=hidden,
+        row_indices=np.array([1, 3], dtype=np.int64),
+        obs_step=np.zeros((4, 3), dtype=np.float32),
+        actor_step=np.array([0, 1, 0, 1], dtype=np.int64),
+    )
+
+    assert model.advance_calls == 1
+    assert model.forward_calls == 0
+    npt.assert_array_equal(hidden.numpy(), np.array([[0.0, 0.0], [5.0, 5.0], [0.0, 0.0], [5.0, 5.0]], dtype=np.float32))
+
+
+def test_bootstrap_values_prefers_value_only_model_path() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._actor_amp_enabled = False
+    runtime_any._bootstrap_models = None
+    runtime_any._actors = {}
+
+    class _FakeModel:
+        def __init__(self) -> None:
+            self.value_calls = 0
+            self.forward_calls = 0
+
+        def value_seat_aware(self, obs, acting_seat, hidden_state):
+            self.value_calls += 1
+            return torch.full((obs.shape[0],), 7.0, dtype=torch.float32, device=obs.device)
+
+        def forward_seat_aware(self, obs, acting_seat, hidden_state):
+            self.forward_calls += 1
+            raise AssertionError("forward_seat_aware should not run when value_seat_aware exists")
+
+    model = _FakeModel()
+    runtime_any._actors[0] = cast(Any, SimpleNamespace(model=model))
+    unroll = _make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=0)
+    unroll = replace(
+        unroll,
+        bootstrap_obs=np.zeros((3, 2), dtype=np.float32),
+        bootstrap_actor=np.array([0, 2, 1], dtype=np.int64),
+        final_hidden_state=np.zeros((3, 4), dtype=np.float32),
+    )
+
+    values = QueueRuntime._bootstrap_values(runtime, unroll)
+
+    assert model.value_calls == 1
+    assert model.forward_calls == 0
+    npt.assert_array_equal(values, np.array([7.0, 0.0, 7.0], dtype=np.float32))
+
+
+def test_sample_packed_action_scores_falls_back_to_last_candidate_when_cdf_undershoots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    packed_scores = torch.tensor([0.0, -0.1, -0.2], dtype=torch.float32)
+    packed_ids = torch.tensor([4, 7, 9], dtype=torch.long)
+    packed_offsets = torch.tensor([0, 3], dtype=torch.long)
+    sample_seeds = torch.tensor([123], dtype=torch.long)
+
+    monkeypatch.setattr(
+        model_module,
+        "_uniform_from_seeds",
+        lambda sample_seeds, *, dtype: torch.tensor([0.99999994], dtype=dtype, device=sample_seeds.device),
+    )
+    monkeypatch.setattr(
+        model_module,
+        "_packed_local_cdf",
+        lambda probabilities, offsets: torch.tensor([0.4, 0.8, 0.9999999], dtype=probabilities.dtype, device=probabilities.device),
+    )
+
+    actions, logp = model_module._sample_packed_action_scores(
+        packed_scores,
+        packed_ids,
+        packed_offsets,
+        sample_seeds,
+        pass_action_id=51,
+    )
+
+    assert actions.tolist() == [9]
+    assert torch.isfinite(logp).all()
+
+
+def test_structured_warmstart_source_mix_balances_sources_and_restores_actor_slots() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any.config = QueueRuntimeConfig(
+        mode="train_ordered",
+        actor_count=1,
+        envs_per_actor=8,
+        unroll_length=1,
+        batch_unrolls_per_update=2,
+        queue_capacity_unrolls=2,
+        profile="fast",
+        base_seed=7,
+        pass_action_id=51,
+        actor_reload_interval_updates=1,
+    )
+    runtime_any._collector_result_queue = None
+    runtime_any._teacher_policy = object()
+    runtime_any._opponent_heuristic_policies = {}
+    runtime_any._opponent_models = {_NOLEAGUE_BASELINE_POLICY_ID: object()}
+    runtime_any._device = torch.device("cpu")
+    runtime_any._forced_fixed_opponent_policy_ids = ()
+
+    def fake_assign_episode_roles(actor, done, *, initial: bool = False) -> None:
+        fixed = actor.fixed_opponent_policy_id_by_env
+        assigned = np.full(actor.focal_seat_by_env.shape, _MIRROR_OPPONENT_POLICY_ID, dtype=object)
+        if fixed is not None:
+            fixed_array = np.asarray(fixed, dtype=object)
+            non_empty = np.asarray([bool(str(value).strip()) for value in fixed_array.tolist()], dtype=np.bool_)
+            assigned[non_empty] = fixed_array[non_empty]
+        actor.opponent_policy_id_by_env[:] = assigned
+
+    runtime_any._assign_episode_roles = fake_assign_episode_roles
+
+    class _FakeEnv:
+        def reset_done(self, done):
+            return {"reset_done": np.asarray(done, dtype=np.bool_).copy()}
+
+    class _FakeModel:
+        def initial_seat_hidden(self, batch_size: int, *, device: torch.device) -> torch.Tensor:
+            return torch.zeros((batch_size, 3), device=device)
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            env=_FakeEnv(),
+            model=_FakeModel(),
+            rng=np.random.default_rng(7),
+            seat_hidden=torch.ones((8, 3)),
+            opponent_hidden=torch.ones((8, 3)),
+            focal_seat_by_env=np.zeros((8,), dtype=np.int64),
+            opponent_policy_id_by_env=np.full((8,), _MIRROR_OPPONENT_POLICY_ID, dtype=object),
+            fixed_opponent_policy_id_by_env=None,
+            current_batch=None,
+        ),
+    )
+    runtime_any._actors = [actor]
+
+    with QueueRuntime.structured_warmstart_source_mix(runtime) as metrics:
+        assert metrics["structured_warmstart_source_count"] == 3.0
+        assert metrics["structured_warmstart_self_play_envs_per_actor"] == 3.0
+        assert metrics["structured_warmstart_b1_envs_per_actor"] == 3.0
+        assert metrics["structured_warmstart_b2_envs_per_actor"] == 2.0
+        assert actor.fixed_opponent_policy_id_by_env is not None
+        assert actor.opponent_policy_id_by_env.tolist().count(_NOLEAGUE_BASELINE_POLICY_ID) == 3
+        assert actor.opponent_policy_id_by_env.tolist().count(HEURISTIC_PUBLIC_POLICY_ID) == 2
+        assert actor.opponent_policy_id_by_env.tolist().count(_MIRROR_OPPONENT_POLICY_ID) == 3
+        assert HEURISTIC_PUBLIC_POLICY_ID in runtime_any._opponent_heuristic_policies
+        assert runtime_any._forced_fixed_opponent_policy_ids == (
+            _NOLEAGUE_BASELINE_POLICY_ID,
+            HEURISTIC_PUBLIC_POLICY_ID,
+        )
+
+    assert actor.fixed_opponent_policy_id_by_env is None
+    assert actor.opponent_policy_id_by_env.tolist() == [_MIRROR_OPPONENT_POLICY_ID] * 8
+    assert HEURISTIC_PUBLIC_POLICY_ID not in runtime_any._opponent_heuristic_policies
+    assert runtime_any._forced_fixed_opponent_policy_ids == ()
+
+
+def test_structured_warmstart_source_mix_process_collectors_pushes_fixed_sources() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any.config = QueueRuntimeConfig(
+        mode="train_async_fast",
+        actor_count=2,
+        envs_per_actor=8,
+        unroll_length=1,
+        batch_unrolls_per_update=2,
+        queue_capacity_unrolls=2,
+        profile="fast",
+        base_seed=11,
+        pass_action_id=51,
+        actor_reload_interval_updates=1,
+    )
+    runtime_any._collector_result_queue = object()
+    runtime_any._teacher_policy = object()
+    runtime_any._opponent_heuristic_policies = {}
+    runtime_any._opponent_models = {_NOLEAGUE_BASELINE_POLICY_ID: torch.nn.Linear(1, 1)}
+    runtime_any._forced_fixed_opponent_policy_ids = ()
+    runtime_any._actors = []
+
+    class _FakeControlQueue:
+        def __init__(self) -> None:
+            self.commands: list[dict[str, Any]] = []
+
+        def put(self, payload: dict[str, Any]) -> None:
+            self.commands.append(payload)
+
+    control_queues = [_FakeControlQueue(), _FakeControlQueue()]
+    runtime_any._collector_control_queues = control_queues
+
+    with QueueRuntime.structured_warmstart_source_mix(runtime) as metrics:
+        assert metrics["structured_warmstart_source_count"] == 3.0
+        assert metrics["structured_warmstart_self_play_envs_per_actor"] == 3.0
+        assert metrics["structured_warmstart_b1_envs_per_actor"] == 3.0
+        assert metrics["structured_warmstart_b2_envs_per_actor"] == 2.0
+        assert runtime_any._forced_fixed_opponent_policy_ids == (
+            _NOLEAGUE_BASELINE_POLICY_ID,
+            HEURISTIC_PUBLIC_POLICY_ID,
+        )
+
+    for queue in control_queues:
+        assert len(queue.commands) == 2
+        apply_payload, restore_payload = queue.commands
+        assert apply_payload["kind"] == "set_fixed_opponents"
+        assert apply_payload["restore_defaults"] is False
+        assert apply_payload["activate_teacher_heuristic"] is True
+        assert tuple(apply_payload["forced_policy_ids"]) == (
+            _NOLEAGUE_BASELINE_POLICY_ID,
+            HEURISTIC_PUBLIC_POLICY_ID,
+        )
+        assert apply_payload["fixed_opponent_policy_id_by_env"].count(_NOLEAGUE_BASELINE_POLICY_ID) == 3
+        assert apply_payload["fixed_opponent_policy_id_by_env"].count(HEURISTIC_PUBLIC_POLICY_ID) == 2
+        assert apply_payload["fixed_opponent_policy_id_by_env"].count("") == 3
+        assert isinstance(apply_payload["noleague_baseline_state_dict"], dict)
+        assert restore_payload == {"kind": "set_fixed_opponents", "restore_defaults": True}
 
 
 def test_refresh_opponent_pool_excludes_fixed_b1_anchor(tmp_path: Path) -> None:
@@ -1004,6 +1299,151 @@ def test_overwrite_central_outputs_with_batched_opponents_groups_rows_across_act
     assert actor_b.opponent_hidden[1].tolist() == [2.0, 2.0, 2.0]
 
 
+def test_overwrite_central_outputs_with_batched_opponents_batches_heuristic_public_rows_across_actors() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._actor_amp_enabled = False
+    runtime_any._profile_timers = False
+    runtime_any.action_dim = 32
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_model_locks = {}
+
+    class _AdvanceOnlyModel:
+        def advance_seat_hidden(self, obs_tensor, actor_tensor, hidden_tensor):
+            return hidden_tensor + 1.0
+
+    class _FakeHeuristicPolicy:
+        def __init__(self) -> None:
+            self.calls: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]] = []
+
+        def choose_actions_from_meta_batch(self, obs_rows, legal_ids, legal_offsets, legal_action_meta):
+            obs_array = np.asarray(obs_rows, dtype=np.int32)
+            ids_array = np.asarray(legal_ids, dtype=np.uint32)
+            offsets_array = np.asarray(legal_offsets, dtype=np.uint32)
+            meta_array = None if legal_action_meta is None else np.asarray(legal_action_meta, dtype=np.uint16)
+            self.calls.append(
+                (
+                    obs_array.copy(),
+                    ids_array.copy(),
+                    offsets_array.copy(),
+                    None if meta_array is None else meta_array.copy(),
+                )
+            )
+            return np.asarray(
+                [int(ids_array[int(offsets_array[row_index])]) for row_index in range(offsets_array.shape[0] - 1)],
+                dtype=np.int64,
+            )
+
+    heuristic_policy = _FakeHeuristicPolicy()
+    runtime_any._opponent_heuristic_policies = {HEURISTIC_PUBLIC_POLICY_ID: heuristic_policy}
+
+    shared_model = _AdvanceOnlyModel()
+    actor_a = cast(
+        Any,
+        SimpleNamespace(
+            model=shared_model,
+            compiled_model=None,
+            focal_seat_by_env=np.asarray([0, 0], dtype=np.int64),
+            opponent_policy_id_by_env=np.asarray([HEURISTIC_PUBLIC_POLICY_ID, _MIRROR_OPPONENT_POLICY_ID], dtype=object),
+            seat_hidden=torch.zeros((2, 3)),
+            opponent_hidden=torch.zeros((2, 3)),
+        ),
+    )
+    actor_b = cast(
+        Any,
+        SimpleNamespace(
+            model=shared_model,
+            compiled_model=None,
+            focal_seat_by_env=np.asarray([1, 1], dtype=np.int64),
+            opponent_policy_id_by_env=np.asarray([_MIRROR_OPPONENT_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID], dtype=object),
+            seat_hidden=torch.zeros((2, 3)),
+            opponent_hidden=torch.zeros((2, 3)),
+        ),
+    )
+    batch_a = cast(
+        Any,
+        SimpleNamespace(
+            ids_offsets=(
+                np.asarray([10, 11, 12], dtype=np.uint32),
+                np.asarray([0, 2, 3], dtype=np.uint32),
+            ),
+            legal_action_meta=np.asarray(
+                [
+                    [0, 0, 0, 0],
+                    [1, 1, 1, 0],
+                    [2, 2, 2, 0],
+                ],
+                dtype=np.uint16,
+            ),
+            mask=None,
+        ),
+    )
+    batch_b = cast(
+        Any,
+        SimpleNamespace(
+            ids_offsets=(
+                np.asarray([20, 21, 22], dtype=np.uint32),
+                np.asarray([0, 1, 3], dtype=np.uint32),
+            ),
+            legal_action_meta=np.asarray(
+                [
+                    [3, 0, 0, 0],
+                    [4, 1, 0, 0],
+                    [5, 2, 0, 0],
+                ],
+                dtype=np.uint16,
+            ),
+            mask=None,
+        ),
+    )
+    obs_a = np.asarray([[1, 0, 0], [9, 9, 9]], dtype=np.float32)
+    obs_b = np.asarray([[8, 8, 8], [2, 0, 0]], dtype=np.float32)
+    actor_step_a = np.asarray([1, 0], dtype=np.int64)
+    actor_step_b = np.asarray([1, 0], dtype=np.int64)
+    logits_a = np.full((2, 32), -5.0, dtype=np.float32)
+    logits_b = np.full((2, 32), -5.0, dtype=np.float32)
+    values_a = np.ones((2,), dtype=np.float32)
+    values_b = np.ones((2,), dtype=np.float32)
+
+    QueueRuntime._overwrite_central_outputs_with_batched_opponents(
+        runtime,
+        actors=[actor_a, actor_b],
+        batches=[batch_a, batch_b],
+        obs_steps=[obs_a, obs_b],
+        actor_steps=[actor_step_a, actor_step_b],
+        logits_outs=[logits_a, logits_b],
+        values_outs=[values_a, values_b],
+    )
+
+    assert len(heuristic_policy.calls) == 1
+    call_obs, call_ids, call_offsets, call_meta = heuristic_policy.calls[0]
+    assert np.array_equal(call_obs, np.asarray([[1, 0, 0], [2, 0, 0]], dtype=np.int32))
+    assert np.array_equal(call_ids, np.asarray([10, 11, 21, 22], dtype=np.uint32))
+    assert np.array_equal(call_offsets, np.asarray([0, 2, 4], dtype=np.uint32))
+    assert call_meta is not None
+    assert np.array_equal(
+        call_meta,
+        np.asarray(
+            [
+                [0, 0, 0, 0],
+                [1, 1, 1, 0],
+                [4, 1, 0, 0],
+                [5, 2, 0, 0],
+            ],
+            dtype=np.uint16,
+        ),
+    )
+    assert actor_a.seat_hidden[0].tolist() == [1.0, 1.0, 1.0]
+    assert actor_b.seat_hidden[1].tolist() == [1.0, 1.0, 1.0]
+    assert values_a.tolist() == [0.0, 1.0]
+    assert values_b.tolist() == [1.0, 0.0]
+    assert logits_a[0, 10] == pytest.approx(0.0)
+    assert logits_a[0, 11] < 0.0
+    assert logits_b[1, 21] == pytest.approx(0.0)
+    assert logits_b[1, 22] < 0.0
+
+
 def test_build_runtime_config_minimal_batch_uses_one_unroll_per_actor() -> None:
     stack = SimpleNamespace(
         config=SimpleNamespace(
@@ -1066,6 +1506,7 @@ def test_concatenate_legal_actions_keeps_packed_ids_fast_path() -> None:
     packed = LegalActionBatch.from_packed(
         np.array([0, 2, 1, 2], dtype=np.uint32),
         np.array([0, 2, 4], dtype=np.uint32),
+        action_space=64,
     )
     unroll_a = replace(_make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=0), legal_actions=packed)
     unroll_b = replace(_make_runtime_unroll(actor_id=1, unroll_seq=0, behavior_policy_version=0), legal_actions=packed)
@@ -1075,6 +1516,7 @@ def test_concatenate_legal_actions_keeps_packed_ids_fast_path() -> None:
     assert combined.mask is None
     assert combined.ids is not None
     assert combined.offsets is not None
+    assert combined.action_space == 64
     assert combined.offsets.tolist() == [0, 2, 4]
     assert combined.ids.tolist() == [0, 2, 0, 2]
 
@@ -1104,8 +1546,25 @@ def test_concatenate_legal_actions_reorders_packed_rows_to_match_time_major_batc
     assert combined.mask is None
     assert combined.ids is not None
     assert combined.offsets is not None
+    assert combined.action_space == 64
     assert combined.offsets.tolist() == [0, 1, 2, 3, 4, 5, 6, 7, 8]
     assert combined.ids.tolist() == [10, 11, 30, 31, 20, 21, 40, 41]
+
+
+def test_legal_action_batch_uses_metadata_to_expand_packed_payloads() -> None:
+    packed = LegalActionBatch.from_packed(
+        np.array([1, 3], dtype=np.uint32),
+        np.array([0, 1, 2], dtype=np.uint32),
+        action_space=5,
+    )
+
+    mask = packed.to_mask(expected_shape=(1, 2))
+
+    assert packed.action_space == 5
+    npt.assert_array_equal(
+        mask,
+        np.array([[[False, True, False, False, False], [False, False, False, True, False]]], dtype=np.bool_),
+    )
 
 
 def test_gae_advantages_matches_manual_discounted_deltas() -> None:
@@ -1158,6 +1617,45 @@ def test_build_learner_batch_does_not_double_apply_truncation_reward() -> None:
 
     assert batch["rewards"][:, 0].tolist() == pytest.approx([0.0, 0.0])
     assert batch["discounts"][:, 0].tolist() == pytest.approx([0.99, 0.0])
+
+
+def test_build_learner_batch_preserves_teacher_labels() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any.action_dim = 3
+    unroll = replace(
+        _make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=0),
+        obs=np.zeros((2, 1, 1), dtype=np.float32),
+        actions=np.zeros((2, 1), dtype=np.int64),
+        rewards=np.zeros((2, 1), dtype=np.float32),
+        terminated=np.zeros((2, 1), dtype=np.bool_),
+        truncated=np.zeros((2, 1), dtype=np.bool_),
+        to_play_seat=np.zeros((2, 1), dtype=np.int64),
+        behavior_logp=np.zeros((2, 1), dtype=np.float32),
+        values=np.zeros((2, 1), dtype=np.float32),
+        legal_actions=LegalActionBatch.from_mask(np.ones((2, 1, 3), dtype=np.bool_)),
+        bootstrap_value=np.zeros((1,), dtype=np.float32),
+        initial_hidden_state=np.zeros((1, 1), dtype=np.float32),
+        teacher_family=np.array([[1], [2]], dtype=np.int32),
+        teacher_slot=np.array([[0], [-1]], dtype=np.int32),
+        teacher_attack_type=np.array([[-1], [1]], dtype=np.int32),
+        teacher_valid=np.array([[True], [False]], dtype=np.bool_),
+    )
+
+    batch = QueueRuntime._build_learner_batch(
+        runtime,
+        [unroll],
+        gamma=0.99,
+        truncation_reward=0.0,
+        truncation_bootstrap_value=True,
+        vtrace_rho_bar=1.0,
+        vtrace_c_bar=1.0,
+    )
+
+    assert np.array_equal(batch["teacher_family"], unroll.teacher_family)
+    assert np.array_equal(batch["teacher_slot"], unroll.teacher_slot)
+    assert np.array_equal(batch["teacher_attack_type"], unroll.teacher_attack_type)
+    assert np.array_equal(batch["teacher_valid"], unroll.teacher_valid)
 
 
 def test_build_ppo_batch_does_not_double_apply_truncation_reward() -> None:
@@ -1423,6 +1921,156 @@ def test_runtime_uses_central_batched_collection_for_typed_cpu_async(monkeypatch
         runtime.close()
 
 
+def test_runtime_uses_central_batched_collection_for_structured_cpu_async(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("weiss_rl.runtime.torch.cuda.is_available", lambda: False)
+    monkeypatch.setattr(
+        QueueRuntime,
+        "_build_actor_state",
+        lambda self, *, model, actor_id: cast(
+            Any,
+            SimpleNamespace(
+                actor_id=actor_id,
+                env=SimpleNamespace(close=lambda: None),
+                model=model,
+                compiled_model=None,
+                opponent_policy_id_by_env=np.full((64,), "latest_policy_mirror", dtype=object),
+                seat_hidden=torch.zeros((64, 4)),
+                opponent_hidden=torch.zeros((64, 4)),
+                current_batch=SimpleNamespace(obs=np.zeros((64, 8), dtype=np.float32)),
+                layout_name="i16_legal_ids",
+                focal_seat_by_env=np.zeros((64,), dtype=np.int64),
+                rng=np.random.default_rng(7),
+                snapshot_version=0,
+                next_unroll_seq=0,
+            ),
+        ),
+    )
+    monkeypatch.setattr(QueueRuntime, "refresh_opponent_pool", lambda self: None)
+
+    dummy_model = torch.nn.Linear(8, 4)
+    runtime = QueueRuntime(
+        stack=cast(
+            Any,
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    system=SimpleNamespace(actor_device="cpu", actor_torch_threads=1),
+                    training=SimpleNamespace(
+                        mixed_precision=False,
+                        compile_learner=False,
+                        structured_warmstart=SimpleNamespace(enabled=True),
+                    ),
+                    experiment=SimpleNamespace(role="baseline_noleague"),
+                    league=None,
+                    model=SimpleNamespace(encoder_kind="structured_v2"),
+                )
+            ),
+        ),
+        config=QueueRuntimeConfig(
+            mode="train_async_fast",
+            actor_count=2,
+            envs_per_actor=64,
+            unroll_length=32,
+            batch_unrolls_per_update=96,
+            queue_capacity_unrolls=256,
+            profile="fast",
+            base_seed=7,
+            pass_action_id=51,
+            actor_reload_interval_updates=1000,
+        ),
+        model=cast(Any, dummy_model),
+        observation_dim=8,
+        action_dim=16,
+    )
+    try:
+        runtime_any = cast(Any, runtime)
+        assert runtime_any._use_central_batched_collection is True
+        assert runtime_any._use_process_collectors is False
+        assert runtime_any._collector_executor is None
+    finally:
+        runtime.close()
+
+
+def test_runtime_uses_central_batched_collection_for_structured_cuda_async(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DummyCentralModel:
+        def to(self, device: torch.device) -> "_DummyCentralModel":
+            return self
+
+        def eval(self) -> "_DummyCentralModel":
+            return self
+
+    monkeypatch.setattr("weiss_rl.runtime.torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr(
+        QueueRuntime,
+        "_build_actor_state",
+        lambda self, *, model, actor_id: cast(
+            Any,
+            SimpleNamespace(
+                actor_id=actor_id,
+                env=SimpleNamespace(close=lambda: None),
+                model=model,
+                compiled_model=None,
+                opponent_policy_id_by_env=np.full((64,), "latest_policy_mirror", dtype=object),
+                seat_hidden=torch.zeros((64, 4), device=torch.device("cpu")),
+                opponent_hidden=torch.zeros((64, 4), device=torch.device("cpu")),
+                current_batch=SimpleNamespace(obs=np.zeros((64, 8), dtype=np.float32)),
+                layout_name="i16_legal_ids",
+                focal_seat_by_env=np.zeros((64,), dtype=np.int64),
+                rng=np.random.default_rng(7),
+                snapshot_version=0,
+                next_unroll_seq=0,
+            ),
+        ),
+    )
+    monkeypatch.setattr(QueueRuntime, "refresh_opponent_pool", lambda self: None)
+
+    dummy_model = _DummyCentralModel()
+    runtime = QueueRuntime(
+        stack=cast(
+            Any,
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    system=SimpleNamespace(actor_device="cuda:0", actor_torch_threads=1),
+                    training=SimpleNamespace(
+                        mixed_precision=True,
+                        compile_learner=False,
+                        structured_warmstart=SimpleNamespace(enabled=True),
+                    ),
+                    experiment=SimpleNamespace(role="baseline_noleague"),
+                    league=None,
+                    model=SimpleNamespace(encoder_kind="structured_v2"),
+                )
+            ),
+        ),
+        config=QueueRuntimeConfig(
+            mode="train_async_fast",
+            actor_count=2,
+            envs_per_actor=64,
+            unroll_length=32,
+            batch_unrolls_per_update=96,
+            queue_capacity_unrolls=256,
+            profile="fast",
+            base_seed=7,
+            pass_action_id=51,
+            actor_reload_interval_updates=1000,
+        ),
+        model=cast(Any, dummy_model),
+        observation_dim=8,
+        action_dim=16,
+    )
+    try:
+        runtime_any = cast(Any, runtime)
+        assert runtime_any._device == torch.device("cuda:0")
+        assert runtime_any._use_central_batched_collection is True
+        assert runtime_any._use_process_collectors is False
+        assert runtime_any._collector_executor is None
+    finally:
+        runtime.close()
+
+
 def test_runtime_keeps_central_batched_collection_for_typed_cpu_async_league(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1561,6 +2209,18 @@ def test_shared_collector_slot_round_trip_preserves_packed_unroll_payload() -> N
         packed = LegalActionBatch.from_packed(
             np.array([0, 1, 2, 3, 4, 1], dtype=np.uint32),
             np.array([0, 2, 3, 5, 6], dtype=np.uint32),
+            meta=np.array(
+                [
+                    [1, 0, 0, 0],
+                    [1, 1, 0, 0],
+                    [2, 0, 0, 0],
+                    [3, 0, 1, 0],
+                    [3, 1, 1, 0],
+                    [8, 0, 0, 0],
+                ],
+                dtype=np.uint16,
+            ),
+            action_space=5,
         )
         unroll = RuntimeUnroll(
             actor_id=0,
@@ -1583,6 +2243,10 @@ def test_shared_collector_slot_round_trip_preserves_packed_unroll_payload() -> N
             final_hidden_state=np.arange(16, 32, dtype=np.float32).reshape(2, 2, 4),
             episode_seed=np.array([[5, 6], [7, 8]], dtype=np.uint64),
             policy_train_mask=np.array([[True, False], [True, True]], dtype=np.bool_),
+            teacher_family=np.array([[1, 2], [3, -1]], dtype=np.int32),
+            teacher_slot=np.array([[0, -1], [2, -1]], dtype=np.int32),
+            teacher_attack_type=np.array([[-1, 1], [0, -1]], dtype=np.int32),
+            teacher_valid=np.array([[True, True], [True, False]], dtype=np.bool_),
             behavior_logits=None,
         )
 
@@ -1597,9 +2261,46 @@ def test_shared_collector_slot_round_trip_preserves_packed_unroll_payload() -> N
         assert np.array_equal(restored.bootstrap_obs, unroll.bootstrap_obs)
         assert np.array_equal(restored.bootstrap_value, unroll.bootstrap_value)
         assert np.array_equal(restored.final_hidden_state, unroll.final_hidden_state)
+        assert np.array_equal(restored.teacher_family, unroll.teacher_family)
+        assert np.array_equal(restored.teacher_slot, unroll.teacher_slot)
+        assert np.array_equal(restored.teacher_attack_type, unroll.teacher_attack_type)
+        assert np.array_equal(restored.teacher_valid, unroll.teacher_valid)
         assert restored.legal_actions.ids is not None
         assert restored.legal_actions.offsets is not None
+        assert restored.legal_actions.action_space == 5
         assert restored.legal_actions.ids.tolist() == unroll.legal_actions.ids.tolist()
         assert restored.legal_actions.offsets.tolist() == unroll.legal_actions.offsets.tolist()
+        assert restored.legal_actions.meta is not None
+        assert restored.legal_actions.meta.tolist() == unroll.legal_actions.meta.tolist()
     finally:
         slot.close(unlink=True)
+
+
+def test_teacher_labels_from_actions_group_main_play_and_attack_semantics() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    action_catalog = _teacher_test_catalog()
+    runtime_any._teacher_guidance_enabled = True
+    runtime_any._teacher_action_catalog = action_catalog
+    runtime_any._teacher_family_index = {
+        family.name: index for index, family in enumerate(action_catalog.families)
+    }
+    runtime_any._teacher_attack_type_index = {
+        name: index for index, name in enumerate(action_catalog.attack_type_names)
+    }
+
+    teacher_family, teacher_slot, teacher_attack_type, teacher_valid = QueueRuntime._teacher_labels_from_actions(
+        runtime,
+        row_indices=np.array([0, 1, 2], dtype=np.int64),
+        chosen_actions=np.array([0, 14, 40], dtype=np.int64),
+        num_rows=3,
+    )
+
+    assert teacher_valid.tolist() == [True, True, True]
+    assert teacher_family.tolist() == [
+        runtime_any._teacher_family_index["main_play_character"],
+        runtime_any._teacher_family_index["attack"],
+        runtime_any._teacher_family_index["pass"],
+    ]
+    assert teacher_slot.tolist() == [0, 1, -1]
+    assert teacher_attack_type.tolist() == [-1, 1, -1]

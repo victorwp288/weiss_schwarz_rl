@@ -13,13 +13,14 @@ import numpy as np
 import torch
 
 from weiss_rl.artifacts import ArtifactLayout
+from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.config import StackConfig, compute_config_hash256, load_stack_config
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.eval.heuristic_public import ActionCatalog, HeuristicPublicPolicy
+from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
 from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotRegistry
 from weiss_rl.masking import masked_log_softmax
-from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, PolicyValueModel
+from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, PolicyValueModel, build_policy_value_model
 from weiss_rl.replay.bundles import ReplayBundleMeta, ReplayStep, compute_legal_fingerprint64, load_replay_bundle
 from weiss_rl.replay.runner import ReplayEnvFactory, build_replay_env, require_supported_rerun_contract
 
@@ -321,11 +322,12 @@ def _load_policy(
     if model_config is None:
         raise RuntimeError("The locked stack is missing the model config block")
 
-    model = PolicyValueModel(
+    model = build_policy_value_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
         observation_spec=_load_run_observation_spec(run_spec_bundle),
+        spec_bundle=run_spec_bundle,
     ).to(torch.device("cpu"))
     model.load_state_dict(model_state_dict)
     model.eval()

@@ -77,7 +77,18 @@ class TrainingExplorationConfig:
 class TrainingPrecisionConfig:
     mixed_precision: bool
     compile_learner: bool
+    compile_actor_inference: bool
     masking_math_float32: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingStructuredMetricsConfig:
+    mode: str = "off"
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingTeacherAuxConfig:
+    mode: str = "always"
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +115,23 @@ class TrainingPpoConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TrainingStructuredAuxConfig:
+    enabled: bool = False
+    teacher_family_coef: float = 0.0
+    teacher_slot_coef: float = 0.0
+    teacher_attack_type_coef: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingStructuredWarmstartConfig:
+    enabled: bool = False
+    updates: int = 0
+    teacher_family_coef: float = 0.0
+    teacher_slot_coef: float = 0.0
+    teacher_attack_type_coef: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class TrainingConfig:
     algorithm: str
     rollout: TrainingRolloutConfig
@@ -113,6 +141,12 @@ class TrainingConfig:
     checkpointing: TrainingCheckpointingConfig
     vtrace: TrainingVTraceConfig
     ppo: TrainingPpoConfig
+    structured_aux: TrainingStructuredAuxConfig
+    structured_warmstart: TrainingStructuredWarmstartConfig
+    structured_metrics: TrainingStructuredMetricsConfig = field(default_factory=TrainingStructuredMetricsConfig)
+    teacher_aux: TrainingTeacherAuxConfig = field(default_factory=TrainingTeacherAuxConfig)
+    fixed_opponent_backend: str = "python_scalar"
+    profile_timers: bool = False
 
     @property
     def unroll_length(self) -> int:
@@ -153,6 +187,10 @@ class TrainingConfig:
     @property
     def compile_learner(self) -> bool:
         return bool(self.precision.compile_learner)
+
+    @property
+    def compile_actor_inference(self) -> bool:
+        return bool(self.precision.compile_actor_inference)
 
     @property
     def masking_math_float32(self) -> bool:
@@ -201,6 +239,34 @@ class TrainingConfig:
     @property
     def ppo_normalize_advantages(self) -> bool:
         return bool(self.ppo.normalize_advantages)
+
+    @property
+    def structured_aux_enabled(self) -> bool:
+        return bool(self.structured_aux.enabled)
+
+    @property
+    def structured_metrics_mode(self) -> str:
+        return self.structured_metrics.mode
+
+    @property
+    def teacher_aux_mode(self) -> str:
+        return self.teacher_aux.mode
+
+    @property
+    def teacher_family_coef(self) -> float:
+        return float(self.structured_aux.teacher_family_coef)
+
+    @property
+    def teacher_slot_coef(self) -> float:
+        return float(self.structured_aux.teacher_slot_coef)
+
+    @property
+    def teacher_attack_type_coef(self) -> float:
+        return float(self.structured_aux.teacher_attack_type_coef)
+
+    @property
+    def structured_warmstart_enabled(self) -> bool:
+        return bool(self.structured_warmstart.enabled) and int(self.structured_warmstart.updates) > 0
 
 
 @dataclass(frozen=True, slots=True)

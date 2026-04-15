@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
+import numpy as np
 import torch
 from torch import Tensor, nn
 
+from weiss_rl.action_catalog import ActionCatalog
+from weiss_rl.card_table import cached_runtime_card_table, card_feature_table
 from weiss_rl.config.models import ModelConfig
+from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.observation_layout import ObservationLayout, ObservationPlayerBlock, ObservationSlice, parse_observation_layout
 
 GLOBAL_ACTION_SPACE_SIZE = 527
 SEAT_COUNT = 2
+STRUCTURED_V2_ENCODER_KIND = "structured_v2"
 
 
 def _build_mlp_stack(
@@ -184,6 +190,248 @@ def _flatten_indices(slices: Sequence[ObservationSlice]) -> tuple[int, ...]:
     for current in slices:
         indices.extend(current.indices)
     return tuple(indices)
+
+
+_CARD_ID_VECTOR_SLICE_NAMES = frozenset(
+    {
+        "climax_top",
+        "clock_top",
+        "deck",
+        "hand",
+        "level_top",
+        "resolution_top",
+        "stock_top",
+        "waiting_room_top",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _StructuredObservationContract:
+    layout: ObservationLayout
+    self_stage: ObservationSlice | None
+    opponent_stage: ObservationSlice | None
+    self_hand: ObservationSlice | None
+    stage_slot_count: int
+    sentinel_hidden: int
+    sentinel_empty_card: int
+    card_scalar_indices: tuple[int, ...]
+
+
+def _slice_by_name(block: ObservationPlayerBlock, name: str) -> ObservationSlice | None:
+    for current in block.slices:
+        if current.name == name:
+            return current
+    return None
+
+
+def _build_structured_observation_contract(
+    observation_spec: Mapping[str, Any],
+    *,
+    action_catalog: ActionCatalog,
+) -> _StructuredObservationContract:
+    layout = parse_observation_layout(observation_spec)
+    if not layout.self_first:
+        raise ValueError("structured_v2 requires a self-first observation layout")
+    if len(layout.player_blocks) < 2:
+        raise ValueError("structured_v2 requires at least two player blocks in the observation layout")
+    stage_slot_count = max(int(action_catalog.max_stage), 1)
+    self_block = layout.player_blocks[0]
+    opponent_block = layout.player_blocks[1]
+    self_stage = _slice_by_name(self_block, "stage")
+    opponent_stage = _slice_by_name(opponent_block, "stage")
+    self_hand = _slice_by_name(self_block, "hand")
+
+    for stage_slice, stage_name in ((self_stage, "self"), (opponent_stage, "opponent")):
+        if stage_slice is None:
+            continue
+        if stage_slice.length % stage_slot_count != 0:
+            raise ValueError(
+                f"structured_v2 {stage_name} stage slice length {stage_slice.length} "
+                f"is not divisible by stage slot count {stage_slot_count}"
+            )
+
+    card_scalar_indices: set[int] = set()
+    for block in layout.player_blocks:
+        stage_slice = _slice_by_name(block, "stage")
+        if stage_slice is not None:
+            slot_width = max(stage_slice.length // stage_slot_count, 1)
+            for slot_index in range(stage_slot_count):
+                card_scalar_indices.add(stage_slice.start + slot_index * slot_width)
+        for current in block.slices:
+            if current.name in _CARD_ID_VECTOR_SLICE_NAMES:
+                card_scalar_indices.update(current.indices)
+
+    return _StructuredObservationContract(
+        layout=layout,
+        self_stage=self_stage,
+        opponent_stage=opponent_stage,
+        self_hand=self_hand,
+        stage_slot_count=stage_slot_count,
+        sentinel_hidden=int(observation_spec.get("sentinel_hidden", -1)),
+        sentinel_empty_card=int(observation_spec.get("sentinel_empty_card", 0)),
+        card_scalar_indices=tuple(sorted(card_scalar_indices)),
+    )
+
+
+def _bucket_card_ids(card_ids: Tensor, *, vocab_size: int) -> Tensor:
+    if vocab_size <= 1:
+        return torch.zeros_like(card_ids, dtype=torch.long)
+    card_ids_long = card_ids.to(dtype=torch.long)
+    positive_ids = torch.where(card_ids_long > 0, card_ids_long, torch.zeros_like(card_ids_long))
+    hashed = torch.remainder(positive_ids, vocab_size - 1) + 1
+    return torch.where(positive_ids > 0, hashed, torch.zeros_like(hashed))
+
+
+def _masked_mean_pool(values: Tensor, mask: Tensor) -> Tensor:
+    mask_f = mask.unsqueeze(-1).to(dtype=values.dtype)
+    total = (values * mask_f).sum(dim=1)
+    denom = mask_f.sum(dim=1).clamp_min(1.0)
+    return total / denom
+
+
+def _masked_max_pool(values: Tensor, mask: Tensor) -> Tensor:
+    if values.shape[1] == 0:
+        return values.new_zeros((values.shape[0], values.shape[2]))
+    masked = values.masked_fill(~mask.unsqueeze(-1), torch.finfo(values.dtype).min)
+    pooled = masked.max(dim=1).values
+    has_any = mask.any(dim=1, keepdim=True)
+    return torch.where(has_any, pooled, torch.zeros_like(pooled))
+
+
+def _optional_embedding(embedding: nn.Embedding, indices: Tensor) -> Tensor:
+    safe_ids = torch.where(indices >= 0, indices + 1, torch.zeros_like(indices))
+    return embedding(safe_ids.to(dtype=torch.long))
+
+
+def _negative_logits_fill_value(dtype: torch.dtype) -> float:
+    if dtype.is_floating_point:
+        return float(torch.finfo(dtype).min)
+    return -1.0e9
+
+
+def _packed_row_indices(offsets: Tensor) -> Tensor:
+    lengths = offsets[1:] - offsets[:-1]
+    return torch.repeat_interleave(
+        torch.arange(int(lengths.shape[0]), device=offsets.device, dtype=torch.long),
+        lengths.to(dtype=torch.long),
+    )
+
+
+def _packed_row_log_z(scores: Tensor, offsets: Tensor) -> Tensor:
+    row_count = int(offsets.shape[0] - 1)
+    if row_count < 0:
+        raise ValueError("packed offsets must contain at least one row boundary")
+    row_log_z = torch.full((row_count,), -torch.inf, device=scores.device, dtype=scores.dtype)
+    if scores.numel() == 0 or row_count == 0:
+        return row_log_z
+    lengths = offsets[1:] - offsets[:-1]
+    non_empty_rows = torch.nonzero(lengths > 0, as_tuple=False).squeeze(1)
+    if non_empty_rows.numel() == 0:
+        return row_log_z
+    non_empty_lengths = lengths[non_empty_rows].to(dtype=torch.long)
+    segment_max = torch.segment_reduce(scores, reduce="max", lengths=non_empty_lengths)
+    repeated_max = torch.repeat_interleave(segment_max, non_empty_lengths)
+    shifted = scores - repeated_max
+    exp_shifted = torch.exp(shifted)
+    segment_sum = torch.segment_reduce(exp_shifted, reduce="sum", lengths=non_empty_lengths)
+    row_log_z[non_empty_rows] = torch.log(segment_sum) + segment_max
+    return row_log_z
+
+
+def _packed_local_cdf(probabilities: Tensor, offsets: Tensor) -> Tensor:
+    if probabilities.numel() == 0:
+        return probabilities
+    row_count = int(offsets.shape[0] - 1)
+    row_indices = _packed_row_indices(offsets)
+    cumulative = torch.cumsum(probabilities, dim=0)
+    base = torch.zeros((row_count,), dtype=probabilities.dtype, device=probabilities.device)
+    if row_count > 1:
+        starts = offsets[1:-1].to(dtype=torch.long)
+        base[1:] = cumulative.index_select(0, starts - 1)
+    return cumulative - base.index_select(0, row_indices)
+
+
+def _uniform_from_seeds(sample_seeds: Tensor, *, dtype: torch.dtype) -> Tensor:
+    seed_float = sample_seeds.to(dtype=torch.float64)
+    hashed = torch.sin(seed_float * 12.9898 + 78.233) * 43758.5453123
+    uniform = torch.frac(hashed).to(dtype=dtype)
+    eps = torch.finfo(dtype).eps
+    return torch.clamp(uniform, min=eps, max=1.0 - eps)
+
+
+def _sample_packed_action_scores(
+    packed_scores: Tensor,
+    packed_ids: Tensor,
+    packed_offsets: Tensor,
+    sample_seeds: Tensor,
+    *,
+    pass_action_id: int,
+) -> tuple[Tensor, Tensor]:
+    if packed_scores.ndim != 1:
+        raise ValueError("packed_scores must be 1D")
+    if packed_ids.ndim != 1 or packed_offsets.ndim != 1:
+        raise ValueError("packed ids and offsets must be 1D")
+    row_count = int(packed_offsets.shape[0] - 1)
+    if sample_seeds.ndim != 1 or int(sample_seeds.shape[0]) != row_count:
+        raise ValueError(f"sample_seeds must have shape ({row_count},)")
+    if int(packed_offsets[0].item()) != 0 or int(packed_offsets[-1].item()) != int(packed_scores.shape[0]):
+        raise ValueError("packed offsets must describe the packed score vector exactly")
+
+    lengths = packed_offsets[1:] - packed_offsets[:-1]
+    actions = torch.full(
+        (row_count,),
+        int(pass_action_id),
+        device=packed_scores.device,
+        dtype=torch.long,
+    )
+    selected_logp = torch.zeros((row_count,), device=packed_scores.device, dtype=packed_scores.dtype)
+    non_empty_rows = torch.nonzero(lengths > 0, as_tuple=False).squeeze(1)
+    if non_empty_rows.numel() == 0:
+        return actions, selected_logp
+
+    non_empty_lengths = lengths[non_empty_rows].to(dtype=torch.long)
+    row_indices = _packed_row_indices(packed_offsets)
+    row_log_z = _packed_row_log_z(packed_scores, packed_offsets)
+    repeated_log_z = row_log_z.index_select(0, row_indices)
+    log_probs = packed_scores - repeated_log_z
+    probs = torch.exp(log_probs)
+    local_cdf = _packed_local_cdf(probs, packed_offsets)
+    thresholds = _uniform_from_seeds(
+        sample_seeds.to(device=packed_scores.device, dtype=torch.long).index_select(0, non_empty_rows),
+        dtype=packed_scores.dtype,
+    )
+    repeated_thresholds = thresholds.index_select(0, row_indices)
+    previous_cdf = local_cdf - probs
+    chosen = (local_cdf >= repeated_thresholds) & (previous_cdf < repeated_thresholds)
+    chosen_counts = torch.segment_reduce(chosen.to(dtype=packed_scores.dtype), reduce="sum", lengths=non_empty_lengths)
+    missing_rows = torch.nonzero(chosen_counts == 0.0, as_tuple=False).squeeze(1)
+    if missing_rows.numel() > 0:
+        fallback_positions = packed_offsets[1:].to(device=packed_scores.device, dtype=torch.long).index_select(
+            0, non_empty_rows.index_select(0, missing_rows)
+        ) - 1
+        chosen = chosen.clone()
+        chosen[fallback_positions] = True
+        chosen_counts = torch.segment_reduce(chosen.to(dtype=packed_scores.dtype), reduce="sum", lengths=non_empty_lengths)
+    if bool((chosen_counts != 1.0).any().item()):
+        raise RuntimeError("packed categorical sampling did not select exactly one action per non-empty row")
+    chosen_actions = torch.segment_reduce(
+        torch.where(
+            chosen,
+            packed_ids.to(dtype=packed_scores.dtype),
+            torch.zeros_like(packed_scores),
+        ),
+        reduce="sum",
+        lengths=non_empty_lengths,
+    ).to(dtype=torch.long)
+    chosen_logp = torch.segment_reduce(
+        torch.where(chosen, log_probs, torch.zeros_like(log_probs)),
+        reduce="sum",
+        lengths=non_empty_lengths,
+    )
+    actions[non_empty_rows] = chosen_actions
+    selected_logp[non_empty_rows] = chosen_logp
+    return actions, selected_logp
 
 
 class PolicyValueModel(nn.Module):
@@ -365,6 +613,99 @@ class PolicyValueModel(nn.Module):
         value = self.value_head(recurrent_output).squeeze(-1)
         return logits, value, next_seat_hidden
 
+    def advance_seat_hidden(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+    ) -> Tensor:
+        encoded_obs = self.encode(obs)
+        _, next_seat_hidden = self.recurrent_step_seat_aware(
+            encoded_obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        return next_seat_hidden
+
+    def value_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+    ) -> Tensor:
+        encoded_obs = self.encode(obs)
+        recurrent_output, _next_seat_hidden = self.recurrent_step_seat_aware(
+            encoded_obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        return self.value_head(recurrent_output).squeeze(-1)
+
+    def forward_sequence_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        if legal_actions is not None:
+            raise ValueError("forward_sequence_seat_aware with legal_actions is only supported on structured models")
+        if obs.ndim != 3:
+            raise ValueError(f"obs must be 3D (time, batch, observation), got shape {tuple(obs.shape)}")
+        if acting_seat.ndim != 2 or acting_seat.shape != obs.shape[:2]:
+            raise ValueError(
+                "acting_seat must be 2D (time, batch) with the same leading dimensions as obs"
+            )
+        time_steps, batch_size = int(obs.shape[0]), int(obs.shape[1])
+        seat_hidden = self._prepare_seat_hidden_state(seat_hidden_state, batch_size=batch_size, like=obs[0])
+        logits_steps: list[Tensor] = []
+        value_steps: list[Tensor] = []
+        for step_obs, step_seat in zip(obs.unbind(dim=0), acting_seat.unbind(dim=0), strict=True):
+            step_logits, step_value, seat_hidden = self.forward_seat_aware(
+                step_obs,
+                step_seat,
+                seat_hidden,
+            )
+            logits_steps.append(step_logits)
+            value_steps.append(step_value)
+        return torch.stack(logits_steps, dim=0), torch.stack(value_steps, dim=0), seat_hidden
+
+    def forward_sequence_packed_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        raise ValueError("forward_sequence_packed_seat_aware is only supported on structured models")
+
+    def forward_packed_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        raise ValueError("forward_packed_seat_aware is only supported on structured models")
+
+    def sample_packed_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch,
+        sample_seeds: Tensor,
+        pass_action_id: int,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        raise ValueError("sample_packed_seat_aware is only supported on structured models")
+
+    def enable_trunk_compile(self, *, mode: str = "reduce-overhead") -> PolicyValueModel:
+        return self
+
 
     def _build_observation_encoder(
         self,
@@ -383,14 +724,14 @@ class PolicyValueModel(nn.Module):
                 layer_norm=config.layer_norm,
                 dropout_p=dropout_p,
             )
-        if encoder_kind != "typed_v1":
+        if encoder_kind not in {"typed_v1", STRUCTURED_V2_ENCODER_KIND}:
             raise ValueError(f"Unsupported model.encoder_kind: {config.encoder_kind!r}")
         if observation_spec is None:
-            raise ValueError("typed_v1 encoder requires observation_spec from the simulator spec bundle")
+            raise ValueError(f"{encoder_kind} encoder requires observation_spec from the simulator spec bundle")
         layout = parse_observation_layout(observation_spec)
         if layout.obs_len != observation_dim:
             raise ValueError(
-                "typed_v1 observation spec length mismatch: "
+                f"{encoder_kind} observation spec length mismatch: "
                 f"expected {observation_dim}, observed {layout.obs_len}"
             )
         return _TypedObservationEncoder(
@@ -407,7 +748,7 @@ class PolicyValueModel(nn.Module):
             raise ValueError(f"obs must be 2D (batch, observation), got shape {tuple(obs.shape)}")
         if obs.shape[1] != self.observation_dim:
             raise ValueError(f"obs feature dimension mismatch: expected {self.observation_dim}, got {obs.shape[1]}")
-        return obs.to(dtype=self.policy_head.weight.dtype)
+        return obs.to(dtype=self._reference_parameter().dtype)
 
     def _hidden_tensor_device_dtype(
         self,
@@ -418,8 +759,9 @@ class PolicyValueModel(nn.Module):
     ) -> tuple[torch.device, torch.dtype]:
         if batch_size <= 0:
             raise ValueError(f"batch_size must be >= 1, got {batch_size}")
-        hidden_device: torch.device = self.policy_head.weight.device if device is None else device
-        hidden_dtype: torch.dtype = self.policy_head.weight.dtype if dtype is None else dtype
+        reference = self._reference_parameter()
+        hidden_device: torch.device = reference.device if device is None else device
+        hidden_dtype: torch.dtype = reference.dtype if dtype is None else dtype
         return hidden_device, hidden_dtype
 
     def _prepare_hidden_state(self, hidden_state: Tensor | None, *, batch_size: int, like: Tensor) -> Tensor:
@@ -485,5 +827,1143 @@ class PolicyValueModel(nn.Module):
         next_seat_hidden[batch_index, acting_seat] = next_acting_hidden
         return next_seat_hidden
 
+    def _reference_parameter(self) -> Tensor:
+        try:
+            return next(self.parameters())
+        except StopIteration as exc:
+            raise RuntimeError("Model has no parameters to use as a reference tensor") from exc
 
-__all__ = ["GLOBAL_ACTION_SPACE_SIZE", "SEAT_COUNT", "ModelConfig", "PolicyValueModel"]
+
+class _StructuredLegalActionHead(nn.Module):
+    def __init__(
+        self,
+        *,
+        latent_width: int,
+        action_catalog: ActionCatalog,
+        observation_contract: _StructuredObservationContract,
+        card_table: Mapping[str, Any] | None,
+        action_feature_width: int,
+        layer_norm: bool,
+        dropout_p: float,
+    ) -> None:
+        super().__init__()
+        if latent_width <= 0:
+            raise ValueError(f"latent_width must be >= 1, got {latent_width}")
+        if action_feature_width <= 0:
+            raise ValueError(f"action_feature_width must be >= 1, got {action_feature_width}")
+        self.action_dim = int(action_catalog.action_space_size)
+        self._stage_slot_count = max(int(action_catalog.max_stage), 1)
+        self._observation_contract = observation_contract
+        self._card_vocab_size = 32768
+
+        family_names = tuple(family.name for family in action_catalog.families)
+        family_index = {name: index for index, name in enumerate(family_names)}
+        attack_type_names = tuple(action_catalog.attack_type_names)
+        attack_type_index = {name: index for index, name in enumerate(attack_type_names)}
+        self._meta_unused = int(np.iinfo(np.uint16).max)
+        self._attack_family_id = int(family_index.get("attack", -1))
+        self._encore_pay_family_id = int(family_index.get("encore_pay", -1))
+        self._encore_decline_family_id = int(family_index.get("encore_decline", -1))
+        self._play_character_family_id = int(family_index.get("main_play_character", -1))
+        self._main_event_family_id = int(family_index.get("main_play_event", -1))
+        self._clock_from_hand_family_id = int(family_index.get("clock_from_hand", -1))
+        self._climax_play_family_id = int(family_index.get("climax_play", -1))
+        self._mulligan_select_family_id = int(family_index.get("mulligan_select", -1))
+        self._main_move_family_id = int(family_index.get("main_move", -1))
+        self._choice_select_family_id = int(family_index.get("choice_select", -1))
+        self._level_up_family_id = int(family_index.get("level_up", -1))
+        self._trigger_order_family_id = int(family_index.get("trigger_order", -1))
+
+        family_ids = np.zeros((self.action_dim,), dtype=np.int64)
+        hand_indices = np.full((self.action_dim,), -1, dtype=np.int64)
+        stage_slots = np.full((self.action_dim,), -1, dtype=np.int64)
+        from_slots = np.full((self.action_dim,), -1, dtype=np.int64)
+        to_slots = np.full((self.action_dim,), -1, dtype=np.int64)
+        attack_slots = np.full((self.action_dim,), -1, dtype=np.int64)
+        attack_types = np.full((self.action_dim,), -1, dtype=np.int64)
+        generic_indices = np.full((self.action_dim,), -1, dtype=np.int64)
+        for action_id in range(self.action_dim):
+            decoded = action_catalog.decode(action_id)
+            family_ids[action_id] = family_index.get(decoded.family, 0)
+            if decoded.hand_index is not None:
+                hand_indices[action_id] = int(decoded.hand_index)
+            if decoded.stage_slot is not None:
+                stage_slots[action_id] = int(decoded.stage_slot)
+            if decoded.from_slot is not None:
+                from_slots[action_id] = int(decoded.from_slot)
+            if decoded.to_slot is not None:
+                to_slots[action_id] = int(decoded.to_slot)
+            if decoded.slot is not None:
+                attack_slots[action_id] = int(decoded.slot)
+            if decoded.attack_type is not None:
+                attack_types[action_id] = int(attack_type_index.get(decoded.attack_type, -1))
+            if decoded.index is not None:
+                generic_indices[action_id] = int(decoded.index)
+
+        family_embed_dim = max(12, min(48, action_feature_width // 3))
+        slot_embed_dim = max(8, min(24, action_feature_width // 5))
+        card_embed_dim = max(16, min(64, action_feature_width // 2))
+        slot_context_dim = max(24, action_feature_width // 2)
+        state_width = max(32, int(action_feature_width))
+        self._slot_context_dim = slot_context_dim
+
+        self.family_embedding = nn.Embedding(max(len(family_names), 1), family_embed_dim)
+        self.slot_embedding = nn.Embedding(self._stage_slot_count + 1, slot_embed_dim)
+        self.attack_type_embedding = nn.Embedding(len(attack_type_names) + 1, slot_embed_dim)
+        self.card_embedding = nn.Embedding(self._card_vocab_size, card_embed_dim)
+        static_feature_table = card_feature_table(card_table=card_table, vocab_size=self._card_vocab_size)
+        self.register_buffer(
+            "_card_static_features",
+            torch.as_tensor(static_feature_table, dtype=torch.float32),
+            persistent=False,
+        )
+        self.card_feature_projection = (
+            None
+            if static_feature_table.shape[1] == 0
+            else _build_mlp_stack(
+                input_dim=int(static_feature_table.shape[1]),
+                width=card_embed_dim,
+                layers=1,
+                layer_norm=layer_norm,
+                dropout_p=dropout_p,
+            )
+        )
+        self.hand_summary_projection = _build_mlp_stack(
+            input_dim=card_embed_dim * 2 + 1,
+            width=slot_context_dim,
+            layers=1,
+            layer_norm=layer_norm,
+            dropout_p=dropout_p,
+        )
+        self.slot_encoder = _build_mlp_stack(
+            input_dim=card_embed_dim + 7,
+            width=slot_context_dim,
+            layers=1,
+            layer_norm=layer_norm,
+            dropout_p=dropout_p,
+        )
+        self.state_projection = _build_mlp_stack(
+            input_dim=latent_width + slot_context_dim * 3,
+            width=state_width,
+            layers=1,
+            layer_norm=layer_norm,
+            dropout_p=dropout_p,
+        )
+        candidate_input_dim = family_embed_dim + card_embed_dim + slot_embed_dim * 5 + slot_context_dim * 5 + 11
+        self._candidate_input_dim = int(candidate_input_dim)
+        self.candidate_projection = _build_mlp_stack(
+            input_dim=candidate_input_dim,
+            width=state_width,
+            layers=1,
+            layer_norm=layer_norm,
+            dropout_p=dropout_p,
+        )
+        scorer_layers: list[nn.Module] = [nn.Linear(state_width * 2, state_width)]
+        if layer_norm:
+            scorer_layers.append(nn.LayerNorm(state_width))
+        scorer_layers.append(nn.ReLU())
+        if dropout_p > 0.0:
+            scorer_layers.append(nn.Dropout(p=dropout_p))
+        scorer_layers.append(nn.Linear(state_width, 1))
+        self.joint_scorer = nn.Sequential(*scorer_layers)
+        self.family_bias = nn.Parameter(torch.zeros(max(len(family_names), 1)))
+        self._candidate_scoring_chunk_size = 65536
+        self.register_buffer("_family_ids", torch.as_tensor(family_ids, dtype=torch.long))
+        self.register_buffer("_hand_indices", torch.as_tensor(hand_indices, dtype=torch.long))
+        self.register_buffer("_stage_slots", torch.as_tensor(stage_slots, dtype=torch.long))
+        self.register_buffer("_from_slots", torch.as_tensor(from_slots, dtype=torch.long))
+        self.register_buffer("_to_slots", torch.as_tensor(to_slots, dtype=torch.long))
+        self.register_buffer("_attack_slots", torch.as_tensor(attack_slots, dtype=torch.long))
+        self.register_buffer("_attack_types", torch.as_tensor(attack_types, dtype=torch.long))
+        self.register_buffer("_generic_indices", torch.as_tensor(generic_indices, dtype=torch.long))
+
+    def _build_state_representation(
+        self,
+        latent: Tensor,
+        *,
+        obs: Tensor,
+        observation_context: Mapping[str, Tensor] | None = None,
+    ) -> tuple[Tensor, dict[str, Tensor]]:
+        if latent.ndim != 2:
+            raise ValueError(f"latent must be 2D (batch, hidden), got shape {tuple(latent.shape)}")
+        if obs.ndim != 2 or obs.shape[0] != latent.shape[0]:
+            raise ValueError("structured_v2 policy head requires obs with shape (batch, observation)")
+        obs_batch = obs.to(device=latent.device, dtype=torch.float32)
+        resolved_context = (
+            self._encode_observation_context(obs_batch)
+            if observation_context is None
+            else dict(observation_context)
+        )
+        state_repr = self.state_projection(
+            torch.cat(
+                [
+                    latent,
+                    resolved_context["hand_summary"].to(dtype=latent.dtype),
+                    resolved_context["self_stage_summary"].to(dtype=latent.dtype),
+                    resolved_context["opponent_stage_summary"].to(dtype=latent.dtype),
+                ],
+                dim=1,
+            )
+        )
+        return state_repr, resolved_context
+
+    def score_legal_actions(
+        self,
+        latent: Tensor,
+        *,
+        obs: Tensor,
+        legal_actions: LegalActionBatch | None = None,
+        observation_context: Mapping[str, Tensor] | None = None,
+        state_repr: Tensor | None = None,
+    ) -> Tensor:
+        resolved_state_repr, resolved_context = (
+            (state_repr, dict(observation_context))
+            if state_repr is not None and observation_context is not None
+            else self._build_state_representation(latent, obs=obs, observation_context=observation_context)
+        )
+
+        masked = torch.full(
+            (latent.shape[0], self.action_dim),
+            _negative_logits_fill_value(latent.dtype),
+            device=latent.device,
+            dtype=latent.dtype,
+        )
+        if legal_actions is None:
+            candidate_ids = torch.arange(self.action_dim, device=latent.device, dtype=torch.long)
+            for row_index in range(latent.shape[0]):
+                row_scores = self._score_candidates(
+                    resolved_state_repr[row_index].unsqueeze(0),
+                    torch.zeros((candidate_ids.shape[0],), device=latent.device, dtype=torch.long),
+                    candidate_ids,
+                    resolved_context,
+                )
+                masked[row_index, candidate_ids] = row_scores.to(dtype=masked.dtype)
+            return masked
+
+        if legal_actions.ids is not None and legal_actions.offsets is not None:
+            offsets = torch.as_tensor(legal_actions.offsets, device=latent.device, dtype=torch.long)
+            row_scores = self.score_packed_candidates(
+                latent,
+                obs=obs,
+                legal_actions=legal_actions,
+                observation_context=resolved_context,
+                state_repr=resolved_state_repr,
+            )
+            if row_scores.numel() > 0:
+                ids = torch.as_tensor(legal_actions.ids, device=latent.device, dtype=torch.long)
+                lengths = offsets[1:] - offsets[:-1]
+                row_indices = torch.repeat_interleave(
+                    torch.arange(latent.shape[0], device=latent.device, dtype=torch.long),
+                    lengths,
+                )
+                masked[row_indices, ids] = row_scores.to(dtype=masked.dtype)
+            return masked
+
+        if legal_actions.mask is None:
+            raise ValueError("legal_actions must contain either packed ids or a mask")
+        legal_mask = torch.as_tensor(legal_actions.mask, device=latent.device, dtype=torch.bool)
+        if legal_mask.ndim == 3 and legal_mask.shape[0] == 1:
+            legal_mask = legal_mask[0]
+        if legal_mask.ndim != 2 or legal_mask.shape[0] != latent.shape[0] or legal_mask.shape[1] != self.action_dim:
+            raise ValueError("legal mask must have shape (batch, action) or (1, batch, action)")
+        row_indices, candidate_ids = torch.nonzero(legal_mask, as_tuple=True)
+        if candidate_ids.numel() > 0:
+            row_scores = self._score_candidates_chunked(
+                resolved_state_repr,
+                row_indices.to(dtype=torch.long),
+                candidate_ids.to(dtype=torch.long),
+                resolved_context,
+            )
+            masked[row_indices, candidate_ids] = row_scores.to(dtype=masked.dtype)
+        return masked
+
+    def score_packed_candidates(
+        self,
+        latent: Tensor,
+        *,
+        obs: Tensor,
+        legal_actions: LegalActionBatch,
+        observation_context: Mapping[str, Tensor] | None = None,
+        state_repr: Tensor | None = None,
+    ) -> Tensor:
+        if legal_actions.ids is None or legal_actions.offsets is None:
+            raise ValueError("score_packed_candidates requires packed legal ids and offsets")
+        resolved_state_repr, resolved_context = (
+            (state_repr, dict(observation_context))
+            if state_repr is not None and observation_context is not None
+            else self._build_state_representation(latent, obs=obs, observation_context=observation_context)
+        )
+        ids = torch.as_tensor(legal_actions.ids, device=latent.device, dtype=torch.long)
+        offsets = torch.as_tensor(legal_actions.offsets, device=latent.device, dtype=torch.long)
+        meta = None if legal_actions.meta is None else torch.as_tensor(legal_actions.meta, device=latent.device, dtype=torch.long)
+        if offsets.ndim != 1 or offsets.numel() != latent.shape[0] + 1:
+            raise ValueError(f"packed legal offsets must have shape ({latent.shape[0] + 1},)")
+        if int(offsets[0].item()) != 0 or int(offsets[-1].item()) != int(ids.numel()):
+            raise ValueError("packed legal offsets must be a valid prefix sum")
+        if ids.numel() == 0:
+            return latent.new_zeros((0,))
+        lengths = offsets[1:] - offsets[:-1]
+        row_indices = torch.repeat_interleave(
+            torch.arange(latent.shape[0], device=latent.device, dtype=torch.long),
+            lengths,
+        )
+        return self._score_candidates_chunked(
+            resolved_state_repr,
+            row_indices,
+            ids,
+            resolved_context,
+            candidate_meta=meta,
+        )
+
+    def forward(
+        self,
+        latent: Tensor,
+        *,
+        obs: Tensor,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> Tensor:
+        return self.score_legal_actions(latent, obs=obs, legal_actions=legal_actions)
+
+    def _encode_observation_context(self, obs_batch: Tensor) -> dict[str, Tensor]:
+        batch_size = obs_batch.shape[0]
+        dtype = obs_batch.dtype
+
+        hand_ids = self._extract_card_vector(obs_batch, self._observation_contract.self_hand)
+        if hand_ids.shape[1] == 0:
+            hand_summary = obs_batch.new_zeros((batch_size, self._slot_context_dim))
+        else:
+            hand_mask = hand_ids > max(self._observation_contract.sentinel_empty_card, 0)
+            hand_embeddings = self._card_representation(hand_ids, dtype=dtype)
+            hand_summary = self.hand_summary_projection(
+                torch.cat(
+                    [
+                        _masked_mean_pool(hand_embeddings, hand_mask),
+                        _masked_max_pool(hand_embeddings, hand_mask),
+                        hand_mask.to(dtype=dtype).mean(dim=1, keepdim=True),
+                    ],
+                    dim=1,
+                )
+            )
+
+        self_stage_ctx, self_stage_numeric = self._encode_stage_slice(obs_batch, self._observation_contract.self_stage)
+        opponent_stage_ctx, opponent_stage_numeric = self._encode_stage_slice(
+            obs_batch,
+            self._observation_contract.opponent_stage,
+        )
+        return {
+            "hand_ids": hand_ids,
+            "hand_summary": hand_summary,
+            "self_stage_context": self_stage_ctx,
+            "self_stage_numeric": self_stage_numeric,
+            "self_stage_summary": self_stage_ctx.mean(dim=1),
+            "opponent_stage_context": opponent_stage_ctx,
+            "opponent_stage_numeric": opponent_stage_numeric,
+            "opponent_stage_summary": opponent_stage_ctx.mean(dim=1),
+        }
+
+    def _encode_stage_slice(
+        self,
+        obs_batch: Tensor,
+        stage_slice: ObservationSlice | None,
+    ) -> tuple[Tensor, Tensor]:
+        batch_size = obs_batch.shape[0]
+        dtype = obs_batch.dtype
+        if stage_slice is None:
+            zeros_context = obs_batch.new_zeros((batch_size, self._stage_slot_count, self._slot_context_dim))
+            zeros_numeric = obs_batch.new_zeros((batch_size, self._stage_slot_count, 7))
+            return zeros_context, zeros_numeric
+
+        slot_width = max(stage_slice.length // self._stage_slot_count, 1)
+        stage_values = obs_batch[:, stage_slice.start : stage_slice.stop].reshape(batch_size, self._stage_slot_count, slot_width)
+        card_ids = stage_values[..., 0].to(dtype=torch.long)
+        occupied = (card_ids > max(self._observation_contract.sentinel_empty_card, 0)).to(dtype=dtype)
+        numeric = torch.stack(
+            [
+                occupied,
+                self._slot_component(stage_values, 1) / 8.0,
+                self._slot_component(stage_values, 2),
+                self._slot_component(stage_values, 3) / 20000.0,
+                self._slot_component(stage_values, 4) / 4.0,
+                self._slot_component(stage_values, 5) / 4.0,
+                self._slot_component(stage_values, 6),
+            ],
+            dim=-1,
+        )
+        card_embeddings = self._card_representation(card_ids, dtype=dtype)
+        stage_context = self.slot_encoder(torch.cat([card_embeddings, numeric], dim=-1))
+        return stage_context, numeric
+
+    def _score_candidates_chunked(
+        self,
+        state_repr: Tensor,
+        row_indices: Tensor,
+        candidate_ids: Tensor,
+        observation_context: Mapping[str, Tensor],
+        *,
+        candidate_meta: Tensor | None = None,
+    ) -> Tensor:
+        if candidate_ids.numel() == 0:
+            return state_repr.new_zeros((0,))
+        scores_chunks: list[Tensor] = []
+        chunk_size = max(1, int(self._candidate_scoring_chunk_size))
+        for start in range(0, int(candidate_ids.numel()), chunk_size):
+            end = min(start + chunk_size, int(candidate_ids.numel()))
+            scores_chunks.append(
+                self._score_candidates(
+                    state_repr,
+                    row_indices[start:end],
+                    candidate_ids[start:end],
+                    observation_context,
+                    candidate_meta=None if candidate_meta is None else candidate_meta[start:end],
+                )
+            )
+        return torch.cat(scores_chunks, dim=0)
+
+    def _score_candidates(
+        self,
+        state_repr: Tensor,
+        row_indices: Tensor,
+        candidate_ids: Tensor,
+        observation_context: Mapping[str, Tensor],
+        candidate_meta: Tensor | None = None,
+    ) -> Tensor:
+        row_indices_long = row_indices.to(dtype=torch.long)
+        row_states = state_repr.index_select(0, row_indices_long)
+        (
+            family_ids,
+            hand_indices,
+            stage_slots,
+            from_slots,
+            to_slots,
+            attack_slots,
+            attack_types,
+            generic_indices,
+        ) = self._resolve_candidate_components(candidate_ids, candidate_meta)
+
+        hand_present, hand_card_embeddings = self._gather_hand_embeddings_from_rows(
+            observation_context["hand_ids"],
+            row_indices_long,
+            hand_indices,
+            dtype=row_states.dtype,
+        )
+
+        numeric_width = int(observation_context["self_stage_numeric"].shape[-1])
+        zero_context = row_states.new_zeros((candidate_ids.shape[0], self._slot_context_dim))
+        zero_numeric = row_states.new_zeros((candidate_ids.shape[0], numeric_width))
+        play_target_context = zero_context.clone()
+        play_target_numeric = zero_numeric.clone()
+        move_source_context = zero_context.clone()
+        move_source_numeric = zero_numeric.clone()
+        move_target_context = zero_context.clone()
+        move_target_numeric = zero_numeric.clone()
+        attack_source_context = zero_context.clone()
+        defender_context = zero_context.clone()
+        defender_numeric = zero_numeric.clone()
+
+        play_mask = stage_slots >= 0
+        if torch.any(play_mask):
+            play_target_context[play_mask], play_target_numeric[play_mask] = self._gather_stage_features_for_rows(
+                observation_context["self_stage_context"],
+                observation_context["self_stage_numeric"],
+                row_indices_long[play_mask],
+                stage_slots[play_mask],
+            )
+        move_source_mask = from_slots >= 0
+        if torch.any(move_source_mask):
+            move_source_context[move_source_mask], move_source_numeric[move_source_mask] = self._gather_stage_features_for_rows(
+                observation_context["self_stage_context"],
+                observation_context["self_stage_numeric"],
+                row_indices_long[move_source_mask],
+                from_slots[move_source_mask],
+            )
+        move_target_mask = to_slots >= 0
+        if torch.any(move_target_mask):
+            move_target_context[move_target_mask], move_target_numeric[move_target_mask] = self._gather_stage_features_for_rows(
+                observation_context["self_stage_context"],
+                observation_context["self_stage_numeric"],
+                row_indices_long[move_target_mask],
+                to_slots[move_target_mask],
+            )
+        attack_mask = attack_slots >= 0
+        if torch.any(attack_mask):
+            attack_source_context[attack_mask], _attack_source_numeric = self._gather_stage_features_for_rows(
+                observation_context["self_stage_context"],
+                observation_context["self_stage_numeric"],
+                row_indices_long[attack_mask],
+                attack_slots[attack_mask],
+            )
+            defender_context[attack_mask], defender_numeric[attack_mask] = self._gather_stage_features_for_rows(
+                observation_context["opponent_stage_context"],
+                observation_context["opponent_stage_numeric"],
+                row_indices_long[attack_mask],
+                attack_slots[attack_mask],
+            )
+
+        candidate_inputs = torch.cat(
+            [
+                self.family_embedding(family_ids).to(dtype=row_states.dtype),
+                hand_card_embeddings,
+                _optional_embedding(self.slot_embedding, stage_slots).to(dtype=row_states.dtype),
+                _optional_embedding(self.slot_embedding, from_slots).to(dtype=row_states.dtype),
+                _optional_embedding(self.slot_embedding, to_slots).to(dtype=row_states.dtype),
+                _optional_embedding(self.slot_embedding, attack_slots).to(dtype=row_states.dtype),
+                _optional_embedding(self.attack_type_embedding, attack_types).to(dtype=row_states.dtype),
+                play_target_context.to(dtype=row_states.dtype),
+                move_source_context.to(dtype=row_states.dtype),
+                move_target_context.to(dtype=row_states.dtype),
+                attack_source_context.to(dtype=row_states.dtype),
+                defender_context.to(dtype=row_states.dtype),
+                torch.stack(
+                    [
+                        hand_present.to(dtype=row_states.dtype),
+                        (stage_slots >= 0).to(dtype=row_states.dtype),
+                        (from_slots >= 0).to(dtype=row_states.dtype),
+                        (to_slots >= 0).to(dtype=row_states.dtype),
+                        (attack_slots >= 0).to(dtype=row_states.dtype),
+                        (attack_types >= 0).to(dtype=row_states.dtype),
+                        (generic_indices >= 0).to(dtype=row_states.dtype),
+                        move_source_numeric[:, 0],
+                        1.0 - play_target_numeric[:, 0],
+                        1.0 - move_target_numeric[:, 0],
+                        defender_numeric[:, 0],
+                    ],
+                    dim=1,
+                ),
+            ],
+            dim=1,
+        )
+        candidate_repr = self.candidate_projection(candidate_inputs)
+        scores = self.joint_scorer(torch.cat([row_states, candidate_repr], dim=1)).squeeze(-1)
+        scores = scores.to(dtype=row_states.dtype)
+        return scores + self.family_bias.index_select(0, family_ids).to(dtype=row_states.dtype)
+
+    def _resolve_candidate_components(
+        self,
+        candidate_ids: Tensor,
+        candidate_meta: Tensor | None,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+        if candidate_meta is None:
+            return (
+                self._family_ids.index_select(0, candidate_ids),
+                self._hand_indices.index_select(0, candidate_ids),
+                self._stage_slots.index_select(0, candidate_ids),
+                self._from_slots.index_select(0, candidate_ids),
+                self._to_slots.index_select(0, candidate_ids),
+                self._attack_slots.index_select(0, candidate_ids),
+                self._attack_types.index_select(0, candidate_ids),
+                self._generic_indices.index_select(0, candidate_ids),
+            )
+        family_ids = candidate_meta[:, 0].to(dtype=torch.long)
+        arg0 = candidate_meta[:, 1].to(dtype=torch.long)
+        arg1 = candidate_meta[:, 2].to(dtype=torch.long)
+        meta_unused = torch.full_like(arg0, self._meta_unused)
+        arg0 = torch.where(arg0 == meta_unused, torch.full_like(arg0, -1), arg0)
+        arg1 = torch.where(arg1 == meta_unused, torch.full_like(arg1, -1), arg1)
+
+        hand_indices = torch.full_like(arg0, -1)
+        hand_family_ids = (
+            self._play_character_family_id,
+            self._main_event_family_id,
+            self._clock_from_hand_family_id,
+            self._climax_play_family_id,
+            self._mulligan_select_family_id,
+        )
+        for family_id in hand_family_ids:
+            if family_id < 0:
+                continue
+            family_mask = family_ids == family_id
+            hand_indices[family_mask] = arg0[family_mask]
+
+        stage_slots = torch.full_like(arg0, -1)
+        if self._play_character_family_id >= 0:
+            play_mask = family_ids == self._play_character_family_id
+            stage_slots[play_mask] = arg1[play_mask]
+
+        from_slots = torch.full_like(arg0, -1)
+        to_slots = torch.full_like(arg0, -1)
+        if self._main_move_family_id >= 0:
+            move_mask = family_ids == self._main_move_family_id
+            from_slots[move_mask] = arg0[move_mask]
+            to_slots[move_mask] = arg1[move_mask]
+
+        attack_slots = torch.full_like(arg0, -1)
+        attack_types = torch.full_like(arg0, -1)
+        if self._attack_family_id >= 0:
+            attack_mask = family_ids == self._attack_family_id
+            attack_slots[attack_mask] = arg0[attack_mask]
+            attack_types[attack_mask] = arg1[attack_mask]
+
+        generic_indices = torch.full_like(arg0, -1)
+        generic_family_ids = (
+            self._choice_select_family_id,
+            self._level_up_family_id,
+            self._trigger_order_family_id,
+        )
+        for family_id in generic_family_ids:
+            if family_id < 0:
+                continue
+            generic_mask = family_ids == family_id
+            generic_indices[generic_mask] = arg0[generic_mask]
+
+        return (
+            family_ids,
+            hand_indices,
+            stage_slots,
+            from_slots,
+            to_slots,
+            attack_slots,
+            attack_types,
+            generic_indices,
+        )
+
+    def _gather_hand_embeddings_from_rows(
+        self,
+        hand_ids: Tensor,
+        row_indices: Tensor,
+        hand_indices: Tensor,
+        *,
+        dtype: torch.dtype,
+    ) -> tuple[Tensor, Tensor]:
+        if hand_ids.shape[1] == 0:
+            return (
+                torch.zeros_like(hand_indices, dtype=torch.bool),
+                hand_ids.new_zeros((hand_indices.shape[0], self.card_embedding.embedding_dim), dtype=dtype),
+            )
+        hand_present = (hand_indices >= 0) & (hand_indices < hand_ids.shape[1])
+        hand_card_embeddings = hand_ids.new_zeros((hand_indices.shape[0], self.card_embedding.embedding_dim), dtype=dtype)
+        if torch.any(hand_present):
+            candidate_hand_ids = hand_ids[row_indices[hand_present], hand_indices[hand_present].to(dtype=torch.long)]
+            hand_card_embeddings[hand_present] = self._card_representation(candidate_hand_ids, dtype=dtype)
+        return hand_present, hand_card_embeddings
+
+    def _gather_stage_features_for_rows(
+        self,
+        slot_contexts: Tensor,
+        slot_numeric: Tensor,
+        row_indices: Tensor,
+        slot_indices: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        valid = (slot_indices >= 0) & (slot_indices < self._stage_slot_count)
+        gathered_context = slot_contexts.new_zeros((slot_indices.shape[0], slot_contexts.shape[-1]))
+        gathered_numeric = slot_numeric.new_zeros((slot_indices.shape[0], slot_numeric.shape[-1]))
+        if torch.any(valid):
+            gathered_context[valid] = slot_contexts[
+                row_indices[valid].to(dtype=torch.long),
+                slot_indices[valid].to(dtype=torch.long),
+            ]
+            gathered_numeric[valid] = slot_numeric[
+                row_indices[valid].to(dtype=torch.long),
+                slot_indices[valid].to(dtype=torch.long),
+            ]
+        return gathered_context, gathered_numeric
+
+    def _card_representation(self, card_ids: Tensor, *, dtype: torch.dtype) -> Tensor:
+        bucketed_ids = _bucket_card_ids(card_ids, vocab_size=self._card_vocab_size)
+        learned = self.card_embedding(bucketed_ids).to(dtype=dtype)
+        if self.card_feature_projection is None or self._card_static_features.numel() == 0:
+            return learned
+        static_features = self._card_static_features.index_select(0, bucketed_ids.reshape(-1)).reshape(
+            *bucketed_ids.shape,
+            self._card_static_features.shape[1],
+        )
+        projected = self.card_feature_projection(static_features.to(dtype=dtype))
+        return learned + projected.to(dtype=dtype)
+
+    def _gather_stage_features(
+        self,
+        slot_contexts: Tensor,
+        slot_numeric: Tensor,
+        slot_indices: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        if slot_contexts.ndim == 3:
+            valid = (slot_indices >= 0) & (slot_indices < self._stage_slot_count)
+            safe_indices = torch.where(valid, slot_indices, torch.zeros_like(slot_indices))
+            context_index = safe_indices.to(dtype=torch.long).view(-1, 1, 1).expand(-1, 1, slot_contexts.shape[-1])
+            numeric_index = safe_indices.to(dtype=torch.long).view(-1, 1, 1).expand(-1, 1, slot_numeric.shape[-1])
+            gathered_context = torch.gather(slot_contexts, 1, context_index).squeeze(1)
+            gathered_numeric = torch.gather(slot_numeric, 1, numeric_index).squeeze(1)
+            return (
+                gathered_context * valid.unsqueeze(-1).to(dtype=slot_contexts.dtype),
+                gathered_numeric * valid.unsqueeze(-1).to(dtype=slot_numeric.dtype),
+            )
+        valid = (slot_indices >= 0) & (slot_indices < self._stage_slot_count)
+        safe_indices = torch.where(valid, slot_indices, torch.zeros_like(slot_indices))
+        gathered_context = slot_contexts.index_select(0, safe_indices.to(dtype=torch.long))
+        gathered_numeric = slot_numeric.index_select(0, safe_indices.to(dtype=torch.long))
+        return (
+            gathered_context * valid.unsqueeze(-1).to(dtype=slot_contexts.dtype),
+            gathered_numeric * valid.unsqueeze(-1).to(dtype=slot_numeric.dtype),
+        )
+
+    def _extract_card_vector(self, obs_batch: Tensor, observation_slice: ObservationSlice | None) -> Tensor:
+        if observation_slice is None:
+            return torch.zeros((obs_batch.shape[0], 0), device=obs_batch.device, dtype=torch.long)
+        return obs_batch[:, observation_slice.start : observation_slice.stop].to(dtype=torch.long)
+
+    def _slot_component(self, stage_values: Tensor, offset: int) -> Tensor:
+        if offset >= stage_values.shape[-1]:
+            return torch.zeros(stage_values.shape[:2], device=stage_values.device, dtype=stage_values.dtype)
+        return stage_values[..., offset]
+
+
+class StructuredLegalPolicyValueModel(PolicyValueModel):
+    def __init__(
+        self,
+        *,
+        observation_dim: int,
+        config: ModelConfig,
+        action_dim: int = GLOBAL_ACTION_SPACE_SIZE,
+        dropout_p: float | None = None,
+        observation_spec: Mapping[str, Any] | None = None,
+        spec_bundle: Mapping[str, Any] | None = None,
+        card_table: Mapping[str, Any] | None = None,
+    ) -> None:
+        if spec_bundle is None:
+            raise ValueError("structured_v2 encoder requires the simulator spec bundle")
+        action_catalog = ActionCatalog.from_spec_bundle(spec_bundle)
+        observation_contract = _build_structured_observation_contract(
+            spec_bundle["observation"],
+            action_catalog=action_catalog,
+        )
+        structured_config = replace(config, encoder_kind="typed_v1")
+        super().__init__(
+            observation_dim=observation_dim,
+            config=structured_config,
+            action_dim=action_dim,
+            dropout_p=dropout_p,
+            observation_spec=observation_spec,
+        )
+        if action_catalog.action_space_size != action_dim:
+            raise ValueError(
+                "structured_v2 action catalog mismatch: "
+                f"expected {action_dim}, observed {action_catalog.action_space_size}"
+            )
+        encoder_dropout = structured_config.dropout.family_a if dropout_p is None else dropout_p
+        action_feature_width = max(32, int(structured_config.encoder_mlp_width))
+        self.policy_head = _StructuredLegalActionHead(
+            latent_width=int(structured_config.gru_hidden_size),
+            action_catalog=action_catalog,
+            observation_contract=observation_contract,
+            card_table=cached_runtime_card_table() if card_table is None else card_table,
+            action_feature_width=action_feature_width,
+            layer_norm=bool(structured_config.layer_norm),
+            dropout_p=float(encoder_dropout),
+        )
+        self.action_catalog = action_catalog
+        self._structured_observation_contract = observation_contract
+        self.register_buffer(
+            "_card_scalar_indices",
+            torch.as_tensor(observation_contract.card_scalar_indices, dtype=torch.long),
+            persistent=False,
+        )
+        encoder_keep_mask = torch.ones((int(observation_dim),), dtype=torch.float32)
+        if observation_contract.card_scalar_indices:
+            encoder_keep_mask[torch.as_tensor(observation_contract.card_scalar_indices, dtype=torch.long)] = 0.0
+        self.register_buffer("_encoder_input_keep_mask", encoder_keep_mask, persistent=False)
+        self.supports_legal_candidate_scoring = True
+        self.encoder_kind = STRUCTURED_V2_ENCODER_KIND
+        self._compiled_trunk_packed_core: Any | None = None
+        self._compiled_trunk_sequence_core: Any | None = None
+        self._trunk_compile_last_error: str | None = None
+
+    def encode(self, obs: Tensor) -> Tensor:
+        obs_batch = self._require_observation_batch(obs)
+        if self._card_scalar_indices.numel() == 0:
+            return self.encoder(obs_batch)
+        prepared = obs_batch * self._encoder_input_keep_mask.to(device=obs_batch.device, dtype=obs_batch.dtype)
+        return self.encoder(prepared)
+
+    def forward(
+        self,
+        obs: Tensor,
+        hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        obs_batch = self._require_observation_batch(obs)
+        encoded_obs = self.encode(obs_batch)
+        recurrent_output, next_hidden = self.recurrent_step(encoded_obs, hidden_state)
+        logits = self.policy_head(recurrent_output, obs=obs_batch, legal_actions=legal_actions)
+        value = self.value_head(recurrent_output).squeeze(-1)
+        return logits, value, next_hidden
+
+    def forward_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        obs_batch = self._require_observation_batch(obs)
+        encoded_obs = self.encode(obs_batch)
+        recurrent_output, next_seat_hidden = self.recurrent_step_seat_aware(
+            encoded_obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        logits = self.policy_head(recurrent_output, obs=obs_batch, legal_actions=legal_actions)
+        value = self.value_head(recurrent_output).squeeze(-1)
+        return logits, value, next_seat_hidden
+
+    def forward_seat_aware_inplace(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        obs_batch = self._require_observation_batch(obs)
+        encoded_obs = self.encode(obs_batch)
+        recurrent_output, next_seat_hidden = self.recurrent_step_seat_aware_inplace(
+            encoded_obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        logits = self.policy_head(recurrent_output, obs=obs_batch, legal_actions=legal_actions)
+        value = self.value_head(recurrent_output).squeeze(-1)
+        return logits, value, next_seat_hidden
+
+    def forward_sequence_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        if obs.ndim != 3:
+            raise ValueError(f"obs must be 3D (time, batch, observation), got shape {tuple(obs.shape)}")
+        if acting_seat.ndim != 2 or acting_seat.shape != obs.shape[:2]:
+            raise ValueError(
+                "acting_seat must be 2D (time, batch) with the same leading dimensions as obs"
+            )
+        recurrent_flat, flat_obs_batch, seat_hidden, time_steps, batch_size = self._sequence_recurrent_outputs(
+            obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        logits_flat = self.policy_head.score_legal_actions(
+            recurrent_flat,
+            obs=flat_obs_batch,
+            legal_actions=legal_actions,
+        )
+        value_flat = self.value_head(recurrent_flat).squeeze(-1)
+        return (
+            logits_flat.reshape(time_steps, batch_size, logits_flat.shape[-1]),
+            value_flat.reshape(time_steps, batch_size),
+            seat_hidden,
+        )
+
+    def forward_sequence_packed_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        recurrent_flat, state_repr, observation_context, values, seat_hidden = self.forward_trunk_sequence_seat_aware(
+            obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        packed_logits = self.score_packed_legal_candidates(
+            recurrent_flat,
+            obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2]),
+            legal_actions,
+            state_repr=state_repr,
+            observation_context=observation_context,
+        )
+        return packed_logits, values, seat_hidden
+
+    def enable_trunk_compile(self, *, mode: str = "reduce-overhead") -> StructuredLegalPolicyValueModel:
+        compiled_packed = self._compiled_trunk_packed_core
+        compiled_sequence = self._compiled_trunk_sequence_core
+        if compiled_packed is None:
+            compiled_packed = torch.compile(
+                self._forward_trunk_packed_core,
+                mode=mode,
+            )
+        if compiled_sequence is None:
+            compiled_sequence = torch.compile(
+                self._forward_trunk_sequence_core,
+                mode=mode,
+            )
+        self._compiled_trunk_packed_core = compiled_packed
+        self._compiled_trunk_sequence_core = compiled_sequence
+        return self
+
+    def advance_seat_hidden(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+    ) -> Tensor:
+        obs_batch = self._require_observation_batch(obs)
+        encoded_obs = self.encode(obs_batch)
+        _, next_seat_hidden = self.recurrent_step_seat_aware(
+            encoded_obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        return next_seat_hidden
+
+    def value_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+    ) -> Tensor:
+        obs_batch = self._require_observation_batch(obs)
+        encoded_obs = self.encode(obs_batch)
+        recurrent_output, _next_seat_hidden = self.recurrent_step_seat_aware(
+            encoded_obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        return self.value_head(recurrent_output).squeeze(-1)
+
+    def score_packed_legal_candidates(
+        self,
+        recurrent_outputs: Tensor,
+        obs: Tensor,
+        legal_actions: LegalActionBatch,
+        *,
+        state_repr: Tensor | None = None,
+        observation_context: Mapping[str, Tensor] | None = None,
+    ) -> Tensor:
+        recurrent_batch = recurrent_outputs
+        if recurrent_batch.ndim != 2:
+            raise ValueError("recurrent_outputs must be 2D (rows, hidden)")
+        obs_batch = self._require_observation_batch(obs)
+        if legal_actions.ids is None or legal_actions.offsets is None or legal_actions.meta is None:
+            raise ValueError("score_packed_legal_candidates requires packed ids, offsets, and metadata")
+        return self.policy_head.score_packed_candidates(
+            recurrent_batch,
+            obs=obs_batch,
+            legal_actions=legal_actions,
+            state_repr=state_repr,
+            observation_context=observation_context,
+        )
+
+    def forward_packed_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        recurrent_output, state_repr, observation_context, value, next_seat_hidden = self.forward_trunk_packed_seat_aware(
+            obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        packed_logits = self.score_packed_legal_candidates(
+            recurrent_output,
+            self._require_observation_batch(obs),
+            legal_actions,
+            state_repr=state_repr,
+            observation_context=observation_context,
+        )
+        return packed_logits, value, next_seat_hidden
+
+    def sample_packed_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch,
+        sample_seeds: Tensor,
+        pass_action_id: int,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        packed_logits, value, next_seat_hidden = self.forward_packed_seat_aware(
+            obs,
+            acting_seat,
+            seat_hidden_state,
+            legal_actions=legal_actions,
+        )
+        if legal_actions.ids is None or legal_actions.offsets is None:
+            raise ValueError("sample_packed_seat_aware requires packed ids and offsets")
+        actions, behavior_logp = _sample_packed_action_scores(
+            packed_logits,
+            torch.as_tensor(legal_actions.ids, device=packed_logits.device, dtype=torch.long),
+            torch.as_tensor(legal_actions.offsets, device=packed_logits.device, dtype=torch.long),
+            sample_seeds.to(device=packed_logits.device, dtype=torch.long),
+            pass_action_id=int(pass_action_id),
+        )
+        return actions, behavior_logp, value, next_seat_hidden
+
+    def forward_trunk_packed_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor, dict[str, Tensor], Tensor, Tensor]:
+        trunk_forward = self._compiled_trunk_packed_core
+        if trunk_forward is not None:
+            try:
+                recurrent_output, obs_batch, value, next_seat_hidden = trunk_forward(
+                    obs,
+                    acting_seat,
+                    seat_hidden_state,
+                )
+            except Exception as exc:
+                self._compiled_trunk_packed_core = None
+                self._trunk_compile_last_error = repr(exc)
+                recurrent_output, obs_batch, value, next_seat_hidden = self._forward_trunk_packed_core(
+                    obs,
+                    acting_seat,
+                    seat_hidden_state,
+                )
+        else:
+            recurrent_output, obs_batch, value, next_seat_hidden = self._forward_trunk_packed_core(
+                obs,
+                acting_seat,
+                seat_hidden_state,
+            )
+        state_repr, observation_context = self.policy_head._build_state_representation(recurrent_output, obs=obs_batch)
+        return recurrent_output, state_repr, observation_context, value, next_seat_hidden
+
+    def forward_trunk_sequence_seat_aware(
+        self,
+        obs: Tensor,
+        acting_seat: Tensor,
+        seat_hidden_state: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor, dict[str, Tensor], Tensor, Tensor]:
+        time_steps = int(obs.shape[0])
+        batch_size = int(obs.shape[1])
+        trunk_forward = self._compiled_trunk_sequence_core
+        if trunk_forward is not None:
+            try:
+                recurrent_flat, flat_obs_batch, value_flat, seat_hidden = trunk_forward(
+                    obs,
+                    acting_seat,
+                    seat_hidden_state,
+                )
+            except Exception as exc:
+                self._compiled_trunk_sequence_core = None
+                self._trunk_compile_last_error = repr(exc)
+                recurrent_flat, flat_obs_batch, value_flat, seat_hidden = self._forward_trunk_sequence_core(
+                    obs,
+                    acting_seat,
+                    seat_hidden_state,
+                )
+        else:
+            recurrent_flat, flat_obs_batch, value_flat, seat_hidden = self._forward_trunk_sequence_core(
+                obs,
+                acting_seat,
+                seat_hidden_state,
+            )
+        state_repr, observation_context = self.policy_head._build_state_representation(
+            recurrent_flat,
+            obs=flat_obs_batch,
+        )
+        return recurrent_flat, state_repr, observation_context, value_flat.reshape(time_steps, batch_size), seat_hidden
+
+    def _forward_trunk_packed_core(
+        self,
+        obs: Tensor,
+        acting_seat: int | Tensor,
+        seat_hidden_state: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        obs_batch = self._require_observation_batch(obs)
+        encoded_obs = self.encode(obs_batch)
+        recurrent_output, next_seat_hidden = self.recurrent_step_seat_aware(
+            encoded_obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        value = self.value_head(recurrent_output).squeeze(-1)
+        return recurrent_output, obs_batch, value, next_seat_hidden
+
+    def _forward_trunk_sequence_core(
+        self,
+        obs: Tensor,
+        acting_seat: Tensor,
+        seat_hidden_state: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        recurrent_flat, flat_obs_batch, seat_hidden, _time_steps, _batch_size = self._sequence_recurrent_outputs(
+            obs,
+            acting_seat,
+            seat_hidden_state,
+        )
+        value_flat = self.value_head(recurrent_flat).squeeze(-1)
+        return recurrent_flat, flat_obs_batch, value_flat, seat_hidden
+
+    def _sequence_recurrent_outputs(
+        self,
+        obs: Tensor,
+        acting_seat: Tensor,
+        seat_hidden_state: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor, int, int]:
+        if obs.ndim != 3:
+            raise ValueError(f"obs must be 3D (time, batch, observation), got shape {tuple(obs.shape)}")
+        if acting_seat.ndim != 2 or acting_seat.shape != obs.shape[:2]:
+            raise ValueError(
+                "acting_seat must be 2D (time, batch) with the same leading dimensions as obs"
+            )
+        time_steps, batch_size, obs_dim = int(obs.shape[0]), int(obs.shape[1]), int(obs.shape[2])
+        flat_obs = obs.reshape(time_steps * batch_size, obs_dim)
+        encoded_flat = self.encode(flat_obs)
+        encoded = encoded_flat.reshape(time_steps, batch_size, encoded_flat.shape[-1])
+        seat_hidden = self._prepare_seat_hidden_state(
+            seat_hidden_state,
+            batch_size=batch_size,
+            like=encoded[0],
+        )
+        recurrent_steps: list[Tensor] = []
+        for step_encoded, step_seat in zip(encoded.unbind(dim=0), acting_seat.unbind(dim=0), strict=True):
+            recurrent_output, seat_hidden = self.recurrent_step_seat_aware(
+                step_encoded,
+                step_seat,
+                seat_hidden,
+            )
+            recurrent_steps.append(recurrent_output)
+        recurrent = torch.stack(recurrent_steps, dim=0)
+        recurrent_flat = recurrent.reshape(time_steps * batch_size, recurrent.shape[-1])
+        return recurrent_flat, self._require_observation_batch(flat_obs), seat_hidden, time_steps, batch_size
+
+
+def build_policy_value_model(
+    *,
+    observation_dim: int,
+    config: ModelConfig,
+    action_dim: int = GLOBAL_ACTION_SPACE_SIZE,
+    dropout_p: float | None = None,
+    observation_spec: Mapping[str, Any] | None = None,
+    spec_bundle: Mapping[str, Any] | None = None,
+    card_table: Mapping[str, Any] | None = None,
+) -> PolicyValueModel:
+    encoder_kind = str(config.encoder_kind).strip().lower()
+    if encoder_kind == STRUCTURED_V2_ENCODER_KIND:
+        return StructuredLegalPolicyValueModel(
+            observation_dim=observation_dim,
+            config=config,
+            action_dim=action_dim,
+            dropout_p=dropout_p,
+            observation_spec=observation_spec,
+            spec_bundle=spec_bundle,
+            card_table=card_table,
+        )
+    return PolicyValueModel(
+        observation_dim=observation_dim,
+        config=config,
+        action_dim=action_dim,
+        dropout_p=dropout_p,
+        observation_spec=observation_spec,
+    )
+
+
+__all__ = [
+    "GLOBAL_ACTION_SPACE_SIZE",
+    "SEAT_COUNT",
+    "STRUCTURED_V2_ENCODER_KIND",
+    "ModelConfig",
+    "PolicyValueModel",
+    "StructuredLegalPolicyValueModel",
+    "build_policy_value_model",
+]

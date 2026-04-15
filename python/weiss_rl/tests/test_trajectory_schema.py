@@ -29,7 +29,7 @@ def test_trajectory_step_keeps_behavior_logp_with_step_fields() -> None:
 
 
 def test_legal_storage_fields_match_the_declared_legal_repr() -> None:
-    assert legal_storage_fields("ids_offsets") == ("legal_ids", "legal_offsets")
+    assert legal_storage_fields("ids_offsets") == ("legal_ids", "legal_action_meta", "legal_offsets")
     assert legal_storage_fields("mask") == ("legal_mask",)
     assert legal_storage_fields("none") == ()
 

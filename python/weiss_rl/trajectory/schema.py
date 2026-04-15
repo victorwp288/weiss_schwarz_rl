@@ -11,7 +11,7 @@ LegalRepr = Literal["ids_offsets", "mask", "none"]
 StepDefinition = Literal["decision_boundary", "learner_turn_env"]
 
 LEGAL_REPR_FIELDS: dict[LegalRepr, tuple[str, ...]] = {
-    "ids_offsets": ("legal_ids", "legal_offsets"),
+    "ids_offsets": ("legal_ids", "legal_action_meta", "legal_offsets"),
     "mask": ("legal_mask",),
     "none": (),
 }

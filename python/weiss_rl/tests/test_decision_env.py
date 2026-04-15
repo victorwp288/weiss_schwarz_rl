@@ -54,6 +54,7 @@ class FakeIdsOut:
     def __init__(self, num_envs: int) -> None:
         self.obs = np.zeros((num_envs, 4), dtype=np.int16)
         self.legal_ids = np.zeros((max(2, num_envs * 4),), dtype=np.uint32)
+        self.legal_action_meta = np.full((max(2, num_envs * 4), 4), np.iinfo(np.uint16).max, dtype=np.uint16)
         self.legal_offsets = np.zeros((num_envs + 1,), dtype=np.int32)
         self.rewards = np.zeros((num_envs,), dtype=np.float32)
         self.terminated = np.zeros((num_envs,), dtype=bool)
@@ -69,6 +70,7 @@ class ReadOnlyFakeIdsOut(FakeNoMaskOut):
     def __init__(self, num_envs: int) -> None:
         super().__init__(num_envs)
         self._legal_ids = np.zeros((max(2, num_envs * 4),), dtype=np.uint32)
+        self._legal_action_meta = np.full((max(2, num_envs * 4), 4), np.iinfo(np.uint16).max, dtype=np.uint16)
         self._legal_offsets = np.zeros((num_envs + 1,), dtype=np.int32)
 
     @property
@@ -78,6 +80,10 @@ class ReadOnlyFakeIdsOut(FakeNoMaskOut):
     @property
     def legal_offsets(self) -> np.ndarray:
         return self._legal_offsets
+
+    @property
+    def legal_action_meta(self) -> np.ndarray:
+        return self._legal_action_meta
 
 
 def _copy_array(dst: Any, src: Any, *, allow_resize: bool = False) -> Any:
@@ -110,6 +116,12 @@ def _copy_step_like(dst: Any, src: Any) -> None:
         dst.masks = _copy_array(getattr(dst, "masks", None), src.masks, allow_resize=True)
     if hasattr(src, "legal_ids"):
         dst.legal_ids = _copy_array(getattr(dst, "legal_ids", None), src.legal_ids, allow_resize=True)
+    if hasattr(src, "legal_action_meta"):
+        dst.legal_action_meta = _copy_array(
+            getattr(dst, "legal_action_meta", None),
+            src.legal_action_meta,
+            allow_resize=True,
+        )
     if hasattr(src, "legal_offsets"):
         dst.legal_offsets = _copy_array(
             getattr(dst, "legal_offsets", None),
@@ -128,6 +140,7 @@ class FakePool:
         mask_reset_result: object | None = None,
         nomask_reset_result: object | None = None,
         legal_ids_after_reset: np.ndarray | None = None,
+        legal_action_meta_after_reset: np.ndarray | None = None,
         legal_offsets_after_reset: np.ndarray | None = None,
         episode_seed_batch: np.ndarray | None = None,
         episode_index_batch: np.ndarray | None = None,
@@ -139,6 +152,7 @@ class FakePool:
         self.mask_reset_result = mask_reset_result
         self.nomask_reset_result = nomask_reset_result
         self.legal_ids_after_reset = legal_ids_after_reset
+        self.legal_action_meta_after_reset = legal_action_meta_after_reset
         self.legal_offsets_after_reset = legal_offsets_after_reset
         self._episode_seed_batch = (
             np.zeros((envs_len,), dtype=np.uint64) if episode_seed_batch is None else episode_seed_batch
@@ -150,6 +164,15 @@ class FakePool:
         self.calls: list[tuple[str, np.ndarray, object]] = []
         self.seeded_reset_calls: list[tuple[str, np.ndarray, np.ndarray, object]] = []
         self.legal_refill_calls: list[tuple[np.ndarray, np.ndarray]] = []
+        self.timing_enabled = False
+        self.timing_reset_calls = 0
+        self.timing_snapshot = {
+            "timing_enabled": False,
+            "step_sample_from_logits_with_logp_into_i16_legal_ids_count": 0,
+            "step_sample_from_logits_with_logp_into_i16_legal_ids_ns": 0,
+            "legal_action_meta_materialize_count": 0,
+            "legal_action_meta_materialize_ns": 0,
+        }
 
     def auto_reset_on_error_codes_into(self, codes: np.ndarray, out: Any) -> int | None:
         copied_codes = np.asarray(codes).copy()
@@ -199,6 +222,23 @@ class FakePool:
         legal_offsets[: self.legal_offsets_after_reset.size] = self.legal_offsets_after_reset
         self.legal_refill_calls.append((legal_ids.copy(), legal_offsets.copy()))
         return int(self.legal_ids_after_reset.size)
+
+    def legal_action_meta_into(self, legal_action_meta: np.ndarray) -> int:
+        legal_action_meta[...] = np.iinfo(legal_action_meta.dtype).max
+        if self.legal_action_meta_after_reset is None:
+            return 0
+        legal_action_meta[: self.legal_action_meta_after_reset.shape[0]] = self.legal_action_meta_after_reset
+        return int(self.legal_action_meta_after_reset.shape[0])
+
+    def set_timing_enabled(self, enabled: bool) -> None:
+        self.timing_enabled = bool(enabled)
+        self.timing_snapshot["timing_enabled"] = bool(enabled)
+
+    def reset_timing_counters(self) -> None:
+        self.timing_reset_calls += 1
+
+    def timing_counters(self) -> dict[str, int | bool]:
+        return dict(self.timing_snapshot)
 
     def episode_seed_batch(self) -> np.ndarray:
         return self._episode_seed_batch
@@ -399,6 +439,17 @@ def test_pack_batch_ids_offsets_trims_raw_capacity_and_derives_episode_identity_
         engine_status=np.array([0, 0], dtype=np.uint8),
         spec_hash=np.array([11, 12], dtype=np.uint64),
         legal_ids=np.array([1, 2, 3, 4, 99, 98], dtype=np.uint32),
+        legal_action_meta=np.array(
+            [
+                [2, 0, 0, 0],
+                [2, 1, 0, 0],
+                [3, 0, 1, 0],
+                [3, 1, 1, 0],
+                [65535, 65535, 65535, 65535],
+                [65535, 65535, 65535, 65535],
+            ],
+            dtype=np.uint16,
+        ),
         legal_offsets=np.array([0, 2, 4], dtype=np.uint32),
     )
     pool = FakePool(
@@ -414,6 +465,19 @@ def test_pack_batch_ids_offsets_trims_raw_capacity_and_derives_episode_identity_
     legal_ids, legal_offsets = batch.ids_offsets
     npt.assert_array_equal(legal_ids, np.array([1, 2, 3, 4], dtype=np.uint32))
     npt.assert_array_equal(legal_offsets, np.array([0, 2, 4], dtype=np.uint32))
+    assert batch.legal_action_meta is not None
+    npt.assert_array_equal(
+        batch.legal_action_meta,
+        np.array(
+            [
+                [2, 0, 0, 0],
+                [2, 1, 0, 0],
+                [3, 0, 1, 0],
+                [3, 1, 1, 0],
+            ],
+            dtype=np.uint16,
+        ),
+    )
     npt.assert_array_equal(batch.episode_seed, np.array([101, 202], dtype=np.uint64))
     npt.assert_array_equal(
         batch.episode_key,
@@ -424,6 +488,7 @@ def test_pack_batch_ids_offsets_trims_raw_capacity_and_derives_episode_identity_
         ),
     )
     npt.assert_array_equal(batch.decision_kind, np.array([0, 0], dtype=np.int32))
+    assert batch.action_space == 52
     assert batch.episode_identity_source == "derived"
 
 
@@ -497,6 +562,7 @@ def test_pack_batch_can_return_views_for_runtime_fast_path() -> None:
     assert batch.mask is not None and np.shares_memory(batch.mask, mask)
     assert np.shares_memory(batch.episode_seed, step.episode_seed)
     assert np.shares_memory(batch.episode_key, step.episode_key)
+    assert batch.action_space == 3
 
 
 def test_derive_episode_key_matches_weiss_sim_runner_helper() -> None:
@@ -542,6 +608,7 @@ def test_mask_mode_reset_and_step_return_typed_batch() -> None:
         assert batch.episode_seed.shape == (env.num_envs,)
         assert batch.episode_key.shape == (env.num_envs,)
         assert np.array_equal(batch.to_play, batch.actor)
+        assert batch.action_space == env.action_space
         _assert_batch_episode_identity_matches_pool(batch, env.pool)
 
         next_batch = env.step(_first_legal_from_mask(batch.mask, pass_action_id=env.pass_action_id))
@@ -550,6 +617,7 @@ def test_mask_mode_reset_and_step_return_typed_batch() -> None:
         assert next_batch.ids_offsets is None
         assert next_batch.obs.shape[0] == env.num_envs
         assert next_batch.reward.shape == (env.num_envs,)
+        assert next_batch.action_space == env.action_space
         _assert_batch_episode_identity_matches_pool(next_batch, env.pool)
     finally:
         env.close()
@@ -570,6 +638,7 @@ def test_ids_offsets_mode_reset_and_step_return_typed_batch() -> None:
         assert batch.episode_seed.shape == (env.num_envs,)
         assert batch.episode_key.shape == (env.num_envs,)
         assert np.array_equal(batch.to_play, batch.actor)
+        assert batch.action_space == env.action_space
         _assert_batch_episode_identity_matches_pool(batch, env.pool)
 
         next_batch = env.step(_first_legal_from_ids(legal_ids, legal_offsets, pass_action_id=env.pass_action_id))
@@ -579,6 +648,7 @@ def test_ids_offsets_mode_reset_and_step_return_typed_batch() -> None:
         next_legal_ids, next_legal_offsets = next_batch.ids_offsets
         assert next_legal_ids.shape == (int(next_legal_offsets[-1]),)
         assert next_batch.reward.shape == (env.num_envs,)
+        assert next_batch.action_space == env.action_space
         _assert_batch_episode_identity_matches_pool(next_batch, env.pool)
     finally:
         env.close()
@@ -694,6 +764,31 @@ def test_reset_with_explicit_seed_uses_pool_seeded_reset_contract(
     assert out is not None
 
 
+def test_decision_boundary_env_drains_simulator_timing_counters() -> None:
+    pool = FakePool()
+    pool.timing_snapshot.update(
+        {
+            "timing_enabled": True,
+            "step_sample_from_logits_with_logp_into_i16_legal_ids_count": 2,
+            "step_sample_from_logits_with_logp_into_i16_legal_ids_ns": 1500,
+            "legal_action_meta_materialize_count": 3,
+            "legal_action_meta_materialize_ns": 2750,
+        }
+    )
+
+    env = DecisionBoundaryEnv(pool, legality="ids_offsets", profile_timers=True)
+    counters = env.drain_timing_counters()
+
+    assert pool.timing_enabled is True
+    assert pool.timing_reset_calls == 2
+    assert counters == {
+        "step_sample_from_logits_with_logp_into_i16_legal_ids_count": 2,
+        "step_sample_from_logits_with_logp_into_i16_legal_ids_ns": 1500,
+        "legal_action_meta_materialize_count": 3,
+        "legal_action_meta_materialize_ns": 2750,
+    }
+
+
 def test_hard_fail_raises_and_counts_fault_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     counters = EngineStatusCounters()
     pool = FakePool()
@@ -780,6 +875,7 @@ def test_best_effort_reset_ids_offsets_uses_nomask_contract_and_refills_legal_id
         reported_rows=1,
         nomask_reset_result=nomask_reset,
         legal_ids_after_reset=np.array([2, 4], dtype=np.uint32),
+        legal_action_meta_after_reset=np.array([[6, 0, 0, 0], [6, 1, 0, 0]], dtype=np.uint16),
         legal_offsets_after_reset=np.array([0, 2], dtype=np.int32),
     )
     fake_weiss_sim = FakeWeissSim(reset_result=reset_step, step_result=faulted_step)
@@ -803,6 +899,8 @@ def test_best_effort_reset_ids_offsets_uses_nomask_contract_and_refills_legal_id
     legal_ids, legal_offsets = returned.ids_offsets
     npt.assert_array_equal(legal_ids, np.array([2, 4], dtype=np.uint32))
     npt.assert_array_equal(legal_offsets, np.array([0, 2], dtype=np.int32))
+    assert returned.legal_action_meta is not None
+    npt.assert_array_equal(returned.legal_action_meta, np.array([[6, 0, 0, 0], [6, 1, 0, 0]], dtype=np.uint16))
     npt.assert_array_equal(returned.actor, np.array([1], dtype=np.int32))
     npt.assert_array_equal(returned.engine_status, np.array([0], dtype=np.uint8))
     npt.assert_array_equal(returned.obs, np.array([[7, 8, 9, 10]], dtype=np.int16))
