@@ -1347,6 +1347,9 @@ class _StructuredLegalActionHead(nn.Module):
             return state_repr.new_zeros((0,))
         scores_chunks: list[Tensor] = []
         chunk_size = max(1, int(self._candidate_scoring_chunk_size))
+        resolved_mode = self._resolve_scoring_mode(scoring_mode)
+        if resolved_mode == "learner" and state_repr.device.type == "cuda":
+            chunk_size = max(chunk_size, int(self._cuda_learner_candidate_scoring_chunk_size))
         for start in range(0, scoring_plan.candidate_count, chunk_size):
             end = min(start + chunk_size, scoring_plan.candidate_count)
             scores_chunks.append(
@@ -1354,7 +1357,7 @@ class _StructuredLegalActionHead(nn.Module):
                     state_repr,
                     scoring_plan.slice(start, end),
                     observation_context,
-                    scoring_mode=scoring_mode,
+                    scoring_mode=resolved_mode,
                 )
             )
         return torch.cat(scores_chunks, dim=0)

@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,7 @@ def _load_script_module(script_name: str):
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not load script module: {script_path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -31,6 +33,21 @@ def test_check_core_placeholders_entrypoint_passes(monkeypatch) -> None:
     monkeypatch.chdir(REPO_ROOT)
 
     assert module.main() == 0
+
+
+def test_train_entrypoint_helper_resolves_central_actor_torch_threads(monkeypatch) -> None:
+    module = _load_script_module("train.py")
+
+    stack = SimpleNamespace(
+        config=SimpleNamespace(
+            system=SimpleNamespace(actor_device="cpu", actor_torch_threads=16, learner_torch_threads=4)
+        )
+    )
+    central_runtime = SimpleNamespace(_use_process_collectors=False, _use_central_batched_collection=True)
+    process_runtime = SimpleNamespace(_use_process_collectors=True, _use_central_batched_collection=False)
+
+    assert module._central_runtime_actor_torch_threads(stack, central_runtime) == 16
+    assert module._central_runtime_actor_torch_threads(stack, process_runtime) is None
 
 
 def test_compare_runs_entrypoint_expands_launch_group_and_deduplicates(monkeypatch, tmp_path: Path) -> None:

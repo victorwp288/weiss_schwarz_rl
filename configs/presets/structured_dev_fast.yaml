@@ -1,6 +1,9 @@
 schema_version: 2
 description: structured_dev_fast local preset
 extends: typed_structured_v2.yaml
+system:
+  actor_torch_threads: 16
+  learner_torch_threads: 16
 league:
   enabled: false
 training:

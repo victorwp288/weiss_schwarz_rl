@@ -934,6 +934,38 @@ def _configure_torch_threads(stack: StackConfig) -> None:
         pass
 
 
+@contextmanager
+def _torch_num_threads_scope(num_threads: int | None):
+    if num_threads is None:
+        yield
+        return
+    target = int(num_threads)
+    if target < 1:
+        raise ValueError("num_threads must be >= 1")
+    previous = int(torch.get_num_threads())
+    if previous == target:
+        yield
+        return
+    torch.set_num_threads(target)
+    try:
+        yield
+    finally:
+        torch.set_num_threads(previous)
+
+
+def _central_runtime_actor_torch_threads(stack: StackConfig, runtime: QueueRuntime) -> int | None:
+    system_config = stack.config.system
+    if system_config is None:
+        return None
+    if str(system_config.actor_device).strip().lower() != "cpu":
+        return None
+    if bool(getattr(runtime, "_use_process_collectors", False)):
+        return None
+    if not bool(getattr(runtime, "_use_central_batched_collection", False)):
+        return None
+    return int(system_config.actor_torch_threads)
+
+
 def _spec_dimensions(contract: SimulatorContract) -> tuple[int, int]:
     observation_dim = int(contract.spec_bundle["observation"]["obs_len"])
     action_dim = int(contract.spec_bundle["action"]["action_space_size"])
@@ -2016,6 +2048,8 @@ def _run_structured_warmstart(
     tensorboard_logger: TensorBoardLogger | None,
     start_time: float,
     profile_timers: bool = False,
+    actor_torch_threads: int | None = None,
+    learner_torch_threads: int | None = None,
 ) -> dict[str, float]:
     if not bool(getattr(training_config, "structured_warmstart_enabled", False)):
         return {}
@@ -2039,14 +2073,16 @@ def _run_structured_warmstart(
         with runtime.structured_warmstart_source_mix() as warmstart_source_metrics, runtime.disable_mirror_policy_fusion():
             for warmstart_step in range(updates):
                 with _profile_block(profile_timers, "collect_training_batch"):
-                    runtime_batch = _collect_training_batch(
-                        runtime=runtime,
-                        algorithm=algorithm,
-                        training_config=training_config,
-                        rewards_config=rewards_config,
-                    )
+                    with _torch_num_threads_scope(actor_torch_threads):
+                        runtime_batch = _collect_training_batch(
+                            runtime=runtime,
+                            algorithm=algorithm,
+                            training_config=training_config,
+                            rewards_config=rewards_config,
+                        )
                 with _profile_block(profile_timers, "learner_auxiliary_update"):
-                    latest_metrics = learner.auxiliary_update(runtime_batch.learner_batch)
+                    with _torch_num_threads_scope(learner_torch_threads):
+                        latest_metrics = learner.auxiliary_update(runtime_batch.learner_batch)
                 latest_metrics.update(runtime_batch.runtime_metrics)
                 latest_metrics.update(warmstart_source_metrics)
                 latest_metrics["warmstart_phase"] = 1.0
@@ -3575,6 +3611,12 @@ def _run_minimal_training(
         run_dir=artifacts.run_dir,
         performance_log_path=training_paths.performance_log_path,
     )
+    actor_torch_threads = _central_runtime_actor_torch_threads(stack, runtime)
+    learner_torch_threads = (
+        None
+        if stack.config.system is None
+        else int(stack.config.system.learner_torch_threads)
+    )
     latest_metrics: dict[str, float] = {}
     last_checkpoint_guard_rollback_update: int | None = None
     last_dev_eval_summary: Mapping[str, Any] | None = None
@@ -3597,6 +3639,8 @@ def _run_minimal_training(
                 tensorboard_logger=tensorboard_logger,
                 start_time=start_time,
                 profile_timers=bool(profile_timers),
+                actor_torch_threads=actor_torch_threads,
+                learner_torch_threads=learner_torch_threads,
             )
         if int(learner.update_count) >= max_updates:
             raise RuntimeError(
@@ -3608,14 +3652,16 @@ def _run_minimal_training(
                     _entropy_coef_for_next_update(training_config, update_count=int(learner.update_count) + 1)
                 )
                 with _profile_block(profile_timers, "collect_update_batch"):
-                    runtime_batch = _collect_training_batch(
-                        runtime=runtime,
-                        algorithm=algorithm,
-                        training_config=training_config,
-                        rewards_config=rewards_config,
-                    )
+                    with _torch_num_threads_scope(actor_torch_threads):
+                        runtime_batch = _collect_training_batch(
+                            runtime=runtime,
+                            algorithm=algorithm,
+                            training_config=training_config,
+                            rewards_config=rewards_config,
+                        )
                 with _profile_block(profile_timers, "learner_update"):
-                    latest_metrics = learner.update(runtime_batch.learner_batch)
+                    with _torch_num_threads_scope(learner_torch_threads):
+                        latest_metrics = learner.update(runtime_batch.learner_batch)
                 with _profile_block(profile_timers, "runtime_snapshot_publish"):
                     latest_metrics.update(
                         runtime.maybe_publish_snapshot(
