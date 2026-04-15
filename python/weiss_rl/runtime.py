@@ -2874,6 +2874,7 @@ class QueueRuntime:
         hidden_parts: list[torch.Tensor] = []
         seed_parts: list[np.ndarray] = []
         model = _actor_inference_model(actors[0])
+        pack_started = time.perf_counter()
         for actor_index, (actor, batch, obs_step, actor_step, row_indices) in enumerate(
             zip(
             actors,
@@ -2913,6 +2914,8 @@ class QueueRuntime:
             action_space=int(self.action_dim),
         )
         hidden_concat = torch.cat(hidden_parts, dim=0)
+        self._record_batch_timer_ms("central_focal_policy_pack", time.perf_counter() - pack_started)
+        model_started = time.perf_counter()
         with torch.inference_mode(), torch.amp.autocast(
             device_type=self._device.type,
             enabled=self._actor_amp_enabled,
@@ -2925,10 +2928,12 @@ class QueueRuntime:
                 sample_seeds=torch.as_tensor(np.concatenate(seed_parts, axis=0), device=self._device, dtype=torch.long),
                 pass_action_id=int(self.config.pass_action_id),
             )
+        self._record_batch_timer_ms("central_focal_policy_model", time.perf_counter() - model_started)
         actions_concat = actions_tensor.detach().cpu().numpy().astype(np.int64, copy=False)
         logp_concat = logp_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
         values_concat = value_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
         next_hidden_tensor = torch.as_tensor(next_hidden, device=self._device, dtype=hidden_concat.dtype)
+        scatter_started = time.perf_counter()
         offset = 0
         for actor_index, actor, row_indices in entries:
             count = int(row_indices.shape[0])
@@ -2937,6 +2942,7 @@ class QueueRuntime:
             actions_outs[actor_index][row_indices] = actions_concat[offset : offset + count]
             logp_outs[actor_index][row_indices] = logp_concat[offset : offset + count]
             offset += count
+        self._record_batch_timer_ms("central_focal_policy_scatter", time.perf_counter() - scatter_started)
 
     def _central_value_actor_rows(
         self,

@@ -1012,6 +1012,7 @@ class _StructuredLegalActionHead(nn.Module):
         self.joint_scorer = nn.Sequential(*scorer_layers)
         self.family_bias = nn.Parameter(torch.zeros(max(len(family_names), 1)))
         self._candidate_scoring_chunk_size = 65536
+        self._cuda_learner_candidate_scoring_chunk_size = 262144
         self.register_buffer("_family_ids", torch.as_tensor(family_ids, dtype=torch.long))
         self.register_buffer("_action_arg0", torch.as_tensor(action_arg0, dtype=torch.long))
         self.register_buffer("_action_arg1", torch.as_tensor(action_arg1, dtype=torch.long))
@@ -1164,6 +1165,7 @@ class _StructuredLegalActionHead(nn.Module):
             ids,
             resolved_context,
             candidate_meta=meta,
+            scoring_mode=scoring_mode,
         )
 
     def forward(
@@ -1311,11 +1313,15 @@ class _StructuredLegalActionHead(nn.Module):
         observation_context: Mapping[str, Tensor],
         *,
         candidate_meta: Tensor | None = None,
+        scoring_mode: str = "auto",
     ) -> Tensor:
         if candidate_ids.numel() == 0:
             return state_repr.new_zeros((0,))
         scores_chunks: list[Tensor] = []
         chunk_size = max(1, int(self._candidate_scoring_chunk_size))
+        resolved_mode = self._resolve_scoring_mode(scoring_mode)
+        if resolved_mode == "learner" and state_repr.device.type == "cuda":
+            chunk_size = max(chunk_size, int(self._cuda_learner_candidate_scoring_chunk_size))
         for start in range(0, int(candidate_ids.numel()), chunk_size):
             end = min(start + chunk_size, int(candidate_ids.numel()))
             scores_chunks.append(
