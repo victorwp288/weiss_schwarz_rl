@@ -85,16 +85,27 @@ def _reward_payload_from_stack(stack: StackConfig) -> str | None:
     objective = str(rewards.objective).strip().lower()
     if objective not in {"terminal_pm1", "terminal_only_pm1"}:
         raise ValueError(f"Unsupported rewards.objective {rewards.objective!r}")
+    shaping_enabled = bool(rewards.shaping.enable_damage_shaping)
+    damage_reward = float(rewards.shaping.damage_reward)
+    level_reward = float(rewards.shaping.level_reward)
+    board_reward = float(rewards.shaping.board_reward)
+    no_progress_penalty = float(rewards.shaping.no_progress_penalty)
+    if objective == "terminal_only_pm1":
+        shaping_enabled = False
+        damage_reward = 0.0
+        level_reward = 0.0
+        board_reward = 0.0
+        no_progress_penalty = 0.0
     payload = {
         "terminal_win": 1.0,
         "terminal_loss": -1.0,
         "terminal_draw": 0.0,
         "terminal_timeout": float(rewards.truncation.reward),
-        "enable_shaping": bool(rewards.shaping.enable_damage_shaping),
-        "damage_reward": float(rewards.shaping.damage_reward),
-        "level_reward": float(rewards.shaping.level_reward),
-        "board_reward": float(rewards.shaping.board_reward),
-        "no_progress_penalty": float(rewards.shaping.no_progress_penalty),
+        "enable_shaping": shaping_enabled,
+        "damage_reward": damage_reward,
+        "level_reward": level_reward,
+        "board_reward": board_reward,
+        "no_progress_penalty": no_progress_penalty,
     }
     return json.dumps(payload, sort_keys=True)
 
@@ -106,7 +117,22 @@ def _curriculum_payload_from_stack(stack: StackConfig) -> str | None:
     return json.dumps(curriculum.simulator, sort_keys=True)
 
 
-def build_env_config_from_stack(stack: StackConfig, *, seed: int) -> dict[str, Any]:
+def _cycle_deck_choice(deck_pool: tuple[str, ...], *, actor_id: int | None) -> str | None:
+    if not deck_pool:
+        return None
+    if actor_id is None:
+        return str(deck_pool[0])
+    return str(deck_pool[int(actor_id) % len(deck_pool)])
+
+
+def build_env_config_from_stack(
+    stack: StackConfig,
+    *,
+    seed: int,
+    actor_id: int | None = None,
+    deck: str | None = None,
+    opponent_deck: str | None = None,
+) -> dict[str, Any]:
     environment_config = stack.config.environment
     if environment_config is None:
         raise RuntimeError("stack config is missing environment")
@@ -122,6 +148,15 @@ def build_env_config_from_stack(stack: StackConfig, *, seed: int) -> dict[str, A
         env_config["reward_json"] = reward_json
     if curriculum_json is not None:
         env_config["curriculum_json"] = curriculum_json
+    resolved_deck = deck or _cycle_deck_choice(environment_config.deck_pool, actor_id=actor_id)
+    resolved_opponent_deck = opponent_deck or _cycle_deck_choice(
+        environment_config.opponent_deck_pool,
+        actor_id=actor_id,
+    )
+    if resolved_deck is not None:
+        env_config["deck"] = str(resolved_deck)
+    if resolved_opponent_deck is not None:
+        env_config["opponent_deck"] = str(resolved_opponent_deck)
     return env_config
 
 
@@ -150,9 +185,7 @@ def make_env_pool_from_config(
 
     factory = getattr(weiss_sim, settings.entrypoint)
     parameters = signature(factory).parameters
-    uses_kwargs_wrapper = any(
-        parameter.kind == parameter.VAR_KEYWORD for parameter in parameters.values()
-    )
+    uses_kwargs_wrapper = any(parameter.kind == parameter.VAR_KEYWORD for parameter in parameters.values())
     if uses_kwargs_wrapper and hasattr(weiss_sim, "make"):
         translated_kwargs = dict(kwargs)
         curriculum_json = translated_kwargs.pop("curriculum_json", None)

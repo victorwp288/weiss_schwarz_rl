@@ -12,7 +12,10 @@ from scipy.stats import beta as beta_dist
 
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.eval.policy_set import (
+    HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
+    HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,
+    LEGACY_NO_LEAGUE_POLICY_ID,
     NO_LEAGUE_POLICY_ID,
     RANDOM_LEGAL_POLICY_ID,
 )
@@ -1046,7 +1049,10 @@ def _infer_focal_policy_id(
     baseline_ids = {
         RANDOM_LEGAL_POLICY_ID,
         NO_LEAGUE_POLICY_ID,
+        LEGACY_NO_LEAGUE_POLICY_ID,
         HEURISTIC_PUBLIC_POLICY_ID,
+        HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
+        HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
         baseline_policy_id,
     }
     eligible_policy_ids = [policy_id for policy_id in policy_ids if policy_id not in baseline_ids]
@@ -1308,6 +1314,12 @@ def _validate_manifest_policy_set_selection(value: Any, *, details: Any) -> dict
         return selection_check
     if value:
         return {"passed": True, "reason": None, "message": "ok"}
+    if _documents_unresolved_policy_set_selection(details):
+        return {
+            "passed": False,
+            "reason": "empty",
+            "message": "field is documented as unresolved, but paper-grade readiness requires a resolved final policy set",
+        }
     return {
         "passed": False,
         "reason": "empty",

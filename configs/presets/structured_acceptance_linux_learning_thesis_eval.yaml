@@ -1,0 +1,17 @@
+schema_version: 2
+description: structured_acceptance Linux/WSL learning frontier with early live PFSP and richer thesis anchors
+extends: structured_acceptance_linux_learning_liveleague.yaml
+league:
+  promotion:
+    anchor_set_v1:
+      optional_if_available:
+        - B2 HeuristicPublic
+        - Previous champion snapshot
+        - Previous recent snapshot
+evaluation:
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      optional_if_available:
+        - B2 HeuristicPublic
+        - Previous champion snapshot
+        - Previous recent snapshot

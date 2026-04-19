@@ -170,7 +170,11 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
                 {"family": "clock_from_hand", "count": 1},
             ],
             "action_label_pair_counts": [
-                {"policy_a_action_label": "attack(slot=0, attack_type=direct)", "policy_b_action_label": "pass", "count": 2},
+                {
+                    "policy_a_action_label": "attack(slot=0, attack_type=direct)",
+                    "policy_b_action_label": "pass",
+                    "count": 2,
+                },
                 {
                     "policy_a_action_label": "attack(slot=0, attack_type=direct)",
                     "policy_b_action_label": "attack(slot=0, attack_type=direct)",
@@ -222,8 +226,16 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
                 {"family": "pass", "count": 1},
             ],
             "action_label_pair_counts": [
-                {"policy_a_action_label": "attack(slot=0, attack_type=direct)", "policy_b_action_label": "pass", "count": 2},
-                {"policy_a_action_label": "main_move(from_slot=0, to_slot=2)", "policy_b_action_label": "pass", "count": 2},
+                {
+                    "policy_a_action_label": "attack(slot=0, attack_type=direct)",
+                    "policy_b_action_label": "pass",
+                    "count": 2,
+                },
+                {
+                    "policy_a_action_label": "main_move(from_slot=0, to_slot=2)",
+                    "policy_b_action_label": "pass",
+                    "count": 2,
+                },
                 {
                     "policy_a_action_label": "attack(slot=0, attack_type=direct)",
                     "policy_b_action_label": "attack(slot=0, attack_type=direct)",

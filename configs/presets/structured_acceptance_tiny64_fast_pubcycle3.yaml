@@ -1,0 +1,16 @@
+schema_version: 2
+description: structured_acceptance tiny64 fast packed WSL frontier with cyclic public teacher
+extends: structured_acceptance_tiny64_fast_packed.yaml
+training:
+  structured_aux:
+    teacher_public_heuristic_profiles:
+      - base
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle
+  structured_warmstart:
+    teacher_public_heuristic_profiles:
+      - base
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle

@@ -15,7 +15,9 @@ from weiss_rl.tests.test_contracts import _structured_model_config, _structured_
 from weiss_rl.tests.test_heuristic_public import _empty_obs, _heuristic_spec_bundle, _packed_meta, _set_stage
 
 
-def _build_heuristic_batch(*, rows: int) -> tuple[HeuristicPublicPolicy, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _build_heuristic_batch(
+    *, rows: int
+) -> tuple[HeuristicPublicPolicy, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     policy = HeuristicPublicPolicy.from_spec_bundle(_heuristic_spec_bundle())
     obs_rows = np.stack([_empty_obs() for _ in range(rows)], axis=0)
     row_legal_ids: list[np.ndarray] = []
@@ -50,7 +52,9 @@ def _run_heuristic_benchmark(*, rows: int, iterations: int) -> dict[str, object]
     for _ in range(iterations):
         scalar_actions = np.asarray(
             [
-                policy.choose_action_from_meta(obs_rows[row_index], row_legal_ids[row_index], _packed_meta(row_legal_ids[row_index]))
+                policy.choose_action_from_meta(
+                    obs_rows[row_index], row_legal_ids[row_index], _packed_meta(row_legal_ids[row_index])
+                )
                 for row_index in range(rows)
             ],
             dtype=np.int64,
@@ -148,10 +152,12 @@ def _run_structured_benchmark(
 
         trunk_started = time.perf_counter()
         for _ in range(iterations):
-            recurrent_flat, state_repr, observation_context, values, next_hidden = model.forward_trunk_sequence_seat_aware(
-                obs,
-                acting_seat,
-                seat_hidden,
+            recurrent_flat, state_repr, observation_context, values, next_hidden = (
+                model.forward_trunk_sequence_seat_aware(
+                    obs,
+                    acting_seat,
+                    seat_hidden,
+                )
             )
         trunk_seconds = time.perf_counter() - trunk_started
 
@@ -201,7 +207,9 @@ def main() -> None:
     parser.add_argument("--time-steps", type=int, default=32, help="Structured benchmark time dimension.")
     parser.add_argument("--batch-size", type=int, default=64, help="Structured benchmark batch dimension.")
     parser.add_argument("--iterations", type=int, default=20, help="Benchmark iterations.")
-    parser.add_argument("--compile-trunk", action="store_true", help="Enable torch.compile on the structured trunk before benchmarking.")
+    parser.add_argument(
+        "--compile-trunk", action="store_true", help="Enable torch.compile on the structured trunk before benchmarking."
+    )
     args = parser.parse_args()
 
     if args.mode == "heuristic":

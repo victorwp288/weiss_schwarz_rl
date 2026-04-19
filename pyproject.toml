@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "weiss-schwarz-rl"
 version = "0.1.0"
-description = "Thesis RL pipeline scaffold for Weiss Schwarz."
+description = "Thesis RL training and evaluation pipeline for Weiss Schwarz."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
@@ -26,6 +26,7 @@ dev = [
     "mypy>=1.14,<2",
     "pre-commit>=4,<5",
     "types-PyYAML>=6.0.12.20241230,<7",
+    "vulture>=2.16,<3",
 ]
 sim = [
     "weiss-sim==0.7.0",
@@ -47,6 +48,7 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "B"]
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 markers = [

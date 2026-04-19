@@ -8,6 +8,18 @@ from pathlib import Path
 from typing import Any
 
 
+_PRESET_PATHS = {
+    "standard": Path("configs/presets/structured_acceptance_standard.yaml"),
+    "standard-auto-gpu": Path("configs/presets/structured_acceptance_standard_auto_gpu.yaml"),
+    "standard-thesis-eval": Path("configs/presets/structured_acceptance_standard_thesis_eval.yaml"),
+    "standard-multideck": Path("configs/presets/structured_acceptance_standard_multideck.yaml"),
+    "ablate-no-tactical-bias": Path("configs/presets/ablations/standard_no_tactical_bias.yaml"),
+    "ablate-no-b1-cutoff": Path("configs/presets/ablations/standard_no_b1_cutoff.yaml"),
+    "ablate-multideck": Path("configs/presets/ablations/standard_multideck_generalization.yaml"),
+}
+_DEFAULT_EVAL_PRESET = "standard-thesis-eval"
+
+
 def _command_display(command: list[str]) -> str:
     return " ".join(command)
 
@@ -38,10 +50,34 @@ def _run_step(*, command: list[str], cwd: Path, dry_run: bool) -> dict[str, Any]
     return payload
 
 
+def _resolve_stack_config(*, repo_root: Path, stack_config: Path | None, preset: str) -> Path:
+    if stack_config is not None:
+        return Path(stack_config).resolve()
+    return (repo_root / _PRESET_PATHS[preset]).resolve()
+
+
+def _resolve_eval_stack_config(
+    *,
+    repo_root: Path,
+    eval_stack_config: Path | None,
+    train_stack_config: Path | None,
+    eval_preset: str,
+) -> Path:
+    if eval_stack_config is not None:
+        return Path(eval_stack_config).resolve()
+    if train_stack_config is not None and not eval_preset:
+        return Path(train_stack_config).resolve()
+    return (repo_root / _PRESET_PATHS[eval_preset]).resolve()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Thin wrapper for canonical thesis train/eval/compare runs")
-    parser.add_argument("--stack-config", type=Path, required=True)
-    parser.add_argument("--run-label", type=str, required=True)
+    parser.add_argument("--stack-config", type=Path, default=None)
+    parser.add_argument("--eval-stack-config", type=Path, default=None)
+    parser.add_argument("--preset", choices=tuple(_PRESET_PATHS), default="standard")
+    parser.add_argument("--eval-preset", choices=tuple(_PRESET_PATHS), default="")
+    parser.add_argument("--list-presets", action="store_true")
+    parser.add_argument("--run-label", type=str, default="")
     parser.add_argument("--num-envs", type=int, default=2)
     parser.add_argument("--unroll-length", type=int, default=4)
     parser.add_argument("--max-updates", type=int, default=1)
@@ -64,15 +100,31 @@ def main() -> None:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2] if args.repo_root is None else Path(args.repo_root).resolve()
+    if args.list_presets:
+        for name, path in _PRESET_PATHS.items():
+            print(f"{name}: {(repo_root / path).as_posix()}")
+        return
+    if not str(args.run_label).strip():
+        parser.error("--run-label is required unless --list-presets is used")
     python_exe = sys.executable
     run_dir = repo_root / "runs" / args.run_label
+    stack_config = _resolve_stack_config(repo_root=repo_root, stack_config=args.stack_config, preset=str(args.preset))
+    eval_preset = str(args.eval_preset).strip()
+    if not eval_preset and args.stack_config is None:
+        eval_preset = _DEFAULT_EVAL_PRESET
+    eval_stack_config = _resolve_eval_stack_config(
+        repo_root=repo_root,
+        eval_stack_config=args.eval_stack_config,
+        train_stack_config=args.stack_config,
+        eval_preset=eval_preset,
+    )
     steps: list[dict[str, Any]] = []
 
     train_command = [
         python_exe,
         "python/scripts/train.py",
         "--stack-config",
-        str(args.stack_config),
+        str(stack_config),
         "--run-label",
         args.run_label,
         "--num-envs",
@@ -105,7 +157,7 @@ def main() -> None:
                 python_exe,
                 "python/scripts/eval.py",
                 "--stack-config",
-                str(args.stack_config),
+                str(eval_stack_config),
                 "--run-dir",
                 str(run_dir),
             ]
@@ -135,7 +187,10 @@ def main() -> None:
         "kind": "thesis_run_wrapper_v1",
         "run_label": args.run_label,
         "run_dir": run_dir.as_posix(),
-        "stack_config": Path(args.stack_config).resolve().as_posix(),
+        "stack_config": stack_config.as_posix(),
+        "eval_stack_config": eval_stack_config.as_posix(),
+        "preset": str(args.preset),
+        "eval_preset": eval_preset,
         "dry_run": bool(args.dry_run),
         "status": "failed" if failed else ("planned" if args.dry_run else "completed"),
         "steps": steps,

@@ -662,9 +662,7 @@ def test_ids_offsets_mode_step_sample_from_logits_with_logp_matches_manual() -> 
         legal_ids, legal_offsets = batch.ids_offsets
         legal_ids_before = np.asarray(legal_ids, dtype=np.uint32).copy()
         legal_offsets_before = np.asarray(legal_offsets, dtype=np.uint32).copy()
-        logits = np.random.default_rng(202).standard_normal(
-            (env.num_envs, env.action_space), dtype=np.float32
-        )
+        logits = np.random.default_rng(202).standard_normal((env.num_envs, env.action_space), dtype=np.float32)
         next_batch, actions, action_logp = env.step_sample_from_logits_with_logp(
             logits,
             np.array([11 + idx for idx in range(env.num_envs)], dtype=np.uint64),

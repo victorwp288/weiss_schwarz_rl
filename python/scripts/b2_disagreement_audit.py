@@ -12,7 +12,12 @@ from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.eval.export import load_eval_game_records, write_matchup_summary_json
 from weiss_rl.eval.heuristic_public import ActionCatalog, DecodedAction
-from weiss_rl.eval.harness import EvalGameRecord, build_seat_swapped_schedule, record_completed_game, write_episodes_jsonl
+from weiss_rl.eval.harness import (
+    EvalGameRecord,
+    build_seat_swapped_schedule,
+    record_completed_game,
+    write_episodes_jsonl,
+)
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
 from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
 from weiss_rl.replay.inspector import inspect_replay_bundle, write_replay_inspection_report
@@ -451,9 +456,7 @@ def _aggregate_audit_summary(
         "compared_steps": compared_steps,
         "inspected_step_count": inspected_steps,
         "max_total_variation": max_total_variation,
-        "mean_total_variation": (
-            weighted_total_variation / compared_steps if compared_steps else 0.0
-        ),
+        "mean_total_variation": (weighted_total_variation / compared_steps if compared_steps else 0.0),
         "top_family_pairs": _top_counter_items(
             family_pair_counts,
             key_names=("policy_a_family", "policy_b_family"),
@@ -521,9 +524,11 @@ def _format_with_fields(family: str, *fields: tuple[str, Any]) -> str:
 
 def _counter_payload(counter: Counter[Any], *, key_names: tuple[str, ...]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for key, count in sorted(counter.items(), key=lambda item: (-int(item[1]), tuple(str(part) for part in _as_tuple(item[0])))):
+    for key, count in sorted(
+        counter.items(), key=lambda item: (-int(item[1]), tuple(str(part) for part in _as_tuple(item[0])))
+    ):
         payload: dict[str, Any] = {"count": int(count)}
-        for key_name, part in zip(key_names, _as_tuple(key)):
+        for key_name, part in zip(key_names, _as_tuple(key), strict=False):
             payload[key_name] = part
         items.append(payload)
     return items

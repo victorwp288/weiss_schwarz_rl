@@ -1,0 +1,10 @@
+schema_version: 2
+description: structured_acceptance Linux/WSL hybrid-residual frontier preset
+extends: structured_acceptance_linux_frontier.yaml
+model:
+  public_heuristic_logit_bias_scale: 1.0
+training:
+  structured_aux:
+    teacher_public_heuristic_coef: 0.1
+  structured_warmstart:
+    teacher_public_heuristic_coef: 0.5

@@ -40,11 +40,7 @@ def classify_episode_end_reason(
         return "decision_limit_timeout"
     if max_ticks_i is not None and tick_count_i >= max_ticks_i:
         return "tick_limit_timeout"
-    if (
-        max_no_progress_i is not None
-        and max_no_progress_i > 0
-        and no_progress_count_i >= max_no_progress_i
-    ):
+    if max_no_progress_i is not None and max_no_progress_i > 0 and no_progress_count_i >= max_no_progress_i:
         return "no_progress_timeout"
     return "timeout_unknown"
 

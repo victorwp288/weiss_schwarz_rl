@@ -1,0 +1,16 @@
+schema_version: 2
+description: structured_acceptance Linux/WSL learning preset with tactical-only live public teacher
+extends: structured_acceptance_linux_learning_curriculum.yaml
+training:
+  teacher_aux:
+    mode: always
+  structured_aux:
+    teacher_public_heuristic_temperature: 8.0
+    teacher_public_heuristic_families:
+      - attack
+      - main_move
+  structured_warmstart:
+    teacher_public_heuristic_families:
+      - main_play_character
+      - attack
+      - main_move

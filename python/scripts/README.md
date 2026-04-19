@@ -11,6 +11,39 @@ uv run python ...
 
 If you are doing an ad-hoc local invocation without installing the package, use `PYTHONPATH=python python ...` explicitly. For normal development, prefer `uv run` or an editable install.
 
+## Canonical recipe shortcuts
+
+The current ship-ready stack surface is:
+
+- `configs/presets/structured_acceptance_standard.yaml`
+- `configs/presets/structured_acceptance_standard_auto_gpu.yaml`
+- `configs/presets/structured_acceptance_standard_thesis_eval.yaml`
+- `configs/presets/structured_acceptance_standard_multideck.yaml`
+
+The wrapper exposes them as named presets, so the shortest standard commands are:
+
+```bash
+uv run python python/scripts/thesis_run.py --list-presets
+uv run python python/scripts/thesis_run.py --preset standard --run-label thesis_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset standard-auto-gpu --run-label thesis_server_seed1 --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --run-dir runs/<run_dir>
+uv run python python/scripts/play_vs_model.py --run-dir runs/<run_dir>
+```
+
+`thesis_run.py --preset standard` now trains with `structured_acceptance_standard.yaml` and, by default, evaluates with `structured_acceptance_standard_thesis_eval.yaml`.
+
+For the current recommended ablations and what they answer, see `docs/standard_recipe.md`.
+
+## Release verification
+
+Use the cross-platform verification entrypoint for the release-facing local check:
+
+```bash
+uv run python python/scripts/verify_repo.py
+```
+
+If GNU Make is installed, `make verify` delegates to the same command chain. On Unix-like shells, `bash scripts/run_local_ci_parity.sh` remains the matching wrapper.
+
 ## Current script status
 
 ### `train.py`
@@ -19,10 +52,10 @@ Canonical single-node training entrypoint with a separate scaffold-only `stack_s
 
 ```bash
 make train-min
-# or, when you want the real M3-08 inline smoke path
+# or, when you want a low-level simulator-backed smoke on the canonical stack
 make train-inline-smoke
 # or directly
-PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.py --stack-config configs/presets/typed_thesis_locked.yaml --run-label m3_08_smoke --device cpu
+PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --run-label m3_08_smoke --device cpu
 ```
 
 What it does today:
@@ -53,7 +86,7 @@ Resume support:
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --stack-config configs/presets/structured_acceptance_standard.yaml \
   --resume-run-dir runs/my_locked_run \
   --resume-from latest \
   --max-updates 200
@@ -76,7 +109,7 @@ Public-safe toy/demo staging:
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --stack-config configs/presets/structured_acceptance_standard.yaml \
   --public-demo \
   --run-label toy_public_demo
 ```
@@ -90,14 +123,14 @@ Evaluation reporting and contract-check entrypoint.
 Contract-only smoke check:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/presets/typed_thesis_locked.yaml
+uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
 ```
 
 Summary export from an existing episodes file:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml \
   --episodes-jsonl runs/some_eval/episodes.jsonl \
   --summary-json runs/some_eval/summary.json \
   --summary-csv runs/some_eval/summary.csv \
@@ -124,7 +157,7 @@ Public-safe toy/demo eval:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml \
   --public-demo \
   --run-dir runs/toy_public_demo
 ```
@@ -137,7 +170,7 @@ Thin orchestration wrapper for the canonical thesis flow: `train.py -> eval.py -
 
 ```bash
 uv run python python/scripts/thesis_run.py \
-  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --preset standard \
   --run-label thesis_seed1 \
   --device cuda:0 \
   --max-updates 200
@@ -147,12 +180,12 @@ Dry-run planning:
 
 ```bash
 uv run python python/scripts/thesis_run.py \
-  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --preset standard \
   --run-label thesis_seed1 \
   --dry-run
 ```
 
-The wrapper writes one summary JSON so the exact command chain is inspectable before and after execution.
+The wrapper writes one summary JSON so the exact command chain is inspectable before and after execution. If you pass a custom `--stack-config`, the wrapper now reuses that same stack for eval unless you also provide an explicit `--eval-preset` or `--eval-stack-config`.
 
 ### `paper_readiness_check.py`
 
@@ -190,7 +223,7 @@ Compare two policies on the recorded states from a deterministic replay bundle.
 ```bash
 uv run python python/scripts/replay_inspector.py \
   --bundle runs/some_run/replays/regression/replay_deadbeef.zip \
-  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --stack-config configs/presets/structured_acceptance_standard.yaml \
   --run-dir runs/some_run \
   --policy-a policy_000123 \
   --policy-b policy_000456 \

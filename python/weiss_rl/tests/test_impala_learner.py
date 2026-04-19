@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
@@ -13,6 +15,7 @@ from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.learners.impala_learner import (
     ImpalaLearner,
     _masked_action_logp_and_entropy,
+    _packed_structured_legal_view,
     compute_structured_teacher_auxiliary_metrics,
     summarize_structured_policy_metrics,
 )
@@ -73,6 +76,67 @@ class TinyPolicyValueModel(nn.Module):
         return logits, values, next_hidden
 
 
+class SeatAwareTinyPolicyValueModel(nn.Module):
+    def __init__(self, observation_dim: int = 2, action_dim: int = 2) -> None:
+        super().__init__()
+        self.logit_bias = nn.Parameter(torch.zeros(action_dim))
+        self.value = nn.Linear(observation_dim, 1)
+
+    def _next_hidden(
+        self,
+        obs: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None,
+    ) -> torch.Tensor:
+        if seat_hidden_state is None:
+            return torch.zeros((int(obs.shape[0]), 2, 1), dtype=obs.dtype, device=obs.device)
+        return seat_hidden_state + 1.0
+
+    def forward_seat_aware(
+        self,
+        obs: torch.Tensor,
+        acting_seat: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        del acting_seat, legal_actions
+        batch = int(obs.shape[0])
+        logits = self.logit_bias.unsqueeze(0).expand(batch, -1)
+        values = self.value(obs).squeeze(-1)
+        return logits, values, self._next_hidden(obs, seat_hidden_state)
+
+    def forward_sequence_seat_aware(
+        self,
+        obs: torch.Tensor,
+        acting_seat: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        del legal_actions
+        time_steps, batch_size, obs_dim = obs.shape
+        flat_obs = obs.reshape(time_steps * batch_size, obs_dim)
+        flat_logits, flat_values, next_hidden = self.forward_seat_aware(
+            flat_obs,
+            acting_seat.reshape(time_steps * batch_size),
+            seat_hidden_state,
+        )
+        return (
+            flat_logits.reshape(time_steps, batch_size, -1),
+            flat_values.reshape(time_steps, batch_size),
+            next_hidden,
+        )
+
+    def value_seat_aware(
+        self,
+        obs: torch.Tensor,
+        acting_seat: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        del acting_seat, seat_hidden_state
+        return self.value(obs).squeeze(-1)
+
+
 class TinyStructuredTeacherModel(nn.Module):
     def __init__(self, action_catalog: ActionCatalog, observation_dim: int = 2) -> None:
         super().__init__()
@@ -90,7 +154,9 @@ class TinyStructuredTeacherModel(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         logits = self.policy(obs)
         if legal_actions is not None:
-            legal_mask = torch.as_tensor(legal_actions.to_mask(expected_shape=(1, int(obs.shape[0])), action_space=logits.shape[-1])[0])
+            legal_mask = torch.as_tensor(
+                legal_actions.to_mask(expected_shape=(1, int(obs.shape[0])), action_space=logits.shape[-1])[0]
+            )
             logits = torch.where(legal_mask.to(device=logits.device), logits, torch.full_like(logits, -1.0e9))
         values = self.value(obs).squeeze(-1)
         next_hidden = torch.zeros((int(obs.shape[0]), 1), dtype=obs.dtype, device=obs.device)
@@ -160,6 +226,8 @@ class TrunkStructuredTeacherModel(TinyStructuredTeacherModel):
         self.trunk_calls = 0
         self.scorer_calls = 0
         self.sequence_calls = 0
+        self.scorer_row_count = 0
+        self.scorer_candidate_count = 0
 
     def forward_trunk_sequence_seat_aware(
         self,
@@ -187,7 +255,9 @@ class TrunkStructuredTeacherModel(TinyStructuredTeacherModel):
         self.scorer_calls += 1
         assert state_repr is not None
         assert observation_context is not None
+        self.scorer_row_count = int(obs.shape[0])
         ids = torch.as_tensor(legal_actions.ids, device=obs.device, dtype=torch.long)
+        self.scorer_candidate_count = int(ids.shape[0])
         offsets = torch.as_tensor(legal_actions.offsets, device=obs.device, dtype=torch.long)
         lengths = offsets[1:] - offsets[:-1]
         row_indices = torch.repeat_interleave(
@@ -214,6 +284,160 @@ class TrunkStructuredTeacherModel(TinyStructuredTeacherModel):
             flat_logits.reshape(time_steps, batch_size, -1),
             flat_values.reshape(time_steps, batch_size),
             next_hidden,
+        )
+
+
+class FactorizedStructuredTeacherModel(nn.Module):
+    def __init__(self, action_catalog: ActionCatalog, observation_dim: int = 2) -> None:
+        super().__init__()
+        self.bias = nn.Parameter(torch.zeros(()))
+        self.action_catalog = action_catalog
+        self.supports_legal_candidate_scoring = True
+        self.supports_factorized_legal_policy = True
+        self.factorized_calls = 0
+        self.trunk_calls = 0
+        self.public_student_calls = 0
+        self.public_target_calls = 0
+        self.public_target_profiles: list[str] = []
+
+    def forward_trunk_sequence_seat_aware(
+        self,
+        obs: torch.Tensor,
+        acting_seat: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
+        del acting_seat, seat_hidden_state
+        self.trunk_calls += 1
+        time_steps, batch_size, obs_dim = obs.shape
+        flat_obs = obs.reshape(time_steps * batch_size, obs_dim)
+        values = self.bias.expand(time_steps, batch_size)
+        next_hidden = torch.zeros((batch_size, 1), dtype=obs.dtype, device=obs.device)
+        return flat_obs, flat_obs, {"flat_obs": flat_obs}, values, next_hidden
+
+    def score_packed_legal_candidates(
+        self,
+        recurrent_outputs: torch.Tensor,
+        obs: torch.Tensor,
+        legal_actions: LegalActionBatch | Any,
+        *,
+        state_repr: torch.Tensor | None = None,
+        observation_context: dict[str, torch.Tensor] | None = None,
+        scoring_mode: str = "auto",
+    ) -> torch.Tensor:
+        del recurrent_outputs, state_repr, observation_context, scoring_mode
+        self.public_student_calls += 1
+        action_dim = int(self.action_catalog.action_space_size)
+        flat_logits = torch.full((obs.shape[0], action_dim), -20.0, dtype=obs.dtype, device=obs.device)
+        flat_logits[:, 0] = self.bias + 0.5
+        flat_logits[:, 5] = self.bias + 4.0
+        flat_logits[:, self.action_catalog.pass_action_id] = self.bias - 5.0
+        ids = torch.as_tensor(legal_actions.ids, device=obs.device, dtype=torch.long)
+        offsets = torch.as_tensor(legal_actions.offsets, device=obs.device, dtype=torch.long)
+        lengths = offsets[1:] - offsets[:-1]
+        row_indices = torch.repeat_interleave(
+            torch.arange(int(lengths.shape[0]), device=obs.device, dtype=torch.long),
+            lengths,
+        )
+        return flat_logits[row_indices, ids]
+
+    def score_packed_public_heuristic_candidates(
+        self,
+        obs: torch.Tensor,
+        legal_actions: LegalActionBatch | Any,
+        *,
+        observation_context: dict[str, torch.Tensor] | None = None,
+        scoring_profile: str = "base",
+    ) -> torch.Tensor:
+        del obs, observation_context
+        self.public_target_calls += 1
+        self.public_target_profiles.append(str(scoring_profile))
+        ids = torch.as_tensor(legal_actions.ids, dtype=torch.long)
+        logits = torch.full((int(ids.shape[0]),), -6.0, dtype=self.bias.dtype, device=self.bias.device)
+        if str(scoring_profile) == "aggressive":
+            logits = torch.where(ids == 5, self.bias + 4.5, logits)
+            logits = torch.where(ids == 0, self.bias - 0.5, logits)
+            logits = torch.where(ids == int(self.action_catalog.pass_action_id), self.bias - 7.0, logits)
+        elif str(scoring_profile) == "control":
+            logits = torch.where(ids == 5, self.bias + 1.5, logits)
+            logits = torch.where(ids == 0, self.bias + 2.0, logits)
+            logits = torch.where(ids == int(self.action_catalog.pass_action_id), self.bias - 5.0, logits)
+        else:
+            logits = torch.where(ids == 5, self.bias + 3.0, logits)
+            logits = torch.where(ids == 0, self.bias + 0.0, logits)
+            logits = torch.where(ids == int(self.action_catalog.pass_action_id), self.bias - 6.0, logits)
+        return logits
+
+    def evaluate_factorized_sequence_packed_seat_aware(
+        self,
+        obs: torch.Tensor,
+        acting_seat: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | Any,
+        actions: torch.Tensor | None = None,
+        same_family_reference_actions: torch.Tensor | None = None,
+        same_family_reference_families: torch.Tensor | None = None,
+    ) -> Any:
+        del legal_actions, acting_seat, seat_hidden_state, same_family_reference_families
+        self.factorized_calls += 1
+        time_steps, batch_size, _obs_dim = obs.shape
+        family_index = {family.name: index for index, family in enumerate(self.action_catalog.families)}
+        attack_type_index = {name: index for index, name in enumerate(self.action_catalog.attack_type_names)}
+        family_count = len(self.action_catalog.families)
+        max_stage = max(int(self.action_catalog.max_stage), 1)
+        attack_slot_count = max(int(self.action_catalog.attack_slot_count), 1)
+        attack_type_count = max(len(self.action_catalog.attack_type_names), 1)
+
+        family_logits = torch.full(
+            (time_steps, batch_size, family_count),
+            -2.0,
+            dtype=obs.dtype,
+            device=obs.device,
+        )
+        family_logits[0, 0, family_index["main_play_character"]] = self.bias + 4.0
+        if time_steps * batch_size > 1 and "attack" in family_index:
+            family_logits.reshape(-1, family_count)[1, family_index["attack"]] = self.bias + 4.0
+        family_log_probs = torch.log_softmax(family_logits, dim=-1)
+
+        play_slot_logits = torch.zeros((time_steps, batch_size, max_stage), dtype=obs.dtype, device=obs.device)
+        play_slot_logits[..., 0] = self.bias + 3.0
+        play_slot_log_probs = torch.log_softmax(play_slot_logits, dim=-1)
+
+        attack_slot_logits = torch.zeros(
+            (time_steps, batch_size, attack_slot_count), dtype=obs.dtype, device=obs.device
+        )
+        attack_slot_logits[..., 0] = self.bias + 3.0
+        attack_slot_log_probs = torch.log_softmax(attack_slot_logits, dim=-1)
+
+        attack_type_logits = torch.zeros(
+            (time_steps, batch_size, attack_type_count), dtype=obs.dtype, device=obs.device
+        )
+        attack_type_logits[..., attack_type_index.get("direct", 0)] = self.bias + 3.0
+        attack_type_log_probs = torch.log_softmax(attack_type_logits, dim=-1)
+
+        values = self.bias.expand(time_steps, batch_size)
+        entropy = torch.ones((time_steps, batch_size), dtype=obs.dtype, device=obs.device) * (self.bias + 1.0)
+        action_logp = None if actions is None else self.bias.expand(time_steps, batch_size) - 0.25
+        top_action_ids = None
+        same_family_action_logp = None
+        same_family_top_action_ids = None
+        if same_family_reference_actions is not None:
+            same_family_action_logp = self.bias.expand(time_steps, batch_size) - 0.1
+            same_family_top_action_ids = same_family_reference_actions.to(device=obs.device, dtype=torch.long)
+            top_action_ids = same_family_reference_actions.to(device=obs.device, dtype=torch.long)
+        return SimpleNamespace(
+            values=values,
+            action_logp=action_logp,
+            entropy=entropy,
+            family_log_probs=family_log_probs,
+            play_slot_log_probs=play_slot_log_probs,
+            move_source_log_probs=play_slot_log_probs,
+            move_slot_log_probs=play_slot_log_probs,
+            attack_slot_log_probs=attack_slot_log_probs,
+            attack_type_log_probs=attack_type_log_probs,
+            top_action_ids=top_action_ids,
+            same_family_action_logp=same_family_action_logp,
+            same_family_top_action_ids=same_family_top_action_ids,
         )
 
 
@@ -547,15 +771,20 @@ def test_compute_structured_teacher_auxiliary_metrics_supervises_slot_groups_not
     aux_loss, metrics, _context = compute_structured_teacher_auxiliary_metrics(
         logits=logits,
         legal_mask=legal_mask,
-        teacher_family=torch.tensor([[family_index["main_play_character"]], [family_index["attack"]]], dtype=torch.long),
+        teacher_family=torch.tensor(
+            [[family_index["main_play_character"]], [family_index["attack"]]], dtype=torch.long
+        ),
         teacher_slot=torch.tensor([[0], [0]], dtype=torch.long),
         teacher_attack_type=torch.tensor([[-1], [attack_type_index["direct"]]], dtype=torch.long),
+        teacher_action=torch.tensor([[0], [11]], dtype=torch.long),
         teacher_valid=torch.tensor([[True], [True]], dtype=torch.bool),
         loss_mask=torch.ones((2, 1), dtype=torch.float32),
         action_catalog=action_catalog,
         family_coef=0.2,
         slot_coef=0.1,
         attack_type_coef=0.05,
+        action_coef=0.15,
+        same_family_action_coef=0.2,
     )
 
     assert float(aux_loss.detach()) > 0.0
@@ -563,7 +792,256 @@ def test_compute_structured_teacher_auxiliary_metrics_supervises_slot_groups_not
     assert metrics["teacher_family_accuracy"] == pytest.approx(1.0)
     assert metrics["teacher_slot_accuracy"] == pytest.approx(1.0)
     assert metrics["teacher_attack_type_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_action_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_same_family_action_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_same_family_main_play_character_accuracy"] == pytest.approx(1.0)
     assert metrics["teacher_slot_loss"] < 0.05
+    assert metrics["teacher_action_loss"] < 0.35
+    assert metrics["teacher_same_family_action_loss"] < 0.35
+
+
+def test_compute_structured_teacher_auxiliary_metrics_groups_main_move_targets_by_destination_slot() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    move_actions_by_target: dict[int, list[int]] = {}
+    for action_id in range(action_catalog.action_space_size):
+        decoded = action_catalog.decode(action_id)
+        if decoded.family != "main_move" or decoded.to_slot is None:
+            continue
+        move_actions_by_target.setdefault(int(decoded.to_slot), []).append(int(action_id))
+    target_slot, target_actions = next(
+        (slot, action_ids) for slot, action_ids in move_actions_by_target.items() if len(action_ids) >= 2
+    )
+    preferred_move, alternate_move = target_actions[:2]
+
+    logits = torch.full((1, 1, action_catalog.action_space_size), -20.0)
+    legal_mask = torch.zeros((1, 1, action_catalog.action_space_size), dtype=torch.bool)
+    legal_mask[0, 0, [preferred_move, alternate_move, action_catalog.pass_action_id]] = True
+    logits[0, 0, preferred_move] = 1.0
+    logits[0, 0, alternate_move] = 3.0
+    logits[0, 0, action_catalog.pass_action_id] = -4.0
+
+    teacher_kwargs = {
+        "teacher_family": torch.tensor(
+            [
+                [family_index["main_move"]],
+            ],
+            dtype=torch.long,
+        ),
+        "teacher_slot": torch.tensor([[target_slot]], dtype=torch.long),
+        "teacher_attack_type": torch.tensor([[-1]], dtype=torch.long),
+        "teacher_action": torch.tensor([[preferred_move]], dtype=torch.long),
+        "teacher_valid": torch.tensor([[True]], dtype=torch.bool),
+        "loss_mask": torch.ones((1, 1), dtype=torch.float32),
+        "action_catalog": action_catalog,
+        "family_coef": 0.0,
+        "slot_coef": 1.0,
+        "attack_type_coef": 0.0,
+        "action_coef": 0.0,
+        "same_family_action_coef": 1.0,
+    }
+
+    dense_loss, dense_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        logits=logits,
+        legal_mask=legal_mask,
+        **teacher_kwargs,
+    )
+    packed_ids, packed_offsets = _packed_ids_from_mask(legal_mask.numpy().astype(np.uint8, copy=False))
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    packed_loss, packed_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        logits=logits,
+        legal_mask=None,
+        packed_ids=torch.as_tensor(packed_ids, dtype=torch.long),
+        packed_offsets=torch.as_tensor(packed_offsets, dtype=torch.long),
+        packed_meta=torch.as_tensor(packed_meta, dtype=torch.long),
+        **teacher_kwargs,
+    )
+
+    torch.testing.assert_close(dense_loss, packed_loss)
+    assert packed_metrics == pytest.approx(dense_metrics)
+    assert dense_metrics["teacher_slot_accuracy"] == pytest.approx(1.0)
+    assert dense_metrics["teacher_same_family_action_accuracy"] == pytest.approx(0.0)
+    assert dense_metrics["teacher_same_family_main_move_accuracy"] == pytest.approx(0.0)
+
+
+def test_compute_structured_teacher_auxiliary_metrics_supports_public_heuristic_soft_targets() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    logits = torch.full((1, 1, action_catalog.action_space_size), -20.0)
+    legal_mask = torch.zeros((1, 1, action_catalog.action_space_size), dtype=torch.bool)
+    legal_mask[0, 0, [0, 5, action_catalog.pass_action_id]] = True
+
+    packed_ids, packed_offsets = _packed_ids_from_mask(legal_mask.numpy().astype(np.uint8, copy=False))
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    public_target_logits = torch.tensor([0.0, 3.0, -6.0], dtype=torch.float32)
+
+    teacher_kwargs = {
+        "teacher_family": torch.tensor([[family_index["main_play_character"]]], dtype=torch.long),
+        "teacher_slot": torch.tensor([[0]], dtype=torch.long),
+        "teacher_attack_type": torch.tensor([[-1]], dtype=torch.long),
+        "teacher_action": torch.tensor([[0]], dtype=torch.long),
+        "teacher_valid": torch.tensor([[True]], dtype=torch.bool),
+        "loss_mask": torch.ones((1, 1), dtype=torch.float32),
+        "action_catalog": action_catalog,
+        "family_coef": 0.0,
+        "slot_coef": 0.0,
+        "attack_type_coef": 0.0,
+        "action_coef": 0.0,
+        "same_family_action_coef": 0.0,
+        "public_heuristic_coef": 1.0,
+        "public_heuristic_temperature": 1.0,
+        "public_heuristic_target_logits": public_target_logits,
+        "packed_ids": torch.as_tensor(packed_ids, dtype=torch.long),
+        "packed_offsets": torch.as_tensor(packed_offsets, dtype=torch.long),
+        "packed_meta": torch.as_tensor(packed_meta, dtype=torch.long),
+    }
+
+    logits[0, 0, 0] = 4.0
+    logits[0, 0, 5] = 0.5
+    logits[0, 0, action_catalog.pass_action_id] = -5.0
+    misaligned_loss, misaligned_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        logits=logits,
+        legal_mask=None,
+        **teacher_kwargs,
+    )
+
+    logits[0, 0, 0] = 0.5
+    logits[0, 0, 5] = 4.0
+    aligned_loss, aligned_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        logits=logits,
+        legal_mask=None,
+        **teacher_kwargs,
+    )
+
+    assert float(misaligned_loss.detach()) > float(aligned_loss.detach())
+    assert misaligned_metrics["teacher_public_heuristic_supported_fraction"] == pytest.approx(1.0)
+    assert aligned_metrics["teacher_public_heuristic_loss"] < misaligned_metrics["teacher_public_heuristic_loss"]
+    assert (
+        aligned_metrics["teacher_public_heuristic_top1_mass"] > misaligned_metrics["teacher_public_heuristic_top1_mass"]
+    )
+
+
+def test_compute_structured_teacher_auxiliary_metrics_supports_factorized_public_heuristic_soft_targets() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    legal_mask = torch.zeros((1, 1, action_catalog.action_space_size), dtype=torch.bool)
+    legal_mask[0, 0, [0, 5, action_catalog.pass_action_id]] = True
+    packed_ids, packed_offsets = _packed_ids_from_mask(legal_mask.numpy().astype(np.uint8, copy=False))
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    public_target_logits = torch.tensor([0.0, 3.0, -6.0], dtype=torch.float32)
+    family_logits = torch.full((1, 1, len(action_catalog.families)), -2.0, dtype=torch.float32)
+    family_logits[0, 0, family_index["main_play_character"]] = 4.0
+    teacher_kwargs = {
+        "logits": None,
+        "legal_mask": None,
+        "teacher_family": torch.tensor([[family_index["main_play_character"]]], dtype=torch.long),
+        "teacher_slot": torch.tensor([[0]], dtype=torch.long),
+        "teacher_attack_type": torch.tensor([[-1]], dtype=torch.long),
+        "teacher_action": torch.tensor([[0]], dtype=torch.long),
+        "teacher_valid": torch.tensor([[True]], dtype=torch.bool),
+        "loss_mask": torch.ones((1, 1), dtype=torch.float32),
+        "action_catalog": action_catalog,
+        "family_coef": 0.0,
+        "slot_coef": 0.0,
+        "attack_type_coef": 0.0,
+        "action_coef": 0.0,
+        "same_family_action_coef": 0.0,
+        "public_heuristic_coef": 1.0,
+        "public_heuristic_temperature": 1.0,
+        "public_heuristic_target_logits": public_target_logits,
+        "packed_ids": torch.as_tensor(packed_ids, dtype=torch.long),
+        "packed_offsets": torch.as_tensor(packed_offsets, dtype=torch.long),
+        "packed_meta": torch.as_tensor(packed_meta, dtype=torch.long),
+        "factorized_family_log_probs": torch.log_softmax(family_logits, dim=-1),
+    }
+
+    misaligned_view = _packed_structured_legal_view(
+        logits=torch.tensor([4.0, 0.5, -5.0], dtype=torch.float32),
+        packed_ids=torch.as_tensor(packed_ids, dtype=torch.long),
+        packed_offsets=torch.as_tensor(packed_offsets, dtype=torch.long),
+        packed_meta=torch.as_tensor(packed_meta, dtype=torch.long),
+    )
+    misaligned_loss, misaligned_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        packed_view=misaligned_view,
+        **teacher_kwargs,
+    )
+
+    aligned_view = _packed_structured_legal_view(
+        logits=torch.tensor([0.5, 4.0, -5.0], dtype=torch.float32),
+        packed_ids=torch.as_tensor(packed_ids, dtype=torch.long),
+        packed_offsets=torch.as_tensor(packed_offsets, dtype=torch.long),
+        packed_meta=torch.as_tensor(packed_meta, dtype=torch.long),
+    )
+    aligned_loss, aligned_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        packed_view=aligned_view,
+        **teacher_kwargs,
+    )
+
+    assert float(misaligned_loss.detach()) > float(aligned_loss.detach())
+    assert misaligned_metrics["teacher_public_heuristic_supported_fraction"] == pytest.approx(1.0)
+    assert aligned_metrics["teacher_public_heuristic_loss"] < misaligned_metrics["teacher_public_heuristic_loss"]
+    assert (
+        aligned_metrics["teacher_public_heuristic_top1_mass"] > misaligned_metrics["teacher_public_heuristic_top1_mass"]
+    )
+
+
+def test_compute_structured_teacher_auxiliary_metrics_gates_public_heuristic_by_family() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    legal_mask = torch.zeros((1, 1, action_catalog.action_space_size), dtype=torch.bool)
+    legal_mask[0, 0, [0, 5, action_catalog.pass_action_id]] = True
+    packed_ids, packed_offsets = _packed_ids_from_mask(legal_mask.numpy().astype(np.uint8, copy=False))
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    public_target_logits = torch.tensor([0.0, 3.0, -6.0], dtype=torch.float32)
+    family_logits = torch.full((1, 1, len(action_catalog.families)), -2.0, dtype=torch.float32)
+    family_logits[0, 0, family_index["main_play_character"]] = 4.0
+    packed_view = _packed_structured_legal_view(
+        logits=torch.tensor([0.5, 4.0, -5.0], dtype=torch.float32),
+        packed_ids=torch.as_tensor(packed_ids, dtype=torch.long),
+        packed_offsets=torch.as_tensor(packed_offsets, dtype=torch.long),
+        packed_meta=torch.as_tensor(packed_meta, dtype=torch.long),
+    )
+
+    common_kwargs = {
+        "logits": None,
+        "legal_mask": None,
+        "teacher_family": torch.tensor([[family_index["main_play_character"]]], dtype=torch.long),
+        "teacher_slot": torch.tensor([[0]], dtype=torch.long),
+        "teacher_attack_type": torch.tensor([[-1]], dtype=torch.long),
+        "teacher_action": torch.tensor([[0]], dtype=torch.long),
+        "teacher_valid": torch.tensor([[True]], dtype=torch.bool),
+        "loss_mask": torch.ones((1, 1), dtype=torch.float32),
+        "action_catalog": action_catalog,
+        "family_coef": 0.0,
+        "slot_coef": 0.0,
+        "attack_type_coef": 0.0,
+        "action_coef": 0.0,
+        "same_family_action_coef": 0.0,
+        "public_heuristic_coef": 1.0,
+        "public_heuristic_temperature": 1.0,
+        "public_heuristic_target_logits": public_target_logits,
+        "packed_ids": torch.as_tensor(packed_ids, dtype=torch.long),
+        "packed_offsets": torch.as_tensor(packed_offsets, dtype=torch.long),
+        "packed_meta": torch.as_tensor(packed_meta, dtype=torch.long),
+        "packed_view": packed_view,
+        "factorized_family_log_probs": torch.log_softmax(family_logits, dim=-1),
+    }
+
+    allowed_loss, allowed_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        public_heuristic_families=("main_play_character",),
+        **common_kwargs,
+    )
+    gated_loss, gated_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        public_heuristic_families=("attack",),
+        **common_kwargs,
+    )
+
+    assert float(allowed_loss.detach()) > 0.0
+    assert allowed_metrics["teacher_public_heuristic_supported_fraction"] == pytest.approx(1.0)
+    assert allowed_metrics["teacher_public_heuristic_loss"] > 0.0
+    assert float(gated_loss.detach()) == pytest.approx(0.0)
+    assert gated_metrics["teacher_public_heuristic_supported_fraction"] == pytest.approx(0.0)
+    assert gated_metrics["teacher_public_heuristic_loss"] == pytest.approx(0.0)
 
 
 def test_compute_structured_teacher_auxiliary_metrics_matches_packed_meta_path() -> None:
@@ -582,15 +1060,20 @@ def test_compute_structured_teacher_auxiliary_metrics_matches_packed_meta_path()
     logits[1, 0, 12] = 0.0
     logits[1, 0, 19] = -3.0
     teacher_kwargs = {
-        "teacher_family": torch.tensor([[family_index["main_play_character"]], [family_index["attack"]]], dtype=torch.long),
+        "teacher_family": torch.tensor(
+            [[family_index["main_play_character"]], [family_index["attack"]]], dtype=torch.long
+        ),
         "teacher_slot": torch.tensor([[0], [0]], dtype=torch.long),
         "teacher_attack_type": torch.tensor([[-1], [attack_type_index["direct"]]], dtype=torch.long),
+        "teacher_action": torch.tensor([[0], [11]], dtype=torch.long),
         "teacher_valid": torch.tensor([[True], [True]], dtype=torch.bool),
         "loss_mask": torch.ones((2, 1), dtype=torch.float32),
         "action_catalog": action_catalog,
         "family_coef": 0.2,
         "slot_coef": 0.1,
         "attack_type_coef": 0.05,
+        "action_coef": 0.15,
+        "same_family_action_coef": 0.2,
     }
     packed_ids, packed_offsets = _packed_ids_from_mask(legal_mask.numpy().astype(np.uint8, copy=False))
     packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
@@ -631,15 +1114,20 @@ def test_compute_structured_teacher_auxiliary_metrics_skips_unsupported_packed_t
     logits[1, 0, 19] = 1.0
 
     teacher_kwargs = {
-        "teacher_family": torch.tensor([[family_index["main_play_character"]], [family_index["attack"]]], dtype=torch.long),
+        "teacher_family": torch.tensor(
+            [[family_index["main_play_character"]], [family_index["attack"]]], dtype=torch.long
+        ),
         "teacher_slot": torch.tensor([[0], [0]], dtype=torch.long),
         "teacher_attack_type": torch.tensor([[-1], [attack_type_index["direct"]]], dtype=torch.long),
+        "teacher_action": torch.tensor([[0], [11]], dtype=torch.long),
         "teacher_valid": torch.tensor([[True], [True]], dtype=torch.bool),
         "loss_mask": torch.ones((2, 1), dtype=torch.float32),
         "action_catalog": action_catalog,
         "family_coef": 0.2,
         "slot_coef": 0.1,
         "attack_type_coef": 0.05,
+        "action_coef": 0.15,
+        "same_family_action_coef": 0.2,
     }
     packed_ids, packed_offsets = _packed_ids_from_mask(legal_mask.numpy().astype(np.uint8, copy=False))
     packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
@@ -658,9 +1146,509 @@ def test_compute_structured_teacher_auxiliary_metrics_skips_unsupported_packed_t
     assert np.isfinite(packed_metrics["teacher_family_loss"])
     assert np.isfinite(packed_metrics["teacher_slot_loss"])
     assert np.isfinite(packed_metrics["teacher_attack_type_loss"])
+    assert np.isfinite(packed_metrics["teacher_action_loss"])
+    assert np.isfinite(packed_metrics["teacher_same_family_action_loss"])
+    assert packed_metrics["teacher_action_supported_fraction"] == pytest.approx(0.5)
+    assert packed_metrics["teacher_same_family_action_supported_fraction"] == pytest.approx(0.5)
     assert "teacher_attack_type_log_probs" not in packed_context
     assert "teacher_family_log_probs" in packed_context
+    assert "teacher_action_log_probs" in packed_context
+    assert "teacher_same_family_action_log_probs" in packed_context
     assert not torch.isnan(packed_context["teacher_family_log_probs"]).any()
+
+
+def test_compute_structured_teacher_auxiliary_metrics_reports_within_family_tactical_miss() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    logits = torch.full((1, 1, action_catalog.action_space_size), -20.0)
+    legal_mask = torch.zeros((1, 1, action_catalog.action_space_size), dtype=torch.bool)
+
+    # Two play-character actions share the same play slot. The model picks the wrong hand index,
+    # so family and slot stay correct while the exact within-family choice is wrong.
+    legal_mask[0, 0, [0, 5, 19]] = True
+    logits[0, 0, 0] = 1.0
+    logits[0, 0, 5] = 3.0
+    logits[0, 0, 19] = -4.0
+
+    _aux_loss, metrics, _context = compute_structured_teacher_auxiliary_metrics(
+        logits=logits,
+        legal_mask=legal_mask,
+        teacher_family=torch.tensor([[family_index["main_play_character"]]], dtype=torch.long),
+        teacher_slot=torch.tensor([[0]], dtype=torch.long),
+        teacher_attack_type=torch.tensor([[-1]], dtype=torch.long),
+        teacher_action=torch.tensor([[0]], dtype=torch.long),
+        teacher_valid=torch.tensor([[True]], dtype=torch.bool),
+        loss_mask=torch.ones((1, 1), dtype=torch.float32),
+        action_catalog=action_catalog,
+        family_coef=0.0,
+        slot_coef=0.0,
+        attack_type_coef=0.0,
+        action_coef=0.0,
+        same_family_action_coef=1.0,
+    )
+
+    assert metrics["teacher_family_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_slot_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_same_family_action_accuracy"] == pytest.approx(0.0)
+    assert metrics["teacher_same_family_main_play_character_accuracy"] == pytest.approx(0.0)
+    assert metrics["teacher_same_family_action_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_same_family_action_loss"] > 0.0
+
+
+def test_compute_structured_teacher_auxiliary_metrics_supports_factorized_same_family_targets() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    move_action = next(
+        action_id
+        for action_id in range(action_catalog.action_space_size)
+        if action_catalog.decode(action_id).family == "main_move"
+    )
+    move_decoded = action_catalog.decode(move_action)
+    family_logits = torch.full((2, 1, len(action_catalog.families)), -2.0)
+    family_logits[0, 0, family_index["main_play_character"]] = 3.0
+    family_logits[1, 0, family_index["main_move"]] = 3.0
+    aux_loss, metrics, _context = compute_structured_teacher_auxiliary_metrics(
+        logits=None,
+        legal_mask=None,
+        teacher_family=torch.tensor(
+            [[family_index["main_play_character"]], [family_index["main_move"]]],
+            dtype=torch.long,
+        ),
+        teacher_slot=torch.tensor([[0], [int(move_decoded.to_slot or 0)]], dtype=torch.long),
+        teacher_attack_type=torch.tensor([[-1], [-1]], dtype=torch.long),
+        teacher_action=torch.tensor([[0], [move_action]], dtype=torch.long),
+        teacher_valid=torch.tensor([[True], [True]], dtype=torch.bool),
+        loss_mask=torch.ones((2, 1), dtype=torch.float32),
+        action_catalog=action_catalog,
+        family_coef=0.0,
+        slot_coef=0.0,
+        attack_type_coef=0.0,
+        action_coef=0.0,
+        same_family_action_coef=1.0,
+        factorized_family_log_probs=torch.log_softmax(family_logits, dim=-1),
+        factorized_same_family_action_logp=torch.tensor([[-0.1], [-0.2]], dtype=torch.float32),
+        factorized_same_family_top_action_ids=torch.tensor([[0], [move_action]], dtype=torch.long),
+    )
+
+    assert float(aux_loss.detach()) > 0.0
+    assert metrics["teacher_same_family_action_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_same_family_action_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_same_family_main_play_character_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_same_family_main_move_accuracy"] == pytest.approx(1.0)
+
+
+def test_compute_structured_teacher_auxiliary_metrics_supports_factorized_exact_action_targets() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    family_logits = torch.full((1, 1, len(action_catalog.families)), -2.0)
+    family_logits[0, 0, family_index["main_play_character"]] = 3.0
+    aux_loss, metrics, _context = compute_structured_teacher_auxiliary_metrics(
+        logits=None,
+        legal_mask=None,
+        teacher_family=torch.tensor([[family_index["main_play_character"]]], dtype=torch.long),
+        teacher_slot=torch.tensor([[0]], dtype=torch.long),
+        teacher_attack_type=torch.tensor([[-1]], dtype=torch.long),
+        teacher_action=torch.tensor([[0]], dtype=torch.long),
+        teacher_valid=torch.tensor([[True]], dtype=torch.bool),
+        loss_mask=torch.ones((1, 1), dtype=torch.float32),
+        action_catalog=action_catalog,
+        family_coef=0.0,
+        slot_coef=0.0,
+        attack_type_coef=0.0,
+        action_coef=1.0,
+        same_family_action_coef=0.0,
+        factorized_family_log_probs=torch.log_softmax(family_logits, dim=-1),
+        factorized_top_action_ids=torch.tensor([[0]], dtype=torch.long),
+        factorized_same_family_action_logp=torch.tensor([[-0.1]], dtype=torch.float32),
+    )
+
+    assert float(aux_loss.detach()) > 0.0
+    assert metrics["teacher_action_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_action_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_action_loss"] > 0.0
+
+
+def test_compute_structured_teacher_auxiliary_metrics_supports_factorized_move_source_targets() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    move_action = next(
+        action_id
+        for action_id in range(action_catalog.action_space_size)
+        if (action_catalog.decode(action_id).family == "main_move" and action_catalog.decode(action_id).from_slot == 0)
+    )
+    move_decoded = action_catalog.decode(move_action)
+    family_logits = torch.full((1, 1, len(action_catalog.families)), -2.0)
+    family_logits[0, 0, family_index["main_move"]] = 3.0
+    aux_loss, metrics, _context = compute_structured_teacher_auxiliary_metrics(
+        logits=None,
+        legal_mask=None,
+        teacher_family=torch.tensor([[family_index["main_move"]]], dtype=torch.long),
+        teacher_slot=torch.tensor([[int(move_decoded.to_slot or 0)]], dtype=torch.long),
+        teacher_attack_type=torch.tensor([[-1]], dtype=torch.long),
+        teacher_action=torch.tensor([[move_action]], dtype=torch.long),
+        teacher_valid=torch.tensor([[True]], dtype=torch.bool),
+        loss_mask=torch.ones((1, 1), dtype=torch.float32),
+        action_catalog=action_catalog,
+        family_coef=0.0,
+        slot_coef=0.0,
+        attack_type_coef=0.0,
+        action_coef=0.0,
+        same_family_action_coef=0.0,
+        move_source_coef=1.0,
+        factorized_family_log_probs=torch.log_softmax(family_logits, dim=-1),
+        factorized_move_source_log_probs=torch.tensor([[[-0.01, -5.0, -5.0, -5.0, -5.0]]], dtype=torch.float32),
+    )
+
+    assert float(aux_loss.detach()) > 0.0
+    assert metrics["teacher_move_source_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_move_source_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_move_source_loss"] > 0.0
+
+
+def test_compute_structured_teacher_auxiliary_metrics_supports_explicit_move_source_labels() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    move_action = next(
+        action_id
+        for action_id in range(action_catalog.action_space_size)
+        if (action_catalog.decode(action_id).family == "main_move" and action_catalog.decode(action_id).from_slot == 0)
+    )
+    move_decoded = action_catalog.decode(move_action)
+    family_logits = torch.full((1, 1, len(action_catalog.families)), -2.0)
+    family_logits[0, 0, family_index["main_move"]] = 3.0
+    aux_loss, metrics, _context = compute_structured_teacher_auxiliary_metrics(
+        logits=None,
+        legal_mask=None,
+        teacher_family=torch.tensor([[family_index["main_move"]]], dtype=torch.long),
+        teacher_slot=torch.tensor([[int(move_decoded.to_slot or 0)]], dtype=torch.long),
+        teacher_attack_type=torch.tensor([[-1]], dtype=torch.long),
+        teacher_action=torch.tensor([[-1]], dtype=torch.long),
+        teacher_valid=torch.tensor([[True]], dtype=torch.bool),
+        loss_mask=torch.ones((1, 1), dtype=torch.float32),
+        action_catalog=action_catalog,
+        family_coef=0.0,
+        slot_coef=0.0,
+        attack_type_coef=0.0,
+        action_coef=0.0,
+        same_family_action_coef=0.0,
+        move_source_coef=1.0,
+        factorized_family_log_probs=torch.log_softmax(family_logits, dim=-1),
+        factorized_move_source_log_probs=torch.tensor([[[-0.01, -5.0, -5.0, -5.0, -5.0]]], dtype=torch.float32),
+        teacher_move_source=torch.tensor([[int(move_decoded.from_slot or 0)]], dtype=torch.long),
+    )
+
+    assert float(aux_loss.detach()) > 0.0
+    assert metrics["teacher_move_source_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_move_source_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_move_source_loss"] > 0.0
+
+
+def test_compute_structured_teacher_auxiliary_metrics_reports_family_coverage_on_active_rows() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    family_logits = torch.zeros((4, 1, len(action_catalog.families)), dtype=torch.float32)
+    _aux_loss, metrics, _context = compute_structured_teacher_auxiliary_metrics(
+        logits=None,
+        legal_mask=None,
+        teacher_family=torch.tensor(
+            [
+                [family_index["main_play_character"]],
+                [family_index["main_move"]],
+                [family_index["attack"]],
+                [family_index["main_move"]],
+            ],
+            dtype=torch.long,
+        ),
+        teacher_slot=torch.tensor([[0], [1], [0], [2]], dtype=torch.long),
+        teacher_attack_type=torch.tensor([[-1], [-1], [0], [-1]], dtype=torch.long),
+        teacher_action=torch.tensor([[0], [5], [11], [5]], dtype=torch.long),
+        teacher_valid=torch.tensor([[True], [True], [True], [False]], dtype=torch.bool),
+        loss_mask=torch.tensor([[1.0], [1.0], [0.0], [1.0]], dtype=torch.float32),
+        action_catalog=action_catalog,
+        family_coef=0.0,
+        slot_coef=0.0,
+        attack_type_coef=0.0,
+        action_coef=0.0,
+        same_family_action_coef=0.0,
+        move_source_coef=0.0,
+        factorized_family_log_probs=torch.log_softmax(family_logits, dim=-1),
+    )
+
+    assert metrics["teacher_active_fraction"] == pytest.approx(0.75)
+    assert metrics["teacher_main_play_character_fraction"] == pytest.approx(1.0 / 3.0)
+    assert metrics["teacher_main_move_fraction"] == pytest.approx(1.0 / 3.0)
+    assert metrics["teacher_attack_fraction"] == pytest.approx(0.0)
+
+
+def test_impala_learner_auxiliary_update_uses_factorized_same_family_teacher_path() -> None:
+    action_catalog = _teacher_aux_catalog()
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        teacher_same_family_action_coef=1.0,
+    )
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    packed_ids = np.asarray([0, 5, 19, 10, 11, 12, 19], dtype=np.uint32)
+    packed_offsets = np.asarray([0, 3, 7], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]], [[0.25, -0.5]]], dtype=np.float32),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0], [1]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "teacher_family": np.asarray(
+            [[family_index["main_play_character"]], [family_index["attack"]]],
+            dtype=np.int64,
+        ),
+        "teacher_slot": np.asarray([[0], [0]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1], [0]], dtype=np.int64),
+        "teacher_action": np.asarray([[0], [11]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True], [True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True], [True]], dtype=np.bool_),
+    }
+
+    metrics = learner.auxiliary_update(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert model.factorized_calls == 1
+    assert metrics["loss"] > 0.0
+    assert metrics["teacher_same_family_action_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_same_family_action_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_same_family_main_play_character_accuracy"] == pytest.approx(1.0)
+
+
+def test_impala_learner_auxiliary_update_uses_factorized_teacher_action_path() -> None:
+    action_catalog = _teacher_aux_catalog()
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        teacher_action_coef=1.0,
+    )
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    packed_ids = np.asarray([0, 5, 19, 10, 11, 12, 19], dtype=np.uint32)
+    packed_offsets = np.asarray([0, 3, 7], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]], [[0.25, -0.5]]], dtype=np.float32),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0], [1]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "teacher_family": np.asarray(
+            [[family_index["main_play_character"]], [family_index["attack"]]],
+            dtype=np.int64,
+        ),
+        "teacher_slot": np.asarray([[0], [0]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1], [0]], dtype=np.int64),
+        "teacher_action": np.asarray([[0], [11]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True], [True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True], [True]], dtype=np.bool_),
+    }
+
+    metrics = learner.auxiliary_update(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert model.factorized_calls == 1
+    assert metrics["loss"] > 0.0
+    assert metrics["teacher_action_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_action_accuracy"] == pytest.approx(1.0)
+
+
+def test_impala_learner_auxiliary_update_uses_factorized_move_source_teacher_path() -> None:
+    action_catalog = _teacher_aux_catalog()
+    move_action = next(
+        action_id
+        for action_id in range(action_catalog.action_space_size)
+        if (action_catalog.decode(action_id).family == "main_move" and action_catalog.decode(action_id).from_slot == 0)
+    )
+    move_decoded = action_catalog.decode(move_action)
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        teacher_move_source_coef=1.0,
+    )
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    packed_ids = np.asarray([move_action, action_catalog.pass_action_id], dtype=np.uint32)
+    packed_offsets = np.asarray([0, 2], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]]], dtype=np.float32),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "teacher_family": np.asarray([[family_index["main_move"]]], dtype=np.int64),
+        "teacher_slot": np.asarray([[int(move_decoded.to_slot or 0)]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1]], dtype=np.int64),
+        "teacher_action": np.asarray([[move_action]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True]], dtype=np.bool_),
+    }
+
+    metrics = learner.auxiliary_update(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert model.factorized_calls == 1
+    assert metrics["loss"] > 0.0
+    assert metrics["teacher_move_source_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_move_source_accuracy"] == pytest.approx(1.0)
+
+
+def test_impala_learner_auxiliary_update_uses_factorized_public_heuristic_teacher_path() -> None:
+    action_catalog = _teacher_aux_catalog()
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        teacher_public_heuristic_coef=1.0,
+        teacher_public_heuristic_temperature=1.0,
+    )
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    packed_ids = np.asarray([0, 5, action_catalog.pass_action_id], dtype=np.uint32)
+    packed_offsets = np.asarray([0, 3], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]]], dtype=np.float32),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "teacher_family": np.asarray([[family_index["main_play_character"]]], dtype=np.int64),
+        "teacher_slot": np.asarray([[0]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1]], dtype=np.int64),
+        "teacher_action": np.asarray([[0]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True]], dtype=np.bool_),
+    }
+
+    metrics = learner.auxiliary_update(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert model.factorized_calls == 1
+    assert model.trunk_calls == 1
+    assert model.public_student_calls == 1
+    assert model.public_target_calls == 1
+    assert metrics["loss"] > 0.0
+    assert metrics["teacher_public_heuristic_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_public_heuristic_loss"] > 0.0
+
+
+def test_impala_learner_auxiliary_update_averages_multiple_public_heuristic_profiles() -> None:
+    action_catalog = _teacher_aux_catalog()
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        teacher_public_heuristic_coef=1.0,
+        teacher_public_heuristic_temperature=1.0,
+        teacher_public_heuristic_profiles=("base", "aggressive", "control"),
+    )
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    packed_ids = np.asarray([0, 5, action_catalog.pass_action_id], dtype=np.uint32)
+    packed_offsets = np.asarray([0, 3], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]]], dtype=np.float32),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "teacher_family": np.asarray([[family_index["main_play_character"]]], dtype=np.int64),
+        "teacher_slot": np.asarray([[0]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1]], dtype=np.int64),
+        "teacher_action": np.asarray([[0]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True]], dtype=np.bool_),
+    }
+
+    metrics = learner.auxiliary_update(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert model.public_target_calls == 3
+    assert model.public_target_profiles == ["base", "aggressive", "control"]
+    assert metrics["teacher_public_heuristic_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_public_heuristic_target_entropy"] > 0.0
+
+
+def test_impala_learner_auxiliary_update_cycles_public_heuristic_profiles() -> None:
+    action_catalog = _teacher_aux_catalog()
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        teacher_public_heuristic_coef=1.0,
+        teacher_public_heuristic_temperature=1.0,
+        teacher_public_heuristic_profiles=("base", "aggressive", "control"),
+        teacher_public_heuristic_profile_mode="cycle",
+    )
+    learner.update_count = 1
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    packed_ids = np.asarray([0, 5, action_catalog.pass_action_id], dtype=np.uint32)
+    packed_offsets = np.asarray([0, 3], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]]], dtype=np.float32),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "teacher_family": np.asarray([[family_index["main_play_character"]]], dtype=np.int64),
+        "teacher_slot": np.asarray([[0]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1]], dtype=np.int64),
+        "teacher_action": np.asarray([[0]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True]], dtype=np.bool_),
+    }
+
+    metrics = learner.auxiliary_update(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert model.public_target_calls == 1
+    assert model.public_target_profiles == ["aggressive"]
+    assert metrics["teacher_public_heuristic_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_public_heuristic_target_entropy"] > 0.0
+
+
+def test_impala_learner_public_heuristic_profiles_fall_back_to_base_after_end_update() -> None:
+    action_catalog = _teacher_aux_catalog()
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        teacher_public_heuristic_coef=1.0,
+        teacher_public_heuristic_temperature=1.0,
+        teacher_public_heuristic_profiles=("base", "aggressive", "control"),
+        teacher_public_heuristic_profile_mode="cycle",
+        teacher_public_heuristic_profiles_end_updates=0,
+    )
+    learner.update_count = 1
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    packed_ids = np.asarray([0, 5, action_catalog.pass_action_id], dtype=np.uint32)
+    packed_offsets = np.asarray([0, 3], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]]], dtype=np.float32),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "teacher_family": np.asarray([[family_index["main_play_character"]]], dtype=np.int64),
+        "teacher_slot": np.asarray([[0]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1]], dtype=np.int64),
+        "teacher_action": np.asarray([[0]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True]], dtype=np.bool_),
+    }
+
+    learner.auxiliary_update(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert model.public_target_calls == 1
+    assert model.public_target_profiles == ["base"]
 
 
 def test_impala_learner_mixed_precision_flag_disables_amp_on_cpu() -> None:
@@ -691,6 +1679,7 @@ def test_impala_learner_auxiliary_update_optimizes_teacher_only_loss() -> None:
         teacher_family_coef=0.5,
         teacher_slot_coef=0.25,
         teacher_attack_type_coef=0.1,
+        teacher_action_coef=0.2,
     )
     legal_mask = np.zeros((2, 1, action_catalog.action_space_size), dtype=np.uint8)
     legal_mask[0, 0, [0, 5, 19]] = 1
@@ -706,6 +1695,7 @@ def test_impala_learner_auxiliary_update_optimizes_teacher_only_loss() -> None:
         ),
         "teacher_slot": np.asarray([[0], [0]], dtype=np.int64),
         "teacher_attack_type": np.asarray([[-1], [attack_type_index["direct"]]], dtype=np.int64),
+        "teacher_action": np.asarray([[0], [11]], dtype=np.int64),
         "teacher_valid": np.asarray([[True], [True]], dtype=np.bool_),
         "policy_train_mask": np.asarray([[True], [True]], dtype=np.bool_),
     }
@@ -714,6 +1704,7 @@ def test_impala_learner_auxiliary_update_optimizes_teacher_only_loss() -> None:
 
     assert metrics["loss"] > 0.0
     assert metrics["teacher_valid_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_action_accuracy"] == pytest.approx(1.0)
     assert metrics["grad_norm"] >= 0.0
 
 
@@ -724,6 +1715,7 @@ def test_impala_learner_auxiliary_update_handles_batches_without_valid_teacher_r
         teacher_family_coef=0.5,
         teacher_slot_coef=0.25,
         teacher_attack_type_coef=0.1,
+        teacher_action_coef=0.2,
     )
     legal_mask = np.zeros((1, 1, action_catalog.action_space_size), dtype=np.uint8)
     legal_mask[0, 0, [0, 5, 19]] = 1
@@ -734,6 +1726,7 @@ def test_impala_learner_auxiliary_update_handles_batches_without_valid_teacher_r
         "teacher_family": np.asarray([[family_index["main_play_character"]]], dtype=np.int64),
         "teacher_slot": np.asarray([[0]], dtype=np.int64),
         "teacher_attack_type": np.asarray([[-1]], dtype=np.int64),
+        "teacher_action": np.asarray([[0]], dtype=np.int64),
         "teacher_valid": np.asarray([[False]], dtype=np.bool_),
         "policy_train_mask": np.asarray([[True]], dtype=np.bool_),
     }
@@ -779,6 +1772,104 @@ def test_impala_learner_raw_vtrace_inputs_use_current_policy_logp_for_importance
     assert metrics["vtrace_rho_p95"] > 7.0
     assert metrics["vtrace_rho_clip_rate"] == pytest.approx(1.0)
     assert metrics["vtrace_c_clip_rate"] == pytest.approx(1.0)
+
+
+def test_impala_learner_raw_vtrace_inputs_use_current_learner_values_for_targets() -> None:
+    torch.manual_seed(0)
+
+    learner = ImpalaLearner(model=TinyPolicyValueModel(action_dim=2))
+    obs = np.asarray([[[1.0, -0.5]]], dtype=np.float32)
+    actions = np.asarray([[0]], dtype=np.int64)
+    legal_mask = np.ones((1, 1, 2), dtype=np.uint8)
+
+    with torch.no_grad():
+        forward = learner._forward_time_major(torch.from_numpy(obs))
+        logits = forward.logits
+        assert logits is not None
+        values = forward.values
+        action_logp, _entropy = _masked_action_logp_and_entropy(
+            logits,
+            torch.from_numpy(legal_mask),
+            torch.from_numpy(actions),
+            pass_action_id=None,
+        )
+
+    log_rho = -0.2
+    raw_batch = {
+        "obs": obs,
+        "actions": actions,
+        "legal_mask": legal_mask,
+        "rewards": np.zeros((1, 1), dtype=np.float32),
+        "discounts": np.ones((1, 1), dtype=np.float32),
+        "behavior_logp": (action_logp - log_rho).cpu().numpy().astype(np.float32),
+        "behavior_values": np.full((1, 1), 123.0, dtype=np.float32),
+        "bootstrap_value": np.zeros((1,), dtype=np.float32),
+        "vtrace_rho_bar": 2.4,
+        "vtrace_c_bar": 1.0,
+    }
+
+    _loss, _metrics, context = learner._loss_and_metrics_with_context(raw_batch)
+
+    expected_rho = float(np.exp(log_rho))
+    expected_targets = values.detach() * (1.0 - expected_rho)
+    assert torch.allclose(context["targets"], expected_targets, atol=1.0e-6)
+
+
+def test_impala_learner_raw_vtrace_inputs_can_bootstrap_from_current_model() -> None:
+    torch.manual_seed(0)
+
+    learner = ImpalaLearner(model=SeatAwareTinyPolicyValueModel(action_dim=2))
+    obs = np.asarray([[[1.0, 0.0]]], dtype=np.float32)
+    actions = np.asarray([[0]], dtype=np.int64)
+    legal_mask = np.ones((1, 1, 2), dtype=np.uint8)
+    to_play_seat = np.asarray([[0]], dtype=np.int64)
+    initial_hidden_state = np.zeros((1, 2, 1), dtype=np.float32)
+    bootstrap_obs = np.asarray([[2.0, 0.0]], dtype=np.float32)
+    bootstrap_actor = np.asarray([1], dtype=np.int64)
+    final_hidden_state = np.zeros((1, 2, 1), dtype=np.float32)
+
+    with torch.no_grad():
+        forward = learner._forward_time_major(
+            torch.from_numpy(obs),
+            to_play_seat=to_play_seat,
+            initial_hidden_state=initial_hidden_state,
+        )
+        logits = forward.logits
+        assert logits is not None
+        action_logp, _entropy = _masked_action_logp_and_entropy(
+            logits,
+            torch.from_numpy(legal_mask),
+            torch.from_numpy(actions),
+            pass_action_id=None,
+        )
+        expected_bootstrap = learner.model.value_seat_aware(
+            torch.from_numpy(bootstrap_obs),
+            torch.from_numpy(bootstrap_actor),
+            torch.from_numpy(final_hidden_state),
+        )
+
+    raw_batch = {
+        "obs": obs,
+        "actions": actions,
+        "legal_mask": legal_mask,
+        "to_play_seat": to_play_seat,
+        "actor": to_play_seat,
+        "initial_hidden_state": initial_hidden_state,
+        "rewards": np.zeros((1, 1), dtype=np.float32),
+        "discounts": np.ones((1, 1), dtype=np.float32),
+        "behavior_logp": action_logp.cpu().numpy().astype(np.float32),
+        "behavior_values": np.full((1, 1), -77.0, dtype=np.float32),
+        "bootstrap_value": np.full((1,), 123.0, dtype=np.float32),
+        "bootstrap_obs": bootstrap_obs,
+        "bootstrap_actor": bootstrap_actor,
+        "final_hidden_state": final_hidden_state,
+        "vtrace_rho_bar": 1.0,
+        "vtrace_c_bar": 1.0,
+    }
+
+    _loss, _metrics, context = learner._loss_and_metrics_with_context(raw_batch)
+
+    assert torch.allclose(context["targets"], expected_bootstrap.reshape(1, 1), atol=1.0e-6)
 
 
 def test_impala_learner_forward_time_major_requires_packed_meta_for_structured_updates() -> None:
@@ -868,6 +1959,145 @@ def test_impala_learner_forward_time_major_uses_trunk_sequence_path_and_records_
     assert model.sequence_calls == 0
     assert learner._active_timing_metrics["timer_learner_trunk_ms"] >= 0.0
     assert learner._active_timing_metrics["timer_learner_packed_scorer_ms"] >= 0.0
+
+
+def test_impala_learner_uses_factorized_legal_policy_path_for_loss_and_metrics() -> None:
+    action_catalog = _teacher_aux_catalog()
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        profile_timers=True,
+    )
+    learner._active_timing_metrics = {}
+    packed_ids = np.asarray([0, 5, 19, 10, 11, 12, 19], dtype=np.uint32)
+    packed_offsets = np.asarray([0, 3, 7], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]], [[0.25, -0.5]]], dtype=np.float32),
+        "actions": np.asarray([[0], [11]], dtype=np.int64),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0], [1]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "vtrace_result": VTraceTargets(
+            vs=np.asarray([[0.1], [0.2]], dtype=np.float32),
+            pg_advantages=np.asarray([[1.0], [0.5]], dtype=np.float32),
+            rhos=np.ones((2, 1), dtype=np.float32),
+        ),
+    }
+
+    loss, metrics = learner._loss_and_metrics(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert float(loss.detach()) != 0.0
+    assert model.factorized_calls == 1
+    assert learner._active_timing_metrics["timer_learner_factorized_policy_ms"] >= 0.0
+    assert learner._active_timing_metrics["packed_candidate_count"] == pytest.approx(7.0)
+    assert metrics["entropy"] > 0.0
+
+
+def test_impala_learner_restricts_packed_policy_scoring_to_train_rows() -> None:
+    action_catalog = _teacher_aux_catalog()
+    model = TrunkStructuredTeacherModel(action_catalog)
+    with torch.no_grad():
+        model.policy.weight.zero_()
+        model.policy.bias.zero_()
+        model.policy.bias[0] = -1.0
+        model.policy.bias[5] = 2.5
+        model.policy.bias[10] = -0.5
+        model.policy.bias[11] = 1.5
+        model.policy.bias[12] = -2.0
+        model.policy.bias[action_catalog.pass_action_id] = -3.0
+    learner = ImpalaLearner(
+        model=model,
+        profile_timers=True,
+        structured_metrics_mode="off",
+        teacher_aux_mode="off",
+        pass_action_id=action_catalog.pass_action_id,
+        vtrace_rho_bar=10.0,
+        vtrace_c_bar=10.0,
+    )
+    learner._active_timing_metrics = {}
+    packed_ids = np.asarray(
+        [0, 5, action_catalog.pass_action_id, 10, 11, 12, action_catalog.pass_action_id], dtype=np.uint32
+    )
+    packed_offsets = np.asarray([0, 3, 7], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]], [[0.25, -0.5]]], dtype=np.float32),
+        "actions": np.asarray([[5], [11]], dtype=np.int64),
+        "legal_actions": LegalActionBatch.from_packed(
+            packed_ids,
+            packed_offsets,
+            meta=packed_meta,
+            action_space=action_catalog.action_space_size,
+        ),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0], [1]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "rewards": np.zeros((2, 1), dtype=np.float32),
+        "discounts": np.ones((2, 1), dtype=np.float32),
+        "behavior_logp": np.asarray([[-2.0], [-3.0]], dtype=np.float32),
+        "bootstrap_value": np.zeros((1,), dtype=np.float32),
+        "policy_train_mask": np.asarray([[True], [False]], dtype=np.bool_),
+    }
+
+    loss, metrics, context = learner._loss_and_metrics_with_context(batch)
+
+    assert float(loss.detach()) != 0.0
+    assert model.trunk_calls == 1
+    assert model.scorer_calls == 1
+    assert model.scorer_row_count == 1
+    assert model.scorer_candidate_count == 3
+    assert learner._active_timing_metrics["packed_candidate_train_rows"] == pytest.approx(1.0)
+    assert learner._active_timing_metrics["packed_candidate_train_count"] == pytest.approx(3.0)
+    assert float(context["vtrace_rhos"][1, 0]) == pytest.approx(1.0)
+    assert float(context["vtrace_rhos"][0, 0]) > 1.0
+    assert metrics["policy_train_fraction"] == pytest.approx(0.5)
+
+
+def test_impala_learner_auxiliary_update_uses_factorized_teacher_path() -> None:
+    action_catalog = _teacher_aux_catalog()
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        teacher_family_coef=0.5,
+        teacher_slot_coef=0.25,
+        teacher_attack_type_coef=0.1,
+    )
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    attack_type_index = {name: index for index, name in enumerate(action_catalog.attack_type_names)}
+    packed_ids = np.asarray([0, 5, 19, 10, 11, 12, 19], dtype=np.uint32)
+    packed_offsets = np.asarray([0, 3, 7], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]], [[0.25, -0.5]]], dtype=np.float32),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0], [1]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "teacher_family": np.asarray(
+            [[family_index["main_play_character"]], [family_index["attack"]]],
+            dtype=np.int64,
+        ),
+        "teacher_slot": np.asarray([[0], [0]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1], [attack_type_index["direct"]]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True], [True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True], [True]], dtype=np.bool_),
+    }
+
+    metrics = learner.auxiliary_update(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert model.factorized_calls == 1
+    assert metrics["loss"] > 0.0
+    assert metrics["teacher_family_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_slot_accuracy"] == pytest.approx(1.0)
+    assert metrics["teacher_attack_type_accuracy"] == pytest.approx(1.0)
 
 
 def test_impala_learner_reports_reward_and_advantage_scale_metrics() -> None:

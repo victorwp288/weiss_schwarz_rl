@@ -146,7 +146,9 @@ class SnapshotRegistry:
         if not normalized_snapshot_id:
             return False
         original = list(self.champion_snapshots)
-        self.champion_snapshots = [snapshot for snapshot in self.champion_snapshots if snapshot != normalized_snapshot_id]
+        self.champion_snapshots = [
+            snapshot for snapshot in self.champion_snapshots if snapshot != normalized_snapshot_id
+        ]
         self.normalize()
         return self.champion_snapshots != original
 

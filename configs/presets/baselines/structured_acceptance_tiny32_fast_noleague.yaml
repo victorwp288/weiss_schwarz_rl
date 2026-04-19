@@ -1,0 +1,9 @@
+schema_version: 2
+description: structured_acceptance tiny32 fast packed WSL no-league baseline
+extends: ../structured_acceptance_tiny32_fast_packed.yaml
+experiment:
+  role: baseline_noleague
+evaluation:
+  periodic_dev_eval_interval_updates: 0
+league:
+  enabled: false

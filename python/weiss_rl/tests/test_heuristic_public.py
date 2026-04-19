@@ -9,12 +9,23 @@ import torch
 
 from weiss_rl.action_catalog import ActionCatalog as SharedActionCatalog
 from weiss_rl.config import load_stack_config
+from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
 from weiss_rl.envs.decision_env import DecisionBoundaryEnv
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
-from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, RANDOM_LEGAL_POLICY_ID
+from weiss_rl.eval.policy_set import (
+    HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
+    HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
+    HEURISTIC_PUBLIC_POLICY_ID,
+    RANDOM_LEGAL_POLICY_ID,
+)
 from weiss_rl.eval.simulator_runner import resolve_eval_policies
+from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.league.registry import SnapshotRegistry
-from weiss_rl.model import PolicyValueModel
+from weiss_rl.model import (
+    PolicyValueModel,
+    StructuredLegalPolicyValueModel,
+    build_policy_value_model,
+)
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 
@@ -200,6 +211,19 @@ def test_heuristic_public_prefers_pass_over_main_move_loops() -> None:
     assert policy.choose_action(obs, legal_ids) == 51
 
 
+def test_heuristic_public_profiles_choose_different_attack_lines() -> None:
+    aggressive = HeuristicPublicPolicy.from_spec_bundle(_heuristic_spec_bundle(), scoring_profile="aggressive")
+    control = HeuristicPublicPolicy.from_spec_bundle(_heuristic_spec_bundle(), scoring_profile="control")
+    obs = _empty_obs()
+    _set_stage(obs, player_index=0, slot=0, occupied=True, power=6000, effective_soul=3)
+    _set_stage(obs, player_index=1, slot=0, occupied=True, power=2000)
+
+    legal_ids = np.array([472, 474], dtype=np.uint32)
+
+    assert aggressive.choose_action(obs, legal_ids) == 474
+    assert control.choose_action(obs, legal_ids) == 472
+
+
 def test_heuristic_public_meta_fast_path_matches_scalar_policy() -> None:
     policy = HeuristicPublicPolicy.from_spec_bundle(_heuristic_spec_bundle())
     obs = _empty_obs()
@@ -207,7 +231,9 @@ def test_heuristic_public_meta_fast_path_matches_scalar_policy() -> None:
 
     legal_ids = np.array([472, 473, 474, 51, 402], dtype=np.uint32)
 
-    assert policy.choose_action_from_meta(obs, legal_ids, _packed_meta(legal_ids)) == policy.choose_action(obs, legal_ids)
+    assert policy.choose_action_from_meta(obs, legal_ids, _packed_meta(legal_ids)) == policy.choose_action(
+        obs, legal_ids
+    )
 
 
 def test_heuristic_public_batch_meta_fast_path_matches_scalar_policy() -> None:
@@ -229,19 +255,274 @@ def test_heuristic_public_batch_meta_fast_path_matches_scalar_policy() -> None:
     ]
     obs_rows = np.stack([obs_attack, obs_play, obs_clock], axis=0)
     legal_ids = np.concatenate(row_legal_ids, axis=0)
-    offsets = np.asarray([0, row_legal_ids[0].size, row_legal_ids[0].size + row_legal_ids[1].size, legal_ids.size], dtype=np.uint32)
+    offsets = np.asarray(
+        [0, row_legal_ids[0].size, row_legal_ids[0].size + row_legal_ids[1].size, legal_ids.size], dtype=np.uint32
+    )
     meta = _packed_meta(legal_ids)
 
     batch_actions = policy.choose_actions_from_meta_batch(obs_rows, legal_ids, offsets, meta)
     scalar_actions = np.asarray(
         [
-            policy.choose_action_from_meta(obs_rows[row_index], row_legal_ids[row_index], _packed_meta(row_legal_ids[row_index]))
+            policy.choose_action_from_meta(
+                obs_rows[row_index], row_legal_ids[row_index], _packed_meta(row_legal_ids[row_index])
+            )
             for row_index in range(len(row_legal_ids))
         ],
         dtype=np.int64,
     )
 
     npt.assert_array_equal(batch_actions, scalar_actions)
+
+
+def test_structured_model_public_heuristic_scores_match_b2_batch_meta_choices() -> None:
+    spec_bundle = _heuristic_spec_bundle()
+    model = build_policy_value_model(
+        observation_dim=int(spec_bundle["observation"]["obs_len"]),  # type: ignore[index]
+        config=ModelConfig(
+            gru_hidden_size=64,
+            encoder_mlp_width=64,
+            encoder_mlp_layers=1,
+            layer_norm=True,
+            dropout=ModelDropoutConfig(family_a=0.0, ablation=0.0),
+            encoder_kind="structured_v2",
+            typed_feature_width=32,
+        ),
+        action_dim=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
+        observation_spec=spec_bundle["observation"],  # type: ignore[index]
+        spec_bundle=spec_bundle,
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    policy = HeuristicPublicPolicy.from_spec_bundle(spec_bundle)
+    obs_attack = _empty_obs()
+    _set_stage(obs_attack, player_index=0, slot=0, occupied=True, power=5000, effective_soul=1)
+    obs_play = _empty_obs()
+    _set_stage(obs_play, player_index=0, slot=1, occupied=True, power=2500)
+    obs_clock = _empty_obs()
+    obs_clock[16] = 0
+    obs_clock[17] = 3
+    obs_clock[14] = 16
+    obs_clock[15] = 40
+
+    row_legal_ids = [
+        np.array([472, 473, 474, 51, 402], dtype=np.uint32),
+        np.array([102, 103, 104, 105, 106], dtype=np.uint32),
+        np.array([52, 53, 524, 525, 51], dtype=np.uint32),
+    ]
+    obs_rows = np.stack([obs_attack, obs_play, obs_clock], axis=0)
+    legal_ids = np.concatenate(row_legal_ids, axis=0)
+    offsets = np.asarray(
+        [0, row_legal_ids[0].size, row_legal_ids[0].size + row_legal_ids[1].size, legal_ids.size], dtype=np.uint32
+    )
+    meta = _packed_meta(legal_ids)
+
+    scores = (
+        model.score_packed_public_heuristic_candidates(
+            torch.as_tensor(obs_rows, dtype=torch.float32),
+            LegalActionBatch.from_packed(
+                legal_ids,
+                offsets,
+                meta=meta,
+                action_space=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
+            ),
+        )
+        .detach()
+        .cpu()
+        .numpy()
+    )
+    chosen = np.full((obs_rows.shape[0],), policy.pass_action_id, dtype=np.int64)
+    for row_index in range(obs_rows.shape[0]):
+        start = int(offsets[row_index])
+        stop = int(offsets[row_index + 1])
+        row_scores = scores[start:stop]
+        row_best = np.flatnonzero(row_scores == row_scores.max())
+        chosen[row_index] = int(legal_ids[start:stop][int(row_best[0])])
+
+    expected = policy.choose_actions_from_meta_batch(obs_rows, legal_ids, offsets, meta)
+    npt.assert_array_equal(chosen, expected)
+
+
+def test_structured_model_public_bias_guides_live_packed_scores_toward_b2_choices() -> None:
+    spec_bundle = _heuristic_spec_bundle()
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=int(spec_bundle["observation"]["obs_len"]),  # type: ignore[index]
+        config=ModelConfig(
+            gru_hidden_size=64,
+            encoder_mlp_width=64,
+            encoder_mlp_layers=1,
+            layer_norm=True,
+            dropout=ModelDropoutConfig(family_a=0.0, ablation=0.0),
+            encoder_kind="structured_v2",
+            typed_feature_width=32,
+            public_heuristic_logit_bias_scale=0.0,
+            public_heuristic_actor_logit_bias_scale=100.0,
+        ),
+        action_dim=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
+        observation_spec=spec_bundle["observation"],  # type: ignore[index]
+        spec_bundle=spec_bundle,
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    policy = HeuristicPublicPolicy.from_spec_bundle(spec_bundle)
+    obs_attack = _empty_obs()
+    _set_stage(obs_attack, player_index=0, slot=0, occupied=True, power=5000, effective_soul=1)
+    obs_play = _empty_obs()
+    _set_stage(obs_play, player_index=0, slot=1, occupied=True, power=2500)
+    obs_clock = _empty_obs()
+    obs_clock[16] = 0
+    obs_clock[17] = 3
+    obs_clock[14] = 16
+    obs_clock[15] = 40
+
+    row_legal_ids = [
+        np.array([472, 473, 474, 51, 402], dtype=np.uint32),
+        np.array([102, 103, 104, 105, 106], dtype=np.uint32),
+        np.array([52, 53, 524, 525, 51], dtype=np.uint32),
+    ]
+    obs_rows = np.stack([obs_attack, obs_play, obs_clock], axis=0)
+    legal_ids = np.concatenate(row_legal_ids, axis=0)
+    offsets = np.asarray(
+        [0, row_legal_ids[0].size, row_legal_ids[0].size + row_legal_ids[1].size, legal_ids.size], dtype=np.uint32
+    )
+    meta = _packed_meta(legal_ids)
+    legal_batch = LegalActionBatch.from_packed(
+        legal_ids,
+        offsets,
+        meta=meta,
+        action_space=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
+    )
+    obs_tensor = torch.as_tensor(obs_rows, dtype=torch.float32)
+
+    with torch.no_grad():
+        encoded = model.encode(obs_tensor)
+        recurrent_output, _ = model.recurrent_step_seat_aware(encoded, 0, None)
+        scores = (
+            model.score_packed_legal_candidates(
+                recurrent_output,
+                obs_tensor,
+                legal_batch,
+                scoring_mode="actor",
+            )
+            .detach()
+            .cpu()
+            .numpy()
+        )
+
+    chosen = np.full((obs_rows.shape[0],), policy.pass_action_id, dtype=np.int64)
+    for row_index in range(obs_rows.shape[0]):
+        start = int(offsets[row_index])
+        stop = int(offsets[row_index + 1])
+        row_scores = scores[start:stop]
+        row_best = np.flatnonzero(row_scores == row_scores.max())
+        chosen[row_index] = int(legal_ids[start:stop][int(row_best[0])])
+
+    expected = policy.choose_actions_from_meta_batch(obs_rows, legal_ids, offsets, meta)
+    npt.assert_array_equal(chosen, expected)
+
+
+def test_structured_model_public_bias_family_gate_only_affects_selected_families() -> None:
+    spec_bundle = _heuristic_spec_bundle()
+    torch.manual_seed(0)
+    baseline_model = build_policy_value_model(
+        observation_dim=int(spec_bundle["observation"]["obs_len"]),  # type: ignore[index]
+        config=ModelConfig(
+            gru_hidden_size=64,
+            encoder_mlp_width=64,
+            encoder_mlp_layers=1,
+            layer_norm=True,
+            dropout=ModelDropoutConfig(family_a=0.0, ablation=0.0),
+            encoder_kind="structured_v2",
+            typed_feature_width=32,
+            public_heuristic_logit_bias_scale=0.0,
+            public_heuristic_actor_logit_bias_scale=0.0,
+        ),
+        action_dim=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
+        observation_spec=spec_bundle["observation"],  # type: ignore[index]
+        spec_bundle=spec_bundle,
+    )
+    torch.manual_seed(0)
+    gated_model = build_policy_value_model(
+        observation_dim=int(spec_bundle["observation"]["obs_len"]),  # type: ignore[index]
+        config=ModelConfig(
+            gru_hidden_size=64,
+            encoder_mlp_width=64,
+            encoder_mlp_layers=1,
+            layer_norm=True,
+            dropout=ModelDropoutConfig(family_a=0.0, ablation=0.0),
+            encoder_kind="structured_v2",
+            typed_feature_width=32,
+            public_heuristic_logit_bias_scale=0.0,
+            public_heuristic_actor_logit_bias_scale=100.0,
+            public_heuristic_logit_bias_families=("attack",),
+        ),
+        action_dim=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
+        observation_spec=spec_bundle["observation"],  # type: ignore[index]
+        spec_bundle=spec_bundle,
+    )
+    assert isinstance(baseline_model, StructuredLegalPolicyValueModel)
+    assert isinstance(gated_model, StructuredLegalPolicyValueModel)
+
+    obs_attack = _empty_obs()
+    _set_stage(obs_attack, player_index=0, slot=0, occupied=True, power=5000, effective_soul=1)
+    obs_play = _empty_obs()
+    _set_stage(obs_play, player_index=0, slot=1, occupied=True, power=2500)
+    obs_clock = _empty_obs()
+    obs_clock[16] = 0
+    obs_clock[17] = 3
+    obs_clock[14] = 16
+    obs_clock[15] = 40
+
+    row_legal_ids = [
+        np.array([472, 473, 474, 51, 402], dtype=np.uint32),
+        np.array([102, 103, 104, 105, 106], dtype=np.uint32),
+        np.array([52, 53, 524, 525, 51], dtype=np.uint32),
+    ]
+    obs_rows = np.stack([obs_attack, obs_play, obs_clock], axis=0)
+    legal_ids = np.concatenate(row_legal_ids, axis=0)
+    offsets = np.asarray(
+        [0, row_legal_ids[0].size, row_legal_ids[0].size + row_legal_ids[1].size, legal_ids.size], dtype=np.uint32
+    )
+    meta = _packed_meta(legal_ids)
+    legal_batch = LegalActionBatch.from_packed(
+        legal_ids,
+        offsets,
+        meta=meta,
+        action_space=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
+    )
+    obs_tensor = torch.as_tensor(obs_rows, dtype=torch.float32)
+
+    def _scores(model: StructuredLegalPolicyValueModel) -> np.ndarray:
+        with torch.no_grad():
+            encoded = model.encode(obs_tensor)
+            recurrent_output, _ = model.recurrent_step_seat_aware(encoded, 0, None)
+            return (
+                model.score_packed_legal_candidates(
+                    recurrent_output,
+                    obs_tensor,
+                    legal_batch,
+                    scoring_mode="actor",
+                )
+                .detach()
+                .cpu()
+                .numpy()
+            )
+
+    baseline_scores = _scores(baseline_model)
+    gated_scores = _scores(gated_model)
+
+    npt.assert_allclose(
+        gated_scores[int(offsets[1]) : int(offsets[2])],
+        baseline_scores[int(offsets[1]) : int(offsets[2])],
+    )
+    npt.assert_allclose(
+        gated_scores[int(offsets[2]) : int(offsets[3])],
+        baseline_scores[int(offsets[2]) : int(offsets[3])],
+    )
+    assert not np.allclose(
+        gated_scores[int(offsets[0]) : int(offsets[1])],
+        baseline_scores[int(offsets[0]) : int(offsets[1])],
+    )
 
 
 def test_heuristic_public_batch_meta_fast_path_falls_back_on_invalid_meta() -> None:
@@ -328,6 +609,24 @@ def test_resolve_eval_policies_supports_b2_without_snapshot_weights(tmp_path: Pa
     assert resolved[RANDOM_LEGAL_POLICY_ID].kind == "random_legal"
     assert resolved[HEURISTIC_PUBLIC_POLICY_ID].kind == "heuristic_public"
     assert resolved[HEURISTIC_PUBLIC_POLICY_ID].heuristic_policy is not None
+
+
+def test_resolve_eval_policies_supports_heuristic_public_variants(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=[HEURISTIC_PUBLIC_AGGRO_POLICY_ID, HEURISTIC_PUBLIC_CONTROL_POLICY_ID],
+        run_dir=tmp_path,
+        observation_dim=100,
+        action_dim=527,
+        spec_bundle=_heuristic_spec_bundle(),
+    )
+
+    assert resolved[HEURISTIC_PUBLIC_AGGRO_POLICY_ID].kind == "heuristic_public"
+    assert resolved[HEURISTIC_PUBLIC_AGGRO_POLICY_ID].heuristic_policy is not None
+    assert resolved[HEURISTIC_PUBLIC_CONTROL_POLICY_ID].kind == "heuristic_public"
+    assert resolved[HEURISTIC_PUBLIC_CONTROL_POLICY_ID].heuristic_policy is not None
 
 
 def test_resolve_eval_policies_loads_snapshots_from_registry_run_root(tmp_path: Path) -> None:

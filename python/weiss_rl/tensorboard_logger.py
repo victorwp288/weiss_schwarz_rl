@@ -141,8 +141,12 @@ class TensorBoardLogger:
         self.log_text("run/determinism_report", determinism_report)
         self.log_text("run/config_canonical", manifest.get("config_canonical", {}))
         self.log_text("run/simulator", manifest.get("simulator", {}))
-        self._log_scalar("run/policy_set_selection_count", float(len(cast(list[Any], manifest.get("policy_set_selection", [])))), 0)
-        for tag, value in _iter_numeric_mapping(cast(Mapping[str, Any], manifest.get("hardware", {})), prefix="run/hardware"):
+        self._log_scalar(
+            "run/policy_set_selection_count", float(len(cast(list[Any], manifest.get("policy_set_selection", [])))), 0
+        )
+        for tag, value in _iter_numeric_mapping(
+            cast(Mapping[str, Any], manifest.get("hardware", {})), prefix="run/hardware"
+        ):
             self._log_scalar(tag, value, 0)
         for tag, value in _iter_numeric_mapping(
             cast(Mapping[str, Any], manifest.get("evaluation_pinning", {})),
@@ -160,8 +164,12 @@ class TensorBoardLogger:
     ) -> None:
         if not self.enabled:
             return
-        self._log_scalar("run/policy_version", float(policy_version), update_count, wall_clock_seconds=wall_clock_seconds)
-        self._log_scalar("run/wall_clock_seconds", float(wall_clock_seconds), update_count, wall_clock_seconds=wall_clock_seconds)
+        self._log_scalar(
+            "run/policy_version", float(policy_version), update_count, wall_clock_seconds=wall_clock_seconds
+        )
+        self._log_scalar(
+            "run/wall_clock_seconds", float(wall_clock_seconds), update_count, wall_clock_seconds=wall_clock_seconds
+        )
         for key, value in sorted(metrics.items()):
             scalar = _as_scalar(value)
             if scalar is None:
@@ -265,12 +273,16 @@ class TensorBoardLogger:
             return
         self.log_text("eval/readiness/summary", summary_payload, step=step)
         self._log_scalar("eval/readiness/passed", 1.0 if bool(summary_payload.get("passed", False)) else 0.0, step)
-        self._log_scalar("eval/readiness/alarms_count", float(len(cast(list[Any], summary_payload.get("alarms", [])))), step)
+        self._log_scalar(
+            "eval/readiness/alarms_count", float(len(cast(list[Any], summary_payload.get("alarms", [])))), step
+        )
         checks = summary_payload.get("checks", {})
         if isinstance(checks, Mapping):
             for check_name, check_payload in checks.items():
                 if isinstance(check_payload, Mapping):
-                    for tag, value in _iter_numeric_mapping(check_payload, prefix=f"eval/readiness/checks/{_tag_part(check_name)}"):
+                    for tag, value in _iter_numeric_mapping(
+                        check_payload, prefix=f"eval/readiness/checks/{_tag_part(check_name)}"
+                    ):
                         self._log_scalar(tag, value, step)
 
     def log_text(self, tag: str, payload: Any, *, step: int = 0) -> None:
@@ -304,7 +316,11 @@ class TensorBoardLogger:
     def _log_scalar(self, tag: str, value: float, step: int, *, wall_clock_seconds: float | None = None) -> None:
         if not self.enabled or self._writer is None or not math.isfinite(value):
             return
-        walltime = None if wall_clock_seconds is None else time.time() - max(0.0, float(wall_clock_seconds)) + float(wall_clock_seconds)
+        walltime = (
+            None
+            if wall_clock_seconds is None
+            else time.time() - max(0.0, float(wall_clock_seconds)) + float(wall_clock_seconds)
+        )
         self._writer.add_scalar(tag, value, global_step=int(step), walltime=walltime)
 
     def _log_matrix_scalars(self, *, prefix: str, matrix_payload: Mapping[str, Any], step: int) -> None:
@@ -346,7 +362,14 @@ class TensorBoardLogger:
         axis.set_yticklabels(labels)
         for row_index in range(matrix.shape[0]):
             for column_index in range(matrix.shape[1]):
-                axis.text(column_index, row_index, f"{matrix[row_index, column_index]:.3f}", ha="center", va="center", color="white")
+                axis.text(
+                    column_index,
+                    row_index,
+                    f"{matrix[row_index, column_index]:.3f}",
+                    ha="center",
+                    va="center",
+                    color="white",
+                )
         figure.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
         figure.tight_layout()
         self._writer.add_figure(tag, figure, global_step=step, close=True)

@@ -1,0 +1,10 @@
+schema_version: 2
+description: structured_acceptance tiny32 fast cyclic public-teacher WSL frontier with tactical-only model public bias
+extends: structured_acceptance_tiny32_fast_pubcycle3_b1mix015.yaml
+model:
+  public_heuristic_logit_bias_scale: 2.0
+  public_heuristic_logit_bias_families:
+    - main_play_character
+    - main_move
+    - attack
+

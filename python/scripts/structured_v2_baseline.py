@@ -45,11 +45,7 @@ def main() -> None:
         parser.error("--baseline-update must be > 0")
 
     dev_eval_summary = (
-        args.baseline_run_dir
-        / "eval"
-        / "dev_eval"
-        / f"update_{int(args.baseline_update)}"
-        / "summary.json"
+        args.baseline_run_dir / "eval" / "dev_eval" / f"update_{int(args.baseline_update)}" / "summary.json"
     )
     if not dev_eval_summary.is_file():
         parser.error(f"baseline dev-eval summary not found: {dev_eval_summary}")

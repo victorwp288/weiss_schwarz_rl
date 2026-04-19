@@ -1,0 +1,8 @@
+schema_version: 2
+description: structured_acceptance Linux/WSL learning preset with attack-plus-move public bias
+extends: structured_acceptance_linux_learning_curriculum.yaml
+model:
+  public_heuristic_logit_bias_scale: 2.0
+  public_heuristic_logit_bias_families:
+    - attack
+    - main_move

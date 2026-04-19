@@ -159,9 +159,7 @@ def _write_final_eval_tree(layout: ArtifactLayout) -> None:
     _write_text(layout.final_eval_matchups_csv(), "\n".join(matchup_rows) + "\n")
     _write_text(
         layout.final_eval_matrix_csv("mean"),
-        "focal_policy_id,B0 RandomLegal,policy_000300\n"
-        "B0 RandomLegal,0.5,0.0\n"
-        "policy_000300,0.9,0.5\n",
+        "focal_policy_id,B0 RandomLegal,policy_000300\nB0 RandomLegal,0.5,0.0\npolicy_000300,0.9,0.5\n",
     )
     _write_json(
         layout.final_eval_summary_json(),

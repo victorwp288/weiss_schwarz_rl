@@ -13,7 +13,12 @@ from torch.nn.utils import clip_grad_norm_
 
 from weiss_rl.training_logger import TrainingMetrics
 
-from .impala_learner import ImpalaLearner, _batch_value, _masked_action_logp_and_entropy, _packed_action_logp_and_entropy
+from .impala_learner import (
+    ImpalaLearner,
+    _batch_value,
+    _masked_action_logp_and_entropy,
+    _packed_action_logp_and_entropy,
+)
 
 
 def _masked_mean(values: Tensor, mask: Tensor) -> Tensor:
@@ -137,10 +142,14 @@ class PpoLiteLearner(ImpalaLearner):
             legal_actions=_batch_value(batch, "legal_actions"),
         )
         packed_legal = self._resolve_packed_legal_actions(batch, expected_shape=obs.shape[:2])
-        legal_mask = None if packed_legal is not None else self._resolve_legal_mask(
-            batch,
-            expected_shape=obs.shape[:2],
-            action_dim=logits.shape[-1],
+        legal_mask = (
+            None
+            if packed_legal is not None
+            else self._resolve_legal_mask(
+                batch,
+                expected_shape=obs.shape[:2],
+                action_dim=logits.shape[-1],
+            )
         )
         context: dict[str, Any] = {
             "logits": logits.detach(),
@@ -277,7 +286,4 @@ def _mean_metric_dicts(records: list[dict[str, float]]) -> dict[str, float]:
     if not records:
         return {}
     keys = sorted({key for record in records for key in record})
-    return {
-        key: float(np.mean([float(record[key]) for record in records if key in record]))
-        for key in keys
-    }
+    return {key: float(np.mean([float(record[key]) for record in records if key in record])) for key in keys}

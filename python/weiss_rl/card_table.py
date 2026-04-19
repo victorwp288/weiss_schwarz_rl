@@ -35,19 +35,9 @@ def card_feature_table(
 
     rows_obj = [] if card_table is None else card_table.get("rows", [])
     rows = [dict(item) for item in rows_obj] if isinstance(rows_obj, list) else []
-    colors = sorted(
-        {
-            str(row.get("color", "")).strip().lower()
-            for row in rows
-            if str(row.get("color", "")).strip()
-        }
-    )
+    colors = sorted({str(row.get("color", "")).strip().lower() for row in rows if str(row.get("color", "")).strip()})
     card_types = sorted(
-        {
-            str(row.get("card_type", "")).strip().lower()
-            for row in rows
-            if str(row.get("card_type", "")).strip()
-        }
+        {str(row.get("card_type", "")).strip().lower() for row in rows if str(row.get("card_type", "")).strip()}
     )
     color_index = {name: idx for idx, name in enumerate(colors)}
     type_index = {name: idx for idx, name in enumerate(card_types)}

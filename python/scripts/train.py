@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib
+import inspect
 import json
 import os
 import platform
@@ -47,7 +48,10 @@ from weiss_rl.eval import (
 )
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
-from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, select_final_policy_set_deterministic_v1
+from weiss_rl.eval.policy_set import (
+    heuristic_public_profile_name_for_policy_id,
+    select_final_policy_set_deterministic_v1,
+)
 from weiss_rl.learners.impala_learner import ImpalaLearner
 from weiss_rl.learners.ppo_lite_learner import PpoLiteLearner
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
@@ -61,7 +65,7 @@ from weiss_rl.manifest import (
 )
 from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_mask, sample_actions_from_mask
 from weiss_rl.model import PolicyValueModel, build_policy_value_model
-from weiss_rl.runtime import QueueRuntime, QueueRuntimeMode, build_runtime_config
+from weiss_rl.runtime import QueueRuntime, QueueRuntimeMode, build_runtime_config, resolve_actor_device_layout
 from weiss_rl.repro import (
     canonical_json_bytes,
     compute_run_id64,
@@ -99,10 +103,13 @@ _PROMOTION_GATE_NOLEAGUE_BASELINE_CHECKPOINT = "baseline_checkpoint.pt"
 _LATEST_CHECKPOINT_FILENAME = "latest.pt"
 _BEST_CHECKPOINT_FILENAME = "best.pt"
 _CHECKPOINT_TRACKER_FILENAME = "checkpoint_tracker.json"
-_IMPALA_ALGORITHMS = frozenset({"impala_vtrace_gru", "impala_vtrace_ff", "structured_v2", "impala_vtrace_structured_v1"})
+_IMPALA_ALGORITHMS = frozenset(
+    {"impala_vtrace_gru", "impala_vtrace_ff", "structured_v2", "impala_vtrace_structured_v1"}
+)
 _PPO_ALGORITHMS = frozenset({"ppo_lite_masked_v1"})
 _CONFIRMATORY_DEV_EVAL_MAX_PROB_SHORTFALL = 0.1
 _CONFIRMATORY_DEV_EVAL_MAX_CI_EXCESS = 0.05
+_GIT_COMMIT_HEX_LENGTH = 40
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,9 +188,7 @@ class _PeriodicDevEvalRunner:
         )
         focal_hidden = self.model.initial_seat_hidden(1, device=self._device)
         opponent_hidden = (
-            None
-            if self.opponent_model is None
-            else self.opponent_model.initial_seat_hidden(1, device=self._device)
+            None if self.opponent_model is None else self.opponent_model.initial_seat_hidden(1, device=self._device)
         )
         seat_rngs = {
             seat: Pcg32XshRrV1(_periodic_dev_eval_rng_seed(scheduled_game=scheduled_game, seat=seat)) for seat in (0, 1)
@@ -286,6 +291,7 @@ class _PeriodicDevEvalRunner:
                 torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
                 torch.as_tensor([current_seat], device=self._device, dtype=torch.long),
                 seat_hidden,
+                scoring_mode="learner",
             )
         logits = logits_tensor[0].detach().cpu().numpy().astype(np.float32, copy=False)
         action, _ = sample_action_pinned(
@@ -506,6 +512,9 @@ def _git_output(args: list[str]) -> str:
 
 
 def _git_commit() -> str:
+    override = str(os.environ.get("WEISS_RL_GIT_COMMIT", "")).strip().lower()
+    if len(override) == _GIT_COMMIT_HEX_LENGTH and all(char in "0123456789abcdef" for char in override):
+        return override
     try:
         return _git_output(["rev-parse", "HEAD"])
     except (OSError, subprocess.CalledProcessError):
@@ -527,9 +536,10 @@ def _hardware_summary(
     learner_device: torch.device | str = "cpu",
     *,
     actor_device: torch.device | str = "cpu",
+    actor_device_layout: Sequence[str] | None = None,
 ) -> dict[str, str | int]:
     learner_device_name = str(learner_device)
-    return {
+    payload: dict[str, str | int] = {
         "platform": platform.platform(),
         "python_version": platform.python_version(),
         "machine": platform.machine(),
@@ -538,6 +548,45 @@ def _hardware_summary(
         "learner_device": learner_device_name,
         "actor_device": str(actor_device),
     }
+    if actor_device_layout:
+        payload["actor_device_layout"] = ",".join(str(device_name) for device_name in actor_device_layout)
+        payload["actor_device_unique_count"] = len(
+            dict.fromkeys(str(device_name) for device_name in actor_device_layout)
+        )
+    return payload
+
+
+def _manifest_actor_device_layout(
+    *,
+    stack: StackConfig,
+    num_envs: int,
+    unroll_length: int,
+    profile: str,
+    seed: int,
+    pass_action_id: int,
+    runtime_mode: QueueRuntimeMode,
+    learner_device: torch.device,
+) -> tuple[str, ...] | None:
+    if stack.config.system is None or stack.config.training is None:
+        return None
+    runtime_config = build_runtime_config(
+        stack=stack,
+        num_envs=num_envs,
+        unroll_length=unroll_length,
+        profile=profile,
+        seed=seed,
+        pass_action_id=pass_action_id,
+        runtime_mode=runtime_mode,
+    )
+    return tuple(
+        str(device_name)
+        for device_name in resolve_actor_device_layout(
+            stack,
+            actor_count=int(runtime_config.actor_count),
+            learner_device=learner_device,
+            prefer_process_collectors=True,
+        )
+    )
 
 
 def _evaluation_pinning(stack: StackConfig) -> dict[str, str | bool]:
@@ -751,7 +800,7 @@ def _resolve_policy_set_selection(
         else _manifest_source_path(dev_eval_summaries_path, root=stack.root),
     }
     if evaluation is None:
-        return [], {"status": "not_configured", "source_paths": source_paths}
+        return [], {"mode": "not_configured", "status": "not_configured", "source_paths": source_paths}
 
     snapshot_registry = None if snapshot_registry_path is None else _load_snapshot_registry(snapshot_registry_path)
     dev_eval_summaries = None if dev_eval_summaries_path is None else _load_dev_eval_summaries(dev_eval_summaries_path)
@@ -763,6 +812,7 @@ def _resolve_policy_set_selection(
         missing_inputs.append("dev_eval_summaries_json")
 
     details: dict[str, Any] = {
+        "mode": evaluation.final_policy_set_selection.version,
         "status": "resolved",
         "version": evaluation.final_policy_set_selection.version,
         "final_policy_set_size": evaluation.final_policy_set_size,
@@ -770,6 +820,7 @@ def _resolve_policy_set_selection(
         "missing_inputs": missing_inputs,
     }
     if missing_inputs:
+        details["mode"] = "unresolved"
         details["status"] = "unresolved"
         details["reason"] = "deterministic final policy set inputs were not provided"
         return [], details
@@ -817,9 +868,18 @@ def _resolve_device(stack: StackConfig, device_override: str) -> torch.device:
     requested = device_override.strip()
     if not requested:
         system_config = stack.config.system
-        requested = "cpu" if system_config is None else system_config.learner_device
+        requested = "cpu" if system_config is None else getattr(system_config, "learner_device", "cpu")
+    normalized = str(requested).strip().lower()
+    if normalized in {"auto", "cuda:auto"}:
+        if torch.cuda.is_available() and int(torch.cuda.device_count()) > 0:
+            requested = "cuda:0"
+        else:
+            requested = "cpu"
     if requested.startswith("cuda") and not torch.cuda.is_available():
-        print("Requested CUDA device is unavailable; falling back to cpu for the canonical single-node run.", file=sys.stderr)
+        print(
+            "Requested CUDA device is unavailable; falling back to cpu for the canonical single-node run.",
+            file=sys.stderr,
+        )
         requested = "cpu"
     return torch.device(requested)
 
@@ -1271,9 +1331,7 @@ def _write_checkpoint(
         "model_state_dict": learner.model.state_dict(),
         "optimizer_state_dict": None if learner.optimizer is None else learner.optimizer.state_dict(),
         "grad_scaler_state_dict": (
-            None
-            if getattr(learner, "_grad_scaler", None) is None
-            else learner._grad_scaler.state_dict()
+            None if getattr(learner, "_grad_scaler", None) is None else learner._grad_scaler.state_dict()
         ),
     }
     torch.save(payload, checkpoint_path)
@@ -1292,9 +1350,7 @@ def _load_checkpoint_tracker(training_paths: TrainingPaths) -> dict[str, Any]:
         return {"format": "checkpoint_tracker_v1", "latest": None, "best": None}
     payload = json.loads(training_paths.checkpoint_tracker_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise RuntimeError(
-            f"checkpoint tracker must be a JSON object: {training_paths.checkpoint_tracker_path}"
-        )
+        raise RuntimeError(f"checkpoint tracker must be a JSON object: {training_paths.checkpoint_tracker_path}")
     payload.setdefault("format", "checkpoint_tracker_v1")
     payload.setdefault("latest", None)
     payload.setdefault("best", None)
@@ -1464,21 +1520,15 @@ def _dev_eval_confidence_stats(dev_eval_summary: Mapping[str, Any] | None) -> di
         ci_half_width = uncertainty.get("ci_half_width")
         if isinstance(prob_gt_half, (int, float)) and np.isfinite(float(prob_gt_half)):
             min_prob_gt_half = (
-                float(prob_gt_half)
-                if min_prob_gt_half is None
-                else min(min_prob_gt_half, float(prob_gt_half))
+                float(prob_gt_half) if min_prob_gt_half is None else min(min_prob_gt_half, float(prob_gt_half))
             )
         if isinstance(prob_lt_half, (int, float)) and np.isfinite(float(prob_lt_half)):
             max_prob_lt_half = (
-                float(prob_lt_half)
-                if max_prob_lt_half is None
-                else max(max_prob_lt_half, float(prob_lt_half))
+                float(prob_lt_half) if max_prob_lt_half is None else max(max_prob_lt_half, float(prob_lt_half))
             )
         if isinstance(ci_half_width, (int, float)) and np.isfinite(float(ci_half_width)):
             max_ci_half_width = (
-                float(ci_half_width)
-                if max_ci_half_width is None
-                else max(max_ci_half_width, float(ci_half_width))
+                float(ci_half_width) if max_ci_half_width is None else max(max_ci_half_width, float(ci_half_width))
             )
     stats["min_prob_gt_half"] = min_prob_gt_half
     stats["max_prob_lt_half"] = max_prob_lt_half
@@ -1507,13 +1557,9 @@ def _dev_eval_ineligibility_reasons(
     confidence = _dev_eval_confidence_stats(dev_eval_summary)
     min_prob_gt_half = confidence["min_prob_gt_half"]
     max_ci_half_width = confidence["max_ci_half_width"]
-    if min_prob_gt_half is not None and (
-        float(min_prob_gt_half) < float(checkpoint_guard.promote_min_prob_gt_half)
-    ):
+    if min_prob_gt_half is not None and (float(min_prob_gt_half) < float(checkpoint_guard.promote_min_prob_gt_half)):
         reasons.append("confidence_prob")
-    if max_ci_half_width is not None and (
-        float(max_ci_half_width) > float(checkpoint_guard.promote_max_ci_half_width)
-    ):
+    if max_ci_half_width is not None and (float(max_ci_half_width) > float(checkpoint_guard.promote_max_ci_half_width)):
         reasons.append("confidence_ci")
     return tuple(reasons)
 
@@ -1543,18 +1589,21 @@ def _expand_periodic_dev_eval_paired_seeds(
     seen = set(paired_seeds)
     extra_index = 0
     while len(paired_seeds) < requested_pairs_i:
-        derived_seed = stable_hash64(
-            canonical_json_bytes(
-                {
-                    "kind": "periodic_dev_eval_confirmatory_seed_v1",
-                    "scope": str(scope),
-                    "seed_file_sha256": str(seed_file_sha256),
-                    "update_count": int(update_count),
-                    "policy_version": int(policy_version),
-                    "extra_index": int(extra_index),
-                }
+        derived_seed = (
+            stable_hash64(
+                canonical_json_bytes(
+                    {
+                        "kind": "periodic_dev_eval_confirmatory_seed_v1",
+                        "scope": str(scope),
+                        "seed_file_sha256": str(seed_file_sha256),
+                        "update_count": int(update_count),
+                        "policy_version": int(policy_version),
+                        "extra_index": int(extra_index),
+                    }
+                )
             )
-        ) & _U64_MASK
+            & _U64_MASK
+        )
         extra_index += 1
         if derived_seed in seen:
             continue
@@ -1652,7 +1701,11 @@ def _checkpoint_candidate_metric(
         if aggregate_score is not None:
             return "dev_eval_mean", aggregate_score
     evaluation = stack.config.evaluation
-    if evaluation is not None and int(evaluation.periodic_dev_eval_interval_updates) > 0:
+    if (
+        evaluation is not None
+        and int(evaluation.periodic_dev_eval_interval_updates) > 0
+        and dev_eval_summary is not None
+    ):
         return None, None
     if latest_metrics is not None:
         loss_value = latest_metrics.get("loss")
@@ -1720,7 +1773,18 @@ def _publish_checkpoint_aliases(
     best_record = tracker.get("best")
     if not isinstance(best_record, Mapping):
         best_record = None
-    if _should_promote_best_checkpoint(
+    if best_record is None:
+        shutil.copy2(checkpoint_path, training_paths.best_checkpoint_path)
+        tracker["best"] = _build_checkpoint_record(
+            alias_name="best",
+            alias_path=training_paths.best_checkpoint_path,
+            source_checkpoint_path=checkpoint_path,
+            artifacts=artifacts,
+            learner=learner,
+            metric_kind=latest_kind,
+            metric_value=latest_value,
+        )
+    elif _should_promote_best_checkpoint(
         existing_record=cast(Mapping[str, Any] | None, best_record),
         candidate_kind=latest_kind,
         candidate_value=latest_value,
@@ -1921,7 +1985,16 @@ def _build_training_learner(
         "pass_action_id": pass_action_id,
         "teacher_family_coef": training_config.teacher_family_coef,
         "teacher_slot_coef": training_config.teacher_slot_coef,
+        "teacher_move_source_coef": training_config.teacher_move_source_coef,
         "teacher_attack_type_coef": training_config.teacher_attack_type_coef,
+        "teacher_action_coef": training_config.teacher_action_coef,
+        "teacher_same_family_action_coef": training_config.teacher_same_family_action_coef,
+        "teacher_public_heuristic_coef": training_config.teacher_public_heuristic_coef,
+        "teacher_public_heuristic_temperature": training_config.teacher_public_heuristic_temperature,
+        "teacher_public_heuristic_families": training_config.teacher_public_heuristic_families,
+        "teacher_public_heuristic_profiles": training_config.teacher_public_heuristic_profiles,
+        "teacher_public_heuristic_profile_mode": training_config.teacher_public_heuristic_profile_mode,
+        "teacher_public_heuristic_profiles_end_updates": training_config.teacher_public_heuristic_profiles_end_updates,
         "profile_timers": bool(getattr(training_config, "profile_timers", False)),
         "structured_metrics_mode": str(getattr(training_config, "structured_metrics_mode", "full")),
         "teacher_aux_mode": str(getattr(training_config, "teacher_aux_mode", "always")),
@@ -1961,7 +2034,9 @@ def _maybe_compile_learner_model(
     if not bool(getattr(training_config, "compile_learner", False)):
         return None
     if device.type != "cuda":
-        print("Learner compile note: compile_learner is enabled but the learner device is not CUDA; skipping torch.compile.")
+        print(
+            "Learner compile note: compile_learner is enabled but the learner device is not CUDA; skipping torch.compile."
+        )
         return None
     if bool(getattr(model, "supports_legal_candidate_scoring", False)):
         enable_trunk_compile = getattr(model, "enable_trunk_compile", None)
@@ -1973,7 +2048,9 @@ def _maybe_compile_learner_model(
                 return None
             print("Enabled torch.compile for the structured learner trunk (mode=reduce-overhead).")
             return model
-        print("Learner compile note: structured legal scoring is enabled but no trunk compile hook exists; skipping torch.compile.")
+        print(
+            "Learner compile note: structured legal scoring is enabled but no trunk compile hook exists; skipping torch.compile."
+        )
         return None
     compiled = torch.compile(model, mode="reduce-overhead")
     print("Enabled torch.compile for the learner forward path (mode=reduce-overhead).")
@@ -2062,15 +2139,36 @@ def _run_structured_warmstart(
 
     previous_family = float(training_config.teacher_family_coef)
     previous_slot = float(training_config.teacher_slot_coef)
+    previous_move_source = float(training_config.teacher_move_source_coef)
     previous_attack_type = float(training_config.teacher_attack_type_coef)
+    previous_action = float(training_config.teacher_action_coef)
+    previous_same_family_action = float(training_config.teacher_same_family_action_coef)
+    previous_public_heuristic = float(training_config.teacher_public_heuristic_coef)
+    previous_public_heuristic_temperature = float(training_config.teacher_public_heuristic_temperature)
+    previous_public_heuristic_families = tuple(training_config.teacher_public_heuristic_families)
+    previous_public_heuristic_profiles = tuple(training_config.teacher_public_heuristic_profiles)
+    previous_public_heuristic_profile_mode = str(training_config.teacher_public_heuristic_profile_mode)
+    previous_public_heuristic_profiles_end_updates = int(training_config.teacher_public_heuristic_profiles_end_updates)
     learner.set_teacher_aux_coefs(
         family=float(warmstart_cfg.teacher_family_coef),
         slot=float(warmstart_cfg.teacher_slot_coef),
+        move_source=float(warmstart_cfg.teacher_move_source_coef),
         attack_type=float(warmstart_cfg.teacher_attack_type_coef),
+        action=float(warmstart_cfg.teacher_action_coef),
+        same_family_action=float(warmstart_cfg.teacher_same_family_action_coef),
+        public_heuristic=float(warmstart_cfg.teacher_public_heuristic_coef),
+        public_heuristic_temperature=float(warmstart_cfg.teacher_public_heuristic_temperature),
+        public_heuristic_families=tuple(warmstart_cfg.teacher_public_heuristic_families),
+        public_heuristic_profiles=tuple(warmstart_cfg.teacher_public_heuristic_profiles),
+        public_heuristic_profile_mode=str(warmstart_cfg.teacher_public_heuristic_profile_mode),
+        public_heuristic_profiles_end_updates=int(warmstart_cfg.teacher_public_heuristic_profiles_end_updates),
     )
     latest_metrics: dict[str, float] = {}
     try:
-        with runtime.structured_warmstart_source_mix() as warmstart_source_metrics, runtime.disable_mirror_policy_fusion():
+        with (
+            runtime.structured_warmstart_source_mix() as warmstart_source_metrics,
+            runtime.disable_mirror_policy_fusion(),
+        ):
             for warmstart_step in range(updates):
                 with _profile_block(profile_timers, "collect_training_batch"):
                     with _torch_num_threads_scope(actor_torch_threads):
@@ -2104,7 +2202,16 @@ def _run_structured_warmstart(
         learner.set_teacher_aux_coefs(
             family=previous_family,
             slot=previous_slot,
+            move_source=previous_move_source,
             attack_type=previous_attack_type,
+            action=previous_action,
+            same_family_action=previous_same_family_action,
+            public_heuristic=previous_public_heuristic,
+            public_heuristic_temperature=previous_public_heuristic_temperature,
+            public_heuristic_families=previous_public_heuristic_families,
+            public_heuristic_profiles=previous_public_heuristic_profiles,
+            public_heuristic_profile_mode=previous_public_heuristic_profile_mode,
+            public_heuristic_profiles_end_updates=previous_public_heuristic_profiles_end_updates,
         )
     return latest_metrics
 
@@ -2147,12 +2254,48 @@ def _promotion_anchor_policy_id_candidates(anchor_name: str) -> tuple[str, ...]:
         return (_PROMOTION_GATE_RANDOMLEGAL_POLICY_ID,)
     if anchor_name == _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME:
         return (_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID, anchor_name)
-    if anchor_name == HEURISTIC_PUBLIC_POLICY_ID:
-        return (HEURISTIC_PUBLIC_POLICY_ID,)
+    if heuristic_public_profile_name_for_policy_id(anchor_name) is not None:
+        return (anchor_name,)
     normalized = _slug_policy_id(anchor_name)
     if not normalized:
         return ()
     return tuple(dict.fromkeys((normalized, anchor_name)))
+
+
+def _resolve_symbolic_promotion_anchor_policy_id(
+    anchor_name: str,
+    *,
+    registry: SnapshotRegistry,
+) -> str | None:
+    if anchor_name == "Latest champion snapshot":
+        champion_ids = registry.latest_champions(1)
+        return None if not champion_ids else str(champion_ids[-1])
+    if anchor_name == "Previous champion snapshot":
+        champion_ids = registry.latest_champions(2)
+        return None if len(champion_ids) < 2 else str(champion_ids[-2])
+    if anchor_name == "Latest recent snapshot":
+        recent_ids = registry.latest_ids(1)
+        return None if not recent_ids else str(recent_ids[-1])
+    if anchor_name == "Previous recent snapshot":
+        recent_ids = registry.latest_ids(2)
+        return None if len(recent_ids) < 2 else str(recent_ids[-2])
+    return None
+
+
+def _build_heuristic_public_policy(
+    spec_bundle: Mapping[str, object],
+    *,
+    scoring_profile: str,
+) -> HeuristicPublicPolicy:
+    factory = HeuristicPublicPolicy.from_spec_bundle
+    supports_scoring_profile = False
+    try:
+        supports_scoring_profile = "scoring_profile" in inspect.signature(factory).parameters
+    except (TypeError, ValueError):
+        supports_scoring_profile = False
+    if supports_scoring_profile:
+        return factory(spec_bundle, scoring_profile=scoring_profile)
+    return factory(spec_bundle)
 
 
 def _find_noleague_baseline_snapshot(run_dir: Path) -> SnapshotMeta | None:
@@ -2237,6 +2380,174 @@ def _import_noleague_baseline_anchor(
         },
     )
     return weights_path, weights_sha256, int(source_snapshot.update)
+
+
+def _validate_seed_snapshot_import_contract(
+    *,
+    source_run_dir: Path,
+    payload: dict[str, Any],
+    expected_model_state_dict: dict[str, Any],
+    expected_config_canonical: dict[str, Any] | None,
+    expected_spec_hash256: str | None,
+) -> None:
+    source_layout = ArtifactLayout.from_run_dir(source_run_dir)
+    manifest_path = source_layout.manifest_path
+    source_manifest = (
+        _load_json_object(manifest_path, label="seed snapshot manifest") if manifest_path.is_file() else None
+    )
+    source_config_canonical = source_manifest.get("config_canonical") if isinstance(source_manifest, dict) else None
+    if isinstance(source_config_canonical, dict) and isinstance(expected_config_canonical, dict):
+        for section_name in ("model", "environment"):
+            source_section = source_config_canonical.get(section_name)
+            expected_section = expected_config_canonical.get(section_name)
+            if source_section is None or expected_section is None:
+                continue
+            if source_section != expected_section:
+                raise RuntimeError(
+                    f"Imported seed snapshot config does not match the current run for section={section_name!r}"
+                )
+
+    if expected_spec_hash256 is not None:
+        source_spec_hash = _read_optional_hash_file(source_layout.spec_hash_path)
+        if source_spec_hash is not None and source_spec_hash != expected_spec_hash256:
+            raise RuntimeError(
+                "Imported seed snapshot spec hash does not match the current run: "
+                f"source={source_spec_hash} expected={expected_spec_hash256}"
+            )
+
+    source_model_state_dict = payload.get("model_state_dict")
+    if not isinstance(source_model_state_dict, dict):
+        raise RuntimeError(f"Imported seed snapshot weights payload is missing model_state_dict: {source_run_dir}")
+    source_keys = set(source_model_state_dict)
+    expected_keys = set(expected_model_state_dict)
+    if source_keys != expected_keys:
+        missing = sorted(expected_keys - source_keys)
+        extra = sorted(source_keys - expected_keys)
+        raise RuntimeError(
+            "Imported seed snapshot model contract does not match the current run: "
+            f"missing_keys={missing} extra_keys={extra}"
+        )
+    for key in sorted(expected_keys):
+        source_value = source_model_state_dict[key]
+        expected_value = expected_model_state_dict[key]
+        if not isinstance(source_value, torch.Tensor) or not isinstance(expected_value, torch.Tensor):
+            continue
+        if tuple(source_value.shape) != tuple(expected_value.shape) or source_value.dtype != expected_value.dtype:
+            raise RuntimeError(
+                "Imported seed snapshot tensor contract does not match the current run: "
+                f"key={key} source_shape={tuple(source_value.shape)} "
+                f"expected_shape={tuple(expected_value.shape)} "
+                f"source_dtype={source_value.dtype} expected_dtype={expected_value.dtype}"
+            )
+
+
+def _seed_snapshot_policy_id(*, source_run_dir: Path, source_policy_id: str) -> str:
+    source_hash = hashlib.sha1(source_run_dir.as_posix().encode("utf-8")).hexdigest()[:10]
+    safe_policy_id = str(source_policy_id).replace("/", "_").replace("\\", "_").strip()
+    return f"seed_{source_hash}_{safe_policy_id}"
+
+
+def _import_seed_snapshot_pool(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    seed_snapshot_run_dir: Path,
+    expected_model_state_dict: dict[str, Any],
+    expected_config_canonical: dict[str, Any] | None,
+    expected_spec_hash256: str | None,
+) -> list[str]:
+    source_run_dir = Path(seed_snapshot_run_dir).resolve()
+    source_layout = ArtifactLayout.from_run_dir(source_run_dir)
+    source_registry_path = source_layout.training_snapshots_dir / REGISTRY_FILENAME
+    if not source_registry_path.is_file():
+        raise FileNotFoundError(
+            f"Could not resolve a snapshot registry in the seed snapshot run: {source_registry_path}"
+        )
+    source_registry = SnapshotRegistry.load(source_registry_path)
+    source_snapshots = [
+        snapshot
+        for snapshot in source_registry.snapshots
+        if snapshot.policy_id not in _promotion_anchor_policy_id_candidates(_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME)
+    ]
+    if not source_snapshots:
+        return []
+
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    registry = SnapshotRegistry.load(registry_path)
+    _sync_snapshot_registry_retention(stack, registry)
+    existing_policy_ids = {snapshot.policy_id for snapshot in registry.snapshots}
+    source_champions = set(source_registry.champion_snapshots)
+    imported_policy_ids: list[str] = []
+    for source_snapshot in source_snapshots:
+        imported_policy_id = _seed_snapshot_policy_id(
+            source_run_dir=source_run_dir,
+            source_policy_id=source_snapshot.policy_id,
+        )
+        if imported_policy_id in existing_policy_ids:
+            imported_policy_ids.append(imported_policy_id)
+            continue
+        source_weights_path = source_run_dir / source_snapshot.path
+        if not source_weights_path.is_file():
+            raise FileNotFoundError(f"Resolved seed snapshot is missing its weights artifact: {source_weights_path}")
+        payload = torch.load(source_weights_path, map_location="cpu", weights_only=True)
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Imported seed snapshot weights payload must be a dict: {source_weights_path}")
+        _validate_seed_snapshot_import_contract(
+            source_run_dir=source_run_dir,
+            payload=payload,
+            expected_model_state_dict=expected_model_state_dict,
+            expected_config_canonical=expected_config_canonical,
+            expected_spec_hash256=expected_spec_hash256,
+        )
+        snapshot_dir = training_paths.snapshots_dir / imported_policy_id
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        weights_path = snapshot_dir / SNAPSHOT_WEIGHTS_FILENAME
+        imported_payload = dict(payload)
+        imported_payload["policy_id"] = imported_policy_id
+        imported_payload["imported_from_run_dir"] = source_run_dir.as_posix()
+        imported_payload["imported_from_policy_id"] = source_snapshot.policy_id
+        imported_payload["imported_from_snapshot_path"] = source_snapshot.path
+        imported_payload["seeded_from_external_registry"] = True
+        torch.save(imported_payload, weights_path)
+        weights_sha256 = _sha256_file(weights_path)
+        _write_json_file(
+            snapshot_dir / SNAPSHOT_METADATA_FILENAME,
+            {
+                "format": "seeded_train_snapshot_metadata_v1",
+                "policy_id": imported_policy_id,
+                "update": int(source_snapshot.update),
+                "weights_path": snapshot_weights_relpath(imported_policy_id),
+                "weights_sha256": weights_sha256,
+                "imported_from_run_dir": source_run_dir.as_posix(),
+                "imported_from_policy_id": source_snapshot.policy_id,
+                "imported_from_snapshot_path": source_snapshot.path,
+            },
+        )
+        registry.add_snapshot(
+            policy_id=imported_policy_id,
+            update=int(source_snapshot.update),
+            weights_sha256=weights_sha256,
+            path=weights_path.relative_to(run_dir).as_posix(),
+        )
+        if source_snapshot.policy_id in source_champions:
+            registry.add_champion(imported_policy_id)
+        existing_policy_ids.add(imported_policy_id)
+        imported_policy_ids.append(imported_policy_id)
+
+    if imported_policy_ids:
+        _save_snapshot_registry_with_retention(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=run_dir,
+            registry=registry,
+        )
+        print(
+            "Imported seeded snapshot pool: "
+            f"count={len(imported_policy_ids)} "
+            f"source_run_dir={source_run_dir.as_posix()}"
+        )
+    return imported_policy_ids
 
 
 def _ensure_noleague_baseline_anchor(
@@ -2401,12 +2712,14 @@ def _resolve_promotion_anchor_policy_ids(
     required_names = set(league.promotion_anchor_set_v1.required)
 
     for anchor_name in anchor_names:
-        candidates = _promotion_anchor_policy_id_candidates(anchor_name)
-        policy_id = next((candidate for candidate in candidates if candidate in available_policy_ids), None)
+        policy_id = _resolve_symbolic_promotion_anchor_policy_id(anchor_name, registry=registry)
+        if policy_id is None:
+            candidates = _promotion_anchor_policy_id_candidates(anchor_name)
+            policy_id = next((candidate for candidate in candidates if candidate in available_policy_ids), None)
         if policy_id is None and anchor_name == _PROMOTION_GATE_RANDOMLEGAL_NAME:
             policy_id = _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID
-        if policy_id is None and anchor_name == HEURISTIC_PUBLIC_POLICY_ID:
-            policy_id = HEURISTIC_PUBLIC_POLICY_ID
+        if policy_id is None and heuristic_public_profile_name_for_policy_id(anchor_name) is not None:
+            policy_id = anchor_name
         if policy_id is not None:
             resolved[anchor_name] = policy_id
             continue
@@ -2570,6 +2883,7 @@ class _PromotionGateRunner:
                 torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
                 torch.as_tensor([current_seat], device=self._device, dtype=torch.long),
                 seat_hidden,
+                scoring_mode="learner",
             )
         logits = logits_tensor[0].detach().cpu().numpy().astype(np.float32, copy=False)
         action, _ = sample_action_pinned(
@@ -2811,47 +3125,73 @@ def _periodic_dev_eval_opponents(
     observation_dim: int,
     action_dim: int,
 ) -> list[tuple[str, str, PolicyValueModel | None, HeuristicPublicPolicy | None]]:
-    opponents: list[tuple[str, str, PolicyValueModel | None, HeuristicPublicPolicy | None]] = [
-        ("b0_randomlegal", _PROMOTION_GATE_RANDOMLEGAL_NAME, None, None),
-    ]
-    baseline_snapshot = _find_noleague_baseline_snapshot(run_dir)
-    if baseline_snapshot is not None:
+    registry_path = ArtifactLayout.from_run_dir(run_dir).training_snapshots_dir / REGISTRY_FILENAME
+    registry = SnapshotRegistry.load(registry_path) if registry_path.is_file() else SnapshotRegistry()
+    anchor_policy_ids, missing_required = _resolve_promotion_anchor_policy_ids(
+        stack=stack,
+        registry=registry,
+    )
+    if missing_required:
+        missing_text = ",".join(missing_required)
+        raise RuntimeError(f"Periodic dev eval is missing required anchors: {missing_text}")
+
+    league = stack.config.league
+    anchor_names: list[str]
+    if league is None:
+        anchor_names = [_PROMOTION_GATE_RANDOMLEGAL_NAME, _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME]
+    else:
+        anchor_names = [
+            *league.promotion_anchor_set_v1.required,
+            *league.promotion_anchor_set_v1.optional_if_available,
+        ]
+
+    snapshot_index = _snapshot_meta_by_policy_id(registry)
+    observation_spec = cast(dict[str, Any] | None, contract.spec_bundle.get("observation"))
+    spec_bundle = cast(dict[str, Any] | None, contract.spec_bundle)
+    opponents: list[tuple[str, str, PolicyValueModel | None, HeuristicPublicPolicy | None]] = []
+    for anchor_name in anchor_names:
+        policy_id = anchor_policy_ids.get(anchor_name)
+        if policy_id is None:
+            continue
+        if policy_id == _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID:
+            opponents.append((policy_id, anchor_name, None, None))
+            continue
+        heuristic_profile = heuristic_public_profile_name_for_policy_id(policy_id)
+        if heuristic_profile is not None:
+            try:
+                heuristic_policy = _build_heuristic_public_policy(
+                    contract.spec_bundle,
+                    scoring_profile=heuristic_profile,
+                )
+            except Exception as exc:
+                if league is not None and anchor_name in league.promotion_anchor_set_v1.required:
+                    raise RuntimeError(
+                        f"Periodic dev eval requires a heuristic-compatible simulator contract for {policy_id}"
+                    ) from exc
+                continue
+            opponents.append((policy_id, anchor_name, None, heuristic_policy))
+            continue
+        snapshot = snapshot_index.get(policy_id)
+        if snapshot is None:
+            if league is not None and anchor_name in league.promotion_anchor_set_v1.required:
+                raise RuntimeError(f"Periodic dev eval could not resolve required snapshot anchor {anchor_name!r}")
+            continue
         opponents.append(
             (
-                _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID,
-                _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME,
+                policy_id,
+                anchor_name,
                 _load_snapshot_eval_model(
                     run_dir=run_dir,
-                    snapshot_path=baseline_snapshot.path,
+                    snapshot_path=snapshot.path,
                     stack=stack,
                     observation_dim=observation_dim,
                     action_dim=action_dim,
-                    observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
-                    spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
+                    observation_spec=observation_spec,
+                    spec_bundle=spec_bundle,
                 ),
                 None,
             )
         )
-
-    league = stack.config.league
-    if league is not None and (
-        HEURISTIC_PUBLIC_POLICY_ID in league.promotion_anchor_set_v1.required
-        or HEURISTIC_PUBLIC_POLICY_ID in league.promotion_anchor_set_v1.optional_if_available
-    ):
-        try:
-            heuristic_policy = HeuristicPublicPolicy.from_spec_bundle(contract.spec_bundle)
-        except Exception as exc:
-            if HEURISTIC_PUBLIC_POLICY_ID in league.promotion_anchor_set_v1.required:
-                raise RuntimeError("Periodic dev eval requires a heuristic-compatible simulator contract for B2") from exc
-        else:
-            opponents.append(
-                (
-                    HEURISTIC_PUBLIC_POLICY_ID,
-                    HEURISTIC_PUBLIC_POLICY_ID,
-                    None,
-                    heuristic_policy,
-                )
-            )
     return opponents
 
 
@@ -2932,9 +3272,7 @@ def _update_stall_monitor(
         "stall_risk": stall_risk,
         "worst_anchor": worst_anchor,
         "stall_indicator_kind": (
-            "no_progress_timeout"
-            if anchor_no_progress_rates.get(worst_anchor, 0.0) > 0.0
-            else "truncation_fallback"
+            "no_progress_timeout" if anchor_no_progress_rates.get(worst_anchor, 0.0) > 0.0 else "truncation_fallback"
         ),
         "worst_stall_rate": worst_rate,
         "worst_truncation_rate": float(anchor_truncation_rates.get(worst_anchor, 0.0)),
@@ -2969,9 +3307,9 @@ def _maybe_rollback_to_best_checkpoint(
     checkpoint_guard = curriculum.checkpoint_guard
     if not checkpoint_guard.enabled or dev_eval_summary is None:
         return None
-    if last_rollback_update is not None and (
-        int(learner.update_count) - int(last_rollback_update)
-    ) < int(checkpoint_guard.cooldown_updates):
+    if last_rollback_update is not None and (int(learner.update_count) - int(last_rollback_update)) < int(
+        checkpoint_guard.cooldown_updates
+    ):
         return None
 
     current_score = _dev_eval_aggregate_score(dev_eval_summary)
@@ -3007,9 +3345,7 @@ def _maybe_rollback_to_best_checkpoint(
     ):
         rollback_reasons.append("truncation")
     max_prob_lt_half = confidence["max_prob_lt_half"]
-    if max_prob_lt_half is not None and (
-        float(max_prob_lt_half) >= float(checkpoint_guard.rollback_max_prob_lt_half)
-    ):
+    if max_prob_lt_half is not None and (float(max_prob_lt_half) >= float(checkpoint_guard.rollback_max_prob_lt_half)):
         rollback_reasons.append("confidence")
     if not rollback_reasons:
         return None
@@ -3210,9 +3546,7 @@ def _run_periodic_dev_eval(
         stack=stack,
         device=device,
         spec_hash256=spec_hash256,
-        algorithm=str(stack.config.training.algorithm).strip()
-        if stack.config.training is not None
-        else None,
+        algorithm=str(stack.config.training.algorithm).strip() if stack.config.training is not None else None,
     )
 
     update_dir = artifacts.run_dir / "eval" / artifact_dir_name / f"update_{update_count}"
@@ -3425,25 +3759,41 @@ def _run_snapshot_promotion_gate(
             spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
         )
         for policy_id in set(anchor_policy_ids.values())
-        if policy_id not in {_PROMOTION_GATE_RANDOMLEGAL_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID}
+        if policy_id != _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID
+        and heuristic_public_profile_name_for_policy_id(policy_id) is None
     }
     heuristic_policies: dict[str, HeuristicPublicPolicy] = {}
-    if HEURISTIC_PUBLIC_POLICY_ID in set(anchor_policy_ids.values()):
+    heuristic_policy_ids = {
+        policy_id
+        for policy_id in set(anchor_policy_ids.values())
+        if heuristic_public_profile_name_for_policy_id(policy_id) is not None
+    }
+    if heuristic_policy_ids:
         try:
             heuristic_policies = {
-                HEURISTIC_PUBLIC_POLICY_ID: HeuristicPublicPolicy.from_spec_bundle(contract.spec_bundle)
+                policy_id: _build_heuristic_public_policy(
+                    contract.spec_bundle,
+                    scoring_profile=cast(str, heuristic_public_profile_name_for_policy_id(policy_id)),
+                )
+                for policy_id in heuristic_policy_ids
             }
         except Exception as exc:
             assert league is not None
-            if HEURISTIC_PUBLIC_POLICY_ID in league.promotion_anchor_set_v1.required:
-                raise RuntimeError("Promotion gate requires a heuristic-compatible simulator contract for B2") from exc
+            missing_required = [
+                policy_id for policy_id in heuristic_policy_ids if policy_id in league.promotion_anchor_set_v1.required
+            ]
+            if missing_required:
+                missing_text = ", ".join(missing_required)
+                raise RuntimeError(
+                    f"Promotion gate requires a heuristic-compatible simulator contract for {missing_text}"
+                ) from exc
             anchor_policy_ids = {
                 anchor_name: policy_id
                 for anchor_name, policy_id in anchor_policy_ids.items()
-                if policy_id != HEURISTIC_PUBLIC_POLICY_ID
+                if heuristic_public_profile_name_for_policy_id(policy_id) is None
             }
             print(
-                "Promotion gate note: skipping optional B2 HeuristicPublic because the active simulator contract "
+                "Promotion gate note: skipping optional heuristic-public anchors because the active simulator contract "
                 f"does not expose the required public action/observation metadata ({exc})."
             )
     runner = _PromotionGateRunner(
@@ -3516,6 +3866,7 @@ def _run_minimal_training(
     spec_hash256: str,
     runtime_mode: QueueRuntimeMode,
     b1_baseline_run_dir: Path | None,
+    seed_snapshot_run_dir: Path | None = None,
     profile_timers: bool = False,
     torch_profiler: bool = False,
     resume_checkpoint_path: Path | None = None,
@@ -3591,6 +3942,16 @@ def _run_minimal_training(
         spec_hash256=spec_hash256,
         baseline_run_dir=b1_baseline_run_dir,
     )
+    if seed_snapshot_run_dir is not None:
+        _import_seed_snapshot_pool(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=artifacts.run_dir,
+            seed_snapshot_run_dir=seed_snapshot_run_dir,
+            expected_model_state_dict=learner.model.state_dict(),
+            expected_config_canonical=canonical_config_dict(stack),
+            expected_spec_hash256=spec_hash256,
+        )
     runtime_config = build_runtime_config(
         stack=stack,
         num_envs=num_envs,
@@ -3610,13 +3971,10 @@ def _run_minimal_training(
         spec_bundle=cast(dict[str, Any], contract.spec_bundle),
         run_dir=artifacts.run_dir,
         performance_log_path=training_paths.performance_log_path,
+        learner_device=device,
     )
     actor_torch_threads = _central_runtime_actor_torch_threads(stack, runtime)
-    learner_torch_threads = (
-        None
-        if stack.config.system is None
-        else int(stack.config.system.learner_torch_threads)
-    )
+    learner_torch_threads = None if stack.config.system is None else int(stack.config.system.learner_torch_threads)
     latest_metrics: dict[str, float] = {}
     last_checkpoint_guard_rollback_update: int | None = None
     last_dev_eval_summary: Mapping[str, Any] | None = None
@@ -3787,7 +4145,9 @@ def _run_minimal_training(
                         dev_eval_summary=summary_payload,
                     )
                     if confirmatory_request is not None:
-                        seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
+                        seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = (
+                            _periodic_dev_eval_schedule(stack)
+                        )
                         confirmatory_pairs = _expand_periodic_dev_eval_paired_seeds(
                             base_paired_seeds,
                             requested_pairs=int(confirmatory_request["target_pairs"]),
@@ -3901,9 +4261,7 @@ def _run_minimal_training(
         spec_hash256=spec_hash256,
         algorithm=algorithm,
     )
-    final_dev_eval_summary = (
-        last_dev_eval_summary if last_dev_eval_update_count == int(learner.update_count) else None
-    )
+    final_dev_eval_summary = last_dev_eval_summary if last_dev_eval_update_count == int(learner.update_count) else None
     tracker_payload = _publish_checkpoint_aliases(
         stack=stack,
         training_paths=training_paths,
@@ -4012,6 +4370,12 @@ def main() -> None:
         help="Completed baseline_noleague run directory used to import the canonical B1 baseline anchor",
     )
     parser.add_argument(
+        "--seed-snapshot-run-dir",
+        type=Path,
+        default=None,
+        help="Optional completed run directory whose snapshot registry should be imported into the current training league before update 1",
+    )
+    parser.add_argument(
         "--resume-run-dir",
         type=Path,
         default=None,
@@ -4047,10 +4411,12 @@ def main() -> None:
     if public_demo_enabled:
         public_demo_bundle = public_demo_spec_bundle()
         assert_spec_bundle_contract(args.spec_hash, public_demo_bundle)
+        spec_bundle = public_demo_bundle
         spec_hash256 = public_demo_spec_hash256()
         simulator_info = public_demo_simulator_info()
     else:
         simulator_contract = load_verified_simulator_contract(stack.root, expected_spec_hash=args.spec_hash)
+        spec_bundle = simulator_contract.spec_bundle
         spec_hash256 = simulator_contract.spec_hash256
         simulator_info = simulator_contract.simulator
     config_hash256 = compute_config_hash256(stack)
@@ -4100,6 +4466,18 @@ def main() -> None:
     print(f"Loaded stack config with {len(stack.components)} components")
 
     device = _resolve_device(stack, args.device)
+    profile = _resolve_runtime_profile(stack, args.profile)
+    seed = _resolve_seed(stack, args.seed)
+    actor_device_layout = _manifest_actor_device_layout(
+        stack=stack,
+        num_envs=num_envs,
+        unroll_length=unroll_length,
+        profile=profile,
+        seed=seed,
+        pass_action_id=int(spec_bundle["action"]["pass_action_id"]),
+        runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
+        learner_device=device,
+    )
     policy_set_selection, policy_set_selection_details = _resolve_policy_set_selection(
         stack,
         snapshot_registry_path=args.snapshot_registry_json,
@@ -4114,16 +4492,13 @@ def main() -> None:
         spec_hash256=spec_hash256,
         config_hash256=config_hash256,
         simulator=simulator_info,
-        spec_bundle=public_demo_spec_bundle() if public_demo_enabled else simulator_contract.spec_bundle,
+        spec_bundle=spec_bundle,
         config_canonical=canonical_config_dict(stack),
         seed_files=build_seed_file_manifest(stack.seed_sets, root=stack.root),
         hardware=_hardware_summary(
             device,
-            actor_device=(
-                "cpu"
-                if stack.config.system is None
-                else stack.config.system.actor_device
-            ),
+            actor_device=("cpu" if stack.config.system is None else stack.config.system.actor_device),
+            actor_device_layout=actor_device_layout,
         ),
         evaluation_pinning=_evaluation_pinning(stack),
         policy_set_selection=policy_set_selection,
@@ -4150,6 +4525,8 @@ def main() -> None:
         }
     if args.b1_baseline_run_dir is not None:
         run_summary_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
+    if args.seed_snapshot_run_dir is not None:
+        run_summary_payload["seed_snapshot_run_dir"] = args.seed_snapshot_run_dir.resolve().as_posix()
     if resume_checkpoint_path is not None:
         run_summary_payload["resume"] = {
             "enabled": True,
@@ -4171,6 +4548,8 @@ def main() -> None:
         }
     if args.b1_baseline_run_dir is not None:
         determinism_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
+    if args.seed_snapshot_run_dir is not None:
+        determinism_payload["seed_snapshot_run_dir"] = args.seed_snapshot_run_dir.resolve().as_posix()
     if resume_checkpoint_path is not None:
         determinism_payload["resume_checkpoint_path"] = resume_checkpoint_path.as_posix()
     _write_json(artifacts.determinism_report_path, determinism_payload)
@@ -4232,8 +4611,6 @@ def main() -> None:
             else int(training_config.checkpoint_interval_updates),
         )
 
-        profile = _resolve_runtime_profile(stack, args.profile)
-        seed = _resolve_seed(stack, args.seed)
         profile_timers = bool(training_config.profile_timers or bool(args.profile_timers))
         torch_profiler = bool(training_config.torch_profiler or bool(args.torch_profiler))
         object.__setattr__(training_config, "profile_timers", bool(profile_timers))
@@ -4264,6 +4641,7 @@ def main() -> None:
             spec_hash256=spec_hash256,
             runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
             b1_baseline_run_dir=None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve(),
+            seed_snapshot_run_dir=None if args.seed_snapshot_run_dir is None else args.seed_snapshot_run_dir.resolve(),
             profile_timers=profile_timers,
             torch_profiler=torch_profiler,
             resume_checkpoint_path=resume_checkpoint_path,

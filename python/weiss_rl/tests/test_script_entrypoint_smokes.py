@@ -35,6 +35,99 @@ def test_check_core_placeholders_entrypoint_passes(monkeypatch) -> None:
     assert module.main() == 0
 
 
+def test_verify_repo_entrypoint_runs_release_verification_steps(monkeypatch) -> None:
+    module = _load_script_module("verify_repo.py")
+    observed: list[tuple[list[str], Path, bool]] = []
+
+    def _fake_run(command: list[str], cwd: Path, check: bool):
+        observed.append((command, cwd, check))
+        return subprocess.CompletedProcess(args=command, returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(module.sys, "executable", "C:/Python/python.exe")
+
+    module.main()
+
+    assert observed == [
+        (["C:/Python/python.exe", "python/scripts/check_core_placeholders.py"], REPO_ROOT, True),
+        (
+            ["C:/Python/python.exe", "-m", "ruff", "check", "python", "tests", "examples", "python/scripts"],
+            REPO_ROOT,
+            True,
+        ),
+        (
+            [
+                "C:/Python/python.exe",
+                "-m",
+                "ruff",
+                "format",
+                "--check",
+                "python",
+                "tests",
+                "examples",
+                "python/scripts",
+            ],
+            REPO_ROOT,
+            True,
+        ),
+        (
+            [
+                "C:/Python/python.exe",
+                "-m",
+                "mypy",
+                "python/scripts/thesis_run.py",
+                "python/scripts/eval.py",
+                "python/scripts/play_vs_model.py",
+            ],
+            REPO_ROOT,
+            True,
+        ),
+        (
+            [
+                "C:/Python/python.exe",
+                "-m",
+                "vulture",
+                "python/weiss_rl",
+                "python/scripts",
+                "examples",
+                "--min-confidence",
+                "80",
+            ],
+            REPO_ROOT,
+            True,
+        ),
+        (["C:/Python/python.exe", "-m", "pytest", "-q", "python/weiss_rl/tests"], REPO_ROOT, True),
+        (
+            [
+                "C:/Python/python.exe",
+                "python/scripts/thesis_run.py",
+                "--preset",
+                "standard",
+                "--run-label",
+                "standard_surface_ci",
+                "--dry-run",
+                "--skip-compare",
+            ],
+            REPO_ROOT,
+            True,
+        ),
+        (
+            [
+                "C:/Python/python.exe",
+                "python/scripts/thesis_run.py",
+                "--preset",
+                "standard-auto-gpu",
+                "--run-label",
+                "standard_auto_gpu_surface_ci",
+                "--dry-run",
+                "--skip-compare",
+            ],
+            REPO_ROOT,
+            True,
+        ),
+    ]
+
+
 def test_train_entrypoint_helper_resolves_central_actor_torch_threads(monkeypatch) -> None:
     module = _load_script_module("train.py")
 
@@ -48,6 +141,18 @@ def test_train_entrypoint_helper_resolves_central_actor_torch_threads(monkeypatc
 
     assert module._central_runtime_actor_torch_threads(stack, central_runtime) == 16
     assert module._central_runtime_actor_torch_threads(stack, process_runtime) is None
+
+
+def test_train_entrypoint_resolves_cuda_auto_to_first_visible_gpu(monkeypatch) -> None:
+    module = _load_script_module("train.py")
+
+    monkeypatch.setattr(module.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(module.torch.cuda, "device_count", lambda: 4)
+    stack = SimpleNamespace(config=SimpleNamespace(system=SimpleNamespace(learner_device="cuda:auto")))
+
+    resolved = module._resolve_device(stack, "")
+
+    assert resolved == module.torch.device("cuda:0")
 
 
 def test_compare_runs_entrypoint_expands_launch_group_and_deduplicates(monkeypatch, tmp_path: Path) -> None:

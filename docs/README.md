@@ -7,6 +7,7 @@ The canonical simulator-backed path uses the published `weiss-sim` package, the 
 ## Start here
 
 - [Getting started](getting_started.md)
+- [Standard recipe](standard_recipe.md)
 - [Runtime modes](runtime_modes.md)
 - [Artifact contract](artifact_contract.md)
 - [Troubleshooting](troubleshooting.md)
@@ -22,4 +23,4 @@ The canonical simulator-backed path uses the published `weiss-sim` package, the 
 3. `artifact_contract.md`
 4. `troubleshooting.md`
 
-If you are only trying to verify a local checkout, run `make verify` or `bash scripts/run_local_ci_parity.sh`.
+If you are only trying to verify a local checkout, run `uv run python python/scripts/verify_repo.py`. `make verify` remains a convenience wrapper, and the Bash parity wrapper is still available on Unix-like shells as `bash scripts/run_local_ci_parity.sh`.

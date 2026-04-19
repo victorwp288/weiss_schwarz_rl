@@ -9,7 +9,6 @@ from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 
 def test_write_run_artifacts_creates_manifest_scaffold(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[3]
     stack = load_stack_config(canonical_stack_config_path())
     manifest = RunManifest(
         run_id256="ab" * 32,

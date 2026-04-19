@@ -1,0 +1,7 @@
+schema_version: 2
+description: structured_acceptance tiny64 fast packed WSL frontier
+extends: structured_acceptance_tiny32_fast_packed.yaml
+model:
+  gru_hidden_size: 64
+  encoder_mlp_width: 64
+  typed_feature_width: 16

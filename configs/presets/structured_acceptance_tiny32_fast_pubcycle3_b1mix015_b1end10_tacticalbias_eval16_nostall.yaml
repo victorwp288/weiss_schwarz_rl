@@ -1,0 +1,13 @@
+schema_version: 2
+description: structured_acceptance tiny32 fast tactical-bias WSL frontier with B1 cutoff, denser periodic dev eval, and no confirmatory stall-monitor re-eval
+extends: structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias.yaml
+curriculum:
+  stall_monitor:
+    enabled: false
+evaluation:
+  seed_files:
+    dev_eval: configs/seeds/dev_eval_seeds.txt
+  periodic_dev_eval_paired_seeds: 16
+reproducibility:
+  seed_files:
+    dev_eval: configs/seeds/dev_eval_seeds.txt

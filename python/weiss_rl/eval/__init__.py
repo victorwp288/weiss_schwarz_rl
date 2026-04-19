@@ -46,6 +46,7 @@ from weiss_rl.eval.rng_pcg32 import NEXT_U64_ORDER, PCG32_XSH_RR_V1, Pcg32XshRrV
 from weiss_rl.eval.policy_set import (
     DevEvalPolicySummary,
     parse_training_policy_id,
+    recommend_focal_policy_id,
     select_final_policy_set_deterministic_v1,
 )
 from weiss_rl.eval.stage2 import Stage2Decision, Stage2StopReason, summarize_stage2_records
@@ -91,6 +92,7 @@ __all__ = [
     "parse_training_policy_id",
     "paired_seed_uncertainty_summary",
     "posterior_samples",
+    "recommend_focal_policy_id",
     "resolve_final_policy_set",
     "run_final_eval",
     "select_final_policy_set_deterministic_v1",

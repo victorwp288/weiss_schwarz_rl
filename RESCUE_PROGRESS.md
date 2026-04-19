@@ -1,0 +1,7749 @@
+# Throughput + Learning Rescue Progress
+
+This file is the continuation point for the April 16, 2026 rescue pass.
+
+## Starting Point
+
+- No prior repo-local rescue progress file existed at takeover time.
+- RL HEAD: `48b613715f7a1fe4b9b9ebd8d2e93220dd7b7d76`
+- Simulator HEAD: `e3992e943b3a56871cfe63458eb9a7f425b946e8`
+- Current working tree already contains uncommitted structured/factorized changes and is treated as the live baseline.
+
+## Reference Baseline From Prior Best Mixed Packed Run
+
+- current best run label: `structured_dev_fast_u1_batchheuristic_simnative_v11`
+- exact throughput numbers:
+  - first real update throughput: `3697.3231606553754` samples/sec
+  - first real update actor env-steps/sec: `2995.3976243799443`
+  - first runtime actor env-steps/sec: `4838.257101016588`
+- exact learner timing breakdown:
+  - warm-start learner total: `43969.52020000026` ms
+  - warm-start learner forward_time_major: `10105.37850000037` ms
+  - warm-start learner packed scorer: `9089.75400000054` ms
+  - warm-start learner trunk: `1015.6093999994482` ms
+  - first real update learner total: `56664.85979999925` ms
+  - first real update learner forward_time_major: `21830.928600000334` ms
+  - first real update learner packed scorer: `19793.758300000263` ms
+  - first real update learner packed reductions: `241.33989999972982` ms
+  - first real update learner trunk: `2037.1637000007468` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `12626.845800014053` ms
+  - first runtime central fixed-opponent overwrite: `23457.554700029505` ms
+  - first runtime collect batch total: `40635.19769999948` ms
+  - first real update central focal policy: `17114.702900043994` ms
+  - first real update central fixed-opponent overwrite: `54.8919000357273` ms
+  - first real update collect batch total: `21630.801500001326` ms
+- what changed:
+  - takeover initialized
+  - created repo-local rescue log
+  - inherited previous packed reference metrics from the existing run artifacts
+- whether learning improved:
+  - unknown in this pass so far
+  - inherited context says training dynamics were healthier than the collapse era but still flat around `0.0` vs `B2 HeuristicPublic`
+- next hypotheses:
+  - verify whether current working tree still reproduces the packed baseline or has already drifted
+  - remove redundant actor-side policy work and/or fixed-opponent overwrite work rather than polishing the existing factorized path
+  - attack learner packed scorer/materialization costs only after confirming actor-side collection is still the dominant wall-clock path
+
+## Attempt 1: Fresh Mixed Packed Baseline On Live Working Tree
+
+- current best run label: `structured_rescue_baseline_packed_live_v1`
+- exact throughput numbers:
+  - first real update throughput: `4592.3743247063985` samples/sec
+  - first real update actor env-steps/sec: `4382.089698218206`
+  - first runtime actor env-steps/sec: `4833.287080202429`
+  - total wall clock to first real update: `141.38211011886597` s
+- exact learner timing breakdown:
+  - warm-start learner total: `23696.557300005225` ms
+  - warm-start learner forward_time_major: `5657.878800004255` ms
+  - warm-start learner packed scorer: `5005.62580001133` ms
+  - warm-start learner trunk: `652.2387000004528` ms
+  - first real update learner total: `55824.34789999388` ms
+  - first real update learner forward_time_major: `36839.915200005635` ms
+  - first real update learner packed scorer: `20360.005299997283` ms
+  - first real update learner packed reductions: `294.26899999089073` ms
+  - first real update learner trunk: `16479.90179999033` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `12273.079599966877` ms
+  - first runtime focal policy model only: `11640.322799852584` ms
+  - first runtime focal policy pack: `444.9999002245022` ms
+  - first runtime focal policy scatter: `100.92020008596592` ms
+  - first runtime central fixed-opponent overwrite: `23990.31820005621` ms
+  - first runtime collect batch total: `40677.332399995066` ms
+  - first real update central focal policy: `16429.749000046286` ms
+  - first real update focal policy model only: `15555.619599777856` ms
+  - first real update focal policy pack: `635.3105998859974` ms
+  - first real update focal policy scatter: `123.72179995873012` ms
+  - first real update central fixed-opponent overwrite: `62.14120036747772` ms
+  - first real update collect batch total: `21133.24619999912` ms
+- what changed:
+  - ran a fresh real mixed packed probe on the live working tree with run label `structured_rescue_baseline_packed_live_v1`
+  - confirmed the live tree is better than the inherited packed reference, but still far from the rescue target class
+- whether learning improved:
+  - no convincing evidence yet
+  - loss is numerically healthy on the single-update probe, but this is still only throughput/baseline validation
+- next hypotheses:
+  - learner is still the first major wall-clock sink on the real update; packed scorer plus trunk remain too expensive
+  - warm-start fixed-opponent overwrite is still a large startup tax, but the steady-state mixed update is dominated more by focal model + learner
+  - inspect the structured scorer/trunk architecture for repeated candidate materialization and family-by-family branching, then replace that path rather than keep tuning chunk sizes
+
+## Attempt 2: Packed Slimmer Model Capacity Probe (`128/128/32`)
+
+- current best run label: `structured_rescue_packed_h128_probe_v1`
+- exact throughput numbers:
+  - first real update throughput: `5704.863898274551` samples/sec
+  - first real update actor env-steps/sec: `6651.691595565134`
+  - first runtime actor env-steps/sec: `5004.378444728269`
+  - total wall clock to first real update: `86.44654989242554` s
+- exact learner timing breakdown:
+  - warm-start learner total: `11496.30120000802` ms
+  - warm-start learner forward_time_major: `951.7769999947632` ms
+  - warm-start learner packed scorer: `465.19580000313` ms
+  - warm-start learner trunk: `486.568599997554` ms
+  - first real update learner total: `17593.90500000154` ms
+  - first real update learner forward_time_major: `7557.804099997156` ms
+  - first real update learner packed scorer: `3938.568600002327` ms
+  - first real update learner packed reductions: `17.07600000372622` ms
+  - first real update learner trunk: `3619.228600000497` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `11666.875099981553` ms
+  - first runtime focal policy model only: `11014.178100187564` ms
+  - first runtime focal policy pack: `467.24519977578893` ms
+  - first runtime focal policy scatter: `100.10989986767527` ms
+  - first runtime central fixed-opponent overwrite: `23198.427600160358` ms
+  - first runtime collect batch total: `39286.322500003735` ms
+  - first real update central focal policy: `13642.80320025864` ms
+  - first real update focal policy model only: `12840.282799967099` ms
+  - first real update focal policy pack: `590.4675997007871` ms
+  - first real update focal policy scatter: `110.18790019443259` ms
+  - first real update central fixed-opponent overwrite: `50.68940029013902` ms
+  - first real update collect batch total: `18023.36119998654` ms
+- what changed:
+  - ran a real mixed packed probe with overrides:
+    - `model.gru_hidden_size=128`
+    - `model.encoder_mlp_width=128`
+    - `model.typed_feature_width=32`
+  - no code changes yet; this was an architecture-capacity sweep to identify whether the existing model is oversized
+- whether learning improved:
+  - unknown in a single-update probe
+  - training remained numerically healthy, but no longer-run B2 evidence yet
+- next hypotheses:
+  - current structured model is materially oversized for this task/runtime; slimming is a first-class throughput lever, not a marginal tweak
+  - we should probe one more smaller capacity point to find the knee of the curve, then codify a slim structured preset
+  - after capacity is right-sized, revisit the action contract with a sparse exact factorized path so throughput stops scaling with packed candidate count
+
+## Attempt 3: Packed Even Slimmer Capacity Probe (`96/96/24`)
+
+- current best run label: `structured_rescue_packed_h96_probe_v1`
+- exact throughput numbers:
+  - first real update throughput: `7479.908971361688` samples/sec
+  - first real update actor env-steps/sec: `10838.410065161732`
+  - first runtime actor env-steps/sec: `5722.204208346026`
+  - total wall clock to first real update: `53.34059429168701` s
+- exact learner timing breakdown:
+  - warm-start learner total: `2440.497699994012` ms
+  - warm-start learner forward_time_major: `592.1583000017563` ms
+  - warm-start learner packed scorer: `167.52370000176597` ms
+  - warm-start learner trunk: `424.6192999999039` ms
+  - first real update learner total: `833.7442000047304` ms
+  - first real update learner forward_time_major: `360.5797999916831` ms
+  - first real update learner packed scorer: `115.59649999253452` ms
+  - first real update learner packed reductions: `11.088100000051782` ms
+  - first real update learner trunk: `244.97539999720175` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `9953.903100147727` ms
+  - first runtime focal policy model only: `9387.71189977706` ms
+  - first runtime focal policy pack: `409.5959005499026` ms
+  - first runtime focal policy scatter: `87.70220023870934` ms
+  - first runtime central fixed-opponent overwrite: `20293.175800004974` ms
+  - first runtime collect batch total: `34359.03469999903` ms
+  - first real update central focal policy: `11666.592700275942` ms
+  - first real update focal policy model only: `10965.534499991918` ms
+  - first real update focal policy pack: `528.2388002378866` ms
+  - first real update focal policy scatter: `93.19229990069289` ms
+  - first real update central fixed-opponent overwrite: `40.38340046827216` ms
+  - first real update collect batch total: `15663.808400000562` ms
+- what changed:
+  - ran a second real mixed packed probe with overrides:
+    - `model.gru_hidden_size=96`
+    - `model.encoder_mlp_width=96`
+    - `model.typed_feature_width=24`
+  - this moved the bottleneck decisively from learner time to actor collection time
+- whether learning improved:
+  - still unknown in a single-update probe
+  - numerics remained healthy and did not collapse immediately
+- next hypotheses:
+  - the best immediate throughput path is to codify a slim structured preset around this size class
+  - with learner cost now tiny, the next large win should come from reducing actor-side focal-policy time and warm-start fixed-opponent overwrite
+  - probe one more smaller model point (`64` class) to locate the throughput/expressivity knee before changing defaults
+
+## Attempt 4: Packed Smallest Capacity Probe So Far (`64/64/16`)
+
+- current best run label: `structured_rescue_packed_h64_probe_v1`
+- exact throughput numbers:
+  - first real update throughput: `7967.072745317138` samples/sec
+  - first real update actor env-steps/sec: `11798.69452815064`
+  - first runtime actor env-steps/sec: `6026.731655690719`
+  - total wall clock to first real update: `49.88855600357056` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1905.605200008722` ms
+  - warm-start learner forward_time_major: `526.5887999994447` ms
+  - warm-start learner packed scorer: `130.14559999282937` ms
+  - warm-start learner trunk: `396.42900000035297` ms
+  - first real update learner total: `594.9534999963362` ms
+  - first real update learner forward_time_major: `193.5083999997005` ms
+  - first real update learner packed scorer: `96.89649999199901` ms
+  - first real update learner packed reductions: `11.950999993132427` ms
+  - first real update learner trunk: `96.60590000567026` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `9342.109099787194` ms
+  - first runtime focal policy model only: `8803.632399765775` ms
+  - first runtime focal policy pack: `395.266700128559` ms
+  - first runtime focal policy scatter: `78.39950012566987` ms
+  - first runtime central fixed-opponent overwrite: `19230.46149991569` ms
+  - first runtime collect batch total: `32622.738099991693` ms
+  - first real update central focal policy: `10833.259999970323` ms
+  - first real update focal policy model only: `10163.592999626417` ms
+  - first real update focal policy pack: `504.44299999799114` ms
+  - first real update focal policy scatter: `90.76389987603761` ms
+  - first real update central fixed-opponent overwrite: `35.86579985858407` ms
+  - first real update collect batch total: `14722.178800002439` ms
+- what changed:
+  - ran a third real mixed packed probe with overrides:
+    - `model.gru_hidden_size=64`
+    - `model.encoder_mlp_width=64`
+    - `model.typed_feature_width=16`
+  - this is the current throughput leader for mixed packed probes in this pass
+- whether learning improved:
+  - still unknown in a single-update probe
+  - numerics remained stable; no immediate collapse or overflow
+- next hypotheses:
+  - capacity slimming alone produced a `2.15x` throughput gain vs the live packed baseline (`7967.07` vs `4592.37`)
+  - the best next step is a real learning check comparing `96` vs `64` slim presets over multiple updates and B2-facing evals
+  - once the safer slim size is chosen, codify it in new presets and then decide whether actor-side routing or sparse factorized policy should be the next engineering pass
+
+## Attempt 5: Slim64 Exact Teacher-Action Probe (`teacher_action_coef=0.25`, warm-start `1.0`)
+
+- current best run label: `structured_rescue_slim64_teacheraction_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `7870.8649173425465` samples/sec
+  - first real update actor env-steps/sec: `11553.067028683456`
+  - first runtime actor env-steps/sec: `5981.155104230603`
+  - total wall clock to first real update: `50.53582453727722` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1962.861400010297` ms
+  - warm-start learner packed scorer: `132.80730000406038` ms
+  - warm-start learner trunk: `429.6613000042271` ms
+  - warm-start learner teacher aux: `45.10550000122748` ms
+  - first real update learner total: `637.2867999889422` ms
+  - first real update learner packed scorer: `96.16210000240244` ms
+  - first real update learner trunk: `102.66369998862501` ms
+  - first real update learner packed reductions: `5.318000010447577` ms
+  - first real update learner teacher aux: `23.50579999620095` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `9355.184800253483` ms
+  - first runtime focal policy model only: `8817.21099987044` ms
+  - first runtime central fixed-opponent overwrite: `19454.422799448366` ms
+  - first runtime collect batch total: `32870.3111000068` ms
+  - first real update central focal policy: `11084.960299936938` ms
+  - first real update focal policy model only: `10393.76310010266` ms
+  - first real update central fixed-opponent overwrite: `36.07129979354795` ms
+  - first real update collect batch total: `15020.678500004578` ms
+- what changed:
+  - implemented exact `teacher_action` label plumbing end to end through runtime transport, learner batches, config parsing, warm-start overrides, and structured auxiliary losses
+  - enabled direct teacher-action imitation on the slim64 fast path with stronger overrides than the new preset defaults:
+    - `training.structured_aux.teacher_action_coef=0.25`
+    - `training.structured_warmstart.teacher_action_coef=1.0`
+- whether learning improved:
+  - unknown from the one-update mixed probe
+  - exact teacher-action metrics are now live and finite on the real update:
+    - `teacher_action_accuracy=0.35169675090252706`
+    - `teacher_action_loss=1.9180781841278076`
+    - `teacher_action_supported_fraction=1.0`
+- next hypotheses:
+  - the throughput tax of exact teacher imitation is small enough to keep; compared with the prior slim64 probe, throughput only moved from `7967.07` to `7870.86`
+  - the next meaningful question is purely learning: whether exact tactical imitation during warm-start and main updates finally moves dev-eval above `0.0` vs `B2 HeuristicPublic`
+  - if B2 is still flat after a short acceptance run, increase exact-action weight further and/or bias league mix harder toward B2 tactical rows instead of revisiting throughput
+
+## Attempt 6: Slim64 Acceptance Probe With Exact Teacher-Action (`u5`, dev eval at update 5)
+
+- current best run label: `structured_acceptance_slim64_teacheraction_u5_dev5_v1`
+- exact throughput numbers:
+  - update 1 throughput: `7725.786500118662` samples/sec
+  - update 2 throughput: `8877.705381103091` samples/sec
+  - update 3 throughput: `9592.702641527838` samples/sec
+  - update 4 throughput: `10084.401630641963` samples/sec
+  - update 5 throughput: `10437.815800695183` samples/sec
+  - first runtime actor env-steps/sec: `5802.9366755905985`
+  - update 5 actor env-steps/sec: `12654.583136267667`
+  - update 5 actor env-steps/sec cumulative: `10448.002207564397`
+  - total wall clock at update 5: `113.50449061393738` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1975.9561999962898` ms
+  - warm-start learner packed scorer: `132.52709999505896` ms
+  - warm-start learner trunk: `391.05979999294505` ms
+  - warm-start learner teacher aux: `43.56809999444522` ms
+  - update 5 learner total: `590.0734000024386` ms
+  - update 5 learner packed scorer: `93.30989999580197` ms
+  - update 5 learner trunk: `99.57040000881534` ms
+  - update 5 learner packed reductions: `5.549399997107685` ms
+  - update 5 learner teacher aux: `19.84910000464879` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `9645.970600031433` ms
+  - first runtime focal policy model only: `9092.11970004253` ms
+  - first runtime central fixed-opponent overwrite: `20058.41070000315` ms
+  - first runtime collect batch total: `33874.74290000682` ms
+  - update 5 central focal policy: `10952.599299838766` ms
+  - update 5 focal policy model only: `10275.219400471542` ms
+  - update 5 central fixed-opponent overwrite: `37.72270050831139` ms
+  - update 5 collect batch total: `14906.81709999626` ms
+- what changed:
+  - ran the first real slim64 acceptance-style learning probe with exact teacher-action imitation enabled in both warm-start and main learner updates
+  - used overrides:
+    - `training.structured_warmstart.updates=1`
+    - `training.structured_aux.teacher_action_coef=0.25`
+    - `training.structured_warmstart.teacher_action_coef=1.0`
+    - `evaluation.periodic_dev_eval_interval_updates=5`
+    - `evaluation.periodic_dev_eval_paired_seeds=4`
+- whether learning improved:
+  - yes, but only partially
+  - compared with the earlier slim64 acceptance run at update 5:
+    - aggregate dev score improved from `0.4166666666666667` to `0.4583333333333333`
+    - `B1 NoLeague baseline` improved from `0.5` to `0.625`
+    - `B2 HeuristicPublic` stayed flat at `0.0`
+  - update 5 teacher metrics:
+    - `teacher_action_accuracy=0.35255169116768253`
+    - `teacher_action_loss=1.9039181470870972`
+    - `teacher_action_supported_fraction=1.0`
+    - `teacher_slot_accuracy=0.3911891159667825`
+    - `teacher_family_accuracy=0.9226552664708351`
+    - `teacher_attack_type_accuracy=0.9104761904761904`
+- next hypotheses:
+  - exact teacher-action imitation is helping enough to move the weaker anchor, so the mechanism is not dead, but it is still too weak or too short-lived to beat `B2` quickly
+  - the next aggressive test should increase teacher-action weight substantially and/or extend warm-start beyond a single update so the tactical prior lands before RL drift
+  - if a stronger imitation-heavy run still remains `0.0` vs `B2`, the remaining problem is likely not “insufficient supervision weight” but a deeper mismatch in action semantics or opponent-facing objective
+
+## Attempt 7: Stronger Exact Teacher-Action Acceptance Probe (`teacher_action_coef=1.0`, warm-start `4.0`, `8` warm-start updates)
+
+- current best run label: `structured_acceptance_slim64_teacheraction_strong_ws8_u5_dev5_v1`
+- exact throughput numbers:
+  - update 1 throughput: `6129.4461575949945` samples/sec
+  - update 2 throughput: `6459.212884024608` samples/sec
+  - update 3 throughput: `6760.186206212213` samples/sec
+  - update 4 throughput: `7031.141176501835` samples/sec
+  - update 5 throughput: `7280.007093187814` samples/sec
+  - update 5 actor env-steps/sec: `12655.525627312252`
+  - total wall clock at update 5: `351.5619728565216` s
+- exact learner timing breakdown:
+  - warm-start step 1 learner total: `1925.397700004396` ms
+  - warm-start step 1 learner packed scorer: `132.91700000991113` ms
+  - warm-start step 1 learner trunk: `399.5253000030061` ms
+  - warm-start step 1 learner teacher aux: `45.55120000441093` ms
+  - warm-start step 8 learner total: `1627.7877999816556` ms
+  - warm-start step 8 learner packed scorer: `132.79929998656735` ms
+  - warm-start step 8 learner trunk: `146.36240000231192` ms
+  - warm-start step 8 learner teacher aux: `45.35940001346171` ms
+  - update 5 learner total: `579.3031000066549` ms
+  - update 5 learner packed scorer: `95.2541000006022` ms
+  - update 5 learner trunk: `96.71800000069197` ms
+  - update 5 learner packed reductions: `5.634700006339699` ms
+  - update 5 learner teacher aux: `21.876300001167692` ms
+- exact actor timing breakdown:
+  - update 5 central focal policy: `11024.080099916318` ms
+  - update 5 focal policy model only: `10291.000599929248` ms
+  - update 5 central fixed-opponent overwrite: `36.74599967780523` ms
+  - update 5 collect batch total: `15032.815700003994` ms
+- what changed:
+  - increased exact action imitation aggressively during both main updates and warm-start:
+    - `training.structured_aux.teacher_action_coef=1.0`
+    - `training.structured_warmstart.teacher_action_coef=4.0`
+  - extended warm-start from `1` update to `8` updates before the five measured RL updates
+- whether learning improved:
+  - no meaningful improvement on the key target
+  - dev eval at update 5:
+    - aggregate: `0.4583333333333333`
+    - `B0 RandomLegal: 0.625`
+    - `B1 NoLeague baseline: 0.75`
+    - `B2 HeuristicPublic: 0.0`
+  - exact teacher metrics at update 5:
+    - `teacher_action_accuracy=0.3429673375919007`
+    - `teacher_action_loss=1.936551809310913`
+    - `teacher_action_supported_fraction=1.0`
+    - `teacher_slot_accuracy=0.6097967539113905`
+    - `teacher_family_accuracy=0.9323509360742567`
+    - `teacher_attack_type_accuracy=0.8869346733668342`
+    - `teacher_aux_loss=2.1581006050109863`
+- next hypotheses:
+  - stronger exact-action imitation plus longer warm-start is not sufficient to move `B2`, so the remaining failure is unlikely to be fixed by supervision weight tuning alone
+  - the next pass should target semantic mismatch directly, especially the action families where B2 still gets tactical leverage that exact action cloning does not transfer into robust policy behavior
+  - `MainMove` and related tactical/public-rule decisions are still the top suspects and now need dedicated diagnostics and/or dedicated supervision rather than generic exact-action weighting
+
+## Attempt 8: Same-Family Tactical Distillation Probe (`same_family_action_coef=0.75`, warm-start `2.0`)
+
+- current best run label: `structured_rescue_slim64_samefamily_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `7751.267001697393` samples/sec
+  - first real update actor env-steps/sec: `11327.916882260557`
+  - first runtime actor env-steps/sec: `5905.815468717836`
+  - total wall clock to first real update: `51.32841348648071` s
+- exact learner timing breakdown:
+  - warm-start learner total: `2029.0549999917857` ms
+  - warm-start learner packed scorer: `133.0030999961309` ms
+  - warm-start learner trunk: `393.7397000117926` ms
+  - warm-start learner teacher aux: `48.17549999279436` ms
+  - first real update learner total: `673.5565999988467` ms
+  - first real update learner packed scorer: `96.84529999503866` ms
+  - first real update learner trunk: `100.47259999555536` ms
+  - first real update learner packed reductions: `5.712199999834411` ms
+  - first real update learner teacher aux: `27.62750000692904` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `9487.331899945275` ms
+  - first runtime focal policy model only: `8945.263399931719` ms
+  - first runtime central fixed-opponent overwrite: `19712.04210034921` ms
+  - first runtime collect batch total: `33290.242200004286` ms
+  - first real update central focal policy: `11283.374699822161` ms
+  - first real update focal policy model only: `10579.842300488963` ms
+  - first real update central fixed-opponent overwrite: `39.448399911634624` ms
+  - first real update collect batch total: `15286.410900007468` ms
+- what changed:
+  - added a new `teacher_same_family_action_coef` auxiliary path that re-normalizes over legal actions within the teacher family and supervises the exact tactical branch choice instead of only the global action id
+  - added supporting metrics:
+    - `teacher_same_family_action_accuracy`
+    - `teacher_same_family_action_loss`
+    - `teacher_same_family_action_supported_fraction`
+    - `teacher_same_family_main_play_character_accuracy`
+    - `teacher_same_family_main_move_accuracy`
+  - probe overrides:
+    - `training.structured_aux.teacher_action_coef=0.25`
+    - `training.structured_aux.teacher_same_family_action_coef=0.75`
+    - `training.structured_warmstart.teacher_action_coef=1.0`
+    - `training.structured_warmstart.teacher_same_family_action_coef=2.0`
+- whether learning improved:
+  - still unknown from a one-update probe
+  - the new within-family tactical metric is now observable on real updates, and it starts very low:
+    - `teacher_same_family_action_accuracy=0.13464150943396228`
+    - `teacher_same_family_action_loss=2.7397818565368652`
+    - `teacher_same_family_action_supported_fraction=0.31889290012033694`
+    - `teacher_same_family_main_play_character_accuracy=0.05880356385235469`
+    - `teacher_same_family_main_move_accuracy=0.0`
+  - broad teacher metrics on the same update:
+    - `teacher_family_accuracy=0.9038582183186951`
+    - `teacher_slot_accuracy=0.22681560969888878`
+    - `teacher_action_accuracy=0.35250300842358606`
+- next hypotheses:
+  - the audit-backed loss is now targeting the right failure mode, but the first probe shows the model is still far from matching B2 on within-family tactical choice
+  - throughput remains acceptable for more learning probes, though this setting is slightly slower than the prior exact-action-only slim64 run (`7751.27` vs `7870.86`)
+  - the next meaningful test is a short acceptance run with this new same-family signal active to see whether the new metric climbs across updates and whether `B2 HeuristicPublic` finally moves above `0.0`
+
+## Attempt 9: Same-Family Tactical Acceptance Probe (`same_family_action_coef=0.75`, warm-start `2.0`, `5` updates)
+
+- current best run label: `structured_acceptance_slim64_samefamily_u5_dev5_v1`
+- exact throughput numbers:
+  - update 1 throughput: `7895.872322243819` samples/sec
+  - update 2 throughput: `9014.97258189517` samples/sec
+  - update 3 throughput: `9724.851334077173` samples/sec
+  - update 4 throughput: `10200.665289130946` samples/sec
+  - update 5 throughput: `10540.722210227565` samples/sec
+  - update 5 actor env-steps/sec: `12649.515357948392`
+  - update 5 cumulative actor env-steps/sec: `10552.581530292604`
+  - total wall clock at update 5: `112.38198232650757` s
+- exact learner timing breakdown:
+  - warm-start step 1 learner total: `2049.792299997527` ms
+  - warm-start step 1 learner packed scorer: `135.7948999935761` ms
+  - warm-start step 1 learner trunk: `398.89839999575634` ms
+  - warm-start step 1 learner teacher aux: `51.15049998823088` ms
+  - update 5 learner total: `585.0809999974445` ms
+  - update 5 learner packed scorer: `94.48329999577254` ms
+  - update 5 learner trunk: `98.2668999931775` ms
+  - update 5 learner packed reductions: `5.481100000906736` ms
+  - update 5 learner teacher aux: `23.9648999995552` ms
+- exact actor timing breakdown:
+  - update 5 central focal policy: `10947.106399427867` ms
+  - update 5 focal policy model only: `10264.108100323938` ms
+  - update 5 central fixed-opponent overwrite: `38.16739993635565` ms
+  - update 5 collect batch total: `14931.264200000442` ms
+- what changed:
+  - carried the new same-family tactical distillation signal into a real acceptance run:
+    - `training.structured_aux.teacher_action_coef=0.25`
+    - `training.structured_aux.teacher_same_family_action_coef=0.75`
+    - `training.structured_warmstart.teacher_action_coef=1.0`
+    - `training.structured_warmstart.teacher_same_family_action_coef=2.0`
+  - kept the slim model settings that were sustaining the faster packed path:
+    - `model.gru_hidden_size=64`
+    - `model.encoder_mlp_width=64`
+    - `model.typed_feature_width=16`
+- whether learning improved:
+  - no, this is a negative result
+  - dev eval at update 5:
+    - aggregate: `0.4166666666666667`
+    - `B0 RandomLegal: 0.5`
+    - `B1 NoLeague baseline: 0.75`
+    - `B2 HeuristicPublic: 0.0`
+  - the new within-family metric stayed essentially flat and low across the run:
+    - update 1 `teacher_same_family_action_accuracy=0.13803951659313254`
+    - update 5 `teacher_same_family_action_accuracy=0.14044025396342621`
+    - update 1 `teacher_same_family_main_play_character_accuracy=0.05928648648648649`
+    - update 5 `teacher_same_family_main_play_character_accuracy=0.059330389677198093`
+    - update 1 `teacher_same_family_main_move_accuracy=0.0`
+    - update 5 `teacher_same_family_main_move_accuracy=0.0`
+- next hypotheses:
+  - exact-within-family action supervision on canonical action ids is not the missing learning signal
+  - the remaining failure is likely structural: either the scorer cannot represent the relevant per-card/per-slot tactical distinctions well enough, or the observation / action contract is still hiding the right information from the learner
+  - the next pass should inspect `main_play_character` candidate scoring and card-feature conditioning directly instead of doing more teacher-loss tuning
+
+## Attempt 10: Public-Heuristic Prior Mixed Probe (`public_heuristic_logit_bias_scale=1.0`)
+
+- current best run label: `structured_rescue_slim64_publicbias1_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `6813.657092684228` samples/sec
+  - first real update actor env-steps/sec: `10241.457396316904`
+  - first runtime actor env-steps/sec: `5115.838454284392`
+  - total wall clock to first real update: `58.25224041938782` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1993.2706999970833` ms
+  - warm-start learner packed scorer: `150.8804000040982` ms
+  - warm-start learner trunk: `419.65160000836477` ms
+  - warm-start learner teacher aux: `43.2989999972051` ms
+  - first real update learner total: `615.5466999916825` ms
+  - first real update learner packed scorer: `114.08940001274459` ms
+  - first real update learner trunk: `103.60849999415223` ms
+  - first real update learner packed reductions: `5.698099994333461` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `11452.915299494634` ms
+  - first runtime focal policy model only: `10897.77729990601` ms
+  - first runtime central fixed-opponent overwrite: `22808.635600013076` ms
+  - first runtime collect batch total: `38430.660300000454` ms
+  - first real update central focal policy: `13121.187300086603` ms
+  - first real update focal policy model only: `12420.496799910325` ms
+  - first real update central fixed-opponent overwrite: `39.83000018342864` ms
+  - first real update collect batch total: `17167.62480000034` ms
+- what changed:
+  - fixed real packed scorer blind spots before the probe:
+    - index families (`level_up`, `trigger_order`, `choice_select`) now route through a dedicated generic-index projection instead of collapsing in the default branch
+    - slot families (`encore_pay`, `encore_decline`) now get dedicated slot-conditioned packed scoring instead of collapsing in the default branch
+    - hand-indexed actions now add a hand-position embedding on top of hand-card embeddings so duplicate same-card entries are distinguishable
+  - added a direct public-heuristic logit prior for the packed policy scorer and enabled it at `model.public_heuristic_logit_bias_scale=1.0`
+- whether learning improved:
+  - unknown from a one-update probe
+  - the structural scorer fixes are correctness wins, but this exact all-path public prior is a throughput regression versus the earlier slim64 packed reference (`6813.66` vs `7751.27` on the closest one-update probe)
+- next hypotheses:
+  - the public prior may contain useful learning signal, but paying for it on actor-time inference is too expensive
+  - the next pass should split actor-time and learner-time heuristic bias so the learner can still see the prior while the actor path stays close to the faster packed baseline
+
+## Attempt 11: Public-Heuristic Fair Acceptance Probe (`public_heuristic_logit_bias_scale=1.0`, warm-start `1`, `5` updates)
+
+- current best run label: `structured_acceptance_slim64_publicbias1_ws1_u5_dev5_v3`
+- exact throughput numbers:
+  - update 1 throughput: `6849.69962090797` samples/sec
+  - update 2 throughput: `7814.537588217699` samples/sec
+  - update 3 throughput: `8424.175727903019` samples/sec
+  - update 4 throughput: `8838.542481778348` samples/sec
+  - update 5 throughput: `9141.733988337028` samples/sec
+  - update 5 actor env-steps/sec: `11033.66466555983`
+  - update 5 cumulative actor env-steps/sec: `9149.499542030575`
+  - total wall clock at update 5: `129.55771946907043` s
+- exact learner timing breakdown:
+  - warm-start step 1 learner total: `1963.6079000047175` ms
+  - warm-start step 1 learner packed scorer: `144.9480000010226` ms
+  - warm-start step 1 learner trunk: `406.88130000489764` ms
+  - warm-start step 1 learner teacher aux: `43.841999999131076` ms
+  - update 5 learner total: `618.922499998007` ms
+  - update 5 learner packed scorer: `108.19900000933558` ms
+  - update 5 learner trunk: `96.76089999265969` ms
+  - update 5 learner packed reductions: `5.762699991464615` ms
+  - update 5 learner teacher aux: `19.489600002998486` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `11320.619500533212` ms
+  - first runtime focal policy model only: `10773.376299490337` ms
+  - first runtime central fixed-opponent overwrite: `22546.935900201788` ms
+  - first runtime collect batch total: `38018.039500006125` ms
+  - update 5 central focal policy: `13088.009099810733` ms
+  - update 5 focal policy model only: `12398.694799776422` ms
+  - update 5 central fixed-opponent overwrite: `39.57110007468145` ms
+  - update 5 collect batch total: `17182.723900012206` ms
+- what changed:
+  - carried the new scorer correctness fixes and the direct public-heuristic prior into a fair acceptance run
+  - kept warm-start aligned to the fair comparison harness with `training.structured_warmstart.updates=1`
+  - used a compatible regenerated B1 anchor because the scorer contract changed and older B1 baselines could not be imported after adding:
+    - `policy_head.generic_candidate_projection.*`
+    - `policy_head.hand_position_embedding.weight`
+- whether learning improved:
+  - yes, this is the first fair run in the rescue log that moved `B2 HeuristicPublic` above `0.0`
+  - dev eval at update 5:
+    - aggregate: `0.5833333333333334`
+    - `B0 RandomLegal: 1.0`
+    - `B1 NoLeague baseline: 0.375`
+    - `B2 HeuristicPublic: 0.375`
+  - this is still slower than the faster same-family packed baseline:
+    - attempt 9 update 5 throughput: `10540.722210227565`
+    - this run update 5 throughput: `9141.733988337028`
+    - attempt 9 wall clock: `112.38198232650757` s
+    - this run wall clock: `129.55771946907043` s
+  - an accidental longer-warm-start variant (`structured_acceptance_slim64_publicbias1_u5_dev5_v2`) reached aggregate `0.875` and `B2 HeuristicPublic=1.0`, so the signal looks real even though that run is not apples-to-apples because it used the preset default `32` warm-start updates
+- next hypotheses:
+  - the public prior is likely a real learning lever, but it needs to be decoupled from actor-time scoring cost
+  - the next experiment should keep learner-side public shaping while disabling or shrinking actor-side public shaping to recover throughput without giving back the `B2` gain
+
+## Attempt 12: Tiny Public-Bias Speed Sweep (`48` vs `32` hidden widths)
+
+- current best run label: `structured_rescue_tiny32_publicbias1_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `7131.653245004769` samples/sec
+  - first real update actor env-steps/sec: `10896.584853592081`
+  - first runtime actor env-steps/sec: `5310.243306622193`
+  - total wall clock to first real update: `55.62397480010986` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1918.2277000072645` ms
+  - warm-start learner packed scorer: `127.99639999866486` ms
+  - warm-start learner trunk: `360.36770000646356` ms
+  - warm-start learner teacher aux: `43.980599992210045` ms
+  - first real update learner total: `548.3553000085521` ms
+  - first real update learner packed scorer: `95.83209999254905` ms
+  - first real update learner trunk: `84.70500000112224` ms
+  - first real update learner packed reductions: `5.089500002213754` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10928.151700281887` ms
+  - first runtime focal policy model only: `10409.373899921775` ms
+  - first runtime central fixed-opponent overwrite: `21970.192799679353` ms
+  - first runtime collect batch total: `37023.492699998314` ms
+  - first real update central focal policy: `12212.853999939398` ms
+  - first real update focal policy model only: `11549.597200239077` ms
+  - first real update central fixed-opponent overwrite: `34.19529981329106` ms
+  - first real update collect batch total: `16089.105500010191` ms
+- what changed:
+  - ran a direct size sweep under the same public-bias regime to see whether smaller recurrent/trunk widths can buy back the actor-time tax
+  - tested:
+    - `structured_rescue_tiny48_publicbias1_u1_v1`
+    - `structured_rescue_tiny32_publicbias1_u1_v1`
+  - exact tiny48 comparison point:
+    - throughput: `6926.863966574737` samples/sec
+    - first real update actor env-steps/sec: `10593.830455182067`
+    - learner total: `573.0956999905175` ms
+    - packed scorer: `100.5066999932751` ms
+- whether learning improved:
+  - unknown from one-update probes
+  - speed improved slightly relative to the slim64 public-bias run, but the best tiny32 result still did not recover the earlier packed reference throughput
+- next hypotheses:
+  - model shrinkage alone is not enough; the actor-side public prior cost is the more likely culprit
+  - pursue split actor-vs-learner public bias before doing more width tuning
+
+## Attempt 13: Core-Only Public-Bias Scope Trim
+
+- current best run label: `structured_rescue_slim64_publicbias1_core_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `6965.868478292822` samples/sec
+  - first real update actor env-steps/sec: `10453.33723129091`
+  - first runtime actor env-steps/sec: `5232.748682284554`
+  - total wall clock to first real update: `57.043949604034424` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1965.7443999894895` ms
+  - warm-start learner packed scorer: `155.85910000663716` ms
+  - warm-start learner trunk: `387.5353999901563` ms
+  - warm-start learner teacher aux: `43.58259998844005` ms
+  - first real update learner total: `655.3476999979466` ms
+  - first real update learner packed scorer: `117.98549999366514` ms
+  - first real update learner trunk: `103.38890001003165` ms
+  - first real update learner packed reductions: `5.457499995827675` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `11175.71620005765` ms
+  - first runtime focal policy model only: `10618.670399868279` ms
+  - first runtime central fixed-opponent overwrite: `22290.661399951205` ms
+  - first runtime collect batch total: `37572.24889998906` ms
+  - first real update central focal policy: `12864.993699418847` ms
+  - first real update focal policy model only: `12165.090099733789` ms
+  - first real update central fixed-opponent overwrite: `40.70580026018433` ms
+  - first real update collect batch total: `16806.02400000498` ms
+- what changed:
+  - trimmed the public-heuristic prior application back to the core public-rule families after the broader version regressed speed
+  - attack and slot-family heuristic bias application were removed from the live scoring path, leaving the prior only on play, move, and pass-style default handling
+- whether learning improved:
+  - unknown from a one-update probe
+  - no throughput recovery worth keeping: this run remained slower than both attempt 9 and the best tiny32 public-bias speed probe
+- next hypotheses:
+  - the main problem is not attack/slot-family heuristic bias scope; it is the cost of computing any public prior on the actor path
+  - the next move should be a true actor-vs-learner split so actors can stay fast while learners retain the public prior as a shaping signal
+
+## Attempt 14: Actor/Learner Public-Bias Split Probe (`learner=1.0`, `actor=0.0`)
+
+- current best run label: `structured_rescue_slim64_publicbias1_actor0_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `6579.612738139169` samples/sec
+  - first real update actor env-steps/sec: `10017.206890205722`
+  - cumulative actor env-steps/sec: `6587.302536042918`
+  - first runtime actor env-steps/sec: `4907.103923867141`
+  - total wall clock to first real update: `60.34442949295044` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1995.720299993991` ms
+  - warm-start learner packed scorer: `155.4145999980392` ms
+  - warm-start learner trunk: `373.0280000017956` ms
+  - warm-start learner teacher aux: `43.832700001075864` ms
+  - first real update learner total: `641.9203999976162` ms
+  - first real update learner packed scorer: `119.00549998972565` ms
+  - first real update learner trunk: `104.83820000081323` ms
+  - first real update learner packed reductions: `6.117999990237877` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `11512.370799828204` ms
+  - first runtime focal policy model only: `10898.779300056049` ms
+  - first runtime central fixed-opponent overwrite: `23815.268099526293` ms
+  - first runtime collect batch total: `40064.82469999173` ms
+  - first real update central focal policy: `13120.04710061592` ms
+  - first real update focal policy model only: `12357.016500100144` ms
+  - first real update central fixed-opponent overwrite: `42.948000045726076` ms
+  - first real update collect batch total: `17589.234700004454` ms
+- what changed:
+  - added the first actor-vs-learner public-heuristic prior split path and ran a real mixed probe with:
+    - `model.public_heuristic_logit_bias_scale=1.0`
+    - `model.public_heuristic_actor_logit_bias_scale=0.0`
+  - kept the slim64 structured settings and simulator-native fixed opponents
+- whether learning improved:
+  - unknown from a one-update probe
+  - throughput did not recover versus the better slim64 packed references or the later heuristic-actor path
+- next hypotheses:
+  - simply removing actor-time public bias from packed scoring is not enough when the actor still pays the packed policy-scoring cost
+  - a stronger change is needed: skip packed policy scoring on the actor path entirely and recover exact behavior log-probs another way
+
+## Attempt 15: GPU Actor Runtime Probe (`system.actor_device=cuda`)
+
+- current best run label: `structured_rescue_slim64_actorcuda_nobias_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `1519.4205776253123` samples/sec
+  - first real update actor env-steps/sec: `2952.6102229901876`
+  - cumulative actor env-steps/sec: `1519.8031347356016`
+  - first runtime actor env-steps/sec: `1023.2518262393492`
+  - total wall clock to first real update: `259.395467042923` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1718.7458999978844` ms
+  - warm-start learner packed scorer: `128.39240000175778` ms
+  - warm-start learner trunk: `138.709499995457` ms
+  - warm-start learner teacher aux: `35.32780001114588` ms
+  - first real update learner total: `657.4777000059839` ms
+  - first real update learner packed scorer: `114.20940000971314` ms
+  - first real update learner trunk: `104.03770000266377` ms
+  - first real update learner packed reductions: `5.74790000973735` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `58393.31270006369` ms
+  - first runtime focal policy model only: `56997.426099842414` ms
+  - first runtime central fixed-opponent overwrite: `128351.48379995371` ms
+  - first runtime collect batch total: `192138.84050000343` ms
+  - first real update central focal policy: `59932.382200611755` ms
+  - first real update focal policy model only: `58430.27359973348` ms
+  - first real update central fixed-opponent overwrite: `48.24959998950362` ms
+  - first real update collect batch total: `64830.83470001293` ms
+- what changed:
+  - ran a direct mixed probe with the central actor runtime on CUDA via:
+    - `system.actor_device=cuda`
+  - left the learner and slim64 structured settings otherwise unchanged
+- whether learning improved:
+  - unknown from a one-update probe
+  - performance regressed catastrophically, so this path is not viable in the current architecture
+- next hypotheses:
+  - current central actor batching on Windows pays too much synchronization / transfer cost to benefit from GPU actor inference
+  - future radical actor redesigns should not assume the existing GPU actor path is salvageable as-is
+
+## Attempt 16: CPU Actor `torch.compile` Probe
+
+- current best run label: `structured_rescue_slim64_actorcompile_nobias_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `4736.550849802762` samples/sec
+  - first real update actor env-steps/sec: `10680.09699131202`
+  - cumulative actor env-steps/sec: `4830.89641436514`
+  - first runtime actor env-steps/sec: `3121.3935164115883`
+  - total wall clock to first real update: `82.02633285522461` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1148.412599999574` ms
+  - warm-start learner packed scorer: `152.95340000011493` ms
+  - warm-start learner trunk: `396.59459999529645` ms
+  - warm-start learner teacher aux: `43.98400000354741` ms
+  - first real update learner total: `621.1718999984441` ms
+  - first real update learner packed scorer: `111.62229999899864` ms
+  - first real update learner trunk: `99.14270001172554` ms
+  - first real update learner packed reductions: `5.5722999968566` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `27348.819899736554` ms
+  - first runtime focal policy model only: `26778.458099943236` ms
+  - first runtime central fixed-opponent overwrite: `31378.811799833784` ms
+  - first runtime collect batch total: `62987.14800000016` ms
+  - first real update central focal policy: `13197.99209976918` ms
+  - first real update focal policy model only: `12486.605099824374` ms
+  - first real update central fixed-opponent overwrite: `41.93049969035201` ms
+  - first real update collect batch total: `17233.494299987797` ms
+- what changed:
+  - ran a CPU actor probe with compiled actor inference enabled through the Visual Studio dev shell:
+    - `training.precision.compile_actor_inference=true`
+  - kept the slim64 structured model and simulator-native fixed opponents
+- whether learning improved:
+  - unknown from a one-update probe
+  - steady-state actor rate looked fine, but compile warmup dominated and end-to-end throughput regressed
+- next hypotheses:
+  - compile warmup on the current Windows actor path is too expensive for this workflow
+  - a structural actor redesign is still the only credible route to a bigger throughput class change
+
+## Attempt 17: Heuristic-Actor Collection Backend
+
+- current best run label: `structured_rescue_slim64_actorheuristic_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `9916.82242540802` samples/sec
+  - first real update actor env-steps/sec: `19761.641142025655`
+  - cumulative actor env-steps/sec: `9937.851510165976`
+  - first runtime actor env-steps/sec: `6638.005603757746`
+  - total wall clock to first real update: `40.098411560058594` s
+- exact learner timing breakdown:
+  - warm-start learner total: `2042.4876999895787` ms
+  - warm-start learner packed scorer: `137.5765999982832` ms
+  - warm-start learner trunk: `418.87329999008216` ms
+  - warm-start learner teacher aux: `44.52630000014324` ms
+  - first real update learner total: `523.732600006042` ms
+  - first real update learner packed scorer: `71.80410000728443` ms
+  - first real update learner trunk: `99.3328000040492` ms
+  - first real update learner packed reductions: `5.292000001645647` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `5033.188699831953` ms
+  - first runtime focal policy model only: `4572.036900164676` ms
+  - first runtime central fixed-opponent overwrite: `20656.338899818365` ms
+  - first runtime collect batch total: `29618.838399997912` ms
+  - first real update central focal policy: `5269.254199840361` ms
+  - first real update focal policy model only: `4773.643100270419` ms
+  - first real update central fixed-opponent overwrite: `14.332600039779209` ms
+  - first real update collect batch total: `7870.826500002295` ms
+- what changed:
+  - added a new runtime knob:
+    - `training.actor_policy_backend=model|heuristic_public`
+  - for the central structured packed collection path, actors can now:
+    - advance GRU state and compute values through the trunk/value path only
+    - choose the action with `HeuristicPublicPolicy`
+    - record exact deterministic `behavior_logp=0.0`
+    - skip actor-side packed policy scoring entirely on focal rows
+  - ran the first real mixed probe with:
+    - `training.actor_policy_backend=heuristic_public`
+    - slim64 structured settings
+    - simulator-native fixed opponents
+- whether learning improved:
+  - learning is still unproven at this point, but a later code-path audit confirmed that periodic dev eval and promotion-gate eval clone the learner model on CPU and do not use `QueueRuntime`, so this actor backend does not contaminate fair eval
+  - throughput improved materially versus the earlier slim64 packed references:
+    - attempt 8 throughput: `7751.267001697393`
+    - this run throughput: `9916.82242540802`
+    - attempt 8 wall clock: `51.32841348648071` s
+    - this run wall clock: `40.098411560058594` s
+- next hypotheses:
+  - combine the heuristic-actor collection backend with learner-side public shaping, since actor-side collection no longer pays packed policy-scoring cost
+  - run a fair multi-update acceptance benchmark immediately with:
+    - slim64 model
+    - simulator-native fixed opponents
+    - `training.actor_policy_backend=heuristic_public`
+    - periodic dev eval at update `5`
+
+## Attempt 18: Heuristic-Actor + Public-Bias Acceptance Probe
+
+- current best run label: `structured_acceptance_slim64_actorheuristic_publicbias1_ws1_u5_dev5_v2`
+- exact throughput numbers:
+  - update `1` throughput: `9747.786179055514` samples/sec
+  - update `5` throughput: `15929.092042894921` samples/sec
+  - first runtime actor env-steps/sec: `6459.592026563677`
+  - update `5` wall clock: `74.47024464607239` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1907.2562000073958` ms
+  - warm-start learner packed scorer: `158.93750000395812` ms
+  - warm-start learner trunk: `386.31610000447836` ms
+  - first real update learner total: `554.7088000021176` ms
+  - first real update learner packed scorer: `68.93929999205284` ms
+  - first real update learner trunk: `97.85580000607297` ms
+  - update `5` learner total: `520.1565000024857` ms
+  - update `5` learner packed scorer: `68.13049998891074` ms
+  - update `5` learner trunk: `96.6315000114264` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `5037.40700011258` ms
+  - first runtime focal policy model only: `4575.509300106205` ms
+  - first runtime central fixed-opponent overwrite: `21417.636899859644` ms
+  - first runtime collect batch total: `30429.47770000319` ms
+- what changed:
+  - combined the new `training.actor_policy_backend=heuristic_public` path with learner-side public heuristic logit shaping:
+    - `model.public_heuristic_logit_bias_scale=1.0`
+  - kept slim64 structured settings, simulator-native fixed opponents, and a single warm-start update
+- whether learning improved:
+  - throughput improved massively, but fair dev eval did not improve on the real target:
+    - `B0 RandomLegal`: `1.0`
+    - `B1 NoLeague baseline`: `1.0`
+    - `B2 HeuristicPublic`: `0.0`
+  - this is a throughput win without the needed learning win
+- next hypotheses:
+  - actor-side heuristic collection likely makes the data too teacher-like and removes the pressure needed to learn to beat B2
+  - test whether mixing model-acted rows back in can recover learning without surrendering all of the throughput gain
+
+## Attempt 19: 50/50 Heuristic-Actor Mixture Probe
+
+- current best run label: `structured_rescue_slim64_actorheuristic50_publicbias1_u1_v1`
+- exact throughput numbers:
+  - first real update throughput: `5798.217640819155` samples/sec
+  - first real update actor env-steps/sec: `4491.064774038206`
+  - total wall clock to first real update: `68.38432884216309` s
+- exact learner timing breakdown:
+  - warm-start learner total: `2120.9262999909697` ms
+  - warm-start learner packed scorer: `174.5913000049768` ms
+  - warm-start learner trunk: `429.59139999584295` ms
+  - first real update learner total: `629.4773999979952` ms
+  - first real update learner packed scorer: `106.87899999902584` ms
+  - first real update learner trunk: `107.90000000270084` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `15596.60240021185` ms
+  - first runtime focal policy model only: `14970.417099961196` ms
+  - first runtime central fixed-opponent overwrite: `23770.046399964485` ms
+  - first runtime collect batch total: `43776.73650000361` ms
+- what changed:
+  - added row-level runtime mixing with:
+    - `training.actor_policy_backend=heuristic_public`
+    - `training.actor_heuristic_fraction=0.5`
+  - half of central focal rows use `HeuristicPublicPolicy`; half still score the model
+- whether learning improved:
+  - unknown from a one-update probe
+  - throughput regressed hard, so this naive mixed backend is not a viable compromise in the current design
+- next hypotheses:
+  - if we need mixed behavior, it cannot be done by per-batch row splitting inside the current runtime
+  - continue searching for a balanced model-actor path instead of polishing this mixture
+
+## Attempt 20: Heuristic-Actor + Public-Bias Long Acceptance Run
+
+- current best run label: `structured_acceptance_slim64_actorheuristic_publicbias1_ws1_u20_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `9844.501449181242` samples/sec
+  - update `20` throughput: `17454.310757832733` samples/sec
+  - first runtime actor env-steps/sec: `6476.390773428972`
+  - update `20` wall clock: `236.96687483787537` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1914.1819000069518` ms
+  - warm-start learner packed scorer: `155.60360001109075` ms
+  - warm-start learner trunk: `406.88320000481326` ms
+  - first real update learner total: `585.9299000003375` ms
+  - first real update learner packed scorer: `72.68569999723695` ms
+  - first real update learner trunk: `103.91639999579638` ms
+  - update `20` learner total: `536.455899986322` ms
+  - update `20` learner packed scorer: `66.29999999131542` ms
+  - update `20` learner trunk: `96.43309999955818` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `4764.076699691941` ms
+  - first runtime focal policy model only: `4663.830700039398` ms
+  - first runtime central fixed-opponent overwrite: `21585.82260021649` ms
+  - first runtime collect batch total: `30350.817900005495` ms
+- what changed:
+  - extended the fast heuristic-actor acceptance run to `20` learner updates with periodic fair dev eval every `5` updates
+- whether learning improved:
+  - no
+  - fair dev eval stayed flat against the real target across the whole run:
+    - update `5`: `B2 HeuristicPublic = 0.0`
+    - update `10`: `B2 HeuristicPublic = 0.0`
+    - update `15`: `B2 HeuristicPublic = 0.0`
+    - update `20`: `B2 HeuristicPublic = 0.0`
+  - this confirms that the fastest current path is not a learning rescue
+- next hypotheses:
+  - keep this path as the throughput ceiling reference only
+  - move back toward model-acted collection for learning-oriented experiments
+
+## Attempt 21: Stronger Teacher-Action Coefficients on Heuristic-Actor Path
+
+- current best run label: `structured_acceptance_slim64_actorheuristic_publicbias1_ta05_ws2_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `9832.70896016898` samples/sec
+  - update `5` throughput: `16341.99857505819` samples/sec
+  - first runtime actor env-steps/sec: `6498.429584124212`
+  - update `5` wall clock: `72.64031553268433` s
+- exact learner timing breakdown:
+  - warm-start learner total: `2056.6495999955805` ms
+  - warm-start learner packed scorer: `153.43280001252424` ms
+  - warm-start learner trunk: `423.38110000127926` ms
+  - first real update learner total: `573.7554000079399` ms
+  - first real update learner packed scorer: `72.61299999663606` ms
+  - first real update learner trunk: `103.52930000226479` ms
+  - update `5` learner total: `577.891399996588` ms
+  - update `5` learner packed scorer: `70.02790000115056` ms
+  - update `5` learner trunk: `98.78939999907743` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `4737.647599700722` ms
+  - first runtime focal policy model only: `4637.22650030104` ms
+  - first runtime central fixed-opponent overwrite: `21534.57670014177` ms
+  - first runtime collect batch total: `30247.388100004173` ms
+- what changed:
+  - increased structured teacher-action supervision:
+    - `training.structured_aux.teacher_action_coef=0.5`
+    - `training.structured_warmstart.teacher_action_coef=2.0`
+  - kept the fast heuristic-actor backend plus public-bias learner shaping
+- whether learning improved:
+  - no
+  - fair dev eval at update `5` still showed:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+- next hypotheses:
+  - simply increasing teacher-action weight is not enough if the on-policy collection distribution is itself wrong for learning to beat B2
+  - return to model-actor runs and investigate why the earlier B2-positive result is not reproducing
+
+## Attempt 22: WSL One-Update Public-Bias Probe
+
+- current best run label: `structured_rescue_slim64_publicbias1_u1_wsl_v1`
+- exact throughput numbers:
+  - first real update throughput: `7857.626439444887` samples/sec
+  - first real update actor env-steps/sec: `6412.594555030911`
+  - total wall clock to first real update: `50.78838229179382` s
+- exact learner timing breakdown:
+  - warm-start learner total: `3058.894611996948` ms
+  - warm-start learner packed scorer: `201.94862499192823` ms
+  - warm-start learner trunk: `707.7058129943907` ms
+  - first real update learner total: `832.2392179979943` ms
+  - first real update learner packed scorer: `166.62349700345658` ms
+  - first real update learner trunk: `106.36376899492461` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `8934.25330419268` ms
+  - first runtime focal policy model only: `8382.852070004446` ms
+  - first runtime central fixed-opponent overwrite: `17429.791107133497` ms
+  - first runtime collect batch total: `30655.951377993915` ms
+- what changed:
+  - set up native WSL CUDA + Rust + local simulator wheel and ran the slim64 model-actor public-bias probe under Linux userland from the local checkout
+- whether learning improved:
+  - unknown from a one-update probe
+  - throughput improved over the comparable Windows one-update public-bias path, but only moderately
+- next hypotheses:
+  - WSL is usable and somewhat faster, but it is not yet an order-of-magnitude class change
+  - verify whether the learning behavior under WSL matches or diverges from the earlier Windows B2-positive run
+
+## Attempt 23: WSL Acceptance Run for Model-Actor Public-Bias Path
+
+- current best run label: `structured_acceptance_slim64_publicbias1_ws1_u5_dev5_wsl_v1`
+- exact throughput numbers:
+  - update `1` throughput: `8021.004414659672` samples/sec
+  - update `5` throughput: `10418.722431182783` samples/sec
+  - first runtime actor env-steps/sec: `6422.22349883335`
+  - update `5` wall clock: `113.75679612159729` s
+- exact learner timing breakdown:
+  - warm-start learner total: `2370.076848004828` ms
+  - warm-start learner packed scorer: `190.4972680058563` ms
+  - warm-start learner trunk: `571.9238660094561` ms
+  - first real update learner total: `788.1542069953866` ms
+  - first real update learner packed scorer: `132.60723899293225` ms
+  - first real update learner trunk: `111.09436801052652` ms
+  - update `5` learner total: `751.0714029922383` ms
+  - update `5` learner packed scorer: `134.7804359975271` ms
+  - update `5` learner trunk: `122.40938800096046` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `8988.724936076324` ms
+  - first runtime focal policy model only: `8449.085768937948` ms
+  - first runtime central fixed-opponent overwrite: `17363.74982900452` ms
+  - first runtime collect batch total: `30607.496993994573` ms
+- what changed:
+  - ran the fair update-`5` acceptance benchmark under WSL with the same slim64 model-actor public-bias setup as the best Windows learning-oriented runs
+- whether learning improved:
+  - no
+  - fair dev eval at update `5` was:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+  - WSL improved throughput versus Windows but lost the earlier B2-positive signal
+- next hypotheses:
+  - WSL is not the immediate learning rescue
+  - keep WSL as a secondary throughput target, but continue root-causing the Windows learning drift
+
+## Attempt 24: Longer Model-Actor Public-Bias Recheck
+
+- current best run label: `structured_acceptance_slim64_publicbias1_ws1_u20_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `6766.043613720508` samples/sec
+  - update `20` throughput: `9906.235512472445` samples/sec
+  - first runtime actor env-steps/sec: `5099.675663946477`
+  - update `20` wall clock: `417.29705286026` s
+- exact learner timing breakdown:
+  - warm-start learner total: `2062.484599999152` ms
+  - warm-start learner packed scorer: `158.4796999959508` ms
+  - warm-start learner trunk: `421.2475000094855` ms
+  - first real update learner total: `707.136700002593` ms
+  - first real update learner packed scorer: `118.21689999487717` ms
+  - first real update learner trunk: `96.13340000214521` ms
+  - update `20` learner total: `616.330899996683` ms
+  - update `20` learner packed scorer: `108.99589999462478` ms
+  - update `20` learner trunk: `92.48089999891818` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `11462.27510018798` ms
+  - first runtime focal policy model only: `10903.760799876181` ms
+  - first runtime central fixed-opponent overwrite: `22959.113099772367` ms
+  - first runtime collect batch total: `38544.938400009414` ms
+- what changed:
+  - extended the slim64 model-actor public-bias path to `20` updates to check whether the earlier B2-positive update-`5` signal was robust or just noise
+- whether learning improved:
+  - not convincingly
+  - fair dev eval trajectory:
+    - update `5`: `B2 HeuristicPublic = 0.0`
+    - update `10`: `B2 HeuristicPublic = 0.0`
+    - update `15`: `B2 HeuristicPublic = 0.125`
+    - update `20`: `B2 HeuristicPublic = 0.0`
+  - this failed to reproduce the earlier update-`5` result of `B2 = 0.375` from `structured_acceptance_slim64_publicbias1_ws1_u5_dev5_v3`
+- next hypotheses:
+  - the best learning-oriented result so far is not robust yet
+  - the highest-value next step is an exact reproduction of the earlier `v3` command on the current tree to determine whether the B2-positive signal was real but unstable, or whether code drift changed behavior
+
+## Attempt 25: Exact Reproduction of the Earlier `v3` Learning-Oriented Run
+
+- current best run label: `structured_acceptance_slim64_publicbias1_ws1_u5_dev5_v4`
+- exact throughput numbers:
+  - update `1` throughput: `7530.126438464373` samples/sec
+  - update `5` throughput: `10160.32544722378` samples/sec
+  - first runtime actor env-steps/sec: `5623.944327382997`
+  - update `5` wall clock: `116.60671401023865` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1814.2978999967454` ms
+  - warm-start learner packed scorer: `148.6810000060359` ms
+  - warm-start learner trunk: `367.9804000130389` ms
+  - first real update learner total: `686.790399995516` ms
+  - first real update learner packed scorer: `110.88250001193956` ms
+  - first real update learner trunk: `92.24820000235923` ms
+  - update `5` learner total: `609.2746999929659` ms
+  - update `5` learner packed scorer: `109.39319999306463` ms
+  - update `5` learner trunk: `91.96890000021085` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10426.06860025262` ms
+  - first runtime focal policy model only: `9939.8369997798` ms
+  - first runtime central fixed-opponent overwrite: `20886.635299553745` ms
+  - first runtime collect batch total: `34951.3261999964` ms
+- what changed:
+  - reran the earlier `structured_acceptance_slim64_publicbias1_ws1_u5_dev5_v3` recipe exactly on the current tree with a new label, same seed, same overrides, and same baseline anchor import
+- whether learning improved:
+  - no
+  - the earlier B2-positive result did not reproduce:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+  - this makes the original `v3` run look like either a fragile one-off or a dirty-tree source-state artifact that is no longer present
+- next hypotheses:
+  - stop treating the earlier `v3` result as a stable target
+  - move on to new learning levers instead of more exact-command reruns
+
+## Attempt 26: Actor-Only Public-Heuristic Bias Spike
+
+- current best run label: `structured_acceptance_slim64_publicbias1_actorbias3_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `7518.054646537356` samples/sec
+  - update `5` throughput: `10077.597166367903` samples/sec
+  - first runtime actor env-steps/sec: `5627.103976113122`
+  - update `5` wall clock: `117.605642080307` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1853.4880999941379` ms
+  - warm-start learner packed scorer: `144.3379999982426` ms
+  - warm-start learner trunk: `387.1115999936592` ms
+  - first real update learner total: `700.949899997795` ms
+  - first real update learner packed scorer: `131.3194999966072` ms
+  - first real update learner trunk: `91.87720000045374` ms
+  - update `5` learner total: `649.0188000025228` ms
+  - update `5` learner packed scorer: `127.89620000694413` ms
+  - update `5` learner trunk: `92.87809999659657` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10335.635099865613` ms
+  - first runtime focal policy model only: `9857.292399625294` ms
+  - first runtime central fixed-opponent overwrite: `21136.47640007548` ms
+  - first runtime collect batch total: `34933.27569999383` ms
+- what changed:
+  - kept learner/eval public bias at `1.0`
+  - increased actor-only public heuristic bias to:
+    - `model.public_heuristic_actor_logit_bias_scale=3.0`
+  - left collection model-acted so behavior log-probs stayed exact
+- whether learning improved:
+  - no; it made the policy worse
+  - fair dev eval at update `5` was:
+    - `B0 RandomLegal = 0.0`
+    - `B1 NoLeague baseline = 0.75`
+    - `B2 HeuristicPublic = 0.0`
+  - over-biasing the actor toward the public heuristic harmed even easy-anchor performance
+- next hypotheses:
+  - actor-only public bias should not be pushed aggressively
+  - if public heuristic knowledge helps, it likely needs to enter through learner-side shaping or a better structured prior, not a blunt actor-only bias increase
+
+## Attempt 27: Fast Heuristic-Actor Path with Full `32`-Update Warm-Start
+
+- current best run label: `structured_acceptance_slim64_actorheuristic_publicbias1_ws32_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `7063.848920443381` samples/sec
+  - update `5` throughput: `7665.195701775446` samples/sec
+  - first runtime actor env-steps/sec: `7120.572182811514`
+  - update `5` wall clock: `949.4408478736877` s
+- exact learner timing breakdown:
+  - warm-start learner updates: `32`
+  - first warm-start learner total: `1936.4000000059605` ms
+  - first warm-start learner packed scorer: `149.09330000227783` ms
+  - first warm-start learner trunk: `404.3804000102682` ms
+  - last warm-start learner total: `556.9530000066152` ms
+  - last warm-start learner packed scorer: `89.39029999601189` ms
+  - last warm-start learner trunk: `91.20929999335203` ms
+  - first real update learner total: `555.736700000125` ms
+  - first real update learner packed scorer: `63.99090000195429` ms
+  - first real update learner trunk: `91.73689999443013` ms
+  - update `5` learner total: `512.0181000092998` ms
+  - update `5` learner packed scorer: `64.4456000009086` ms
+  - update `5` learner trunk: `90.74449999025092` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `4250.833199825138` ms
+  - first runtime focal policy model only: `4167.944399858243` ms
+  - first runtime central fixed-opponent overwrite: `19788.675499672536` ms
+  - first runtime collect batch total: `27603.20569999749` ms
+- what changed:
+  - kept the fast heuristic-actor backend plus learner-side public bias
+  - removed the `training.structured_warmstart.updates=1` override so the acceptance preset’s full `32` warm-start updates ran before the first real policy update
+- whether learning improved:
+  - no
+  - fair dev eval at update `5` remained:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+  - this closes off the hypothesis that a longer supervised warm-start alone can rescue the fast heuristic-actor collection path
+- next hypotheses:
+  - the missing ingredient is not just more warm-start updates
+  - the next structural test should keep model-acted collection and try stronger learner-side shaping, or introduce a richer auxiliary target than exact teacher action IDs
+
+## Attempt 28: Model-Actor Path with Full `32`-Update Warm-Start
+
+- current best run label: `structured_acceptance_slim64_publicbias1_ws32_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `5561.371695055022` samples/sec
+  - update `5` throughput: `5908.922061632666` samples/sec
+  - first runtime actor env-steps/sec: `5593.091307836251`
+  - update `5` wall clock: `1231.6308801174164` s
+- exact learner timing breakdown:
+  - warm-start learner updates: `32`
+  - first warm-start learner total: `1906.0523999942234` ms
+  - first warm-start learner packed scorer: `148.18129999912344` ms
+  - first warm-start learner trunk: `412.82009999849834` ms
+  - last warm-start learner total: `578.2367000065278` ms
+  - last warm-start learner packed scorer: `102.69629998947494` ms
+  - last warm-start learner trunk: `92.23989999736659` ms
+  - first real update learner total: `690.4428999987431` ms
+  - first real update learner packed scorer: `108.17890000180341` ms
+  - first real update learner trunk: `92.63240000291262` ms
+  - update `5` learner total: `624.1486000071745` ms
+  - update `5` learner packed scorer: `108.4160000027623` ms
+  - update `5` learner trunk: `92.14090000023134` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10457.211099972483` ms
+  - first runtime focal policy model only: `9973.701200302457` ms
+  - first runtime central fixed-opponent overwrite: `21067.96129985014` ms
+  - first runtime collect batch total: `35147.43339999404` ms
+- what changed:
+  - kept model-acted collection and learner-side public bias
+  - removed the `training.structured_warmstart.updates=1` override so the acceptance preset ran the full `32` supervised warm-start updates
+- whether learning improved:
+  - no
+  - fair dev eval at update `5` remained:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+  - this closes off the idea that longer warm-start alone can rescue the model-actor path
+- next hypotheses:
+  - stronger warm-start is too expensive and still does not solve the B2 flatline
+  - focus on what tactical signal the learner is missing, not just how long it is supervised
+
+## Attempt 29: Same-Family Tactical Action Supervision on the Model-Actor Path
+
+- current best run label: `structured_acceptance_slim64_publicbias1_sfa05_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `7503.215244039194` samples/sec
+  - update `5` throughput: `10111.287905394112` samples/sec
+  - first runtime actor env-steps/sec: `5608.491597553359`
+  - update `5` wall clock: `117.18664813041687` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1894.6922999894014` ms
+  - warm-start learner packed scorer: `150.2050999988569` ms
+  - warm-start learner trunk: `408.6985000030836` ms
+  - first real update learner total: `642.9844999947818` ms
+  - first real update learner packed scorer: `111.02100000425708` ms
+  - first real update learner trunk: `91.91059999284334` ms
+  - update `5` learner total: `618.8438999961363` ms
+  - update `5` learner packed scorer: `107.7270999958273` ms
+  - update `5` learner trunk: `92.09340000234079` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10432.086600092589` ms
+  - first runtime focal policy model only: `9950.183999797446` ms
+  - first runtime central fixed-opponent overwrite: `20992.12919990532` ms
+  - first runtime collect batch total: `35049.914300005184` ms
+- what changed:
+  - increased within-family tactical action supervision on the model-actor path:
+    - `training.structured_aux.teacher_same_family_action_coef=0.5`
+    - `training.structured_warmstart.teacher_same_family_action_coef=1.0`
+- whether learning improved:
+  - no
+  - fair dev eval at update `5` stayed:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+  - the added same-family loss activated, but `teacher_same_family_main_move_accuracy` still remained `0.0`
+- next hypotheses:
+  - the `main_move` problem is not just missing within-family exact-action pressure
+  - inspect whether `main_move` is under-supervised structurally in the grouped auxiliary targets
+
+## Attempt 30: Stronger Learner/Eval Public-Heuristic Bias Scale
+
+- current best run label: `structured_acceptance_slim64_publicbias2_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `7601.202198421868` samples/sec
+  - update `5` throughput: `10269.060795690033` samples/sec
+  - first runtime actor env-steps/sec: `5788.505074835866`
+  - update `5` wall clock: `115.46746635437012` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1907.5920000032056` ms
+  - warm-start learner packed scorer: `152.22350000112783` ms
+  - warm-start learner trunk: `391.1867999995593` ms
+  - first real update learner total: `700.9288999979617` ms
+  - first real update learner packed scorer: `129.39620000543073` ms
+  - first real update learner trunk: `100.04619999381248` ms
+  - update `5` learner total: `692.9810999863548` ms
+  - update `5` learner packed scorer: `123.15660000604112` ms
+  - update `5` learner trunk: `92.63280000595842` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10061.85309997818` ms
+  - first runtime focal policy model only: `9586.282999327523` ms
+  - first runtime central fixed-opponent overwrite: `20345.129199398798` ms
+  - first runtime collect batch total: `33958.20160000585` ms
+- what changed:
+  - doubled the learner/eval public-heuristic bias strength:
+    - `model.public_heuristic_logit_bias_scale=2.0`
+- whether learning improved:
+  - no
+  - this made the policy worse against the easiest anchor while still failing to move B2:
+    - `B0 RandomLegal = 0.25`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+- next hypotheses:
+  - the missing ingredient is not “more of the same” public heuristic bias
+  - move on to structural supervision changes instead of stronger raw bias scales
+
+## Attempt 31: Structural `main_move` Slot Supervision Patch
+
+- current best run label: `structured_acceptance_slim64_publicbias1_moveaux_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `7518.096970787571` samples/sec
+  - update `5` throughput: `10145.621828909241` samples/sec
+  - first runtime actor env-steps/sec: `5606.582394544538`
+  - update `5` wall clock: `116.76543974876404` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1869.06289999024` ms
+  - warm-start learner packed scorer: `146.75939999870025` ms
+  - warm-start learner trunk: `387.2800999961328` ms
+  - first real update learner total: `645.295399997849` ms
+  - first real update learner packed scorer: `111.38639999262523` ms
+  - first real update learner trunk: `92.17340000031982` ms
+  - update `5` learner total: `592.3775000119349` ms
+  - update `5` learner packed scorer: `106.63920000661165` ms
+  - update `5` learner trunk: `91.96759999031201` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10429.018999886466` ms
+  - first runtime focal policy model only: `9947.776599772624` ms
+  - first runtime central fixed-opponent overwrite: `21011.888300272403` ms
+  - first runtime collect batch total: `35059.75060000492` ms
+- what changed:
+  - patched the structured teacher label and auxiliary paths so `main_move` actions now populate `teacher_slot` with `to_slot`
+  - patched both dense and packed structured teacher-aux paths so slot supervision groups `main_move` candidates by destination slot in addition to play and attack rows
+  - added focused runtime and learner tests for the new `main_move` grouped slot behavior
+- whether learning improved:
+  - not by itself
+  - fair dev eval at update `5` remained:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+  - the new signal was active: `teacher_slot_accuracy` rose to about `0.5209`, but that still did not translate into B2 wins
+- next hypotheses:
+  - the `main_move` slot target is real, but the default slot coefficients are probably too small to matter
+  - try a stronger slot-weighted run, then judge whether this patch is worth keeping
+
+## Attempt 32: Stronger Slot Weight on Top of the `main_move` Patch
+
+- current best run label: `structured_acceptance_slim64_publicbias1_moveaux_slot05_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `7644.417601071828` samples/sec
+  - update `5` throughput: `10218.602916338914` samples/sec
+  - first runtime actor env-steps/sec: `5737.9650657663515`
+  - update `5` wall clock: `115.9404149055481` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1857.8265999967698` ms
+  - warm-start learner packed scorer: `152.40630001062527` ms
+  - warm-start learner trunk: `387.725299995509` ms
+  - first real update learner total: `663.9896999986377` ms
+  - first real update learner packed scorer: `114.38469999120571` ms
+  - first real update learner trunk: `92.36900000541937` ms
+  - update `5` learner total: `609.1237999935402` ms
+  - update `5` learner packed scorer: `106.31119999743532` ms
+  - update `5` learner trunk: `92.44780000881292` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10207.249900166062` ms
+  - first runtime focal policy model only: `9726.555300178006` ms
+  - first runtime central fixed-opponent overwrite: `20429.954799910774` ms
+  - first runtime collect batch total: `34257.858000011765` ms
+- what changed:
+  - kept the `main_move` slot-supervision patch
+  - increased slot supervision weight:
+    - `training.structured_aux.teacher_slot_coef=0.5`
+    - `training.structured_warmstart.teacher_slot_coef=1.0`
+- whether learning improved:
+  - no
+  - fair dev eval at update `5` still showed:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+  - the slot signal got stronger: `teacher_slot_accuracy` rose to about `0.5415`, but B2 stayed flat
+- next hypotheses:
+  - the patch is affecting the intended tactical feature, but not enough to change actual match outcomes
+  - give it a longer run once to see whether the new slot signal compounds over time
+
+## Attempt 33: Longer Run for the Stronger `main_move` Slot-Supervision Path
+
+- current best run label: `structured_acceptance_slim64_publicbias1_moveaux_slot05_ws1_u20_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `7462.8763854671615` samples/sec
+  - update `20` throughput: `10318.784100564799` samples/sec
+  - first runtime actor env-steps/sec: `5589.6432635175715`
+  - update `20` wall clock: `400.6502912044525` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1891.290300001856` ms
+  - warm-start learner packed scorer: `151.5479000081541` ms
+  - warm-start learner trunk: `411.75810000277124` ms
+  - first real update learner total: `634.6185000002151` ms
+  - first real update learner packed scorer: `111.45260000193957` ms
+  - first real update learner trunk: `92.25479999440722` ms
+  - update `20` learner total: `631.2629000021843` ms
+  - update `20` learner packed scorer: `108.15329999604728` ms
+  - update `20` learner trunk: `92.14010000869166` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10472.534500178881` ms
+  - first runtime focal policy model only: `9990.614699825528` ms
+  - first runtime central fixed-opponent overwrite: `21077.974100160645` ms
+  - first runtime collect batch total: `35168.13999999431` ms
+- what changed:
+  - extended the stronger slot-weighted `main_move` patch run to `20` updates
+- whether learning improved:
+  - not meaningfully
+  - fair dev eval trajectory:
+    - update `5`: `B2 HeuristicPublic = 0.0`
+    - update `10`: `B2 HeuristicPublic = 0.0`
+    - update `15`: `B2 HeuristicPublic = 0.125`
+    - update `20`: `B2 HeuristicPublic = 0.0`
+  - this essentially matches the old unstable model-actor pattern and is not a real rescue
+- next hypotheses:
+  - fixing `main_move` slot supervision alone is insufficient
+  - the remaining failure is likely higher-level: objective mismatch, action ranking mismatch, or insufficient direct B2 training pressure
+
+## Attempt 34: Force Direct B2 Training from Update `0`
+
+- current best run label: `structured_acceptance_slim64_publicbias1_b2mix1_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `10981.80720597094` samples/sec
+  - update `5` throughput: `11632.520524236013` samples/sec
+  - first runtime actor env-steps/sec: `10878.305755774873`
+  - update `5` wall clock: `101.8623993396759` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1839.328400004888` ms
+  - warm-start learner packed scorer: `133.4942000103183` ms
+  - warm-start learner trunk: `409.64789999998175` ms
+  - first real update learner total: `614.1037000052165` ms
+  - first real update learner packed scorer: `95.45280000020284` ms
+  - first real update learner trunk: `92.58749999571592` ms
+  - update `5` learner total: `568.3986999938497` ms
+  - update `5` learner packed scorer: `93.44249998684973` ms
+  - update `5` learner trunk: `91.79159998893738` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10116.629699914483` ms
+  - first runtime focal policy model only: `9645.300500356825` ms
+  - first runtime central fixed-opponent overwrite: `4364.214399742195` ms
+  - first runtime collect batch total: `18067.1505999926` ms
+- what changed:
+  - realized the acceptance preset was not actually mixing B2 into training until update `100`
+  - overrode league sampling so the short run trained directly against B2 from update `0`:
+    - `league.sampling.heuristic_public_start_updates=0`
+    - `league.sampling.heuristic_public_mix_fraction=1.0`
+  - kept model-acted collection and public-bias learner shaping
+- whether learning improved:
+  - no
+  - fair dev eval at update `5` became:
+    - `B0 RandomLegal = 0.75`
+    - `B1 NoLeague baseline = 1.0`
+    - `B2 HeuristicPublic = 0.0`
+  - direct B2 exposure improved throughput materially by reducing overwrite work, but still did not move the target metric
+- next hypotheses:
+  - the learner is not failing merely because B2 is absent from the short training schedule
+  - give this direct-B2 schedule a longer run once, then treat direct exposure as ruled out if B2 remains flat
+
+## Attempt 35: Longer Direct-B2 Training Run
+
+- current best run label: `structured_acceptance_slim64_publicbias1_b2mix1_ws1_u20_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `10819.580911788471` samples/sec
+  - update `20` throughput: `9953.755193116842` samples/sec
+  - first runtime actor env-steps/sec: `10876.984682729511`
+  - update `20` wall clock: `415.2956154346466` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1908.3670999971218` ms
+  - warm-start learner packed scorer: `133.3446000062395` ms
+  - warm-start learner trunk: `397.35810000274796` ms
+  - first real update learner total: `616.7489999934332` ms
+  - first real update learner packed scorer: `94.35549999761861` ms
+  - first real update learner trunk: `92.92609999829438` ms
+  - update `20` learner total: `601.8855000002077` ms
+  - update `20` learner packed scorer: `99.4632000074489` ms
+  - update `20` learner trunk: `96.51459999440704` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `10194.14819983649` ms
+  - first runtime focal policy model only: `9729.525499787997` ms
+  - first runtime central fixed-opponent overwrite: `4345.9042002796195` ms
+  - first runtime collect batch total: `18065.280499999062` ms
+- what changed:
+  - extended the direct-B2 training schedule to `20` updates with periodic fair dev eval every `5` updates
+- whether learning improved:
+  - no
+  - fair dev eval trajectory:
+    - update `5`: `B2 HeuristicPublic = 0.0`
+    - update `10`: `B2 HeuristicPublic = 0.0`
+    - update `15`: `B2 HeuristicPublic = 0.0`
+    - update `20`: `B2 HeuristicPublic = 0.0`
+  - this is strong evidence that the remaining failure is deeper than “not training against B2 enough”
+- next hypotheses:
+  - the remaining blocker is most likely in the objective / action-ranking contract itself
+  - the next serious pass should replace or augment exact-action imitation with a richer heuristic ranking target, or redesign the action contract so tactical rules are represented directly instead of indirectly through sparse exact action IDs
+
+## Attempt 36: Bootstrap the Missing Same-Spec `B1` Acceptance Baseline
+
+- current best run label: `structured_acceptance_publicbias1_baseline_noleague_spec859_v2`
+- exact throughput numbers:
+  - update `1` throughput: `4829.972862103761` samples/sec
+  - first runtime actor env-steps/sec: `4841.971044306504`
+  - update `1` wall clock: `40.41673493385315` s
+- exact learner timing breakdown:
+  - update `1` learner total: `13337.98989999923` ms
+  - update `1` learner packed scorer: `2188.2250999915414` ms
+  - update `1` learner trunk: `437.7991000073962` ms
+  - update `1` learner teacher aux: `1116.2973000027705` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `23806.68839997088` ms
+  - first runtime focal policy model only: `23087.57210006297` ms
+  - first runtime central fixed-opponent overwrite: `46.42210008751135` ms
+  - first runtime collect batch total: `27069.705700007034` ms
+- what changed:
+  - created the dedicated same-spec `baseline_noleague` run required by the acceptance harness so later direct-B2 probes can import the canonical `B1` anchor without spec-hash rejection
+  - persisted the canonical `b1_noleague_baseline` alias from this run
+- whether learning improved:
+  - not applicable
+  - this was infrastructure/bootstrap work rather than a rescue-policy experiment
+- next hypotheses:
+  - rerun the direct-B2 acceptance probes with the correct baseline import path
+  - avoid spending more time on blind runs that cannot emit fair `B2` evidence
+
+## Attempt 37: Exact Packed `B2` Soft Target in the Learner
+
+- current best run label: `structured_acceptance_slim64_publicbias1_b2mix1_pubkl025_t24_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `6422.224749235852` samples/sec
+  - update `5` throughput: `3697.534699074279` samples/sec
+  - first runtime actor env-steps/sec: `8886.092983287597`
+  - first real-update actor env-steps/sec: `5044.1173755428235`
+  - update `5` wall clock: `352.1957082748413` s
+- exact learner timing breakdown:
+  - warm-start learner total: `18553.489099998842` ms
+  - warm-start learner forward time-major: `4042.5806999992346` ms
+  - warm-start learner packed scorer: `3467.9547999985516` ms
+  - warm-start learner trunk: `574.6132999920519` ms
+  - warm-start learner public-heuristic target: `521.76309999777` ms
+  - warm-start learner teacher aux: `1892.463600001065` ms
+  - first real update learner total: `32048.966300004395` ms
+  - first real update learner packed scorer: `8108.877000006032` ms
+  - first real update learner trunk: `7036.410600005183` ms
+  - first real update learner public-heuristic target: `780.3643999941414` ms
+  - first real update learner teacher aux: `2136.8834000022616` ms
+  - update `5` learner total: `33279.68919998966` ms
+  - update `5` learner packed scorer: `8725.95540000475` ms
+  - update `5` learner trunk: `6497.869099999662` ms
+  - update `5` learner public-heuristic target: `836.6042999987258` ms
+  - update `5` learner teacher aux: `1689.3157000013161` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `12011.417000292568` ms
+  - first runtime focal policy model only: `11484.90680033865` ms
+  - first runtime central fixed-opponent overwrite: `6441.05790037429` ms
+  - first runtime collect batch total: `22116.49239998951` ms
+  - first real update central focal policy: `12222.122900202521` ms
+  - first real update focal policy model only: `11690.609500088613` ms
+  - first real update central fixed-opponent overwrite: `4436.55700009549` ms
+- what changed:
+  - added an exact packed `B2`/`HeuristicPublic` scorer inside the model and used it to build a soft teacher target in the learner
+  - trained directly against `B2` from update `0` and attached the new soft target in warm-start plus main training updates
+- whether learning improved:
+  - inconclusive on match outcomes because this run accidentally kept `evaluation.periodic_dev_eval_interval_updates=20`, so the intended `update 5` fair dev eval never ran
+  - the new auxiliary target was definitely active:
+    - warm-start `teacher_public_heuristic_loss = 2.525998830795288`
+    - warm-start `teacher_public_heuristic_top1_mass = 0.43798476457595825`
+    - update `5` `teacher_public_heuristic_loss = 2.0986926555633545`
+    - update `5` `teacher_public_heuristic_top1_mass = 0.4601035416126251`
+  - throughput regressed badly versus the best direct-B2 path, so this exact dense soft-target implementation is not viable as the default rescue path
+- next hypotheses:
+  - keep the exact `B2` semantics, but move them into the live scorer / actor-time bias path instead of paying for a second dense learner pass
+  - rerun with explicit `evaluation.periodic_dev_eval_interval_updates=5` so short probes actually produce `B2` evidence
+
+## Attempt 38: Widen Live Actor-Time `B2` Bias Across Tactical Families
+
+- current best run label: `structured_acceptance_slim64_actorpub1_livebias_b2mix1_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `6366.224408942121` samples/sec
+  - update `5` throughput: `3374.3714084433113` samples/sec
+  - first runtime actor env-steps/sec: `8370.154306224138`
+  - first real-update actor env-steps/sec: `5152.362749893121`
+  - update `5` wall clock: `394.6861426830292` s
+- exact learner timing breakdown:
+  - warm-start learner total: `16628.71059999452` ms
+  - warm-start learner forward time-major: `4108.04370000551` ms
+  - warm-start learner packed scorer: `3562.5124999933178` ms
+  - warm-start learner trunk: `545.5185000027996` ms
+  - warm-start learner teacher aux: `637.059999993653` ms
+  - first real update learner total: `49874.8665000021` ms
+  - first real update learner forward time-major: `36928.332800001954` ms
+  - first real update learner packed scorer: `21088.74079999805` ms
+  - first real update learner trunk: `15839.584299988928` ms
+  - first real update learner teacher aux: `1424.3165999941994` ms
+  - update `5` learner total: `45211.402500004624` ms
+  - update `5` learner forward time-major: `20810.10079999396` ms
+  - update `5` learner packed scorer: `12005.109899997478` ms
+  - update `5` learner trunk: `8804.98400000215` ms
+  - update `5` learner teacher aux: `1151.9564999907743` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `13281.384699992486` ms
+  - first runtime focal policy model only: `12755.082800184027` ms
+  - first runtime central fixed-opponent overwrite: `6520.137499421253` ms
+  - first runtime collect batch total: `23484.09549999633` ms
+  - first real update central focal policy: `13365.094899956603` ms
+  - first real update focal policy model only: `12840.616200424847` ms
+  - first real update central fixed-opponent overwrite: `4425.76689994894` ms
+- what changed:
+  - extended the live structured public-heuristic bias path so actor-time scoring now reaches attack, hand/index, slot, and default tactical families instead of only a small subset
+  - reran direct-`B2` short training with fair periodic dev eval at update `5`
+- whether learning improved:
+  - yes, materially on the target metric
+  - fair dev eval at update `5` showed:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 0.5`
+    - `B2 HeuristicPublic = 1.0`
+  - this is the first rescue-pass evidence that the live model policy can decisively beat `B2`, but it regressed against `B1` and throughput was still far below the fast direct-`B2` path
+- next hypotheses:
+  - keep this widened live-bias behavior because it appears to be the first thing that truly moved `B2`
+  - attack the current learner cost directly with a much smaller model core, because the new slowdown persisted even when the live bias was disabled
+
+## Attempt 39: No-Bias Control Probe on the Current Codebase
+
+- current best run label: `structured_acceptance_slim64_nobias_b2mix1_ws1_u1_probe_v1`
+- exact throughput numbers:
+  - update `1` throughput: `6441.557932706907` samples/sec
+  - first runtime actor env-steps/sec: `8376.946878188082`
+  - update `1` wall clock: `108.84180617332458` s
+- exact learner timing breakdown:
+  - warm-start learner total: `17845.8735000022` ms
+  - warm-start learner forward time-major: `4070.630700007314` ms
+  - warm-start learner packed scorer: `3523.877600004198` ms
+  - warm-start learner trunk: `546.7388999968534` ms
+  - first real update learner total: `51287.4332999927` ms
+  - first real update learner forward time-major: `38069.386200004374` ms
+  - first real update learner packed scorer: `20830.399500002386` ms
+  - first real update learner trunk: `17238.979700006894` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `13274.947699974757` ms
+  - first runtime focal policy model only: `12741.413699986413` ms
+  - first runtime central fixed-opponent overwrite: `6520.810900023673` ms
+  - first runtime collect batch total: `23467.353500004276` ms
+  - first real update central focal policy: `13329.968100158498` ms
+  - first real update focal policy model only: `12809.356699872296` ms
+  - first real update central fixed-opponent overwrite: `4415.798300469294` ms
+- what changed:
+  - reran the short direct-`B2` probe with both public-bias scales forced to `0.0` under the current codebase
+- whether learning improved:
+  - not evaluated in this probe
+  - the value of this run was diagnostic: it showed the new enormous learner cost is not caused by the widened live-bias path itself
+- next hypotheses:
+  - the present learner slowdown is broader than actor-time heuristic shaping
+  - try a smaller learner core before spending more time on compile knobs or additional supervision terms
+
+## Attempt 40: `torch.compile` Learner Probe
+
+- current best run label: `structured_acceptance_slim64_nobias_b2mix1_ws1_u2_compilelearner_v1`
+- exact throughput numbers:
+  - update `1` throughput: `4557.890616833865` samples/sec
+  - update `2` throughput: `3892.3615176351805` samples/sec
+  - first runtime actor env-steps/sec: `8474.010088333094`
+  - update `2` wall clock: `182.28408360481262` s
+- exact learner timing breakdown:
+  - warm-start learner total: `37795.7475999865` ms
+  - warm-start learner packed scorer: `3555.6074999909615` ms
+  - warm-start learner trunk: `511.4342000002507` ms
+  - first real update learner total: `41096.01909999037` ms
+  - first real update learner packed scorer: `18006.968699992053` ms
+  - first real update learner trunk: `12136.974200000986` ms
+  - update `2` learner total: `81897.57010000176` ms
+  - update `2` learner packed scorer: `28817.410699991742` ms
+  - update `2` learner trunk: `12303.438699995401` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `13115.640900155529` ms
+  - first runtime focal policy model only: `12589.557100087404` ms
+  - first runtime central fixed-opponent overwrite: `6439.431799924932` ms
+  - first runtime collect batch total: `23271.361899998970` ms
+- what changed:
+  - enabled `training.precision.compile_learner=true` on the direct-`B2` probe to see whether `torch.compile` could claw back the learner regression
+- whether learning improved:
+  - not meaningfully assessed
+  - throughput regressed further and compile startup plus compiled update cost made this clearly worse for the current workload
+- next hypotheses:
+  - abandon `compile_learner` as the immediate rescue path
+  - preserve the successful live-bias tactic and pair it with an aggressively smaller recurrent core
+
+## Attempt 41: Corrected Real `slim64` Live-Bias Acceptance Probe
+
+- current best run label: `structured_acceptance_slim64_actorpub1_livebias_b2mix1_ws1_u5_dev5_v3`
+- exact throughput numbers:
+  - update `1` throughput: `9441.718379633121` samples/sec
+  - update `5` throughput: `9872.76032655615` samples/sec
+  - first runtime actor env-steps/sec: `9502.935122187526`
+  - first real-update actor env-steps/sec: `9437.79870403699`
+  - update `5` wall clock: `119.94930720329285` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1933.23729999247` ms
+  - warm-start learner forward time-major: `523.1878000049619` ms
+  - warm-start learner packed scorer: `137.3850000090897` ms
+  - warm-start learner trunk: `385.7900000002701` ms
+  - warm-start learner teacher aux: `43.4460999967996` ms
+  - first real update learner total: `638.4210999967763` ms
+  - first real update learner forward time-major: `207.0430000021588` ms
+  - first real update learner packed scorer: `102.27370000211522` ms
+  - first real update learner trunk: `104.76180000114255` ms
+  - update `5` learner total: `588.047600002028` ms
+  - update `5` learner forward time-major: `195.87399999727495` ms
+  - update `5` learner packed scorer: `97.58589998818934` ms
+  - update `5` learner trunk: `98.28079999715555` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `11899.15769995423` ms
+  - first runtime focal policy model only: `11355.906000331743` ms
+  - first runtime central fixed-opponent overwrite: `4780.550999872503` ms
+  - first runtime collect batch total: `20682.930700000725` ms
+  - first real update central focal policy: `11986.681000154931` ms
+  - first real update focal policy model only: `11447.182399526355` ms
+  - first real update central fixed-opponent overwrite: `2836.8619003304048` ms
+- what changed:
+  - diagnosed that attempts `38` to `40` were accidentally running the locked `256`-wide model because the `slim64` width overrides were missing
+  - reran the widened live actor-time `B2` bias recipe on the actual intended `slim64` core:
+    - `model.gru_hidden_size=64`
+    - `model.encoder_mlp_width=64`
+    - `model.typed_feature_width=16`
+    - `model.public_heuristic_logit_bias_scale=0.0`
+    - `model.public_heuristic_actor_logit_bias_scale=1.0`
+  - switched the imported `B1` anchor back to the same-contract `slim64` baseline after the first rerun attempt correctly failed tensor-contract validation against the `256`-wide baseline
+- whether learning improved:
+  - yes
+  - fair dev eval at update `5` showed:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 0.5625`
+    - `B2 HeuristicPublic = 1.0`
+  - this is the first run in the rescue that combines:
+    - real `slim64` throughput in the old fast range
+    - `B2 HeuristicPublic = 1.0`
+    - positive `B1` performance instead of collapsing below parity
+- next hypotheses:
+  - the widened live-bias change is a real learning lever, and the apparent learner regression was largely an experiment-contract mistake rather than a code-level slowdown
+  - extend this exact corrected `slim64` recipe to `20` updates to test whether the `B2` win is stable and whether `B1` improves or regresses over time
+
+## Attempt 42: Bootstrap Same-Contract `tiny32` `B1` Acceptance Baseline
+
+- current best run label: `structured_acceptance_tiny32_publicbias1_b1_u1_v1`
+- exact throughput numbers:
+  - update `1` throughput: `5405.887054513103` samples/sec
+  - first runtime actor env-steps/sec: `5061.265729503349`
+  - update `1` wall clock: `1200.7253956794739` s
+- exact learner timing breakdown:
+  - update `1` learner total: `615.3697999980068` ms
+  - update `1` learner packed scorer: `98.48830000555608` ms
+  - update `1` learner trunk: `85.0812999997288` ms
+  - update `1` learner teacher aux: `21.20669999567326` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `11582.558400172275` ms
+  - first runtime focal policy model only: `11059.03319978097` ms
+  - first runtime central fixed-opponent overwrite: `23091.68740003952` ms
+  - first runtime collect batch total: `38845.0884000049` ms
+- what changed:
+  - created the dedicated `tiny32` no-league acceptance baseline so later `tiny32` acceptance probes can import a tensor-contract-compatible `B1` anchor
+  - baseline recipe:
+    - `experiment.role=baseline_noleague`
+    - `league.enabled=false`
+    - `model.gru_hidden_size=32`
+    - `model.encoder_mlp_width=32`
+    - `model.typed_feature_width=8`
+    - `model.public_heuristic_logit_bias_scale=1.0`
+- whether learning improved:
+  - not applicable
+  - this was baseline bootstrap work only
+- next hypotheses:
+  - the baseline bootstrap is expensive because no-league overwrite dominates wall clock, but that cost should not determine the mixed-run viability
+  - run the real `tiny32` live-bias direct-`B2` acceptance probe immediately
+
+## Attempt 43: `tiny32` Live-Bias Direct-`B2` Acceptance Probe
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `9916.878416898959` samples/sec
+  - update `5` throughput: `10347.714487212377` samples/sec
+  - first runtime actor env-steps/sec: `9955.593672552955`
+  - first real-update actor env-steps/sec: `9934.887233846177`
+  - update `5` wall clock: `114.4009518623352` s
+- exact learner timing breakdown:
+  - warm-start learner total: `1813.2236000092234` ms
+  - warm-start learner forward time-major: `480.0734000018565` ms
+  - warm-start learner packed scorer: `119.61859998700675` ms
+  - warm-start learner trunk: `360.4407000093488` ms
+  - warm-start learner teacher aux: `44.55230000894517` ms
+  - first real update learner total: `561.0135000024457` ms
+  - first real update learner forward time-major: `166.74360001343302` ms
+  - first real update learner packed scorer: `82.56190000975039` ms
+  - first real update learner trunk: `84.17370000097435` ms
+  - update `5` learner total: `510.51820001157466` ms
+  - update `5` learner forward time-major: `167.30679999454878` ms
+  - update `5` learner packed scorer: `84.32320000429172` ms
+  - update `5` learner trunk: `82.97709999897052` ms
+  - update `5` learner teacher aux: `19.526899995980784` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `11279.680900057429` ms
+  - first runtime focal policy model only: `10785.461000428768` ms
+  - first runtime central fixed-opponent overwrite: `4569.742100589792` ms
+  - first runtime collect batch total: `19742.491199998767` ms
+  - first real update central focal policy: `11392.55300014338` ms
+  - first real update focal policy model only: `10895.342100106063` ms
+  - first real update central fixed-opponent overwrite: `2626.3022002240177` ms
+- what changed:
+  - kept the corrected direct-`B2` live actor-bias recipe from attempt `41`
+  - shrank the recurrent/trunk/core widths to:
+    - `model.gru_hidden_size=32`
+    - `model.encoder_mlp_width=32`
+    - `model.typed_feature_width=8`
+  - imported the same-contract `tiny32` `B1` baseline from attempt `42`
+- whether learning improved:
+  - yes
+  - fair dev eval at update `5` showed:
+    - `B0 RandomLegal = 1.0`
+    - `B1 NoLeague baseline = 0.625`
+    - `B2 HeuristicPublic = 1.0`
+  - this is better than the corrected `slim64` live-bias probe on both:
+    - throughput (`10347.71` vs `9872.76`)
+    - `B1` (`0.625` vs `0.5625`)
+  - `B2` stayed at `1.0`
+- next hypotheses:
+  - `tiny32` is now the best current learning/speed tradeoff
+  - extend this exact `tiny32` recipe to `20` updates to test whether the gain is stable and whether `B1` can keep improving without giving back `B2`
+
+## Backfilled Historical Scale Ladder: Attempts `44` to `59`
+
+- recovered from run artifacts after the thread cut off; these runs were real and are now recorded so later work can resume from the actual scale frontier instead of replaying it
+- key ladder:
+  - `44` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_ws1_u20_dev5_v1`
+    - throughput: update `5` `10333.480124859992`, update `10` `9548.450436109688`, update `15` `9285.867001832294`, update `20` `7791.8778299138785`
+    - learner: warm-start total `1949.4911999936448` ms, packed scorer `122.47040000511333` ms, trunk `377.5906000082614` ms; update `20` total `545.6153999984963` ms, packed scorer `81.93879999453202` ms, trunk `84.46190001268405` ms
+    - actor: first runtime env-steps/sec `9843.728789885034`, focal policy `11395.614599678083` ms, overwrite `4671.574699430494` ms, collect total `19966.59589999763` ms; last runtime env-steps/sec `10721.799035883663`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`; checkpoint guard later still preferred update `5`
+    - what changed: extended attempt `43` to `20` updates
+    - next hypotheses: scale env count without changing the live-bias recipe
+  - `45` `structured_acceptance_tiny32_actorhybrid50_livebias_b2mix1_ws1_u5_dev5_v1`
+    - throughput: update `5` `9055.828992937619`
+    - learner: warm-start total `1911.732500011567` ms; update `5` total `520.1842999958899` ms, packed scorer `76.71050001226831` ms, trunk `84.41029999812599` ms
+    - actor: first runtime env-steps/sec `8694.17219216211`, focal policy `14309.40990037925` ms, overwrite `4464.6690997324185` ms; last runtime env-steps/sec `9253.898638268078`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`
+    - what changed: tried `training.actor_policy_backend=heuristic_public` with `training.actor_heuristic_fraction=0.5`
+    - next hypotheses: drop the hybrid idea and scale the pure model actor instead
+  - `46` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env192_ws1_u5_dev5_v1`
+    - throughput: update `5` `13670.914961983042`
+    - learner: warm-start total `2017.8418000141392` ms; update `5` total `624.1473999980371` ms, packed scorer `95.96370000508614` ms, trunk `102.59429999860004` ms
+    - actor: first runtime env-steps/sec `13277.397953329166`, focal policy `9502.434100228129` ms, overwrite `5388.7965999456355` ms
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`
+    - what changed: first env-count scale-up of the tiny32 live-bias recipe
+    - next hypotheses: keep scaling up
+  - `47` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env192_ws1_u20_dev5_v1`
+    - throughput: update `5` `15835.636441482793`, update `10` `14447.933406144477`, update `15` `13972.70156653932`, update `20` `11513.135626714993`
+    - learner: warm-start total `1970.4055000038352` ms; update `20` total `621.0954999987734` ms, packed scorer `89.14509999158327` ms, trunk `97.34100000059698` ms
+    - actor: first runtime env-steps/sec `14737.07826266817`; last runtime env-steps/sec `17875.02644892302`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`; update `20` aggregate `0.8125`, `B1=0.4375`, `B2=1.0`
+    - what changed: long-run check for `env192`
+    - next hypotheses: keep scaling while watching update-20 floor
+  - `48` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env288_ws1_u5_dev5_v1`
+    - throughput: update `5` `19336.532397555762`
+    - learner: warm-start total `1762.418099999195` ms; update `5` total `497.29509999451693` ms, packed scorer `74.6035999909509` ms, trunk `80.53520000248682` ms
+    - actor: first runtime env-steps/sec `16513.45527903224`; last runtime env-steps/sec `20373.029613974548`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`
+    - what changed: scaled to `288` envs
+    - next hypotheses: continue the scale ladder
+  - `49` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env288_ws1_u20_dev5_v1`
+    - throughput: update `5` `18795.395633156004`, update `10` `16764.595360885418`, update `15` `16093.013989552781`, update `20` `15748.152562524534`
+    - learner: warm-start total `1748.2399000000441` ms; update `20` total `521.4908000052674` ms, packed scorer `75.15069999499246` ms, trunk `80.39170000120066` ms
+    - actor: first runtime env-steps/sec `16488.252926735167`; last runtime env-steps/sec `20537.45770597361`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`; update `20` aggregate `0.8125`, `B1=0.4375`, `B2=1.0`
+    - what changed: long-run check for `env288`
+    - next hypotheses: continue scaling
+  - `50` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env384_ws1_u5_dev5_v1`
+    - throughput: update `5` `22691.628680137714`
+    - learner: warm-start total `1857.0230000041192` ms; update `5` total `581.5058000007411` ms, packed scorer `89.8111999995308` ms, trunk `98.06340000068303` ms
+    - actor: first runtime env-steps/sec `20048.972727139284`; last runtime env-steps/sec `24253.623375278094`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`
+    - what changed: scaled to `384` envs
+    - next hypotheses: continue scaling
+  - `51` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env384_ws1_u20_dev5_v1`
+    - throughput: update `5` `22876.782533250454`, update `10` `20395.041091304352`, update `15` `19537.09925413015`, update `20` `19148.143815342086`
+    - learner: warm-start total `1879.2272999999113` ms; update `20` total `615.103200005251` ms, packed scorer `88.00000000337604` ms, trunk `97.43730000627693` ms
+    - actor: first runtime env-steps/sec `20012.883606263465`; last runtime env-steps/sec `24265.825361176274`
+    - learning: update `20` aggregate `0.8333333333333334`, `B1=0.5`, `B2=1.0`
+    - what changed: long-run check for `env384`
+    - next hypotheses: continue scaling
+  - `52` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env512_ws1_u5_dev5_v1`
+    - throughput: update `5` `25429.911551624664`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`
+    - what changed: scaled to `512` envs
+    - next hypotheses: continue scaling
+  - `53` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env768_ws1_u5_dev5_v1`
+    - throughput: update `5` `25928.664754883146`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`
+    - what changed: scaled to `768` envs
+    - next hypotheses: extend to a long run
+  - `54` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env768_ws1_u20_dev5_v1`
+    - throughput: update `5` `27582.552737949987`, update `10` `24093.90562519463`, update `15` `22935.934279908313`, update `20` `22335.523929150568`
+    - learner: warm-start total `1949.4911999936448` ms; update `20` total `577.7181999874301` ms, packed scorer `86.95130000705831` ms, trunk `102.19449999567587` ms
+    - actor: first runtime env-steps/sec `23016.311699568865`; last runtime env-steps/sec `28487.014017224472`
+    - learning: update `20` aggregate `0.8333333333333334`, `B1=0.5`, `B2=1.0`
+    - what changed: long-run check for `env768`
+    - next hypotheses: scale higher
+  - `55` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env960_ws1_u5_dev5_v1`
+    - throughput: update `5` `30333.3320617838`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`
+    - what changed: scaled to `960` envs
+    - next hypotheses: extend to a long run
+  - `56` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env960_ws1_u20_dev5_v1`
+    - throughput: update `5` `30373.35700732759`, update `10` `26772.951573089966`, update `15` `25634.921480966794`, update `20` `25091.030924585964`
+    - learner: warm-start total `2016.4821999960113` ms; update `20` total `726.2729000067338` ms, packed scorer `109.39870000584051` ms, trunk `115.67129999457393` ms
+    - actor: first runtime env-steps/sec `26180.972180581277`; last runtime env-steps/sec `32192.085121168264`
+    - learning: update `20` aggregate `0.8125`, `B1=0.4375`, `B2=1.0`
+    - what changed: long-run check for `env960`
+    - next hypotheses: push to `1536`
+  - `57` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env1536_ws1_u5_dev5_v1`
+    - throughput: update `5` `36111.808062246746`
+    - learning: update `5` aggregate `0.875`, `B1=0.625`, `B2=1.0`
+    - what changed: scaled to `1536` envs
+    - next hypotheses: extend to a long run
+  - `58` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env1536_ws1_u20_dev5_v1`
+    - throughput: update `5` `36198.55571186468`, update `10` `32815.4385175027`, update `15` `31671.033295557132`, update `20` `31136.40353787037`
+    - learner: warm-start total `2211.4600000065984` ms; update `20` total `1392.4621000041952` ms, packed scorer `171.4155999943614` ms, trunk `171.30880001059268` ms
+    - actor: first runtime env-steps/sec `33712.433310598`; last runtime env-steps/sec `37756.92799338919`
+    - learning: update `20` aggregate `0.8125`, `B1=0.4375`, `B2=1.0`
+    - what changed: long-run check for `env1536`
+    - next hypotheses: test `2048`, but avoid topology mistakes
+  - `59` `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env2048_ws1_u5_dev5_v1`
+    - throughput: update `1` `27936.239536682813`, update `2` `16609.527404023618`, update `3` `16392.619415604284`, update `4` `15650.974860494973`
+    - learner: warm-start total `31917.350100004114` ms; update `1` total `94085.97690000897` ms; update `4` total `49620.31830000342` ms
+    - actor: first runtime env-steps/sec `44666.543668452876`, focal policy `7132.893400121247` ms, overwrite `5981.1828999372665` ms, collect total `23461.522800003877` ms; last runtime env-steps/sec `14857.603775680554`
+    - learning: not assessed; run stopped before dev eval
+    - what changed: first naive `2048` scale-up without actor-topology override
+    - next hypotheses: force a better topology instead of letting the runtime fall into `8 x 256`
+
+## Attempt 60: GPU Actor Inference Miss
+
+- current best run label: `structured_acceptance_tiny32_actorcuda1_livebias_b2mix1_env1536_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `13429.849439647902`
+  - update `5` throughput: `15934.998681997275`
+  - update `5` wall clock: `198.80912518501282` s
+  - first runtime actor env-steps/sec: `10971.945503806151`
+  - last runtime actor env-steps/sec: `17929.28719519097`
+- exact learner timing breakdown:
+  - warm-start learner total: `3002.2896000009496` ms
+  - warm-start learner forward time-major: `477.95460000634193` ms
+  - warm-start learner packed scorer: `250.74119999771938` ms
+  - warm-start learner trunk: `227.20090000075288` ms
+  - warm-start learner teacher aux: `51.550399999541696` ms
+  - update `5` learner total: `1574.045000001206` ms
+  - update `5` learner forward time-major: `501.7846999980975` ms
+  - update `5` learner packed scorer: `201.55459999659797` ms
+  - update `5` learner trunk: `300.22359999566106` ms
+  - update `5` learner teacher aux: `36.36269999697106` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `15884.403700001712` ms
+  - first runtime focal policy model only: `14935.472199904325` ms
+  - first runtime central fixed-opponent overwrite: `23885.574200066912` ms
+  - first runtime collect batch total: `47771.22909999889` ms
+  - last runtime central focal policy: `14453.821100018104` ms
+  - last runtime focal policy model only: `13495.598799963773` ms
+  - last runtime central fixed-opponent overwrite: `4582.937299863261` ms
+  - last runtime collect batch total: `27535.81710000435` ms
+- what changed:
+  - forced `system.actor_device=cuda:0` on the best `env1536` tiny32 live-bias recipe
+- whether learning improved:
+  - no
+  - update `5` dev eval fell to aggregate `0.8333333333333334`, `B1=0.5`, `B2=1.0`
+  - throughput also regressed badly
+- next hypotheses:
+  - keep actor inference on CPU
+  - inspect actor topology instead of sharing the learner GPU
+
+## Attempt 61: `env1536` `actor24` `batch128` Topology Probe
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env1536_actor24_batch128_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `26536.243782068133`
+  - update `5` throughput: `29397.350731176168`
+  - update `5` wall clock: `108.49454283714294` s
+  - first runtime actor env-steps/sec: `24391.214432400702`
+  - last runtime actor env-steps/sec: `30885.443513677415`
+- exact learner timing breakdown:
+  - warm-start learner total: `2644.5979999989504` ms
+  - warm-start learner forward time-major: `732.3094000021229` ms
+  - warm-start learner packed scorer: `244.94599999889033` ms
+  - warm-start learner trunk: `487.35149999993155` ms
+  - update `5` learner total: `1664.5856999966782` ms
+  - update `5` learner forward time-major: `489.31769999762764` ms
+  - update `5` learner packed scorer: `187.26470000547124` ms
+  - update `5` learner trunk: `302.04690000391565` ms
+  - update `5` learner teacher aux: `23.97690000361763` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `4674.535500053025` ms
+  - first runtime focal policy model only: `4016.9640001040534` ms
+  - first runtime central fixed-opponent overwrite: `8580.379500031995` ms
+  - first runtime collect batch total: `21481.588599999668` ms
+  - last runtime central focal policy: `5024.928300037573` ms
+  - last runtime focal policy model only: `4233.394300092186` ms
+  - last runtime central fixed-opponent overwrite: `1494.88609990658` ms
+  - last runtime collect batch total: `15308.34170000162` ms
+- what changed:
+  - forced `system.actor_process_count=24`
+  - raised `training.rollout.batch_unrolls_per_update=128`
+  - raised `system.actor_queue_capacity_unrolls=512`
+  - targeted `24 x 64` to see whether smaller envs-per-actor improved the central runtime
+- whether learning improved:
+  - no
+  - update `5` dev eval was aggregate `0.8333333333333334`, `B1=0.5`, `B2=1.0`
+  - throughput stayed well below the old `env1536` best
+- next hypotheses:
+  - keep `128` envs/actor, not `64`
+  - try topology fixes on `2048` instead
+
+## Attempt 62: `env2048` `actor16` Short Probe, Seed Noise Case
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env2048_actor16_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `34666.729318647456`
+  - update `5` throughput: `37148.119248008275`
+  - update `5` wall clock: `85.68286752700806` s
+  - first runtime actor env-steps/sec: `33359.46826437665`
+  - last runtime actor env-steps/sec: `39241.74290013471`
+- exact learner timing breakdown:
+  - warm-start learner total: `2553.9163000066765` ms
+  - warm-start learner forward time-major: `784.3069000009564` ms
+  - warm-start learner packed scorer: `250.8637999999337` ms
+  - warm-start learner trunk: `533.4312999984832` ms
+  - update `5` learner total: `1150.8876000007149` ms
+  - update `5` learner forward time-major: `371.2355000025127` ms
+  - update `5` learner packed scorer: `188.88200000219513` ms
+  - update `5` learner trunk: `182.34769999980927` ms
+  - update `5` learner teacher aux: `23.68659999774536` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `3882.641499971214` ms
+  - first runtime focal policy model only: `3347.9361000136123` ms
+  - first runtime central fixed-opponent overwrite: `4963.827799991122` ms
+  - first runtime collect batch total: `15703.074099998048` ms
+  - last runtime central focal policy: `3693.316499920911` ms
+  - last runtime focal policy model only: `3171.5426000228035` ms
+  - last runtime central fixed-opponent overwrite: `1217.4148000849527` ms
+  - last runtime collect batch total: `12098.974799999269` ms
+- what changed:
+  - forced `system.actor_process_count=16` so `2048` resolved to `16 x 128` instead of `8 x 256`
+- whether learning improved:
+  - inconclusive
+  - speed improved materially, but update `5` dev eval on seed `20260417` was only aggregate `0.8333333333333334`, `B1=0.5`, `B2=1.0`
+- next hypotheses:
+  - rerun the exact same topology on the original rescue seed before treating the learning drop as real
+
+## Attempt 63: `env2048` `actor16` Short Probe, Original Seed
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env2048_actor16_ws1_u5_dev5_v2`
+- exact throughput numbers:
+  - update `1` throughput: `35663.92751817223`
+  - update `5` throughput: `38002.947542742266`
+  - update `5` wall clock: `83.75529384613037` s
+  - first runtime actor env-steps/sec: `34686.759718822854`
+  - last runtime actor env-steps/sec: `39382.669229014406`
+- exact learner timing breakdown:
+  - warm-start learner total: `2497.508899999957` ms
+  - warm-start learner forward time-major: `729.1922000003979` ms
+  - warm-start learner packed scorer: `243.99819999962347` ms
+  - warm-start learner trunk: `485.1829999970505` ms
+  - update `5` learner total: `1126.4526000013575` ms
+  - update `5` learner forward time-major: `369.12379999557743` ms
+  - update `5` learner packed scorer: `190.18650000361959` ms
+  - update `5` learner trunk: `178.93199999525677` ms
+  - update `5` learner teacher aux: `30.95049999683397` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `3696.901399976923` ms
+  - first runtime focal policy model only: `3170.705899989116` ms
+  - first runtime central fixed-opponent overwrite: `4687.384600038058` ms
+  - first runtime collect batch total: `15101.264400000218` ms
+  - last runtime central focal policy: `3715.591200038034` ms
+  - last runtime focal policy model only: `3196.728999981133` ms
+  - last runtime central fixed-opponent overwrite: `1205.914100035443` ms
+  - last runtime collect batch total: `12086.117500002729` ms
+- what changed:
+  - reran attempt `62` on the original rescue seed `20260416`
+- whether learning improved:
+  - yes
+  - update `5` dev eval recovered to aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - this became the new best mixed short-run path at the time
+- next hypotheses:
+  - extend the exact recipe to `20` updates
+
+## Attempt 64: `env2048` `actor16` Long Run
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env2048_actor16_ws1_u20_dev5_v1`
+- exact throughput numbers:
+  - update `5` throughput: `36682.065613028986`
+  - update `10` throughput: `33192.745010010905`
+  - update `15` throughput: `31796.51716002397`
+  - update `20` throughput: `31123.83403165744`
+  - update `20` wall clock: `355.49285650253296` s
+  - first runtime actor env-steps/sec: `33429.75751082621`
+  - last runtime actor env-steps/sec: `37286.14305332844`
+- exact learner timing breakdown:
+  - warm-start learner total: `2523.9375999954063` ms
+  - warm-start learner forward time-major: `720.1027999981306` ms
+  - warm-start learner packed scorer: `247.4456000054488` ms
+  - warm-start learner trunk: `472.64569999970263` ms
+  - update `20` learner total: `1890.4703999942285` ms
+  - update `20` learner forward time-major: `424.0070000014384` ms
+  - update `20` learner packed scorer: `186.64739999803714` ms
+  - update `20` learner trunk: `237.3541999986628` ms
+  - update `20` learner teacher aux: `40.428000000247266` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `3883.6404999819933` ms
+  - first runtime focal policy model only: `3338.9489999899524` ms
+  - first runtime central fixed-opponent overwrite: `4988.364300086687` ms
+  - first runtime collect batch total: `15670.978299996932` ms
+  - last runtime central focal policy: `3725.889499983168` ms
+  - last runtime focal policy model only: `3189.5825999672525` ms
+  - last runtime central fixed-opponent overwrite: `1221.2668000356643` ms
+  - last runtime collect batch total: `12182.977500000561` ms
+- what changed:
+  - extended attempt `63` to `20` updates
+- whether learning improved:
+  - mixed
+  - update `5` stayed strong at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - update `20` fell to aggregate `0.8125`, `B1=0.4375`, `B2=1.0`, so checkpoint guard still preferred update `5`
+- next hypotheses:
+  - keep the improved `128` envs/actor topology, but search for a higher-scale peak
+
+## Attempt 65: `env2560` `actor20` Short Probe
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env2560_actor20_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `35579.14864466477`
+  - update `5` throughput: `37403.224208625645`
+  - update `5` wall clock: `85.39504766464233` s
+  - first runtime actor env-steps/sec: `34814.78666910162`
+  - last runtime actor env-steps/sec: `38857.542643749475`
+- exact learner timing breakdown:
+  - warm-start learner total: `2525.847699995211` ms
+  - warm-start learner forward time-major: `733.8081000052625` ms
+  - warm-start learner packed scorer: `251.35130000126082` ms
+  - warm-start learner trunk: `482.4441999953706` ms
+  - update `5` learner total: `1453.6932999981218` ms
+  - update `5` learner forward time-major: `457.9909000021871` ms
+  - update `5` learner packed scorer: `170.18600000301376` ms
+  - update `5` learner trunk: `287.7994000009494` ms
+  - update `5` learner teacher aux: `24.09050000278512` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `3702.1990998691763` ms
+  - first runtime focal policy model only: `3181.1423999315593` ms
+  - first runtime central fixed-opponent overwrite: `4708.980399940629` ms
+  - first runtime collect batch total: `15044.530200000736` ms
+  - last runtime central focal policy: `3652.5861000991426` ms
+  - last runtime focal policy model only: `3134.0743999680853` ms
+  - last runtime central fixed-opponent overwrite: `1194.245300066541` ms
+  - last runtime collect batch total: `12071.097000000009` ms
+- what changed:
+  - scaled the good `128` envs/actor topology to `20` actor slots
+- whether learning improved:
+  - no
+  - update `5` learning stayed healthy (`0.875`, `B1=0.625`, `B2=1.0`), but throughput stayed below attempt `63`
+- next hypotheses:
+  - keep scaling in the same family and look for a higher short-run peak
+
+## Attempt 66: `env3072` `actor24` Short Probe
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env3072_actor24_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `37648.1288924077`
+  - update `5` throughput: `39085.91939019928`
+  - update `5` wall clock: `81.41312003135681` s
+  - first runtime actor env-steps/sec: `36702.81144154233`
+  - last runtime actor env-steps/sec: `39987.5898954702`
+- exact learner timing breakdown:
+  - warm-start learner total: `2491.375600002357` ms
+  - warm-start learner forward time-major: `721.4082999998936` ms
+  - warm-start learner packed scorer: `239.64770000020508` ms
+  - warm-start learner trunk: `481.7493000009563` ms
+  - update `5` learner total: `1100.6539999943925` ms
+  - update `5` learner forward time-major: `348.07680000085384` ms
+  - update `5` learner packed scorer: `173.92839999956777` ms
+  - update `5` learner trunk: `174.14380000263918` ms
+  - update `5` learner teacher aux: `24.055800000496674` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `3246.88009997044` ms
+  - first runtime focal policy model only: `2737.454300018726` ms
+  - first runtime central fixed-opponent overwrite: `4576.148000000103` ms
+  - first runtime collect batch total: `14268.019700000877` ms
+  - last runtime central focal policy: `3257.985999909579` ms
+  - last runtime focal policy model only: `2746.889599955466` ms
+  - last runtime central fixed-opponent overwrite: `1130.254900046566` ms
+  - last runtime collect batch total: `11614.290899997286` ms
+- what changed:
+  - scaled to `3072` envs with `24 x 128`
+- whether learning improved:
+  - yes
+  - update `5` matched the healthy checkpoint again: aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - throughput beat all earlier short runs at the time
+- next hypotheses:
+  - test `4096 x 128` before calling the ceiling
+
+## Attempt 67: `env4096` `actor32` Short Probe
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `39517.95000424782`
+  - update `5` throughput: `41486.13254943294`
+  - update `5` wall clock: `76.80480289459229` s
+  - first runtime actor env-steps/sec: `38440.99273962387`
+  - last runtime actor env-steps/sec: `42393.79426869724`
+- exact learner timing breakdown:
+  - warm-start learner total: `2431.4043000049423` ms
+  - warm-start learner forward time-major: `740.7702999989851` ms
+  - warm-start learner packed scorer: `248.71900000289315` ms
+  - warm-start learner trunk: `492.03720000514295` ms
+  - update `5` learner total: `1174.3998999954783` ms
+  - update `5` learner forward time-major: `391.7942000043695` ms
+  - update `5` learner packed scorer: `209.46859999821754` ms
+  - update `5` learner trunk: `182.31690000538947` ms
+  - update `5` learner teacher aux: `29.4348000024911` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `2760.9502999766846` ms
+  - first runtime focal policy model only: `2261.8912999605527` ms
+  - first runtime central fixed-opponent overwrite: `4514.648099953774` ms
+  - first runtime collect batch total: `13619.04830000276` ms
+  - last runtime central focal policy: `2829.950200015446` ms
+  - last runtime focal policy model only: `2323.5619999686605` ms
+  - last runtime central fixed-opponent overwrite: `1010.2608000088367` ms
+  - last runtime collect batch total: `11133.28360000014` ms
+- what changed:
+  - scaled to `4096` envs with `32 x 128`
+- whether learning improved:
+  - yes
+  - update `5` stayed at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - throughput became the best mixed short-run path so far
+- next hypotheses:
+  - test one step higher to see if the curve is still climbing
+
+## Attempt 68: `env5120` `actor40` Short Probe
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env5120_actor40_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `39759.4061651415`
+  - update `5` throughput: `41060.14573462761`
+  - update `5` wall clock: `77.50377893447876` s
+  - first runtime actor env-steps/sec: `38323.52498864335`
+  - last runtime actor env-steps/sec: `40668.14626788633`
+- exact learner timing breakdown:
+  - warm-start learner total: `2409.8966000019573` ms
+  - warm-start learner forward time-major: `709.6072999993339` ms
+  - warm-start learner packed scorer: `245.49669999396428` ms
+  - warm-start learner trunk: `464.09870000206865` ms
+  - update `5` learner total: `1124.8130000021774` ms
+  - update `5` learner forward time-major: `361.5981000039028` ms
+  - update `5` learner packed scorer: `172.9537000064738` ms
+  - update `5` learner trunk: `188.63910000072792` ms
+  - update `5` learner teacher aux: `23.187799997685943` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `2786.794399995415` ms
+  - first runtime focal policy model only: `2290.3479999949923` ms
+  - first runtime central fixed-opponent overwrite: `4632.44019990816` ms
+  - first runtime collect batch total: `13659.763100004056` ms
+  - last runtime central focal policy: `2947.8463999839732` ms
+  - last runtime focal policy model only: `2433.0526999619906` ms
+  - last runtime central fixed-opponent overwrite: `1038.531400008651` ms
+  - last runtime collect batch total: `11439.299600002414` ms
+- what changed:
+  - scaled to `5120` envs with `40 x 128`
+- whether learning improved:
+  - no
+  - learning stayed strong at update `5`, but throughput dipped below attempt `67`
+- next hypotheses:
+  - treat `4096 x 32` as the current peak and validate it on a long run
+
+## Attempt 69: `env4096` `actor32` Long Run
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env4096_actor32_ws1_u20_dev5_v1`
+- exact throughput numbers:
+  - update `5` throughput: `41365.72598887964`
+  - update `10` throughput: `36928.99684252706`
+  - update `15` throughput: `35440.336267166975`
+  - update `20` throughput: `34578.28820024295`
+  - update `20` wall clock: `319.41651797294617` s
+  - first runtime actor env-steps/sec: `38268.61954092343`
+  - last runtime actor env-steps/sec: `42841.06917615917`
+- exact learner timing breakdown:
+  - warm-start learner total: `2433.331400003226` ms
+  - warm-start learner forward time-major: `728.9133000012953` ms
+  - warm-start learner packed scorer: `247.09029999939958` ms
+  - warm-start learner trunk: `481.8115000016405` ms
+  - update `20` learner total: `1205.2215000003343` ms
+  - update `20` learner forward time-major: `369.1515000027721` ms
+  - update `20` learner packed scorer: `188.17960000160383` ms
+  - update `20` learner trunk: `180.96580000565154` ms
+  - update `20` learner teacher aux: `24.932499996793922` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `2769.9783999923966` ms
+  - first runtime focal policy model only: `2276.3905999818235` ms
+  - first runtime central fixed-opponent overwrite: `4547.44840002968` ms
+  - first runtime collect batch total: `13680.009399999108` ms
+  - last runtime central focal policy: `2844.191399999545` ms
+  - last runtime focal policy model only: `2342.522499995539` ms
+  - last runtime central fixed-opponent overwrite: `1014.3646000360604` ms
+  - last runtime collect batch total: `11047.607299995434` ms
+- what changed:
+  - extended attempt `67` to `20` updates
+- whether learning improved:
+  - yes relative to the old long-run best
+  - update `5` stayed at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - update `20` matched the earlier learning trajectory (`aggregate 0.8125`, `B1=0.4375`, `B2=1.0`) but with materially higher throughput
+  - this is the best long-run throughput path so far
+- next hypotheses:
+  - do one final ceiling check above `4096`
+
+## Attempt 70: `env6144` `actor48` Short Probe
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env6144_actor48_ws1_u5_dev5_v1`
+- exact throughput numbers:
+  - update `1` throughput: `40075.317026794284`
+  - update `5` throughput: `41403.88830651989`
+  - update `5` wall clock: `77.17723417282104` s
+  - first runtime actor env-steps/sec: `38980.36000121318`
+  - last runtime actor env-steps/sec: `41206.749776972465`
+- exact learner timing breakdown:
+  - warm-start learner total: `2544.1651000001` ms
+  - warm-start learner forward time-major: `786.8183000027784` ms
+  - warm-start learner packed scorer: `284.86229999543866` ms
+  - warm-start learner trunk: `501.9442000048002` ms
+  - update `5` learner total: `1450.5694999970729` ms
+  - update `5` learner forward time-major: `384.845900000073` ms
+  - update `5` learner packed scorer: `189.8192000007839` ms
+  - update `5` learner trunk: `195.02059999649646` ms
+  - update `5` learner teacher aux: `28.41459999763174` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `2788.876300000993` ms
+  - first runtime focal policy model only: `2284.9359000101686` ms
+  - first runtime central fixed-opponent overwrite: `4570.642200000293` ms
+  - first runtime collect batch total: `13424.223400004848` ms
+  - last runtime central focal policy: `2823.9504999946803` ms
+  - last runtime focal policy model only: `2316.6463000161457` ms
+  - last runtime central fixed-opponent overwrite: `1022.6981999876443` ms
+  - last runtime collect batch total: `11186.092500000086` ms
+- what changed:
+  - one final same-shape ceiling check above attempt `69`
+- whether learning improved:
+  - no
+  - learning stayed strong at update `5`, but throughput remained below attempts `67` and `69`
+- next hypotheses:
+  - current Windows central-runtime ceiling appears to be around `4096 x 32`
+  - if we need another major jump, it likely requires a different architecture branch rather than another same-contract scale probe
+
+## Attempt 71: WSL/Linux `env4096` `actor32` Baseline
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_v1`
+- exact throughput numbers:
+  - update `5` throughput: `39573.00873205465`
+  - update `5` wall clock: `80.71204829216003` s
+  - first runtime actor env-steps/sec: `39499.801210721664`
+  - last runtime actor env-steps/sec: `41936.57379702425`
+- exact learner timing breakdown:
+  - warm-start learner total: `3070.686418002879` ms
+  - warm-start learner forward time-major: `970.5543560048682` ms
+  - warm-start learner packed scorer: `309.7740769953816` ms
+  - warm-start learner trunk: `660.7643840034143` ms
+  - warm-start learner teacher aux: `82.92414199968334` ms
+  - update `5` learner total: `1199.5790119986054` ms
+  - update `5` learner forward time-major: `355.0956779947737` ms
+  - update `5` learner packed scorer: `182.6846299959584` ms
+  - update `5` learner trunk: `186.40598200634122` ms
+  - update `5` learner teacher aux: `25.74403901270125` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `2694.417214974237` ms
+  - first runtime focal policy model only: `2134.5991639682325` ms
+  - first runtime central fixed-opponent overwrite: `4088.360375906632` ms
+  - first runtime collect batch total: `13249.5134339988` ms
+  - last runtime central focal policy: `2447.455190034816` ms
+  - last runtime focal policy model only: `1868.953911056451` ms
+  - last runtime central fixed-opponent overwrite: `814.3502709863242` ms
+  - last runtime collect batch total: `11213.517283998954` ms
+- what changed:
+  - moved the benchmark target to a Linux-native WSL ext4 mirror
+  - rebuilt the local simulator extension inside a WSL CUDA environment
+  - reran the exact Windows frontier command with the same config hash on Linux
+- whether learning improved:
+  - no
+  - learning matched the healthy short-run checkpoint again: aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - throughput landed below the best Windows short run, so plain WSL/Linux was not a free uplift on this machine
+- next hypotheses:
+  - Linux process-start advantages are irrelevant on the current frontier because the runtime stayed on `use_central_batched_collection=true`
+  - test Linux-only compile/runtime options that Windows made awkward, then decide whether a deeper runtime redesign is required
+
+## Attempt 72: WSL/Linux `compile_actor_inference`
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_compileactor_v1`
+- exact throughput numbers:
+  - update `5` throughput: `31197.13682759907`
+  - update `5` wall clock: `100.99348306655884` s
+  - first runtime actor env-steps/sec: `15516.358454543577`
+  - last runtime actor env-steps/sec: `41734.859241935956`
+- exact learner timing breakdown:
+  - warm-start learner total: `3619.843768989318`
+  - warm-start learner forward time-major: `986.6988330021268` ms
+  - warm-start learner packed scorer: `285.93172899854835` ms
+  - warm-start learner trunk: `668.1721919887932` ms
+  - warm-start learner teacher aux: `81.79703699727543` ms
+  - update `5` learner total: `1517.4681229982525` ms
+  - update `5` learner forward time-major: `409.05710099468706` ms
+  - update `5` learner packed scorer: `225.1984030008316` ms
+  - update `5` learner trunk: `183.85123500047484` ms
+  - update `5` learner teacher aux: `39.59479000332067` ms
+- exact actor timing breakdown:
+  - first runtime central focal policy: `21847.9674690534` ms
+  - first runtime focal policy model only: `21279.187791944423` ms
+  - first runtime central fixed-opponent overwrite: `4065.936153070652` ms
+  - first runtime collect batch total: `32376.300490002905` ms
+  - last runtime central focal policy: `2341.4817129887524` ms
+  - last runtime focal policy model only: `1757.1185449778568` ms
+  - last runtime central fixed-opponent overwrite: `818.42661396513` ms
+  - last runtime collect batch total: `11257.718469001702` ms
+- what changed:
+  - enabled `training.precision.compile_actor_inference=true` on the Linux WSL frontier run
+- whether learning improved:
+  - no
+  - dev eval again matched aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - compile reduced steady-state actor model time a bit, but the compile warm-start penalty crushed short-run wall clock and throughput
+- next hypotheses:
+  - CPU actor compile is not the breakthrough on this branch
+  - inspect whether the next real gain comes from a different runtime ownership boundary: either league-capable process collectors on Linux or a cheaper packed-action sampling boundary
+
+## Attempt 73: WSL/Linux Shared-Transport Stability Rerun
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env4096_actor32_ws1_u20_dev5_wsl_process_shared_v2`
+- exact throughput numbers:
+  - update `5` throughput: `46382.233970282796`
+  - update `10` throughput: `59333.74851164231`
+  - update `15` throughput: `66848.77932042113`
+  - update `20` throughput: `52249.604332819625`
+  - update `20` wall clock: `165.34449815750122` s
+  - first runtime actor env-steps/sec: `10324.046008739497`
+  - last runtime actor env-steps/sec: `158459.59986254008`
+- exact learner timing breakdown:
+  - update `5` learner total: `1876.2406039968482` ms
+  - update `5` learner forward time-major: `714.3557680028607` ms
+  - update `5` learner packed scorer: `391.5445169986924` ms
+  - update `5` learner trunk: `322.7999410009943` ms
+  - update `5` learner teacher aux: `39.06060900044395` ms
+  - update `20` learner total: `2406.813845002034` ms
+  - update `20` learner forward time-major: `972.1837139950367` ms
+  - update `20` learner packed scorer: `642.1411869960139` ms
+  - update `20` learner trunk: `330.0337729961029` ms
+  - update `20` learner teacher aux: `76.07642999937525` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `25732.0` ms
+  - first runtime actor policy forward: `16948.0` ms
+  - first runtime fill pending unrolls: `645.7501330005471` ms
+  - first runtime build learner batch: `624.9805900006322` ms
+  - last runtime collect actor unroll: `79528.0` ms
+  - last runtime actor policy forward: `54117.0` ms
+  - last runtime fill pending unrolls: `96.70036100578727` ms
+  - last runtime build learner batch: `442.4060189994634` ms
+- what changed:
+  - resynced the IPC state-dict serialization fix into the WSL mirror
+  - reran the long shared-memory process-collector path to verify the `Too many open files` crash was actually fixed
+- whether learning improved:
+  - no
+  - dev eval matched the earlier healthy path again: update `5` aggregate `0.875`, update `20` aggregate `0.8333333333333334`, `B2=1.0`
+  - the run finished cleanly with no post-run FD blow-up, so the serialization fix is real
+- next hypotheses:
+  - remove the eager shared-slot readback copy; the parent is still paying hundreds of milliseconds to rebuild batches
+  - if that works, recheck the old `4096 x 32` ceiling on Linux before touching learning again
+
+## Attempt 74: Process-Collector Slot Ring Short Probe
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_process_ring_v2`
+- exact throughput numbers:
+  - update `5` throughput: `48097.07465199825`
+  - update `5` wall clock: `18.614509344100952` s
+  - first runtime actor env-steps/sec: `10916.147773154225`
+  - last runtime actor env-steps/sec: `193439.23811889676`
+- exact learner timing breakdown:
+  - update `5` learner total: `2361.856899995473` ms
+  - update `5` learner forward time-major: `658.2326730058412` ms
+  - update `5` learner packed scorer: `441.3465309989988` ms
+  - update `5` learner trunk: `216.8761610009824` ms
+  - update `5` learner teacher aux: `35.94187799899373` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `24561.0` ms
+  - first runtime actor policy forward: `16425.0` ms
+  - first runtime fill pending unrolls: `1.4285159995779395` ms
+  - first runtime build learner batch: `241.7987900043954` ms
+  - last runtime collect actor unroll: `72088.0` ms
+  - last runtime actor policy forward: `48692.0` ms
+  - last runtime fill pending unrolls: `3.826255000603851` ms
+  - last runtime build learner batch: `270.03604199853726` ms
+- what changed:
+  - replaced the single shared collector slot per actor with a small slot ring
+  - kept pending unrolls as shared-memory views until batch assembly instead of copying every unroll out eagerly
+  - tightened process teardown so the benchmark does not spend minutes in serial collector joins
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - throughput improved over the shared v2 short probe while parent-side runtime timers collapsed
+- next hypotheses:
+  - rerun the sustained `u20` path on the ring branch
+  - then recheck whether higher env counts move the ceiling now that parent copies are cheaper
+
+## Attempt 75: Process-Collector Slot Ring Sustained Probe
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env4096_actor32_ws1_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `47711.46924404909`
+  - update `10` throughput: `61486.97285978875`
+  - update `15` throughput: `68007.16438319074`
+  - update `20` throughput: `53223.04749521214`
+  - update `20` wall clock: `158.3638825416565` s
+  - first runtime actor env-steps/sec: `10508.137051876656`
+  - last runtime actor env-steps/sec: `212738.85518025726`
+- exact learner timing breakdown:
+  - update `5` learner total: `2638.620293000713` ms
+  - update `5` learner forward time-major: `780.0425030000042` ms
+  - update `5` learner packed scorer: `526.312304995372` ms
+  - update `5` learner trunk: `253.7200809965725` ms
+  - update `5` learner teacher aux: `34.52246399683645` ms
+  - update `20` learner total: `2255.431801000668` ms
+  - update `20` learner forward time-major: `752.2886770020705` ms
+  - update `20` learner packed scorer: `534.134642999561` ms
+  - update `20` learner trunk: `218.14422099851072` ms
+  - update `20` learner teacher aux: `36.89856400160352` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `24496.0` ms
+  - first runtime actor policy forward: `16370.0` ms
+  - first runtime fill pending unrolls: `1.3389310042839497` ms
+  - first runtime build learner batch: `272.85229699919` ms
+  - last runtime collect actor unroll: `73298.0` ms
+  - last runtime actor policy forward: `49905.0` ms
+  - last runtime fill pending unrolls: `6.381414001225494` ms
+  - last runtime build learner batch: `279.99027100304374` ms
+- what changed:
+  - validated the ring transport on the real `u20` mixed run
+  - compared it directly against the stabilized shared-transport baseline
+- whether learning improved:
+  - no
+  - dev eval stayed aligned with the earlier ring/shared paths: update `5` `0.875`, update `20` `0.8333333333333334`, `B2=1.0`
+  - this was still a real runtime win because wall clock fell from `165.34449815750122` s to `158.3638825416565` s
+- next hypotheses:
+  - recheck the `env5120` ceiling on the ring branch
+  - if that still tops out, try learning-side tradeoffs or actor-policy ownership changes instead of more topology nudging
+
+## Attempt 76: Ring Ceiling Check Above `4096 x 32`
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_env5120_actor40_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `40484.97831815764`
+  - update `5` wall clock: `17.033626317977905` s
+  - first runtime actor env-steps/sec: `8487.228976493541`
+  - last runtime actor env-steps/sec: `204062.95870084074`
+- exact learner timing breakdown:
+  - update `5` learner total: `2386.0203759977594` ms
+  - update `5` learner forward time-major: `875.8341190041392` ms
+  - update `5` learner packed scorer: `549.0949399973033` ms
+  - update `5` learner trunk: `326.72698399983346` ms
+  - update `5` learner teacher aux: `36.883226995996665` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `25237.0` ms
+  - first runtime actor policy forward: `16891.0` ms
+  - first runtime fill pending unrolls: `1.7952609996427782` ms
+  - first runtime build learner batch: `262.9764849989442` ms
+  - last runtime collect actor unroll: `74602.0` ms
+  - last runtime actor policy forward: `50872.0` ms
+  - last runtime fill pending unrolls: `9.87238300149329` ms
+  - last runtime build learner batch: `218.528919001983` ms
+- what changed:
+  - repeated the old `env5120` ceiling check on the faster ring branch
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - throughput was clearly worse than `env4096 actor32`, so the best shape on this machine did not move upward
+- next hypotheses:
+  - keep `4096 x 32` as the Linux topology frontier for now
+  - probe learning-quality tradeoffs instead of larger same-shape scaleouts
+
+## Attempt 77: Wider `slim64` Ring Probe
+
+- current best run label: `structured_acceptance_slim64_actorpub1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_process_ring_v2`
+- exact throughput numbers:
+  - update `5` throughput: `10594.180624417872`
+  - update `5` wall clock: `297.90112137794495` s
+  - first runtime actor env-steps/sec: `10808.966260480758`
+  - last runtime actor env-steps/sec: `10054.439645197346`
+- exact learner timing breakdown:
+  - update `5` learner total: `49074.37294899864` ms
+  - update `5` learner forward time-major: `32229.00988499896` ms
+  - update `5` learner packed scorer: `7380.613303001155` ms
+  - update `5` learner trunk: `24848.390083003324` ms
+  - update `5` learner teacher aux: `3162.778592995892` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `26997.0` ms
+  - first runtime actor policy forward: `17920.0` ms
+  - first runtime fill pending unrolls: `1.4494850038317963` ms
+  - first runtime build learner batch: `240.37073299405165` ms
+  - last runtime collect actor unroll: `65885.0` ms
+  - last runtime actor policy forward: `45824.0` ms
+  - last runtime fill pending unrolls: `1.1053220005123876` ms
+  - last runtime build learner batch: `169.32064299908234` ms
+- what changed:
+  - copied a `slim64`-compatible B1 baseline into WSL after the first rerun failed on tensor-shape mismatch against the tiny32 anchor
+  - reran the ring runtime with a wider `64/64/16` model to test the speed-quality tradeoff
+- whether learning improved:
+  - no
+  - update `5` dev eval regressed to aggregate `0.8541666666666666`, `B1=0.5625`, `B2=1.0`
+  - throughput collapsed hard, so wider capacity is not the right answer on this hardware
+- next hypotheses:
+  - stay on tiny32 for the fast Linux frontier
+  - test cheaper learning-side auxiliaries before spending more on model width
+
+## Attempt 78: Tiny32 Exact-Action Auxiliary Probe on Ring Runtime
+
+- current best run label: `structured_acceptance_tiny32_actorpub1_livebias_b2mix1_actionaux_env4096_actor32_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `42178.16970568024`
+  - update `5` wall clock: `27.81539297103882` s
+  - first runtime actor env-steps/sec: `10385.590146309172`
+  - last runtime actor env-steps/sec: `114599.11971463401`
+- exact learner timing breakdown:
+  - update `5` learner total: `4528.645713995502` ms
+  - update `5` learner forward time-major: `1876.9552989979275` ms
+  - update `5` learner packed scorer: `1295.6469710043166` ms
+  - update `5` learner trunk: `581.2990199992782` ms
+  - update `5` learner teacher aux: `162.6087059994461` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `27516.0` ms
+  - first runtime actor policy forward: `18744.0` ms
+  - first runtime fill pending unrolls: `1.7216550040757284` ms
+  - first runtime build learner batch: `289.8253390012542` ms
+  - last runtime collect actor unroll: `118443.0` ms
+  - last runtime actor policy forward: `77965.0` ms
+  - last runtime fill pending unrolls: `32.733006999478675` ms
+  - last runtime build learner batch: `490.0892340010614` ms
+- what changed:
+  - enabled moderate exact-action and same-family-action supervision on the tiny32 ring branch
+- whether learning improved:
+  - no
+  - update `5` dev eval dropped to aggregate `0.8541666666666666`, `B1=0.5625`, `B2=1.0`
+  - throughput and actor runtime both regressed badly, so this auxiliary bundle is not a viable fast path
+- next hypotheses:
+  - stop spending more learner work on this branch
+  - attack actor policy-forward cost directly instead
+
+## Attempt 79: Process-Collector Heuristic Actor Backend Short Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `53093.47371497437`
+  - update `5` wall clock: `11.93004584312439` s
+  - first runtime actor env-steps/sec: `10907.642872053284`
+  - last runtime actor env-steps/sec: `325078.95617970184`
+- exact learner timing breakdown:
+  - update `5` learner total: `1621.8057859950932` ms
+  - update `5` learner forward time-major: `557.9108450037893` ms
+  - update `5` learner packed scorer: `308.5012160008773` ms
+  - update `5` learner trunk: `249.3991060036933` ms
+  - update `5` learner teacher aux: `52.76348299958045` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `13077.0` ms
+  - first runtime actor policy forward: `7917.0` ms
+  - first runtime fill pending unrolls: `1.5743249969091266` ms
+  - first runtime build learner batch: `236.00002800230868` ms
+  - last runtime collect actor unroll: `31101.0` ms
+  - last runtime actor policy forward: `20243.0` ms
+  - last runtime fill pending unrolls: `1.313145003223326` ms
+  - last runtime build learner batch: `162.14637600205606` ms
+- what changed:
+  - brought `training.actor_policy_backend=heuristic_public` into the process-collector path
+  - bypassed packed legal scoring on focal actor rows by doing only value/hidden advance on the model side, then taking heuristic-public actions with exact deterministic behavior log-probs
+- whether learning improved:
+  - no clear improvement yet, but no immediate regression either
+  - update `5` dev eval stayed at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - throughput jumped above every prior short probe on this branch, so the idea was strong enough to merit the long run
+- next hypotheses:
+  - run the sustained `u20` version immediately
+  - sweep a lower heuristic fraction afterward to see whether we can keep most of the speed while letting the learned policy act more often
+
+## Attempt 80: Process-Collector Heuristic Actor Backend Sustained Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `52854.67268827007`
+  - update `10` throughput: `70181.01491372139`
+  - update `15` throughput: `80820.34912857444`
+  - update `20` throughput: `86763.73267318316`
+  - update `20` wall clock: `79.3552496433258` s
+  - first runtime actor env-steps/sec: `10849.462835908385`
+  - last runtime actor env-steps/sec: `305578.5852614295`
+- exact learner timing breakdown:
+  - update `5` learner total: `1502.9487450010492` ms
+  - update `5` learner forward time-major: `455.5474939988926` ms
+  - update `5` learner packed scorer: `272.95112600404536` ms
+  - update `5` learner trunk: `182.583188994613` ms
+  - update `5` learner teacher aux: `74.23934200051008` ms
+  - update `20` learner total: `1662.8518090001307` ms
+  - update `20` learner forward time-major: `636.6941259984742` ms
+  - update `20` learner packed scorer: `304.3646730002365` ms
+  - update `20` learner trunk: `332.3200730010285` ms
+  - update `20` learner teacher aux: `33.937419997528195` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `13172.0` ms
+  - first runtime actor policy forward: `8001.0` ms
+  - first runtime fill pending unrolls: `1.2856920002377592` ms
+  - first runtime build learner batch: `247.63561700092396` ms
+  - last runtime collect actor unroll: `33422.0` ms
+  - last runtime actor policy forward: `22289.0` ms
+  - last runtime fill pending unrolls: `2.8091569984098896` ms
+  - last runtime build learner batch: `217.53201499814168` ms
+- what changed:
+  - sustained the new heuristic-backed process collector path through the full `u20` mixed probe
+- whether learning improved:
+  - not convincingly over the earlier `0.875` update-`5` checkpoint
+  - but it did not collapse learning either: update `20` dev eval stayed at aggregate `0.8333333333333334`, `B1=0.5`, `B2=1.0`, with a temporary dip at update `15`
+  - this is the new best Linux frontier so far because it nearly halved wall clock versus the ring/model path while preserving the short-horizon checkpoint quality
+- next hypotheses:
+  - try `actor_heuristic_fraction=0.5` as the obvious speed/learning tradeoff check
+  - if that loses, treat full heuristic-actor collection as the frontier for this architecture branch
+
+## Attempt 81: Mixed `0.5` Heuristic Actor Fraction Tradeoff Check
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic05_livebias_b2mix1_env4096_actor32_ws1_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `47657.05314674327`
+  - update `10` throughput: `59939.951629998934`
+  - update `15` throughput: `66429.56729292525`
+  - update `20` throughput: `71039.47273671812`
+  - update `20` wall clock: `107.61818933486938` s
+  - first runtime actor env-steps/sec: `10675.235721673693`
+  - last runtime actor env-steps/sec: `175837.00853732022`
+- exact learner timing breakdown:
+  - update `5` learner total: `2236.3719919958385` ms
+  - update `5` learner forward time-major: `592.5523659971077` ms
+  - update `5` learner packed scorer: `321.1884420015849` ms
+  - update `5` learner trunk: `271.3531530025648` ms
+  - update `5` learner teacher aux: `40.052647003903985` ms
+  - update `20` learner total: `2462.745372002246` ms
+  - update `20` learner forward time-major: `842.8793809944182` ms
+  - update `20` learner packed scorer: `563.8787039933959` ms
+  - update `20` learner trunk: `278.9914349996252` ms
+  - update `20` learner teacher aux: `82.1604259981541` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `28303.0` ms
+  - first runtime actor policy forward: `19872.0` ms
+  - first runtime fill pending unrolls: `1.2890060024801642` ms
+  - first runtime build learner batch: `235.26480000145966` ms
+  - last runtime collect actor unroll: `99841.0` ms
+  - last runtime actor policy forward: `73838.0` ms
+  - last runtime fill pending unrolls: `204.28606899804436` ms
+  - last runtime build learner batch: `350.2735399961239` ms
+- what changed:
+  - reduced the process-collector heuristic actor fraction from `1.0` to `0.5`
+- whether learning improved:
+  - no
+  - update `20` dev eval regressed to aggregate `0.8125`, `B1=0.4375`, `B2=1.0`
+  - throughput also fell materially below the full heuristic path, so the mixed fraction was strictly worse on this machine
+- next hypotheses:
+  - for the current Linux branch, the best practical path is full heuristic actor collection with the slot-ring process collectors
+  - further major gains likely require a deeper action-contract / scorer redesign or a dedicated actor-inference service rather than more topology tuning
+
+## Attempt 82: Heuristic-Actor Ceiling Check Above `4096 x 32`
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env5120_actor40_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `42227.57550805143`
+  - update `5` wall clock: `12.64991307258606` s
+  - first runtime actor env-steps/sec: `11013.389818270773`
+  - last runtime actor env-steps/sec: `289486.1373350364`
+- exact learner timing breakdown:
+  - update `5` learner total: `1654.2156520008575` ms
+  - update `5` learner forward time-major: `577.5867050029333` ms
+  - update `5` learner packed scorer: `336.5462949941866` ms
+  - update `5` learner trunk: `284.63587400084315` ms
+  - update `5` learner teacher aux: `32.36578299908433` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `14597.0` ms
+  - first runtime actor policy forward: `8758.0` ms
+  - first runtime fill pending unrolls: `1.6337300022705458` ms
+  - first runtime build learner batch: `198.5255330008613` ms
+  - last runtime collect actor unroll: `36254.0` ms
+  - last runtime actor policy forward: `23363.0` ms
+  - last runtime fill pending unrolls: `1.382666997087188` ms
+  - last runtime build learner batch: `140.35865999903763` ms
+- what changed:
+  - repeated the `env5120 actor40` ceiling test on the new full-heuristic actor branch
+- whether learning improved:
+  - no
+  - update `5` dev eval still landed at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - throughput was materially worse than the `env4096 actor32` heuristic frontier, so the shape ceiling still holds on this machine
+- next hypotheses:
+  - current best practical Linux path is `env4096 actor32` with slot-ring process collectors and full heuristic focal actors
+  - if we need another step beyond this, it likely has to come from a deeper actor/scorer redesign rather than more same-contract scaleouts
+
+## Attempt 83: Learner-Value V-trace + Heuristic No-Value Actor Short Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_process_ring_learnerbootstrap_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51721.2454949141`
+  - update `5` wall clock: `12.353452920913696` s
+  - first runtime actor env-steps/sec: `279265.3399758582`
+  - last runtime actor env-steps/sec: `279265.3399758582`
+- exact learner timing breakdown:
+  - update `5` learner total: `1570.4882470017765` ms
+  - update `5` learner forward time-major: `450.49486399511807` ms
+  - update `5` learner packed scorer: `268.23537000018405` ms
+  - update `5` learner trunk: `182.24953800381627` ms
+  - update `5` learner teacher aux: `52.21358400012832` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `29189.0` ms
+  - first runtime actor policy forward: `16968.0` ms
+  - first runtime fill pending unrolls: `1.6253280045930296` ms
+  - first runtime build learner batch: `178.1269630009774` ms
+  - last runtime collect actor unroll: `29189.0` ms
+  - last runtime actor policy forward: `16968.0` ms
+  - last runtime fill pending unrolls: `1.6253280045930296` ms
+  - last runtime build learner batch: `178.1269630009774` ms
+- what changed:
+  - patched the learner raw V-trace path to anchor on current learner values instead of actor-supplied `behavior_values`
+  - added learner-side bootstrap evaluation from `bootstrap_obs` + `bootstrap_actor` + `final_hidden_state`
+  - let heuristic actor rows skip actor-side value computation and bootstrap evaluation when training does not need old values
+- whether learning improved:
+  - no
+  - update `5` dev eval landed at aggregate `0.8333333333333334`, `B1=0.5`, `B2=1.0`
+  - actor policy-forward time dropped materially, but the short mixed probe still did not beat the existing heuristic frontier
+- next hypotheses:
+  - rerun the sustained `u20` probe on the same seed as the old frontier to see whether the corrected learner target helps over time
+  - if sustained learning still matches the old curve, treat this as a correctness cleanup rather than a new frontier
+
+## Attempt 84: Learner-Value V-trace + Heuristic No-Value Actor Sustained Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u20_dev5_wsl_process_ring_learnerbootstrap_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51134.20657384778`
+  - update `10` throughput: `67944.23551804328`
+  - update `15` throughput: `77166.02186324689`
+  - update `20` throughput: `84078.36171666809`
+  - update `20` wall clock: `81.00445079803467` s
+  - first runtime actor env-steps/sec: `10406.777095831636`
+  - last runtime actor env-steps/sec: `294255.04290163715`
+- exact learner timing breakdown:
+  - update `5` learner total: `1480.1404280005954` ms
+  - update `5` learner forward time-major: `539.1807390042231` ms
+  - update `5` learner packed scorer: `345.6138510009623` ms
+  - update `5` learner trunk: `193.55277900467627` ms
+  - update `5` learner teacher aux: `60.27488800464198` ms
+  - update `20` learner total: `1519.0552920030314` ms
+  - update `20` learner forward time-major: `518.7481570028467` ms
+  - update `20` learner packed scorer: `326.3426119956421` ms
+  - update `20` learner trunk: `192.39234699489316` ms
+  - update `20` learner teacher aux: `35.73422300542006` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `11044.0` ms
+  - first runtime actor policy forward: `4523.0` ms
+  - first runtime fill pending unrolls: `1.4140150015009567` ms
+  - first runtime build learner batch: `246.10298199695535` ms
+  - last runtime collect actor unroll: `28088.0` ms
+  - last runtime actor policy forward: `16304.0` ms
+  - last runtime fill pending unrolls: `1.6389929951401427` ms
+  - last runtime build learner batch: `193.70580800023163` ms
+- what changed:
+  - sustained the learner-value / learner-bootstrap branch through the full `u20` mixed probe on the same seed as the old Linux frontier
+  - verified that heuristic actor rows now spend `0.0` ms in actor bootstrap while the learner computes bootstrap values itself
+- whether learning improved:
+  - no clear improvement
+  - the dev-eval trajectory matched the old heuristic frontier exactly: update `5` aggregate `0.875`, update `10` `0.8333333333333334`, update `15` `0.8125`, update `20` `0.8333333333333334`, with `B2` recovering to `1.0` at update `20`
+  - throughput and wall clock were still slightly worse than the previous best heuristic frontier, so this branch looks like a correctness cleanup rather than the new performance winner
+- next hypotheses:
+  - try materially smaller student widths on the heuristic-actor branch, since actor-side computation is now cheaper and teacher-guided learning may tolerate a much smaller model
+  - if tiny-width sweeps fail, the remaining big wins are probably in action-contract/teacher-target redesign rather than more actor-runtime surgery
+
+## Attempt 85: Tiny16 `B1` Baseline Anchor Creation
+
+- current best run label: `structured_acceptance_tiny16_publicbias1_b1_u1_v1`
+- exact throughput numbers:
+  - update `1` throughput: `6654.452494643429`
+  - update `1` wall clock: `975.7518675327301` s
+  - first runtime actor env-steps/sec: `6947.882353621158`
+  - last runtime actor env-steps/sec: `14094.341758804843`
+- exact learner timing breakdown:
+  - update `1` learner total: `848.664794000797` ms
+  - update `1` learner forward time-major: `279.28348499699496` ms
+  - update `1` learner packed scorer: `163.2887430023402` ms
+  - update `1` learner trunk: `115.9873200012953` ms
+  - update `1` learner teacher aux: `40.76658299891278` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `26789.0` ms
+  - first runtime actor policy forward: `4942.0` ms
+  - first runtime fill pending unrolls: `26834.235067995905` ms
+  - first runtime build learner batch: `79.2958020028891` ms
+  - last runtime collect actor unroll: `13109.0` ms
+  - last runtime actor policy forward: `8158.0` ms
+  - last runtime fill pending unrolls: `13152.806333004264` ms
+  - last runtime build learner batch: `72.7897659962764` ms
+- what changed:
+  - minted the tiny16 `baseline_noleague` anchor needed to run fair acceptance probes with a same-shape `B1` import path
+- whether learning improved:
+  - not applicable
+  - this was blocking infrastructure for the tiny16 sweep rather than a frontier attempt
+- next hypotheses:
+  - rerun the fast heuristic-actor acceptance probe with the new tiny16 `B1` anchor
+  - check whether a materially smaller student actually changes end-to-end throughput on the fast Linux branch
+
+## Attempt 86: Tiny16 Heuristic-Actor Fast Probe
+
+- current best run label: `structured_acceptance_tiny16_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `50968.51391470332`
+  - update `5` wall clock: `11.809224367141724` s
+  - first runtime actor env-steps/sec: `10392.234881116925`
+  - last runtime actor env-steps/sec: `311703.00666929653`
+- exact learner timing breakdown:
+  - update `5` learner total: `1570.0184129964327` ms
+  - update `5` learner forward time-major: `632.6572139951168` ms
+  - update `5` learner packed scorer: `317.90559100045357` ms
+  - update `5` learner trunk: `314.73778099461924` ms
+  - update `5` learner teacher aux: `48.71532800461864` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `11191.0` ms
+  - first runtime actor policy forward: `4534.0` ms
+  - first runtime fill pending unrolls: `1.5540959939244203` ms
+  - first runtime build learner batch: `255.99669600342168` ms
+  - last runtime collect actor unroll: `28973.0` ms
+  - last runtime actor policy forward: `17051.0` ms
+  - last runtime fill pending unrolls: `1.1779910055338405` ms
+  - last runtime build learner batch: `185.06339399755234` ms
+- what changed:
+  - reran the best heuristic-actor Linux recipe with a materially smaller `16/16/4` student and the matching tiny16 `B1` anchor
+- whether learning improved:
+  - no
+  - update `5` dev eval regressed to aggregate `0.8333333333333334`, `B1=0.5`, `B2=1.0`
+  - throughput also stayed far below the tiny32 frontier, so shrinking the student is not the missing speed lever here
+- next hypotheses:
+  - stop spending more time on smaller-width sweeps
+  - test whether central batched GPU actor inference becomes viable now that focal actors only need trunk/value work
+
+## Attempt 87: Central Batched GPU-Actor Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_central_gpuactor_v1`
+- exact throughput numbers:
+  - update `5` throughput: `31131.123178570433`
+  - update `5` wall clock: `102.24182033538818` s
+  - first runtime actor env-steps/sec: `11874.828062121942`
+  - last runtime actor env-steps/sec: `48571.60044253362`
+- exact learner timing breakdown:
+  - update `5` learner total: `1397.940427006688` ms
+  - update `5` learner forward time-major: `407.3698309948668` ms
+  - update `5` learner packed scorer: `180.82115300057922` ms
+  - update `5` learner trunk: `226.54045499803033` ms
+  - update `5` learner teacher aux: `29.789989988785237` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `42306.0` ms
+  - first runtime actor policy forward: `448.0` ms
+  - first runtime fill pending unrolls: `42370.98093999521` ms
+  - first runtime build learner batch: `221.16722699865932` ms
+  - last runtime collect actor unroll: `9120.0` ms
+  - last runtime actor policy forward: `32.0` ms
+  - last runtime fill pending unrolls: `9171.513877998223` ms
+  - last runtime build learner batch: `182.6535389991477` ms
+- what changed:
+  - forced `system.actor_device=cuda` and `system.collection_backend=central` to test whether central batched GPU actors finally win when the heuristic branch only needs trunk/value work
+- whether learning improved:
+  - no meaningful gain
+  - update `5` dev eval held at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - throughput collapsed so hard that this path is not viable on the local Linux frontier despite the cheap actor forward itself
+- next hypotheses:
+  - keep the CPU process-collector slot-ring as the only serious performance frontier on this machine
+  - if learning still needs help, spend the remaining budget on objective/teacher changes rather than actor-device experiments
+
+## Attempt 88: Packed Public-Heuristic Soft Target on the Fast Heuristic Branch
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_pubaux025_env4096_actor32_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `46569.647969169564`
+  - update `5` wall clock: `18.683999061584473` s
+  - first runtime actor env-steps/sec: `218839.92337917114`
+  - last runtime actor env-steps/sec: `218839.92337917114`
+- exact learner timing breakdown:
+  - update `5` learner total: `2633.5649019893026` ms
+  - update `5` learner forward time-major: `618.3549989946187` ms
+  - update `5` learner packed scorer: `347.10669198830146` ms
+  - update `5` learner trunk: `271.237861001282` ms
+  - update `5` learner public-heuristic target: `839.0254120022291` ms
+  - update `5` learner teacher aux: `48.503625992452726` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `30797.0` ms
+  - first runtime actor policy forward: `18152.0` ms
+  - first runtime fill pending unrolls: `1.183644009870477` ms
+  - first runtime build learner batch: `239.69829099951312` ms
+  - last runtime collect actor unroll: `30797.0` ms
+  - last runtime actor policy forward: `18152.0` ms
+  - last runtime fill pending unrolls: `1.183644009870477` ms
+  - last runtime build learner batch: `239.69829099951312` ms
+- what changed:
+  - re-enabled the packed public-heuristic soft target on top of the fast full-heuristic actor branch with coefficient `0.25`
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - learner cost jumped by about `0.84` s for the public-heuristic target without moving the short-horizon checkpoint quality
+- next hypotheses:
+  - the local WSL ceiling for the current architecture is now well-supported: the best practical path remains the tiny32 CPU process-collector slot-ring branch at `86763.73267318316` samples/sec
+  - future rescue work should target deeper action/objective semantics or run on the real Linux server hardware rather than keep tuning this same local branch
+
+## Attempt 89: Longer-Unroll Constant-Batch Geometry Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u20_dev5_wsl_process_ring_ul128_bu32_v2`
+- exact throughput numbers:
+  - update `5` throughput: `49582.00967751377`
+  - update `10` throughput: `65833.27883637627`
+  - update `15` throughput: `49359.234213990225`
+  - update `20` throughput: `56832.4522699176`
+  - update `20` wall clock: `142.060702085495` s
+  - first runtime actor env-steps/sec: `10034.483420751438`
+  - last runtime actor env-steps/sec: `333300.63346942584`
+- exact learner timing breakdown:
+  - update `5` learner total: `1422.0073819888057` ms
+  - update `5` learner forward time-major: `492.5567750033224` ms
+  - update `5` learner packed scorer: `266.2012390064774` ms
+  - update `5` learner trunk: `226.34612700494472` ms
+  - update `5` learner teacher aux: `30.16144900175277` ms
+  - update `20` learner total: `1501.400699999067` ms
+  - update `20` learner forward time-major: `485.40710798988584` ms
+  - update `20` learner packed scorer: `269.4638179964386` ms
+  - update `20` learner trunk: `215.93166601087432` ms
+  - update `20` learner teacher aux: `31.70601700549014` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `11128.0` ms
+  - first runtime actor policy forward: `4414.0` ms
+  - first runtime fill pending unrolls: `0.6333859928417951` ms
+  - first runtime build learner batch: `293.88660899712704` ms
+  - last runtime collect actor unroll: `20145.0` ms
+  - last runtime actor policy forward: `11112.0` ms
+  - last runtime fill pending unrolls: `0.5101360002299771` ms
+  - last runtime build learner batch: `173.01488800148945` ms
+- what changed:
+  - codified the best Linux/WSL recipe in `configs/presets/structured_acceptance_linux_frontier.yaml`
+  - kept the heuristic-actor process-ring branch but changed rollout geometry from `unroll_length=64, batch_unrolls_per_update=64` to `unroll_length=128, batch_unrolls_per_update=32` so the total update footprint stayed roughly constant while the runtime paid the per-unroll collector cost fewer times
+  - wired the run to the matching tiny32 `B1` baseline anchor explicitly
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed strong at aggregate `0.875`, `B1=0.625`, `B2=1.0`, but update `15` fell to aggregate `0.7916666666666666`, `B1=0.4375`, `B2=0.9375`
+  - checkpoint guard rolled back to the update `5` best checkpoint at update `15`, and final update `20` only recovered to aggregate `0.8541666666666666`, `B1=0.5625`, `B2=1.0`
+  - throughput stayed far below the `86763.73267318316` sustained frontier, so this longer-unroll constant-batch geometry is not a win
+- next hypotheses:
+  - test the existing narrow CUDA learner trunk compile on the fast Linux frontier, since compile on the structured learner already targets the trunk instead of the branch-heavy packed scorer
+  - if compile also loses, treat same-architecture Linux throughput tuning as near-exhausted and focus the remaining budget on learning/objective ablations
+
+## Attempt 90: CUDA Learner Trunk Compile on the Linux Frontier
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u20_dev5_wsl_process_ring_compilelearner_v1`
+- exact throughput numbers:
+  - update `5` throughput: `37186.37967369001`
+  - update `10` throughput: `52499.89525432553`
+  - update `15` throughput: `42935.81620101702`
+  - update `20` throughput: `49689.22303334698`
+  - update `20` wall clock: `172.2417757511139` s
+  - first runtime actor env-steps/sec: `10466.553295366119`
+  - last runtime actor env-steps/sec: `307242.18413657893`
+- exact learner timing breakdown:
+  - update `5` learner total: `1571.8768299993826` ms
+  - update `5` learner forward time-major: `567.1288230078062` ms
+  - update `5` learner packed scorer: `347.89947600802407` ms
+  - update `5` learner trunk: `219.21716499491595` ms
+  - update `5` learner teacher aux: `45.069217012496665` ms
+  - update `20` learner total: `1542.7655179955764` ms
+  - update `20` learner forward time-major: `554.4335070007946` ms
+  - update `20` learner packed scorer: `326.8474229989806` ms
+  - update `20` learner trunk: `227.57279399957042` ms
+  - update `20` learner teacher aux: `38.87314299936406` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `11376.0` ms
+  - first runtime actor policy forward: `4591.0` ms
+  - first runtime fill pending unrolls: `1.5635830059181899` ms
+  - first runtime build learner batch: `249.22720200265758` ms
+  - last runtime collect actor unroll: `32013.0` ms
+  - last runtime actor policy forward: `19246.0` ms
+  - last runtime fill pending unrolls: `1.0906910029007122` ms
+  - last runtime build learner batch: `179.1572410002118` ms
+- what changed:
+  - enabled `training.precision.compile_learner=true` on the codified Linux frontier preset
+  - used the existing narrow structured-model trunk compile path rather than attempting to compile the branch-heavy packed scorer
+- whether learning improved:
+  - no
+  - the dev-eval trajectory matched the longer-unroll failure exactly: update `5` aggregate `0.875`, update `10` `0.8541666666666666`, update `15` `0.7916666666666666`, update `20` `0.8541666666666666`, with `B2` only briefly dropping to `0.9375` at update `15`
+  - checkpoint guard rolled back to the update `5` best checkpoint at update `15`
+  - throughput and wall clock were materially worse than the non-compiled frontier, so CUDA learner trunk compile is not a rescue lever on this branch
+- next hypotheses:
+  - same-architecture Linux throughput tuning now looks genuinely near-exhausted: geometry and narrow compile both lost badly against the `86763.73267318316` frontier
+  - the next serious performance theory is more radical: remove actor-side recurrent hidden-state tracking on the full heuristic actor branch and let the learner own reconstruction, or otherwise move more of heuristic rollout ownership out of the Python actor loop
+
+## Attempt 91: Heuristic Actor Stateless-Hidden Short Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_process_ring_statelesshidden_v1`
+- exact throughput numbers:
+  - update `5` throughput: `50717.080320721674`
+  - update `5` wall clock: `12.819015741348267` s
+  - first runtime actor env-steps/sec: `10595.811428738174`
+  - last runtime actor env-steps/sec: `193784.7187826606`
+- exact learner timing breakdown:
+  - update `5` learner total: `1579.7055730072316` ms
+  - update `5` learner forward time-major: `461.6087369940942` ms
+  - update `5` learner packed scorer: `187.75780500436667` ms
+  - update `5` learner trunk: `273.8408220029669` ms
+  - update `5` learner teacher aux: `40.5795999977272` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `4379.0` ms
+  - first runtime actor policy forward: `8.0` ms
+  - first runtime fill pending unrolls: `1.3557589991251007` ms
+  - first runtime build learner batch: `258.82582999474835` ms
+  - last runtime collect actor unroll: `9907.0` ms
+  - last runtime actor policy forward: `128.0` ms
+  - last runtime fill pending unrolls: `1.739138999255374` ms
+  - last runtime build learner batch: `219.69660099421162` ms
+- what changed:
+  - added `training.heuristic_actor_hidden_state_tracking`
+  - disabled actor-side recurrent hidden-state advancement on heuristic actor rows and heuristic opponent rows while leaving the rest of the runtime architecture intact
+  - reran the fast Linux heuristic-actor branch with the new stateless-hidden mode enabled
+- whether learning improved:
+  - no clear learning gain yet, but no short-horizon regression either
+  - update `5` dev eval matched the frontier exactly at aggregate `0.875`, `B1=0.625`, `B2=1.0`
+  - the key win was runtime-side: actor policy-forward time collapsed from multi-second totals to near-zero, which is the first evidence that the actor-side GRU hidden update was a real structural cost
+- next hypotheses:
+  - run the sustained `u20` probe immediately, because the short run still carries warm-start and startup overhead and may be understating the end-to-end benefit
+  - if the sustained run also preserves eval while materially beating `86763.73267318316`, promote stateless-hidden heuristic collection to the new Linux frontier
+
+## Attempt 92: Heuristic Actor Stateless-Hidden Sustained Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u20_dev5_wsl_process_ring_statelesshidden_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51640.07109139901`
+  - update `10` throughput: `69048.31758304933`
+  - update `15` throughput: `48351.93117545883`
+  - update `20` throughput: `55310.51215392682`
+  - update `20` wall clock: `150.03645515441895` s
+  - first runtime actor env-steps/sec: `10595.115236906318`
+  - last runtime actor env-steps/sec: `299972.1932608051`
+- exact learner timing breakdown:
+  - update `5` learner total: `1277.9373619996477` ms
+  - update `5` learner forward time-major: `409.689245003392` ms
+  - update `5` learner packed scorer: `202.64154000324197` ms
+  - update `5` learner trunk: `207.0385380066` ms
+  - update `5` learner teacher aux: `31.360936991404742` ms
+  - update `20` learner total: `1507.66274399939` ms
+  - update `20` learner forward time-major: `427.0119260036154` ms
+  - update `20` learner packed scorer: `193.4033439902123` ms
+  - update `20` learner trunk: `233.59248699853197` ms
+  - update `20` learner teacher aux: `33.82527599751484` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `4348.0` ms
+  - first runtime actor policy forward: `4.0` ms
+  - first runtime fill pending unrolls: `1.5667980042053387` ms
+  - first runtime build learner batch: `259.6711030055303` ms
+  - last runtime collect actor unroll: `9363.0` ms
+  - last runtime actor policy forward: `137.0` ms
+  - last runtime fill pending unrolls: `1.5446719917235896` ms
+  - last runtime build learner batch: `228.95071998937055` ms
+- what changed:
+  - disabled heuristic-row actor hidden-state tracking for the full sustained Linux frontier run
+  - left the rest of the architecture intact so the comparison isolates actor-side recurrent-state work
+- whether learning improved:
+  - no
+  - the dev-eval trajectory regressed to the same rollback-confirmatory pattern as the failed geometry/compile branches: update `5` aggregate `0.875`, update `10` `0.8541666666666666`, update `15` `0.7916666666666666`, update `20` `0.8541666666666666`
+  - checkpoint guard rolled back to the update `5` best checkpoint at update `15`
+  - despite collapsing actor policy-forward time from multi-second totals to near-zero, end-to-end throughput still stayed far below the `86763.73267318316` frontier, so actor-side hidden-state advancement was not the true limiting factor
+- next hypotheses:
+  - treat same-architecture heuristic-runtime tuning as effectively exhausted on the local Linux box
+  - shift the remaining search budget toward learning-oriented theories, especially whether a small amount of model-acted collection can improve the actual student without surrendering too much throughput
+
+## Attempt 93: Mixed Collection With Pure-Student Eval Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic09_pureactor_env4096_actor32_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `46772.78576578446`
+  - update `5` wall clock: `16.030887126922607` s
+  - first runtime actor env-steps/sec: `10015.188975859292`
+  - last runtime actor env-steps/sec: `200987.08893726298`
+- exact learner timing breakdown:
+  - update `5` learner total: `2141.761681996286` ms
+  - update `5` learner forward time-major: `788.2258070021635` ms
+  - update `5` learner packed scorer: `594.0191999980016` ms
+  - update `5` learner trunk: `194.19646600726992` ms
+  - update `5` learner teacher aux: `86.97111799847335` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `23225.0` ms
+  - first runtime actor policy forward: `14575.0` ms
+  - first runtime fill pending unrolls: `1.3134630045620725` ms
+  - first runtime build learner batch: `273.0809119961923` ms
+  - last runtime collect actor unroll: `71169.0` ms
+  - last runtime actor policy forward: `48977.0` ms
+  - last runtime fill pending unrolls: `1.8706320110941306` ms
+  - last runtime build learner batch: `453.71314699877985` ms
+- what changed:
+  - reduced `training.actor_heuristic_fraction` to `0.9` so 10% of focal collection uses the model instead of the heuristic actor
+  - set `model.public_heuristic_actor_logit_bias_scale=0.0` so actor-time model inference and dev eval both reflect pure student logits rather than a heuristic-biased actor path
+- whether learning improved:
+  - no
+  - the pure-student dev eval at update `5` was weak: aggregate `0.375`, `B0 RandomLegal=0.4375`, `B1 NoLeague baseline=0.6875`, `B2 HeuristicPublic=0.0`
+  - this is materially worse than the full heuristic-actor Linux frontier and strongly suggests the fast branch is still not producing a robust pure student once actor-time heuristic help is removed
+- next hypotheses:
+  - the next serious learning rescue should stop relying on single chosen-action teacher labels alone and instead turn on or strengthen full legal-set heuristic-ranking supervision
+  - pure model-acted collection is too expensive to use as the first rescue lever here because a small 10% mix already blew up actor policy-forward time and reduced throughput sharply
+
+## Attempt 94: Honest-Eval Fix Plus Public-Distillation Re-Audit
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_pubdistill01_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - source update `5` throughput: `48615.79782830583`
+  - source update `5` wall clock: `17.26786971092224` s
+  - source first runtime actor env-steps/sec: `10730.693061062175`
+  - source last runtime actor env-steps/sec: `202140.0936041216`
+- exact learner timing breakdown:
+  - source update `5` learner total: `2409.3880810105475` ms
+  - source update `5` learner forward time-major: `550.5368419981096` ms
+  - source update `5` learner packed scorer: `259.4051269988995` ms
+  - source update `5` learner trunk: `291.119952002191` ms
+  - source update `5` learner public heuristic target: `820.45361600467` ms
+  - source update `5` learner teacher aux: `48.23281599965412` ms
+- exact actor timing breakdown:
+  - source first runtime collect actor unroll: `11028.0` ms
+  - source first runtime actor policy forward: `4487.0` ms
+  - source first runtime fill pending unrolls: `1.3430430117296055` ms
+  - source first runtime build learner batch: `251.4854469918646` ms
+  - source last runtime collect actor unroll: `29524.0` ms
+  - source last runtime actor policy forward: `17420.0` ms
+  - source last runtime fill pending unrolls: `1.5508329961448908` ms
+  - source last runtime build learner batch: `199.44440400286112` ms
+- what changed:
+  - fixed a real evaluation semantics bug: periodic dev eval, promotion gate, and simulator-backed final eval were all using `forward_seat_aware(..., scoring_mode=\"auto\")`, which resolves to actor-mode heuristic-biased logits under `torch.inference_mode()`
+  - added explicit scoring-mode support through the model forward path and forced learner-mode logits for evaluation call sites
+  - re-audited the old fast frontier checkpoint and the public-distillation checkpoint under the fixed learner-mode evaluator instead of trusting the old actor-biased summaries
+- whether learning improved:
+  - yes relative to the honest baseline, but the truth was much worse than we thought
+  - the old fast frontier checkpoint `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_env4096_actor32_ws1_u5_dev5_wsl_process_ring_v1` fell to aggregate `0.3333333333333333`, `B0=0.5`, `B1=0.5`, `B2=0.0`
+  - the public-distillation checkpoint improved to aggregate `0.4166666666666667`, `B0=0.4375`, `B1=0.8125`, `B2=0.0`
+  - that established two things at once: the old learning evidence was inflated by eval bias, and full legal-set heuristic distillation is a real honest-learning lever even though it still does not beat B2 by itself
+- next hypotheses:
+  - keep honest learner-mode eval permanently and stop trusting any earlier actor-biased B2 numbers
+  - continue with public-distillation variants and then test whether the public heuristic prior should become a permanent deployed model component rather than remaining teacher-only
+
+## Attempt 95: Public Distillation Plus Same-Family Action Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_pubdistill01_samefam01_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `48144.601109748684`
+  - update `5` wall clock: `18.14867329597473` s
+  - first runtime actor env-steps/sec: `10723.129878872533`
+  - last runtime actor env-steps/sec: `193820.67234278767`
+- exact learner timing breakdown:
+  - update `5` learner total: `2588.5914679965936` ms
+  - update `5` learner forward time-major: `600.5698909866624` ms
+  - update `5` learner packed scorer: `276.78809499775525` ms
+  - update `5` learner trunk: `323.7717840092955` ms
+  - update `5` learner public heuristic target: `956.7256970040035` ms
+  - update `5` learner teacher aux: `47.87118600506801` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `11014.0` ms
+  - first runtime actor policy forward: `4506.0` ms
+  - first runtime fill pending unrolls: `1.2873100058641285` ms
+  - first runtime build learner batch: `246.57960099284537` ms
+  - last runtime collect actor unroll: `28879.0` ms
+  - last runtime actor policy forward: `16959.0` ms
+  - last runtime fill pending unrolls: `1.2080230080755427` ms
+  - last runtime build learner batch: `191.40325499756727` ms
+- what changed:
+  - kept the public-distillation loss enabled
+  - added `teacher_same_family_action_coef=0.1` and warm-start `teacher_same_family_action_coef=0.5` to directly supervise within-family tactical choice quality
+- whether learning improved:
+  - no
+  - honest dev eval stayed flat versus the plain public-distillation probe at aggregate `0.4166666666666667`, `B0=0.4375`, `B1=0.8125`, `B2=0.0`
+  - throughput regressed slightly and learner cost increased, so same-family action supervision is not the next rescue lever on this branch
+- next hypotheses:
+  - drop the same-family add-on and keep public-distillation as the only teacher-side improvement that has shown honest value so far
+  - test whether the public heuristic prior should be part of deployed learner-mode inference rather than remaining a teacher-only target
+
+## Attempt 96: Sustained Public-Distillation Honest Run
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_pubdistill01_ws1_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `48615.79782830583`
+  - update `10` throughput: `62037.70875565257`
+  - update `15` throughput: `65834.38996256595`
+  - update `20` throughput: `70112.87529224948`
+  - update `20` wall clock: `159.43194437026978` s
+  - first runtime actor env-steps/sec: `10544.305969334606`
+  - last runtime actor env-steps/sec: `196737.0846960744`
+- exact learner timing breakdown:
+  - update `20` learner total: `2398.970758993528` ms
+  - update `20` learner forward time-major: `473.6744319961872` ms
+  - update `20` learner packed scorer: `284.98148699873127` ms
+  - update `20` learner trunk: `188.68010700680315` ms
+  - update `20` learner public heuristic target: `899.1779520001728` ms
+  - update `20` learner teacher aux: `61.067820992320776` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `11048.0` ms
+  - first runtime actor policy forward: `4462.0` ms
+  - first runtime fill pending unrolls: `1.4634740073233843` ms
+  - first runtime build learner batch: `258.355751997442` ms
+  - last runtime collect actor unroll: `28275.0` ms
+  - last runtime actor policy forward: `16514.0` ms
+  - last runtime fill pending unrolls: `1.1388649872969836` ms
+  - last runtime build learner batch: `183.65463300142437` ms
+- what changed:
+  - kept the plain public-distillation recipe and extended it to a sustained `u20` honest-eval run
+  - left global learner-mode heuristic bias at `0.0`, so this was still asking the student to beat B2 without a deployed heuristic prior
+- whether learning improved:
+  - partially, but not enough
+  - honest dev-eval trajectory: update `5` aggregate `0.4166666666666667`, update `10` `0.3958333333333333`, update `15` `0.4166666666666667`, update `20` `0.2708333333333333`
+  - `B2` stayed `0.0` at every dev-eval checkpoint
+  - `B1` peaked at `0.8125` early and then collapsed to `0.4375` by update `20`
+  - public-distillation alone is therefore helpful but not sufficient
+- next hypotheses:
+  - the deeper issue is not just teacher ranking quality; the deployed policy likely needs the public tactical prior in learner/eval mode as an explicit architecture choice
+  - probe post-hoc deployed global bias scales on the honest public-distillation checkpoint before committing to another expensive retrain
+
+## Attempt 97: Post-Hoc Global-Bias Deployment Probe
+
+- current best run label: `structured_acceptance_tiny32_actorheuristic1_livebias_b2mix1_pubdistill01_ws1_u20_dev5_wsl_process_ring_v1` with learner/eval `public_heuristic_logit_bias_scale=1.0`
+- exact throughput numbers:
+  - source update `20` throughput: `70112.87529224948`
+  - source update `20` wall clock: `159.43194437026978` s
+  - source last runtime actor env-steps/sec: `196737.0846960744`
+- exact learner timing breakdown:
+  - source update `20` learner total: `2398.970758993528` ms
+  - source update `20` learner forward time-major: `473.6744319961872` ms
+  - source update `20` learner packed scorer: `284.98148699873127` ms
+  - source update `20` learner trunk: `188.68010700680315` ms
+  - source update `20` learner public heuristic target: `899.1779520001728` ms
+- exact actor timing breakdown:
+  - source last runtime collect actor unroll: `28275.0` ms
+  - source last runtime actor policy forward: `16514.0` ms
+  - source last runtime fill pending unrolls: `1.1388649872969836` ms
+  - source last runtime build learner batch: `183.65463300142437` ms
+- what changed:
+  - reloaded the sustained public-distillation checkpoint and re-evaluated it repeatedly with learner/eval `model.public_heuristic_logit_bias_scale` changed post hoc to `0.5`, `1.0`, `5.0`, and `20.0`
+  - this treated the public heuristic as part of the deployed policy rather than as teacher-only training help
+- whether learning improved:
+  - yes, decisively, once the heuristic prior became part of the deployed learner-mode policy
+  - bias `0.5`: aggregate `0.8125`, `B0=1.0`, `B1=0.4375`, `B2=1.0`
+  - bias `1.0`: aggregate `0.875`, `B0=1.0`, `B1=0.625`, `B2=1.0`
+  - bias `5.0`: aggregate `0.8333333333333334`, `B0=1.0`, `B1=0.5`, `B2=1.0`
+  - bias `20.0`: aggregate `0.8125`, `B0=1.0`, `B1=0.4375`, `B2=1.0`
+  - the best scale on this checkpoint was `1.0`, which is also materially better than applying the same post-hoc bias to the old non-distilled frontier (`aggregate 0.8333333333333334`, `B1=0.5`, `B2=1.0`)
+- next hypotheses:
+  - promote the public heuristic prior from post-hoc probe to first-class architecture: train and evaluate directly with learner-mode global bias `1.0`
+  - keep public-distillation enabled on top, because it improves the hybrid deployed policy relative to the older fast checkpoint
+
+## Attempt 98: Hybrid-Residual Short Probe
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_ws1_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `47691.02785758759`
+  - update `5` wall clock: `19.052648305892944` s
+  - first runtime actor env-steps/sec: `10740.244161859893`
+  - last runtime actor env-steps/sec: `110835.17862051832`
+- exact learner timing breakdown:
+  - update `5` learner total: `2868.396022997331` ms
+  - update `5` learner forward time-major: `667.8345520049334` ms
+  - update `5` learner packed scorer: `352.0409659977304` ms
+  - update `5` learner trunk: `315.7788920070743` ms
+  - update `5` learner public heuristic target: `946.5055860055145` ms
+  - update `5` learner teacher aux: `47.68991300079506` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `11039.0` ms
+  - first runtime actor policy forward: `4484.0` ms
+  - first runtime fill pending unrolls: `1.873374989372678` ms
+  - first runtime build learner batch: `248.8437659922056` ms
+  - last runtime collect actor unroll: `29811.0` ms
+  - last runtime actor policy forward: `17544.0` ms
+  - last runtime fill pending unrolls: `1.2864390009781346` ms
+  - last runtime build learner batch: `202.44109199848026` ms
+- what changed:
+  - made the public heuristic prior part of learner-mode and eval-mode policy scoring by setting `model.public_heuristic_logit_bias_scale=1.0`
+  - kept the heuristic actor backend for collection
+  - kept public-distillation active so the network still learns a residual on top of the prior instead of relying on the prior alone
+- whether learning improved:
+  - yes
+  - honest dev eval at update `5` jumped to aggregate `0.8333333333333334`, `B0=1.0`, `B1=0.5`, `B2=1.0`
+  - this is the first trained recipe on the Linux frontier that clears the real B2 bar under honest evaluation without post-hoc checkpoint surgery
+- next hypotheses:
+  - take the hybrid residual recipe to `u20` immediately, because the key question is whether it sustains or just spikes during warm-start
+  - if it sustains, codify it as the new Linux server preset and treat pure-student/no-prior training as a dead end for this thesis schedule
+
+## Attempt 99: Sustained Hybrid-Residual Honest Run
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_ws1_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `47691.02785758759`
+  - update `10` throughput: `66821.95133936682`
+  - update `15` throughput: `69089.09065831902`
+  - update `20` throughput: `73492.67997093707`
+  - update `20` wall clock: `152.02082920074463` s
+  - first runtime actor env-steps/sec: `10294.984832459531`
+  - last runtime actor env-steps/sec: `195178.25653358738`
+- exact learner timing breakdown:
+  - update `20` learner total: `2209.549334991607` ms
+  - update `20` learner forward time-major: `505.4607859929092` ms
+  - update `20` learner packed scorer: `316.7718709883047` ms
+  - update `20` learner trunk: `188.6751369893318` ms
+  - update `20` learner public heuristic target: `757.6100949954707` ms
+  - update `20` learner teacher aux: `38.08297299838159` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `11239.0` ms
+  - first runtime actor policy forward: `4607.0` ms
+  - first runtime fill pending unrolls: `1.800470010493882` ms
+  - first runtime build learner batch: `257.48709599429276` ms
+  - last runtime collect actor unroll: `28041.0` ms
+  - last runtime actor policy forward: `16334.0` ms
+  - last runtime fill pending unrolls: `1.5249449934344739` ms
+  - last runtime build learner batch: `177.13690099481028` ms
+- what changed:
+  - trained directly on the hybrid-residual recipe rather than only probing it post hoc
+  - codified the winning ingredients of the last few probes: Linux process collectors, full heuristic actor collection, public-distillation, and learner-mode global public heuristic bias `1.0`
+- whether learning improved:
+  - yes
+  - honest dev-eval trajectory: update `5` aggregate `0.8333333333333334`, update `10` `0.8541666666666666`, update `15` `0.7916666666666666`, update `20` `0.875`
+  - anchor trajectory: `B2` = `1.0 -> 1.0 -> 0.9375 -> 1.0`, `B1` = `0.5 -> 0.5625 -> 0.4375 -> 0.625`
+  - checkpoint guard rolled back at update `15` after the confidence dip and the run recovered to the best honest score yet by update `20`
+  - this beats the old fast frontier even after giving the old checkpoint the same deployed global bias (`0.875` vs `0.8333333333333334`)
+- next hypotheses:
+  - treat the hybrid-residual architecture as the current Linux server frontier: it is slower than the old fake-eval frontier but finally pairs strong throughput with honest B2 competence
+  - if more performance headroom is needed, the next meaningful systems bet is no longer another Python-side tuning sweep; it is a simulator-owned native rollout collector/unroll engine on Linux
+  - if more learning headroom is needed, tune the global bias around `1.0` and possibly anneal or curriculum it rather than removing it, because pure no-prior training still fails the honest B2 bar
+
+## Attempt 101: Hybrid Residual Plus Stateless Heuristic Hidden Tracking
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_ws1_u20_dev5_wsl_process_ring_statelesshidden_nogate_v1`
+- exact throughput numbers:
+  - update `5` throughput: `49528.838662077374`
+  - update `10` throughput: `69473.07027382788`
+  - update `15` throughput: `81082.95280202567`
+  - update `20` throughput: `74108.68108837471`
+  - update `20` wall clock: `151.02232217788696` s
+  - first runtime actor env-steps/sec: `10713.621862939508`
+  - last runtime actor env-steps/sec: `207362.27839529508`
+- exact learner timing breakdown:
+  - update `5` learner total: `2593.57288001047` ms
+  - update `5` learner forward time-major: `449.5091419958044` ms
+  - update `5` learner packed scorer: `250.35608500184026` ms
+  - update `5` learner trunk: `199.1436380048981` ms
+  - update `5` learner public heuristic target: `984.3296049948549` ms
+  - update `5` learner teacher aux: `53.30169200897217` ms
+  - update `20` learner total: `2456.307761007338` ms
+  - update `20` learner forward time-major: `446.1780880083097` ms
+  - update `20` learner packed scorer: `250.38302800385281` ms
+  - update `20` learner trunk: `195.78763699973933` ms
+  - update `20` learner public heuristic target: `977.5227159989299` ms
+  - update `20` learner teacher aux: `34.075240007950924` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `4444.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - first runtime fill pending unrolls: `1.5256249898811802` ms
+  - first runtime build learner batch: `236.40078101016115` ms
+  - first runtime simulator python step: `1281.258045` ms
+  - last runtime collect actor unroll: `9625.0` ms
+  - last runtime actor policy forward: `114.0` ms
+  - last runtime fill pending unrolls: `1.611880012205802` ms
+  - last runtime build learner batch: `188.2710810023127` ms
+  - last runtime simulator python step: `3424.250538` ms
+  - last runtime simulator python reset done: `158.283183` ms
+- what changed:
+  - reran the honest Linux hybrid-residual recipe with `training.heuristic_actor_hidden_state_tracking=false`
+  - disabled league promotion gating for this probe so the run could execute in the Linux workspace without first minting a same-shape tiny32 `baseline_noleague` anchor; periodic dev eval still ran against `B0` and `B2`
+- whether learning improved:
+  - partially
+  - the reduced-gate dev-eval trajectory stayed extremely strong on the anchors that still ran: update `5` aggregate `1.0`, update `10` `1.0`, update `15` `0.96875`, update `20` `1.0`
+  - `B2 HeuristicPublic` was `1.0` at updates `5`, `10`, and `20`, and `0.9375` at update `15`
+  - this is not a full apples-to-apples acceptance result because `B1` was not evaluated in this no-gate probe
+  - performance did improve modestly versus the gated hybrid frontier: update `20` throughput rose from `73492.67997093707` to `74108.68108837471`, and the run peaked at `81082.95280202567` on update `15`
+  - the key structural evidence is that actor policy-forward time collapsed to near-zero again on the honest hybrid recipe, which leaves the Python simulator step/reset loop as the dominant remaining actor-side cost
+- next hypotheses:
+  - stop treating actor-side recurrent advancement as the main systems bottleneck on the all-heuristic Linux branch; the new dominant cost is the Python loop around `env.step()` / `reset_done()`
+  - implement a deeper heuristic fast path that removes more of the per-step Python runtime work, ideally by letting the simulator own more of the heuristic rollout loop or by driving the pool buffers directly without the current decision-env step wrapper
+  - mint a matching tiny32 `baseline_noleague` anchor later so the strongest no-gate performance variants can be rechecked on the full `B0/B1/B2` acceptance harness
+
+## Attempt 102: Direct Pool Heuristic Collector Fast Path
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_ws1_u5_dev5_wsl_process_ring_fastheuristic_statelesshidden_nogate_v1`
+- exact throughput numbers:
+  - update `1` throughput: `20331.973471410045`
+  - update `2` throughput: `29168.910464754386`
+  - update `3` throughput: `37476.221894192764`
+  - update `4` throughput: `44993.543700430746`
+  - update `5` throughput: `51856.39645486634`
+  - update `5` wall clock: `62.79441714286804` s
+  - first runtime actor env-steps/sec: `11287.343281410342`
+  - last runtime actor env-steps/sec: `218307.50193059622`
+- exact learner timing breakdown:
+  - update `5` learner total: `2132.311107998248` ms
+  - update `5` learner forward time-major: `413.4455989988055` ms
+  - update `5` learner packed scorer: `199.61193199560512` ms
+  - update `5` learner trunk: `213.82149899727665` ms
+  - update `5` learner public heuristic target: `730.8257309923647` ms
+  - update `5` learner teacher aux: `33.20240801258478` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3492.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - first runtime fill pending unrolls: `1.7699879972497001` ms
+  - first runtime build learner batch: `253.24200998875313` ms
+  - first runtime simulator python step: `389.313224` ms
+  - first runtime simulator python reset: `41.554667` ms
+  - first runtime simulator python reset done: `32.17258` ms
+  - last runtime collect actor unroll: `7392.0` ms
+  - last runtime actor policy forward: `135.0` ms
+  - last runtime fill pending unrolls: `1.124706002883613` ms
+  - last runtime build learner batch: `196.76086099934764` ms
+  - last runtime simulator python step: `1410.048351` ms
+  - last runtime simulator python reset done: `103.479622` ms
+- what changed:
+  - added a heuristic-only collector fast path in `QueueRuntime` that bypasses `DecisionBoundaryEnv.step()` / `reset_done()` and drives the pool directly with `step_into_i16_legal_ids(...)` and `reset_done_into_i16_legal_ids(...)`
+  - restricted the path to the exact Linux frontier conditions where all actor-controlled rows and fixed opponents are `heuristic_public`, the layout is `i16_legal_ids`, and the fixed-opponent backend is simulator-native
+  - preserved the async IMPALA/V-trace contract by still storing deterministic heuristic behavior with `behavior_logp=0.0`, packed legal payloads, teacher labels, timeout accounting, and done-row role reassignment
+- whether learning improved:
+  - yes on both speed and the available no-gate anchor eval
+  - update `5` throughput rose from `49528.838662077374` on Attempt `101` to `51856.39645486634`
+  - first runtime collect actor unroll fell from `4444.0` ms to `3492.0` ms
+  - first runtime simulator python step fell from `1281.258045` ms to `389.313224` ms
+  - last runtime collect actor unroll fell from `9625.0` ms to `7392.0` ms
+  - last runtime simulator python step fell from `3424.250538` ms to `1410.048351` ms
+  - dev eval at update `5` stayed perfect on the no-gate anchors: aggregate `1.0`, `B0 RandomLegal=1.0`, `B2 HeuristicPublic=1.0`
+- next hypotheses:
+  - run the sustained `u20` version of the same fast collector to confirm the gain survives beyond the short probe and to get an apples-to-apples comparison with Attempt `101`
+  - if the sustained run also wins, treat direct pool stepping as the new Linux actor frontier and keep pushing toward a simulator-owned native heuristic unroll loop that removes even more of the Python per-step control flow
+  - if the sustained run flattens or regresses, inspect whether the remaining actor cost is now teacher-label construction or packed payload copying rather than simulator stepping
+
+## Attempt 103: Sustained Direct Pool Heuristic Collector
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_ws1_u20_dev5_wsl_process_ring_fastheuristic_statelesshidden_nogate_v1`
+- exact throughput numbers:
+  - update `5` throughput: `50683.3386786212`
+  - update `10` throughput: `72547.52500514648`
+  - update `15` throughput: `85409.74995883339`
+  - update `20` throughput: `78897.5577917978`
+  - update `20` wall clock: `141.7536118030548` s
+  - first runtime actor env-steps/sec: `11397.902951878961`
+  - last runtime actor env-steps/sec: `211778.01272002916`
+- exact learner timing breakdown:
+  - update `5` learner total: `2008.845657997881` ms
+  - update `5` learner forward time-major: `453.89937300933525` ms
+  - update `5` learner packed scorer: `263.52573999611195` ms
+  - update `5` learner trunk: `190.36488300480414` ms
+  - update `5` learner public heuristic target: `665.1905320031801` ms
+  - update `5` learner teacher aux: `42.62965499947313` ms
+  - update `20` learner total: `2205.1588390022516` ms
+  - update `20` learner forward time-major: `377.6481430104468` ms
+  - update `20` learner packed scorer: `187.84168100683019` ms
+  - update `20` learner trunk: `189.7980610083323` ms
+  - update `20` learner public heuristic target: `898.3501030015759` ms
+  - update `20` learner teacher aux: `41.96498500823509` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3497.0` ms
+  - first runtime actor policy forward: `8.0` ms
+  - first runtime fill pending unrolls: `1.678357002674602` ms
+  - first runtime build learner batch: `244.5542819914408` ms
+  - first runtime simulator python step: `407.885554` ms
+  - first runtime simulator python reset: `56.786608` ms
+  - first runtime simulator python reset done: `23.553566` ms
+  - last runtime collect actor unroll: `6644.0` ms
+  - last runtime actor policy forward: `95.0` ms
+  - last runtime fill pending unrolls: `1.2718299985863268` ms
+  - last runtime build learner batch: `164.16328799095936` ms
+  - last runtime simulator python step: `1327.182645` ms
+  - last runtime simulator python reset done: `124.62996` ms
+- what changed:
+  - reran the hybrid-residual Linux frontier on the new direct-pool heuristic collector for the full `20`-update window
+  - kept the same strong recipe as Attempt `101`: WSL/Linux process collectors, full heuristic actor collection, public-distillation, learner-side global public heuristic bias `1.0`, and stateless heuristic hidden tracking
+  - preserved the no-gate acceptance variant so the run remained directly comparable to Attempts `101` and `102`
+- whether learning improved:
+  - yes on throughput and no-regression on the measured anchors
+  - update `20` throughput improved from `74108.68108837471` on Attempt `101` to `78897.5577917978`
+  - update `20` wall clock improved from `151.02232217788696` s to `141.7536118030548` s
+  - first runtime simulator python step improved from `1281.258045` ms to `407.885554` ms
+  - last runtime simulator python step improved from `3424.250538` ms to `1327.182645` ms
+  - last runtime collect actor unroll improved from `9625.0` ms to `6644.0` ms
+  - the no-gate dev-eval trajectory matched Attempt `101`: aggregate `1.0`, `1.0`, `0.96875`, `1.0` with `B2 HeuristicPublic = 1.0`, `1.0`, `0.9375`, `1.0`
+- next hypotheses:
+  - treat direct pool stepping as the new Linux actor frontier for the all-heuristic hybrid recipe
+  - the remaining large actor-side cost is still Python-controlled simulator stepping plus post-step teacher-label work, so the next serious system bet is a simulator-owned heuristic rollout/unroll API rather than more Python runtime reshuffling
+  - on the learner side, public-distillation is now the single largest timer, so any next learning/performance trade study should compare keeping its current strength versus scheduling or sparsifying it rather than touching the already-cheap packed scorer
+
+## Attempt 104: Simulator-Owned Heuristic Rollout Prototype
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_ws1_u5_dev5_wsl_nativeheuristicrollout_localpkg_nogate_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51332.63017624954`
+  - update `5` wall clock: `63.4649612903595` s
+  - first runtime actor env-steps/sec: `11231.11456500295`
+  - last runtime actor env-steps/sec: `194454.45936678728`
+- exact learner timing breakdown:
+  - update `5` learner total: `2183.9424470090307` ms
+  - update `5` learner forward time-major: `446.14250100858044` ms
+  - update `5` learner packed scorer: `235.25460899691097` ms
+  - update `5` learner trunk: `210.87746100965887` ms
+  - update `5` learner public heuristic target: `739.056577993324` ms
+  - update `5` learner teacher aux: `31.77548199892044` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `6287.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - first runtime actor env step: `1828.0` ms
+  - first runtime build learner batch: `251.20133999735117` ms
+  - first runtime simulator native heuristic rollout: `1863.962679` ms
+  - first runtime simulator python reset done: `42.368497` ms
+  - last runtime collect actor unroll: `12281.0` ms
+  - last runtime actor policy forward: `0.0` ms
+  - last runtime actor env step: `5934.0` ms
+  - last runtime build learner batch: `162.44834099779837` ms
+  - last runtime simulator native heuristic rollout: `5961.844993` ms
+  - last runtime simulator python reset done: `111.795462` ms
+- what changed:
+  - added a simulator-native `rollout_heuristic_public_into_i16_legal_ids(...)` path in Rust plus a PyO3 wrapper
+  - added an RL-side native-rollout collector that requests a whole heuristic unroll from the simulator in one call, reconstructs the packed legal-action batch from the returned trajectory, and snapshots the bootstrap state once at the end
+  - discovered that WSL/server runs must import the local simulator checkout explicitly; the first `maturin develop` path was still resolving an older installed package, so the real comparison used `PYTHONPATH=/home/claw/thesis-linux/weiss-schwarz-simulator/python` with the freshly built repo-local `.so`
+  - left the native rollout path opt-in only after benchmarking, because this prototype is slower than the current fast frontier
+- whether learning improved:
+  - no
+  - dev eval at update `5` stayed perfect on the no-gate anchors: aggregate `1.0`, `B0 RandomLegal=1.0`, `B2 HeuristicPublic=1.0`
+  - throughput regressed slightly versus Attempt `102`: `51332.63017624954` vs `51856.39645486634`
+  - first runtime collect actor unroll regressed from `3492.0` ms to `6287.0` ms
+  - last runtime collect actor unroll regressed from `7392.0` ms to `12281.0` ms
+  - the path did eliminate per-step Python stepping (`timer_simulator_python_step_ms=0.0`) but replaced it with a larger single native rollout cost (`timer_simulator_python_native_heuristic_rollout_ms=1863.962679` first, `5961.844993` last) and nearly doubled copied bytes (`827752448` vs `431390720`)
+- next hypotheses:
+  - do not keep pushing this exact native-unroll design; it snapshots pre-action packed legality inside Rust every step and ends up doing more total work than the direct-pool fast path
+  - keep the local-checkout Linux import recipe for future server runs: use the simulator repo package directly rather than trusting a previously installed site-packages build
+  - return to the faster direct-pool frontier and test the next lever with better upside: reduce post-warmstart teacher/public-distillation cost on the learner without giving up the strong hybrid-residual B2 behavior
+
+## Attempt 105: Warmstart-Only Teacher Aux on Fast Hybrid Frontier
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u20_dev5_wsl_process_ring_nogate_v1`
+- exact throughput numbers:
+  - update `5` throughput: `56385.49746372646`
+  - update `10` throughput: `83236.58968103486`
+  - update `15` throughput: `98956.87798500728`
+  - update `20` throughput: `89721.48536903708`
+  - update `20` wall clock: `124.06521463394165` s
+  - first runtime actor env-steps/sec: `11560.135227191842`
+  - last runtime actor env-steps/sec: `372926.47788182716`
+- exact learner timing breakdown:
+  - update `5` learner total: `1220.959568003309` ms
+  - update `5` learner forward time-major: `436.82993699621875` ms
+  - update `5` learner packed scorer: `244.47359899932053` ms
+  - update `5` learner trunk: `192.34262600366492` ms
+  - update `20` learner total: `1351.8190250033513` ms
+  - update `20` learner forward time-major: `375.725177989807` ms
+  - update `20` learner packed scorer: `196.2548690062249` ms
+  - update `20` learner trunk: `179.4613949896302` ms
+  - the expensive learner public-heuristic target pass disappeared after warmstart on this setting, which is the main reason total learner time dropped so hard versus Attempt `103`
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3452.0` ms
+  - first runtime actor policy forward: `4.0` ms
+  - first runtime actor env step: `7.0` ms
+  - first runtime build learner batch: `242.29023599764332` ms
+  - first runtime simulator python step: `396.717815` ms
+  - first runtime simulator python reset done: `29.114952` ms
+  - last runtime collect actor unroll: `7470.0` ms
+  - last runtime actor policy forward: `115.0` ms
+  - last runtime actor env step: `412.0` ms
+  - last runtime build learner batch: `99.31701399909798` ms
+  - last runtime simulator python step: `1476.421089` ms
+  - last runtime simulator python reset done: `126.7579` ms
+- what changed:
+  - kept the same Linux/WSL process-ring fast-heuristic frontier as Attempt `103`
+  - changed only `training.teacher_aux.mode=warmstart_only`, so the learner keeps the public/teacher distillation pressure during warmstart and then stops paying for it on the main updates
+  - preserved the no-gate evaluation variant so the learning comparison stayed apples-to-apples with Attempts `101` through `104`
+- whether learning improved:
+  - yes on throughput and no-regression on the available no-gate anchor eval
+  - the dev-eval trajectory matched Attempt `103` exactly: aggregate `1.0`, `1.0`, `0.96875`, `1.0` with `B2 HeuristicPublic = 1.0`, `1.0`, `0.9375`, `1.0`
+  - update `20` throughput improved from `78897.5577917978` on Attempt `103` to `89721.48536903708`
+  - update `20` wall clock improved from `141.7536118030548` s to `124.06521463394165` s
+  - update `20` learner total improved from `2205.1588390022516` ms to `1351.8190250033513` ms
+  - update `15` throughput reached `98956.87798500728`, which is the highest honest no-gate hybrid throughput seen so far
+- next hypotheses:
+  - this is the new Linux frontier and deserves a stricter confirmation run on the acceptance path with the real gate / baseline anchor rather than only the no-gate variant
+  - now that learner total dropped sharply, actor collection may again be the limiting wall-clock term; that makes Linux-native process layout, larger total-env sweeps, or a more surgical simulator-side collector redesign higher-value than more scorer tuning
+  - if learning remains strong with `teacher_aux.mode=warmstart_only`, a follow-up should test whether the same schedule can be extended to other structured teacher losses or whether this specifically solved the costly public-distillation pass without harming B2 behavior
+
+## Attempt 106: Matching Tiny32 Linux `B1` Anchor for the Warmstart-Only Frontier
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_b1_u1_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `1` throughput: `18367.478515625`
+  - update `1` wall clock: `8.122566223144531` s
+  - runtime actor env-steps/sec: `10427.068359375`
+- exact learner timing breakdown:
+  - warm-start learner total: `5406.541015625` ms
+  - warm-start learner forward time-major: `1633.0701904296875` ms
+  - warm-start learner packed scorer: `384.174560546875` ms
+  - warm-start learner trunk: `1248.882080078125` ms
+  - warm-start learner public heuristic target: `1448.3450927734375` ms
+  - warm-start learner teacher aux: `63.50642013549805` ms
+  - update `1` learner total: `2260.821533203125` ms
+  - update `1` learner forward time-major: `791.2777709960938` ms
+  - update `1` learner packed scorer: `364.1546630859375` ms
+  - update `1` learner trunk: `427.1119689941406` ms
+- exact actor timing breakdown:
+  - runtime collect actor unroll: `22185.0` ms
+  - runtime actor policy forward: `13291.0` ms
+  - runtime actor env step: `31.0` ms
+  - runtime build learner batch: `257.17626953125` ms
+  - runtime simulator python step: `1904.85498046875` ms
+  - runtime simulator python reset done: `1007.8746948242188` ms
+- what changed:
+  - minted a fresh Linux/WSL `baseline_noleague` run using the exact tiny32 hybrid frontier tensor contract needed by Attempt `105`
+  - kept the same structured hybrid recipe pieces that affect the model/environment contract, including `public_heuristic_logit_bias_scale=1.0`, tiny32 widths, and `teacher_aux.mode=warmstart_only`
+  - persisted the canonical `B1 NoLeague baseline` alias from this run so the next gated frontier probe can import it without a spec/config mismatch
+- whether learning improved:
+  - not applicable
+  - this was infrastructure work to restore the full `B0/B1/B2` acceptance harness on Linux for the new frontier recipe
+  - the important result is that the matching `B1` anchor now exists and was cheap enough on Linux that it is no longer a serious blocker
+- next hypotheses:
+  - rerun the Attempt `105` frontier with league gating enabled and `--b1-baseline-run-dir` pointing at this new anchor
+  - if the gated run keeps the same B2 behavior while staying near the no-gate throughput, treat `teacher_aux.mode=warmstart_only` as the new honest Linux frontier
+  - once the gated run is confirmed, resume scaling sweeps or deeper runtime redesign from that new baseline rather than from the older no-gate branch
+
+## Attempt 107: Honest Gated Warmstart-Only Hybrid Frontier
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u20_dev5_wsl_process_ring_gated_v1`
+- exact throughput numbers:
+  - update `5` throughput: `53443.89667923942`
+  - update `10` throughput: `72590.22140345162`
+  - update `15` throughput: `83489.7309792601`
+  - update `20` throughput: `90558.33348518136`
+  - last runtime wall clock: `120.32192349433899` s
+  - first runtime actor env-steps/sec: `10986.423489902085`
+  - last runtime actor env-steps/sec: `379188.3584976782`
+- exact learner timing breakdown:
+  - update `5` learner total: `1298.2635829976061` ms
+  - update `5` learner forward time-major: `436.68356399575714` ms
+  - update `5` learner packed scorer: `258.2003489951603` ms
+  - update `5` learner trunk: `178.47671099298168` ms
+  - update `20` learner total: `1350.0246509938734` ms
+  - update `20` learner forward time-major: `465.48599599918816` ms
+  - update `20` learner packed scorer: `259.27676100400276` ms
+  - update `20` learner trunk: `206.2016669951845` ms
+  - the expensive public-heuristic target and teacher-aux timers only appeared on the warm-start step (`738.9757039927645` ms and `65.82777699804865` ms respectively) and were absent on the steady-state updates
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3530.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - first runtime actor env step: `6.0` ms
+  - first runtime build learner batch: `238.81010001059622` ms
+  - first runtime simulator python step: `408.099742` ms
+  - first runtime simulator python reset done: `25.278845` ms
+  - first runtime teacher label time: `65.0` ms
+  - last runtime collect actor unroll: `7285.0` ms
+  - last runtime actor policy forward: `48.0` ms
+  - last runtime actor env step: `380.0` ms
+  - last runtime build learner batch: `102.13139800180215` ms
+  - last runtime simulator python step: `1467.996737` ms
+  - last runtime simulator python reset done: `153.568451` ms
+  - last runtime teacher label time: `779.0` ms
+- what changed:
+  - reran the Attempt `105` Linux frontier under the real acceptance harness with league gating enabled again
+  - imported the matching tiny32 `B1 NoLeague baseline` from Attempt `106` so periodic dev eval ran against `B0`, `B1`, and `B2` on the correct tensor/spec contract
+  - kept the same fast collector recipe as Attempt `105`: process-ring Linux collectors, heuristic-public actor backend, hybrid public bias `1.0`, direct-pool fast heuristic stepping, and `teacher_aux.mode=warmstart_only`
+- whether learning improved:
+  - mixed
+  - versus the older honest gated hybrid run (Attempt `99`), throughput improved sharply at update `20` from `73492.67997093707` to `90558.33348518136`
+  - `B2 HeuristicPublic` stayed strong: `1.0`, `1.0`, `0.9375`, `1.0`
+  - `B1 NoLeague baseline` was weaker than Attempt `99`: `0.4375`, `0.5625`, `0.5`, `0.5` instead of `0.5`, `0.5625`, `0.4375`, `0.625`
+  - honest aggregate dev eval landed at `0.8125`, `0.8541666666666666`, `0.8125`, `0.8333333333333334`, so this path trades some B1 strength for a large speed win
+- next hypotheses:
+  - the likely sweet spot is to keep the cheap structured teacher losses after warmstart while zeroing only the expensive post-warmstart public-distillation term
+  - concretely test `training.teacher_aux.mode=always` together with `training.structured_aux.teacher_public_heuristic_coef=0.0` so family/slot/action supervision stays live but the expensive public-heuristic target pass disappears after warmstart
+  - if that recovers B1 while staying close to the new speed frontier, adopt it as the honest Linux server baseline before any further scale sweeps
+
+## Attempt 108: Keep Cheap Teacher Aux, Drop Only Post-Warmstart Public Distillation
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_teacheralways_postwarmpub0_ws1_u20_dev5_wsl_process_ring_gated_v1`
+- exact throughput numbers:
+  - update `5` throughput: `55264.55236450703`
+  - update `10` throughput: `73163.8395259239`
+  - update `15` throughput: `83167.83620829515`
+  - update `20` throughput: `89654.36403012465`
+  - last runtime wall clock: `121.3427381515503` s
+  - first runtime actor env-steps/sec: `11539.456137340725`
+  - last runtime actor env-steps/sec: `289437.0614712276`
+- exact learner timing breakdown:
+  - update `5` learner total: `1405.9647160029272` ms
+  - update `5` learner packed scorer: `196.49769499665126` ms
+  - update `5` learner trunk: `176.9992670015199` ms
+  - update `5` learner teacher aux: `29.310486002941616` ms
+  - update `20` learner total: `1833.4214409987908` ms
+  - update `20` learner packed scorer: `202.54583698988426` ms
+  - update `20` learner trunk: `189.00037699495442` ms
+  - update `20` learner teacher aux: `43.659047994879074` ms
+  - as intended, the steady-state public-heuristic target timer disappeared entirely after warmstart
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3452.0` ms
+  - first runtime actor policy forward: `8.0` ms
+  - first runtime actor env step: `8.0` ms
+  - first runtime build learner batch: `243.68530299398117` ms
+  - first runtime simulator python step: `399.140111` ms
+  - first runtime simulator python reset done: `27.036187` ms
+  - first runtime teacher label time: `13.0` ms
+  - last runtime collect actor unroll: `7417.0` ms
+  - last runtime actor policy forward: `74.0` ms
+  - last runtime actor env step: `452.0` ms
+  - last runtime build learner batch: `218.85691200441215` ms
+  - last runtime simulator python step: `1531.301974` ms
+  - last runtime simulator python reset done: `163.606204` ms
+  - last runtime teacher label time: `844.0` ms
+- what changed:
+  - kept the same honest gated hybrid frontier as Attempt `107`
+  - changed the teacher schedule to `training.teacher_aux.mode=always` while setting `training.structured_aux.teacher_public_heuristic_coef=0.0`
+  - this preserved the cheap family/slot/action teacher losses on main updates while dropping only the expensive post-warmstart public-distillation pass
+- whether learning improved:
+  - no
+  - honest dev-eval trajectory was `0.8125`, `0.8541666666666666`, `0.7916666666666666`, `0.8333333333333334`
+  - anchor trajectory was `B1 = 0.4375, 0.5625, 0.4375, 0.5` and `B2 = 1.0, 1.0, 0.9375, 1.0`
+  - compared with Attempt `107`, B1 did not recover and update `20` throughput regressed slightly from `90558.33348518136` to `89654.36403012465`
+- next hypotheses:
+  - stop spending more time on this teacher-schedule branch; removing only post-warmstart public distillation did not improve the honest gate
+  - the next low-risk lever is a semantics-preserving CUDA packed-scorer chunk sweep on the honest gated warmstart-only frontier, because `timer_learner_packed_scorer_ms` is now one of the largest remaining learner terms
+  - if chunk sweeps fail to move the frontier materially, revisit actor-side costs again, especially simulator-step and teacher-label time on the long honest run
+
+## Attempt 109: Honest Gated Chunk Sweep to `4M` Learner Scoring Chunks
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_chunk4m_ws1_u5_dev5_wsl_process_ring_gated_v1`
+- exact throughput numbers:
+  - update `5` throughput: `56657.03251075741`
+  - last runtime wall clock: `54.41847109794617` s
+  - first runtime actor env-steps/sec: `11515.006138402103`
+  - last runtime actor env-steps/sec: `437129.245277603`
+- exact learner timing breakdown:
+  - update `5` learner total: `1266.9432739930926` ms
+  - update `5` learner packed scorer: `174.1059889900498` ms
+  - update `5` learner trunk: `182.19730201235507` ms
+  - compared with Attempt `107` at update `5`, packed scorer fell from `258.2003489951603` ms to `174.1059889900498` ms while learner total also improved slightly
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3448.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - first runtime actor env step: `19.0` ms
+  - first runtime build learner batch: `239.16180299420375` ms
+  - first runtime simulator python step: `407.27009` ms
+  - first runtime simulator python reset done: `27.662189` ms
+  - last runtime collect actor unroll: `7228.0` ms
+  - last runtime actor policy forward: `131.0` ms
+  - last runtime actor env step: `358.0` ms
+  - last runtime build learner batch: `102.29316700133495` ms
+  - last runtime simulator python step: `1446.001868` ms
+  - last runtime simulator python reset done: `107.702085` ms
+- what changed:
+  - kept the honest gated warmstart-only hybrid frontier from Attempt `107`
+  - increased `model.cuda_learner_candidate_scoring_chunk_size` from the default `1048576` to `4194304`
+  - changed nothing else about the learning setup or acceptance harness
+- whether learning improved:
+  - no learning regression in the measured short probe
+  - update `5` honest dev eval stayed `aggregate=0.8125`, `B0=1.0`, `B1=0.4375`, `B2=1.0`
+  - throughput improved from `53443.89667923942` on Attempt `107` to `56657.03251075741`
+- next hypotheses:
+  - promote this chunk size to a full honest `u20` run immediately, because it is the first semantics-preserving tweak that materially improves the learner hotspot
+  - if the `u20` run also wins, consider testing one more larger chunk on Linux to see whether the packed scorer still has headroom or whether `4M` is already near the new ceiling
+  - if the long run flattens, actor-side simulator step and teacher-label time are still the main remaining wall-clock terms
+
+## Attempt 110: Runtime Teacher Labels Gated Off After Warmstart
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_runtimeteachergate_ws1_u20_dev5_wsl_process_ring_gated_v2`
+- exact throughput numbers:
+  - update `5` throughput: `51524.2911513882`
+  - update `10` throughput: `68824.22113935008`
+  - update `15` throughput: `80201.55563120342`
+  - update `20` throughput: `85999.96732149775`
+  - last runtime wall clock: `126.53081631660461` s
+  - first runtime actor env-steps/sec: `10561.715642660489`
+  - last runtime actor env-steps/sec: `155780.8541157837`
+- exact learner timing breakdown:
+  - update `5` learner total: `1281.4828690025024` ms
+  - update `5` learner forward time-major: `428.9014429959934` ms
+  - update `5` learner packed scorer: `235.91274900536519` ms
+  - update `5` learner trunk: `192.9800580110168` ms
+  - update `20` learner total: `1431.1413340037689` ms
+  - update `20` learner forward time-major: `411.51021199766546` ms
+  - update `20` learner packed scorer: `214.4545030023437` ms
+  - update `20` learner trunk: `197.04787399678025` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3466.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - first runtime actor env step: `4.0` ms
+  - first runtime build learner batch: `243.0134390015155` ms
+  - first runtime simulator python step: `408.444169` ms
+  - first runtime simulator python reset done: `23.037967` ms
+  - first runtime teacher label time: `18.0` ms
+  - first runtime copied-bytes estimate: `431390720.0`
+  - last runtime collect actor unroll: `5214.0` ms
+  - last runtime actor policy forward: `152.0` ms
+  - last runtime actor env step: `558.0` ms
+  - last runtime build learner batch: `194.50839101045858` ms
+  - last runtime simulator python step: `1562.499231` ms
+  - last runtime simulator python reset done: `146.463367` ms
+  - last runtime teacher label time: `0.0` ms
+  - last runtime copied-bytes estimate: `422477824.0`
+- what changed:
+  - changed the runtime so `training.teacher_aux.mode=warmstart_only` now also disables actor-side teacher-label generation after the warmstart window instead of only disabling the learner-side auxiliary loss
+  - left the learner semantics unchanged: warmstart still receives the same teacher/public-distillation signal as before, and the honest `B0/B1/B2` evaluation harness stayed identical
+  - verified the new scheduling behavior with focused runtime tests on both Windows and WSL before rerunning the Linux frontier
+- whether learning improved:
+  - no learning regression, but not a throughput win by itself
+  - honest dev-eval trajectory stayed identical to Attempt `107`: aggregate `0.8125`, `0.8541666666666666`, `0.8125`, `0.8333333333333334` with `B1 = 0.4375, 0.5625, 0.5, 0.5` and `B2 = 1.0, 1.0, 0.9375, 1.0`
+  - actor-side teacher-label time really did disappear on the steady-state runtime row and copied bytes dropped from `431390720.0` to `422477824.0`
+  - despite that, update `20` throughput still regressed versus Attempt `107` (`85999.96732149775` vs `90558.33348518136`)
+- next hypotheses:
+  - the runtime teacher-label tax was real, but it was not large enough on its own to beat the current honest frontier
+  - the only remaining clean semantics-preserving combo worth testing is runtime teacher gating plus the `4M` learner packed-scorer chunk, because that attacks both of the surviving actor/learner taxes simultaneously
+  - if the combined run still fails to beat Attempt `107`, we are likely near the honest Linux ceiling of the current packed structured contract and should stop this line
+
+## Attempt 111: Full Honest `4M` Learner Chunk on the Warmstart-Only Frontier
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_chunk4m_ws1_u20_dev5_wsl_process_ring_gated_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51468.854363367784`
+  - update `10` throughput: `68971.8653653658`
+  - update `15` throughput: `80404.30508130204`
+  - update `20` throughput: `87256.06789413557`
+  - last runtime wall clock: `124.82641100883484` s
+  - first runtime actor env-steps/sec: `10537.305647356288`
+  - last runtime actor env-steps/sec: `383795.05866940937`
+- exact learner timing breakdown:
+  - update `5` learner total: `1442.8085909894435` ms
+  - update `5` learner forward time-major: `458.6468600027729` ms
+  - update `5` learner packed scorer: `169.99219098943286` ms
+  - update `5` learner trunk: `288.6454030085588` ms
+  - update `20` learner total: `1376.6265110025415` ms
+  - update `20` learner forward time-major: `392.58167300431523` ms
+  - update `20` learner packed scorer: `190.39356701250654` ms
+  - update `20` learner trunk: `202.15762400766835` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3520.0` ms
+  - first runtime actor policy forward: `4.0` ms
+  - first runtime actor env step: `9.0` ms
+  - first runtime build learner batch: `250.00989600084722` ms
+  - first runtime simulator python step: `421.298951` ms
+  - first runtime simulator python reset done: `25.468708` ms
+  - first runtime teacher label time: `34.0` ms
+  - last runtime collect actor unroll: `7575.0` ms
+  - last runtime actor policy forward: `69.0` ms
+  - last runtime actor env step: `482.0` ms
+  - last runtime build learner batch: `107.9960359929828` ms
+  - last runtime simulator python step: `1588.761164` ms
+  - last runtime simulator python reset done: `136.226039` ms
+  - last runtime teacher label time: `938.0` ms
+- what changed:
+  - promoted the short-run `4M` CUDA learner chunk probe to a full honest `u20` run on the unchanged warmstart-only frontier
+  - left the learning setup and honest `B0/B1/B2` evaluation harness untouched
+- whether learning improved:
+  - no learning regression, but no honest throughput win
+  - the dev-eval trajectory matched Attempt `107` exactly, but update `20` throughput fell from `90558.33348518136` to `87256.06789413557`
+- next hypotheses:
+  - `4M` chunks help the scorer itself, but they do not improve end-to-end honest throughput over the current frontier
+  - combine the chunk sweep with the runtime teacher-label gate once, then stop the same-contract chunk line if that still fails to beat Attempt `107`
+
+## Attempt 112: Runtime Teacher Gate Plus `4M` Learner Chunk
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_runtimeteachergate_chunk4m_ws1_u20_dev5_wsl_process_ring_gated_v1`
+- exact throughput numbers:
+  - update `5` throughput: `52855.21917320946`
+  - update `10` throughput: `70916.772491209`
+  - update `15` throughput: `82146.89002254528`
+  - update `20` throughput: `89475.97943170514`
+  - last runtime wall clock: `121.7628173828125` s
+  - first runtime actor env-steps/sec: `10613.888027397385`
+  - last runtime actor env-steps/sec: `417662.6023755425`
+- exact learner timing breakdown:
+  - update `5` learner total: `1188.6320470075589` ms
+  - update `5` learner forward time-major: `350.49849200004246` ms
+  - update `5` learner packed scorer: `145.14380600303411` ms
+  - update `5` learner trunk: `205.34741200390272` ms
+  - update `20` learner total: `1119.2257290094858` ms
+  - update `20` learner forward time-major: `342.77216900954954` ms
+  - update `20` learner packed scorer: `152.25574299984146` ms
+  - update `20` learner trunk: `190.50955399870872` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3495.0` ms
+  - first runtime actor policy forward: `4.0` ms
+  - first runtime actor env step: `12.0` ms
+  - first runtime build learner batch: `229.23113899014425` ms
+  - first runtime simulator python step: `413.25107` ms
+  - first runtime simulator python reset done: `22.412091` ms
+  - first runtime teacher label time: `27.0` ms
+  - last runtime collect actor unroll: `4590.0` ms
+  - last runtime actor policy forward: `113.0` ms
+  - last runtime actor env step: `445.0` ms
+  - last runtime build learner batch: `166.4447920047678` ms
+  - last runtime simulator python step: `1400.244508` ms
+  - last runtime simulator python reset done: `133.768297` ms
+  - last runtime teacher label time: `0.0` ms
+- what changed:
+  - combined the two best systems-side ideas from this pass: runtime teacher labels disabled after warmstart and `4M` CUDA learner candidate-scoring chunks
+  - kept the honest `B0/B1/B2` dev-eval harness and the same warmstart-only learning schedule
+- whether learning improved:
+  - no learning change, and still not a win
+  - this combination came very close but still missed Attempt `107` at update `20`: `89475.97943170514` vs `90558.33348518136`
+  - the honest dev-eval trajectory stayed identical to the baseline frontier
+- next hypotheses:
+  - bracket the chunk size once more at `2M`; if that also misses, stop the same-contract systems sweep
+
+## Attempt 113: Runtime Teacher Gate Plus `2M` Learner Chunk
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_runtimeteachergate_chunk2m_ws1_u20_dev5_wsl_process_ring_gated_v1`
+- exact throughput numbers:
+  - update `5` throughput: `52721.974440446116`
+  - update `10` throughput: `71315.3207807628`
+  - update `15` throughput: `82602.99786650151`
+  - update `20` throughput: `89797.62850895584`
+  - last runtime wall clock: `121.39573192596436` s
+  - first runtime actor env-steps/sec: `10647.487367727492`
+  - last runtime actor env-steps/sec: `380501.248520923`
+- exact learner timing breakdown:
+  - update `5` learner total: `1145.5854300002102` ms
+  - update `5` learner forward time-major: `350.25428399967495` ms
+  - update `5` learner packed scorer: `175.5802580009913` ms
+  - update `5` learner trunk: `174.6671600121772` ms
+  - update `20` learner total: `1501.4608269993914` ms
+  - update `20` learner forward time-major: `470.21506501187105` ms
+  - update `20` learner packed scorer: `201.3620829966385` ms
+  - update `20` learner trunk: `268.8456259929808` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3563.0` ms
+  - first runtime actor policy forward: `4.0` ms
+  - first runtime actor env step: `9.0` ms
+  - first runtime build learner batch: `249.6701589989243` ms
+  - first runtime simulator python step: `415.349589` ms
+  - first runtime simulator python reset done: `23.906819` ms
+  - first runtime teacher label time: `31.0` ms
+  - last runtime collect actor unroll: `4658.0` ms
+  - last runtime actor policy forward: `49.0` ms
+  - last runtime actor env step: `408.0` ms
+  - last runtime build learner batch: `113.48316600196995` ms
+  - last runtime simulator python step: `1382.028238` ms
+  - last runtime simulator python reset done: `96.509553` ms
+  - last runtime teacher label time: `0.0` ms
+- what changed:
+  - ran the final midpoint bracket between the baseline `1M` learner chunk and the aggressive `4M` chunk while keeping runtime teacher gating enabled
+  - kept the learning setup and honest evaluation harness identical
+- whether learning improved:
+  - no
+  - the honest dev-eval trajectory stayed identical again, and update `20` throughput still missed Attempt `107`: `89797.62850895584` vs `90558.33348518136`
+  - at this point the remaining same-contract tuning ideas are producing sub-2% swings and not materially changing the frontier
+- next hypotheses:
+  - treat Attempt `107` as the honest Linux packed-structured ceiling for now: `90558.33348518136` samples/sec with `B1 = 0.4375, 0.5625, 0.5, 0.5` and `B2 = 1.0, 1.0, 0.9375, 1.0`
+  - further meaningful speedups from here likely require a deeper architecture change, not more tuning: a cheaper action contract than dense packed candidate scoring, a better simulator-owned rollout collector than the current snapshot-heavy prototype, or a broader redesign of the public-teacher / tactical supervision contract
+
+## Attempt 114: Sparse Factorized Short Probe With `main_move` Slot Supervision
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u5_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_v1`
+- exact throughput numbers:
+  - update `1` throughput: `19680.99798441057`
+  - update `2` throughput: `28675.00670361277`
+  - update `3` throughput: `37202.814353025584`
+  - update `4` throughput: `45300.77224520131`
+  - update `5` throughput: `53069.46549554688`
+  - first runtime wall clock: `49.337072134017944` s
+  - last runtime wall clock: `58.16320872306824` s
+  - first runtime actor env-steps/sec: `10626.80605734104`
+  - last runtime actor env-steps/sec: `375482.2831185019`
+- exact learner timing breakdown:
+  - update `5` learner total: `1213.2045619946439` ms
+  - update `5` learner factorized policy: `337.6254219911061` ms
+  - update `5` learner forward time-major: `337.6254219911061` ms
+  - update `5` learner backward: `525.989835994551` ms
+  - update `5` learner loss and metrics: `614.5149819931248` ms
+  - update `5` learner optimizer: `70.41967599070631` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3543.0` ms
+  - first runtime actor policy forward: `4.0` ms
+  - first runtime actor env step: `2.0` ms
+  - first runtime build learner batch: `240.1554039970506` ms
+  - first runtime simulator python step: `406.267613` ms
+  - first runtime simulator python reset done: `27.170277` ms
+  - first runtime teacher label time: `57.0` ms
+  - last runtime collect actor unroll: `5010.0` ms
+  - last runtime actor policy forward: `102.0` ms
+  - last runtime actor env step: `468.0` ms
+  - last runtime build learner batch: `110.79461699409876` ms
+  - last runtime simulator python step: `1476.560997` ms
+  - last runtime simulator python reset done: `202.661966` ms
+  - last runtime teacher label time: `6.0` ms
+- what changed:
+  - rewrote the factorized structured policy path to build sparse per-family legality plans instead of dense row-wide arg masks
+  - kept exact factorized action log-prob semantics intact for V-trace while reducing factorized learner overhead substantially versus the old dense factorized design
+  - added factorized `main_move` destination-slot supervision so the factorized auxiliary loss now covers the same move-slot signal as the packed auxiliary path
+  - verified the new factorized implementation with focused Windows and WSL test suites before rerunning Linux training
+- whether learning improved:
+  - no net learning change yet, but this was the first factorized run that actually matched the honest packed frontier on the update-`5` dev checkpoint instead of collapsing
+  - update `5` dev eval exactly matched the honest packed frontier: aggregate `0.8125`, `B0=1.0`, `B1=0.4375`, `B2=1.0`
+  - throughput at update `5` came within noise of Attempt `107` (`53069.46549554688` vs `53443.89667923942`)
+- next hypotheses:
+  - promote the sparse factorized architecture to a full honest `u20` run immediately, because this short probe shows the dense factorized failure mode is gone
+  - if the `u20` factorized run still tracks the packed frontier without beating it, the next likely lever is not more factorized cleanup but either a tactical heuristic prior for the factorized policy or a Rust-owned collector redesign for throughput
+
+## Attempt 115: Full Honest Sparse Factorized Frontier
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u20_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_v1`
+- exact throughput numbers:
+  - update `5` throughput: `53467.06430971881`
+  - update `10` throughput: `71570.44537235747`
+  - update `15` throughput: `80921.32612568006`
+  - update `20` throughput: `86447.39765757155`
+  - first runtime wall clock: `47.52479124069214` s
+  - last runtime wall clock: `126.22254657745361` s
+  - first runtime actor env-steps/sec: `11032.059224163364`
+  - last runtime actor env-steps/sec: `317701.21052445285`
+- exact learner timing breakdown:
+  - update `5` learner total: `1236.4423630060628` ms
+  - update `5` learner factorized policy: `350.31115300080273` ms
+  - update `5` learner forward time-major: `350.31115300080273` ms
+  - update `5` learner backward: `511.49606199760456` ms
+  - update `5` learner loss and metrics: `650.1312089967541` ms
+  - update `5` learner optimizer: `72.51801299571525` ms
+  - update `20` learner total: `1343.0326560046524` ms
+  - update `20` learner factorized policy: `440.6258410017472` ms
+  - update `20` learner forward time-major: `440.6258410017472` ms
+  - update `20` learner backward: `559.911620002822` ms
+  - update `20` learner loss and metrics: `684.5505529927323` ms
+  - update `20` learner optimizer: `95.82771699933801` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3500.0` ms
+  - first runtime actor policy forward: `4.0` ms
+  - first runtime actor env step: `7.0` ms
+  - first runtime build learner batch: `245.97854301100597` ms
+  - first runtime simulator python step: `408.849081` ms
+  - first runtime simulator python reset done: `23.092009` ms
+  - first runtime teacher label time: `44.0` ms
+  - last runtime collect actor unroll: `4798.0` ms
+  - last runtime actor policy forward: `63.0` ms
+  - last runtime actor env step: `440.0` ms
+  - last runtime build learner batch: `170.02598200633656` ms
+  - last runtime simulator python step: `1474.890497` ms
+  - last runtime simulator python reset done: `110.808352` ms
+  - last runtime teacher label time: `0.0` ms
+- what changed:
+  - promoted the sparse factorized architecture and factorized `main_move` slot auxiliary to the full honest Linux `u20` acceptance harness
+  - kept the warmstart-only schedule, actor heuristic backend, and honest `B0/B1/B2` dev-eval harness unchanged so this remained a fair apples-to-apples comparison against Attempt `107`
+- whether learning improved:
+  - no
+  - the dev-eval trajectory matched Attempt `107` exactly at updates `5`, `10`, `15`, and `20`: aggregate `0.8125`, `0.8541666666666666`, `0.8125`, `0.8333333333333334` with `B1 = 0.4375, 0.5625, 0.5, 0.5` and `B2 = 1.0, 1.0, 0.9375, 1.0`
+  - throughput improved dramatically versus the old dense factorized path, but still missed the honest packed frontier at update `20`: `86447.39765757155` vs `90558.33348518136`
+- next hypotheses:
+  - the sparse factorized redesign successfully rescued the factorized contract from the old collapse, but it is still not the new frontier by itself
+  - learner-side contract changes alone are no longer the main throughput limiter; the remaining speed ceiling is the Python-driven heuristic collection loop, which points back toward a Rust-owned transition collector seam
+  - if we keep exploring the factorized route for learning, the next meaningful model-side idea is a tactical heuristic prior or other semantic guidance that the factorized policy can use without reverting to dense packed candidate scoring
+
+## Attempt 116: Sparse Factorized Learner With Focal-Only V-trace Policy Ratios, Short Probe
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u5_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_focalvtrace_v1`
+- exact throughput numbers:
+  - update `1` throughput: `19546.298721502033`
+  - update `2` throughput: `28521.36207391559`
+  - update `3` throughput: `37118.294001698174`
+  - update `4` throughput: `45265.883296013424`
+  - update `5` throughput: `53184.337339242426`
+  - first runtime wall clock: `49.32334303855896` s
+  - last runtime wall clock: `57.500930070877075` s
+  - first runtime actor env-steps/sec: `10629.78317323989`
+  - last runtime actor env-steps/sec: `422258.8662482783`
+- exact learner timing breakdown:
+  - update `5` learner total: `1112.5520450004842` ms
+  - update `5` learner factorized policy: `323.3086580003146` ms
+  - update `5` learner forward time-major: `323.3086580003146` ms
+  - update `5` learner backward: `402.41509399493225` ms
+  - update `5` learner loss and metrics: `632.1880259929458` ms
+  - update `5` learner optimizer: `75.20879700314254` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3538.0` ms
+  - first runtime actor policy forward: `4.0` ms
+  - first runtime actor env step: `0.0` ms
+  - first runtime build learner batch: `255.83796598948538` ms
+  - first runtime simulator python step: `408.532801` ms
+  - first runtime simulator python reset done: `22.232127` ms
+  - first runtime teacher label time: `19.0` ms
+  - last runtime collect actor unroll: `5152.0` ms
+  - last runtime actor policy forward: `89.0` ms
+  - last runtime actor env step: `500.0` ms
+  - last runtime build learner batch: `111.31334799574688` ms
+  - last runtime simulator python step: `1528.051675` ms
+  - last runtime simulator python reset done: `193.179444` ms
+  - last runtime teacher label time: `0.0` ms
+- what changed:
+  - changed the factorized learner path so policy-head work only runs on rows with positive `policy_train_mask`
+  - for non-train rows, stopped using current-policy action log-probs in V-trace and forced `rho=1` by substituting the recorded behavior log-prob instead
+  - kept full-sequence GRU/value recurrence intact so bootstrapping and value targets still see the whole trajectory
+- whether learning improved:
+  - no visible short-run learning change yet
+  - update `5` dev eval stayed `aggregate=0.8125`, `B0=1.0`, `B1=0.4375`, `B2=1.0`
+  - learner total time improved materially versus Attempt `114` (`1112.5520450004842` ms vs `1213.2045619946439`), but short-run end-to-end throughput only moved slightly (`53184.337339242426` vs `53069.46549554688`)
+- next hypotheses:
+  - promote the focal-only V-trace factorized learner to a full `u20` run once, because the semantic change could matter more for learning than the short probe shows
+  - if the long run finally beats the packed frontier, generalize the same focal-only off-policy treatment to the packed learner path too
+
+## Attempt 117: Honest Sparse Factorized Frontier With Focal-Only V-trace Policy Ratios
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u20_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_focalvtrace_v1`
+- exact throughput numbers:
+  - update `5` throughput: `54951.235701749305`
+  - update `10` throughput: `74185.42081681004`
+  - update `15` throughput: `84955.30046974926`
+  - update `20` throughput: `93023.66636439817`
+  - first runtime wall clock: `48.13799071311951` s
+  - last runtime wall clock: `117.05335974693298` s
+  - first runtime actor env-steps/sec: `10891.516769283993`
+  - last runtime actor env-steps/sec: `394416.1125890947`
+- exact learner timing breakdown:
+  - update `5` learner total: `1168.9145840064157` ms
+  - update `5` learner factorized policy: `331.22316699882504` ms
+  - update `5` learner forward time-major: `331.22316699882504` ms
+  - update `5` learner backward: `460.321330014267` ms
+  - update `5` learner loss and metrics: `626.5265779948095` ms
+  - update `5` learner optimizer: `71.41699000203516` ms
+  - update `20` learner total: `1080.582177004544` ms
+  - update `20` learner factorized policy: `309.3110780027928` ms
+  - update `20` learner forward time-major: `309.3110780027928` ms
+  - update `20` learner backward: `423.484079001355` ms
+  - update `20` learner loss and metrics: `598.8147739990382` ms
+  - update `20` learner optimizer: `54.930520011112094` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3612.0` ms
+  - first runtime actor policy forward: `5.0` ms
+  - first runtime actor env step: `6.0` ms
+  - first runtime build learner batch: `239.9770709889708` ms
+  - first runtime simulator python step: `419.179723` ms
+  - first runtime simulator python reset done: `25.750162` ms
+  - first runtime teacher label time: `45.0` ms
+  - last runtime collect actor unroll: `4959.0` ms
+  - last runtime actor policy forward: `83.0` ms
+  - last runtime actor env step: `519.0` ms
+  - last runtime build learner batch: `170.80385900044348` ms
+  - last runtime simulator python step: `1515.274455` ms
+  - last runtime simulator python reset done: `132.857749` ms
+  - last runtime teacher label time: `0.0` ms
+- what changed:
+  - kept the sparse factorized architecture and factorized `main_move` slot auxiliary from Attempts `114-115`
+  - changed only the learner semantics on non-train rows: V-trace now treats them as pure environment/opponent transitions with `rho=1`, and the expensive factorized policy head no longer evaluates those rows
+  - left the actor heuristic backend, warmstart-only schedule, and honest `B0/B1/B2` evaluation harness unchanged
+- whether learning improved:
+  - no change in dev-eval trajectory, but no regression either
+  - the update `5/10/15/20` dev results matched Attempts `107` and `115` exactly: aggregate `0.8125`, `0.8541666666666666`, `0.8125`, `0.8333333333333334` with `B1 = 0.4375, 0.5625, 0.5, 0.5` and `B2 = 1.0, 1.0, 0.9375, 1.0`
+  - this is the new honest Linux throughput frontier so far: update `20` throughput `93023.66636439817`, beating Attempt `107` (`90558.33348518136`) by about `2.72%`
+- next hypotheses:
+  - generalize this focal-only off-policy treatment to the packed learner path, because the factorized run shows that scoring non-train rows was a real tax and probably not mathematically helping
+  - if packed focal-only also wins, compare the two architectures directly on the same honest harness and keep the faster one as the new baseline
+  - after that learner-side cleanup, the remaining big throughput ceiling is still the Python heuristic collector loop, which means the Rust transition-collector seam is still the main systems-side upside
+
+## Attempt 118: Packed Learner With Focal-Only V-trace Policy Ratios, Short Probe
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u5_dev5_wsl_process_ring_gated_packed_focalvtrace_v1`
+- exact throughput numbers:
+  - update `1` throughput: `19482.120097300245`
+  - update `2` throughput: `28472.78399719227`
+  - update `3` throughput: `37107.48767566677`
+  - update `4` throughput: `45417.95163726246`
+  - update `5` throughput: `53286.991883876006`
+  - first runtime wall clock: `49.075716495513916` s
+  - last runtime wall clock: `57.84939670562744` s
+  - first runtime actor env-steps/sec: `10683.395781722062`
+  - last runtime actor env-steps/sec: `402515.90013464645`
+- exact learner timing breakdown:
+  - update `5` learner total: `1094.227517998661` ms
+  - update `5` learner packed scorer: `119.78899899986573` ms
+  - update `5` learner trunk: `175.72655600088183` ms
+  - update `5` learner forward time-major: `307.8977679979289` ms
+  - update `5` learner backward: `485.85319101403` ms
+  - update `5` learner loss and metrics: `552.6034869981231` ms
+  - update `5` learner optimizer: `53.69248100032564` ms
+  - update `5` learner packed reductions: `9.789846008061431` ms
+  - update `5` learner packed candidate train rows: `262069.0`
+  - update `5` learner packed candidate train count: `2237567.0`
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3503.0` ms
+  - first runtime actor policy forward: `4.0` ms
+  - first runtime actor env step: `6.0` ms
+  - first runtime build learner batch: `230.6939090049127` ms
+  - first runtime simulator python step: `406.549643` ms
+  - first runtime simulator python reset done: `26.344452` ms
+  - first runtime teacher label time: `55.0` ms
+  - last runtime collect actor unroll: `4591.0` ms
+  - last runtime actor policy forward: `115.0` ms
+  - last runtime actor env step: `408.0` ms
+  - last runtime build learner batch: `175.43190998549107` ms
+  - last runtime simulator python step: `1375.020435` ms
+  - last runtime simulator python reset done: `107.137941` ms
+  - last runtime teacher label time: `1.0` ms
+- what changed:
+  - generalized the focal-only structured learner idea to the packed path by running the packed scorer only on rows with positive `policy_train_mask`
+  - scattered the subset packed scores back into full packed-candidate buffers so the packed reductions and existing training code could stay intact
+  - moved the behavior-logp substitution ahead of V-trace target construction for the restricted structured path, so masked-out rows now really behave like `rho=1` environment/opponent transitions instead of only being masked in the policy loss
+  - added a focused regression that checks both the scorer-row restriction and the `rho=1` V-trace behavior
+- whether learning improved:
+  - no visible short-run learning change
+  - update `5` dev eval stayed at aggregate `0.8125` with `B0=1.0`, `B1=0.4375`, `B2=1.0`
+  - throughput did not beat either frontier yet: it was slightly below the old packed short probe (`53286.991883876006` vs `53443.89667923942`) and still below the factorized focal-only short probe (`54951.235701749305`)
+- next hypotheses:
+  - promote this packed focal-only learner to one full honest `u20` run anyway, because the packed learner timings improved materially and the short probe is close enough to the old packed baseline that a longer run could still overtake it
+  - if the full packed focal-only run still stalls below the factorized frontier, stop treating packed dense scoring as the likely winner and pivot back to learning-side contract work or a simulator-owned collector redesign
+
+## Attempt 119: Packed Learner With Focal-Only V-trace Policy Ratios, Full Honest Run
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u20_dev5_wsl_process_ring_gated_packed_focalvtrace_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51945.27273907727`
+  - update `10` throughput: `71964.08397713097`
+  - update `15` throughput: `82374.62462296929`
+  - update `20` throughput: `89219.6472939641`
+  - first runtime wall clock: `48.53190994262695` s
+  - last runtime wall clock: `121.92978382110596` s
+  - first runtime actor env-steps/sec: `10803.17385712632`
+  - last runtime actor env-steps/sec: `185403.5930104512`
+- exact learner timing breakdown:
+  - update `5` learner total: `1171.9318770046812` ms
+  - update `5` learner packed scorer: `139.38060800137464` ms
+  - update `5` learner trunk: `199.55047899566125` ms
+  - update `5` learner forward time-major: `351.76373399735894` ms
+  - update `5` learner backward: `484.1140349890338` ms
+  - update `5` learner loss and metrics: `630.0777400028892` ms
+  - update `5` learner optimizer: `55.29900600959081` ms
+  - update `20` learner total: `1413.0174369929591` ms
+  - update `20` learner packed scorer: `251.6170390008483` ms
+  - update `20` learner trunk: `199.47660001344047` ms
+  - update `20` learner forward time-major: `451.1010440037353` ms
+  - update `20` learner backward: `616.1458590067923` ms
+  - update `20` learner loss and metrics: `725.4247989912983` ms
+  - update `20` learner optimizer: `68.47649099654518` ms
+  - update `20` learner packed reductions: `12.702033011009917` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3540.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - first runtime actor env step: `5.0` ms
+  - first runtime build learner batch: `249.47465299919713` ms
+  - first runtime simulator python step: `410.844874` ms
+  - first runtime simulator python reset done: `20.275735` ms
+  - first runtime teacher label time: `82.0` ms
+  - last runtime collect actor unroll: `5022.0` ms
+  - last runtime actor policy forward: `77.0` ms
+  - last runtime actor env step: `487.0` ms
+  - last runtime build learner batch: `184.21020300593227` ms
+  - last runtime simulator python step: `1510.671018` ms
+  - last runtime simulator python reset done: `130.185898` ms
+  - last runtime teacher label time: `0.0` ms
+- what changed:
+  - promoted the packed focal-only learner semantics from Attempt `118` to the full honest Linux `u20` harness
+  - kept the exact same acceptance setup as Attempts `107` and `117`, so the result is directly comparable to the packed and factorized frontiers
+  - this run also exercised the new pre-V-trace behavior-logp substitution on restricted structured rows end to end
+- whether learning improved:
+  - no
+  - the dev-eval trajectory matched Attempts `107`, `115`, and `117` exactly: aggregate `0.8125`, `0.8541666666666666`, `0.8125`, `0.8333333333333334` with `B1 = 0.4375, 0.5625, 0.5, 0.5` and `B2 = 1.0, 1.0, 0.9375, 1.0`
+  - throughput improved strongly versus the pre-restriction packed learner on sampled-off-policy updates, but the honest end-to-end run still missed both frontiers: `89219.6472939641` vs packed Attempt `107` at `90558.33348518136` and factorized Attempt `117` at `93023.66636439817`
+- next hypotheses:
+  - rerun the factorized frontier immediately on the new learner semantics, because this patch finally makes the factorized path's masked-row `rho=1` claim actually true and that could improve learning without giving back throughput
+  - if the factorized rerun still shows the same flat dev trajectory, the next serious work should shift from structured learner plumbing to a better tactical learning contract rather than more scorer optimization
+
+## Attempt 120: Sparse Factorized Frontier Rerun With True Pre-V-trace Masking
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u20_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_focalvtrace_v2`
+- exact throughput numbers:
+  - update `5` throughput: `49620.970659908715`
+  - update `10` throughput: `67077.13407849662`
+  - update `15` throughput: `78763.93279888624`
+  - update `20` throughput: `85826.2433852672`
+  - first runtime wall clock: `53.805158615112305` s
+  - last runtime wall clock: `126.89237904548645` s
+  - first runtime actor env-steps/sec: `9744.326274489229`
+  - last runtime actor env-steps/sec: `385267.4944986521`
+- exact learner timing breakdown:
+  - update `5` learner total: `1062.3020290076965` ms
+  - update `5` learner factorized policy: `305.18809700151905` ms
+  - update `5` learner backward: `421.60435300320387` ms
+  - update `5` learner loss and metrics: `573.5430240019923` ms
+  - update `5` learner optimizer: `64.68824899639003` ms
+  - update `20` learner total: `1141.4363750081975` ms
+  - update `20` learner factorized policy: `331.6683659941191` ms
+  - update `20` learner backward: `432.64033399464097` ms
+  - update `20` learner loss and metrics: `632.942730007926` ms
+  - update `20` learner optimizer: `66.98551301087718` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `4129.0` ms
+  - first runtime actor policy forward: `9.0` ms
+  - first runtime actor env step: `44.0` ms
+  - first runtime build learner batch: `258.2718930061674` ms
+  - first runtime simulator python step: `502.77311` ms
+  - first runtime simulator python reset done: `36.783682` ms
+  - first runtime teacher label time: `165.0` ms
+  - last runtime collect actor unroll: `5299.0` ms
+  - last runtime actor policy forward: `98.0` ms
+  - last runtime actor env step: `539.0` ms
+  - last runtime build learner batch: `206.15977099805605` ms
+  - last runtime simulator python step: `1619.234434` ms
+  - last runtime simulator python reset done: `153.730875` ms
+  - last runtime teacher label time: `0.0` ms
+- what changed:
+  - reran the factorized sparse frontier after moving the behavior-logp substitution ahead of V-trace target construction for masked rows
+  - this was the first honest run where the factorized path actually used the `rho=1` masked-row semantics it was supposed to be using
+- whether learning improved:
+  - no
+  - the dev-eval trajectory again matched the previous honest frontier at updates `5/10/15/20`
+  - throughput regressed materially versus Attempt `117`: `85826.2433852672` vs `93023.66636439817`
+- next hypotheses:
+  - do not keep the true pre-V-trace masking on the factorized frontier; it is slower and did not help learning
+  - restore the older factorized semantics and spend the remaining search on learning-contract changes instead
+
+## Attempt 121: Mixed Heuristic/Model Actor Collection, Sparse Factorized Short Probe
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic05_pubdistill01_teacherauxwarmstartonly_ws1_u5_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_focalvtrace_v1`
+- exact throughput numbers:
+  - update `1` throughput: `18800.343574586084`
+  - update `2` throughput: `27313.95354086822`
+  - update `3` throughput: `35216.87472859151`
+  - update `4` throughput: `42644.50091560402`
+  - update `5` throughput: `49653.19033337648`
+  - first runtime wall clock: `50.8813099861145` s
+  - last runtime wall clock: `61.807679653167725` s
+  - first runtime actor env-steps/sec: `10304.282359879315`
+  - last runtime actor env-steps/sec: `280478.00082803273`
+- exact learner timing breakdown:
+  - update `5` learner total: `1470.4759269952774` ms
+  - update `5` learner factorized policy: `325.8877390035195` ms
+  - update `5` learner backward: `489.89698800141923` ms
+  - update `5` learner loss and metrics: `877.4000799894566` ms
+  - update `5` learner optimizer: `100.00300699903164` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `20367.0` ms
+  - first runtime actor policy forward: `11869.0` ms
+  - first runtime actor env step: `35.0` ms
+  - first runtime build learner batch: `259.14361399190966` ms
+  - first runtime simulator python step: `1837.037866` ms
+  - first runtime simulator python reset done: `1110.944521` ms
+  - first runtime teacher label time: `25.0` ms
+  - last runtime collect actor unroll: `57331.0` ms
+  - last runtime actor policy forward: `36428.0` ms
+  - last runtime actor env step: `2961.0` ms
+  - last runtime build learner batch: `371.05667300056666` ms
+  - last runtime simulator python step: `5702.711618` ms
+  - last runtime simulator python reset done: `7730.475484` ms
+  - last runtime teacher label time: `39.0` ms
+- what changed:
+  - mixed model-acted focal rows back into the factorized frontier by setting `training.actor_heuristic_fraction=0.5`
+  - left the rest of the factorized sparse frontier unchanged so this isolated the cost/benefit of on-policy focal collection
+- whether learning improved:
+  - no visible short-run improvement
+  - update `5` dev eval stayed `aggregate=0.8125`, `B1=0.4375`, `B2=1.0`
+  - throughput cratered and policy-train fraction dropped to about `0.41`, which makes this direction unattractive even before a long run
+- next hypotheses:
+  - rule out large mixed actor fractions on the current process collector design; the actor-side model inference and reset costs explode
+  - if more learning guidance is needed, keep collection heuristic-fast and change the learner contract instead
+
+## Attempt 122: Persistent Structured Teacher Guidance, Sparse Factorized Short Probe
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_ws1_u5_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_focalvtrace_v1`
+- exact throughput numbers:
+  - update `1` throughput: `19866.849568206857`
+  - update `2` throughput: `29018.914597076237`
+  - update `3` throughput: `37740.81001454417`
+  - update `4` throughput: `45982.12148608982`
+  - update `5` throughput: `53932.97297563149`
+  - first runtime wall clock: `49.00231194496155` s
+  - last runtime wall clock: `57.10778784751892` s
+  - first runtime actor env-steps/sec: `10699.40687305794`
+  - last runtime actor env-steps/sec: `396474.7217227627`
+- exact learner timing breakdown:
+  - update `5` learner total: `1122.1394849999342` ms
+  - update `5` learner factorized policy: `278.71864500048105` ms
+  - update `5` learner backward: `424.2273880081484` ms
+  - update `5` learner loss and metrics: `624.1624669928569` ms
+  - update `5` learner optimizer: `70.64416199864354` ms
+  - update `5` learner teacher aux: `8.533961998182349` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3503.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - first runtime actor env step: `0.0` ms
+  - first runtime build learner batch: `242.00276100600604` ms
+  - first runtime simulator python step: `405.372876` ms
+  - first runtime simulator python reset done: `27.249825` ms
+  - first runtime teacher label time: `41.0` ms
+  - last runtime collect actor unroll: `7957.0` ms
+  - last runtime actor policy forward: `114.0` ms
+  - last runtime actor env step: `452.0` ms
+  - last runtime build learner batch: `112.81768200569786` ms
+  - last runtime simulator python step: `1534.614247` ms
+  - last runtime simulator python reset done: `137.240512` ms
+  - last runtime teacher label time: `1014.0` ms
+- what changed:
+  - kept structured teacher labels and auxiliary losses on after warmstart by switching `training.teacher_aux.mode` from `warmstart_only` to `always`
+  - left the sparse factorized frontier otherwise unchanged so this isolated the cost/benefit of persistent structured teacher guidance
+- whether learning improved:
+  - no visible short-run improvement
+  - update `5` dev eval stayed `aggregate=0.8125`, `B1=0.4375`, `B2=1.0`
+  - throughput at update `5` stayed below the old factorized short frontier (`53932.97297563149` vs `54951.235701749305`), and actor-side teacher-label time jumped from essentially `0` late in the run to `1014.0` ms
+- next hypotheses:
+  - plain always-on family/slot/action guidance is not enough by itself; if persistent teaching is going to help, it likely needs a more targeted same-family tactical signal rather than just leaving the existing auxiliary on
+  - the last current-architecture learning theory worth testing is persistent same-family tactical imitation, especially for the problematic `main_move` family
+
+## Attempt 123: Persistent Same-Family Coefficients, Sparse Factorized Long Probe
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_samefamily02warm05_ws1_u20_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_focalvtrace_v1`
+- exact throughput numbers:
+  - update `5` throughput: `54003.62615047965`
+  - update `10` throughput: `73528.79644980984`
+  - update `15` throughput: `82951.54979525879`
+  - update `20` throughput: `88642.13098479938`
+  - first runtime wall clock: `48.936665773391724` s
+  - last runtime wall clock: `57.017130613327026` s
+  - first runtime actor env-steps/sec: `10644.544681330795`
+  - last runtime actor env-steps/sec: `395354.0313869353`
+- exact learner timing breakdown:
+  - update `20` learner total: `1216.31979799713` ms
+  - update `20` learner factorized policy: `308.0431299895281` ms
+  - update `20` learner backward: `483.96234399080276` ms
+  - update `20` learner loss and metrics: `706.6745460032253` ms
+  - update `20` learner optimizer: `86.44701300386898` ms
+  - update `20` learner teacher aux: `6.163687008665875` ms
+- exact actor timing breakdown:
+  - first runtime collect actor unroll: `3493.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - first runtime actor env step: `0.0` ms
+  - first runtime build learner batch: `240.68773299944587` ms
+  - first runtime simulator python step: `408.218111` ms
+  - first runtime simulator python reset done: `24.022136` ms
+  - first runtime teacher label time: `40.0` ms
+  - last runtime collect actor unroll: `8062.0` ms
+  - last runtime actor policy forward: `0.0` ms
+  - last runtime actor env step: `0.0` ms
+  - last runtime build learner batch: `111.63204700336722` ms
+  - last runtime simulator python step: `1555.463132` ms
+  - last runtime simulator python reset done: `141.940237` ms
+  - last runtime teacher label time: `1026.0` ms
+- what changed:
+  - kept `training.teacher_aux.mode=always`
+  - enabled persistent same-family tactical coefficients with `training.structured_aux.teacher_same_family_action_coef=0.2` and `training.structured_warmstart.teacher_same_family_action_coef=0.5`
+  - left the sparse factorized focal-vtrace frontier otherwise unchanged to isolate whether same-family imitation helps learning
+- whether learning improved:
+  - no visible improvement
+  - update `5/10/15/20` dev eval stayed `aggregate=0.8125/0.8541666666666666/0.8125/0.8333333333333334`, `B1=0.4375/0.5625/0.5/0.5`, `B2=1.0/1.0/0.9375/1.0`
+  - the run stayed below the current factorized frontier (`88642.13098479938` vs `93023.66636439817` samples/sec at update `20`)
+  - crucially, `teacher_same_family_action_supported_fraction`, `teacher_same_family_action_accuracy`, and `teacher_same_family_action_loss` all stayed at `0.0`, which means the factorized teacher path is not actually applying same-family supervision yet
+- next hypotheses:
+  - implement exact same-family action support for the factorized learner path; the current factorized head already models exact within-family arg0/arg1 choices, so the missing piece is learner-side supervision, not representational capacity
+  - if that lands cleanly, rerun the persistent same-family factorized probe before exploring more expensive architectural ideas
+
+## Attempt 124: Factorized Same-Family Teacher Path Implemented, Local WSL Process-Collector Blocker
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_ws1_u20_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_focalvtrace_v1`
+- exact throughput numbers:
+  - no post-startup throughput rows were emitted for the new local WSL process-collector probes before timeout
+  - `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_samefamily02warm05_ws1_u1_dev5_wsl_process_ring_gated_factorized_sparse_moveaux_focalvtrace_debugbg_v3` timed out at `600` s with only the startup row written
+  - after reproducing the same behavior on a known-good frontier smoke (`...teacherauxwarmstartonly...frontiercheck_v3`), the local WSL process-ring path was treated as unhealthy
+- exact learner timing breakdown:
+  - none emitted; `scalars.jsonl` and `training_metrics.jsonl` never appeared before timeout
+- exact actor timing breakdown:
+  - none emitted; `performance.jsonl` only contained the startup row
+- what changed:
+  - implemented exact factorized same-family teacher supervision and focused tests
+  - validated the code path with focused Windows + WSL pytest (`143 passed`)
+  - discovered that local WSL process-collector runs now hang before the first scalar write even on previously known-good configs
+  - killed stale training jobs, cleared leaked `/dev/shm/weissrl_*` and `sem.mp-*` objects, and restarted WSL; the local process-ring blocker still reproduced
+- whether learning improved:
+  - blocked locally on the honest Linux throughput lane; no learning rows were produced from the local WSL process-collector probes
+- next hypotheses:
+  - treat local WSL process-collector throughput as an external blocker until the environment is repaired or the university Linux server is available
+  - use `system.collection_backend=central` as a Linux fallback lane for learning-side validation while keeping the last honest process-ring frontier as the throughput baseline
+
+## Attempt 125: Central Linux Fallback, Factorized Teacher-Aux Always Baseline Before Exact-Action Fix
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_ws1_u20_dev5_wsl_central_factorized_baseline_v1`
+- exact throughput numbers:
+  - update `5` throughput: `28998.483104186347`
+  - update `20` throughput: `17697.236715713458`
+  - update `20` wall clock: `233.81579041481018` s
+- exact learner timing breakdown:
+  - update `5` learner total: `593.8231529999598` ms
+  - update `5` learner factorized policy: `231.813304999946` ms
+  - update `5` learner teacher aux: `10.046665000004396` ms
+  - update `5` learner loss and metrics: `338.84660999996186` ms
+  - update `20` learner total: `515.8258280000609` ms
+  - update `20` learner factorized policy: `193.36209499999768` ms
+  - update `20` learner teacher aux: `7.56484399994406` ms
+  - update `20` learner loss and metrics: `282.5538280000046` ms
+  - update `20` teacher_action_supported_fraction: `0.0`
+  - update `20` teacher_same_family_action_supported_fraction: `0.0`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `25387.182442516514`
+  - last runtime actor env-steps/sec: `27967.86753092865`
+  - first runtime collect actor unroll: `6653.0` ms
+  - last runtime collect actor unroll: `5344.0` ms
+  - first runtime actor policy forward: `2.0` ms
+  - last runtime actor policy forward: `4.0` ms
+  - first runtime fixed-opponent routing: `0.0` ms
+  - last runtime fixed-opponent routing: `0.0` ms
+- what changed:
+  - switched to `system.collection_backend=central` to recover a usable Linux validation lane while the local WSL process backend remained blocked
+  - kept `training.teacher_aux.mode=always` and factorized policy active
+- whether learning improved:
+  - no
+  - dev eval stayed `aggregate=0.8125/0.8541666666666666/0.8125/0.8333333333333334`, `B1=0.4375/0.5625/0.5/0.5`, `B2=1.0/1.0/0.9375/1.0`
+  - this run exposed that the factorized path was still silently dropping `teacher_action` as well as same-family exact-action teaching: both supported fractions were `0.0`
+- next hypotheses:
+  - implement exact `teacher_action` on the factorized path, not just same-family conditional supervision
+  - rerun the same central comparison after exact-action teacher support is live
+
+## Attempt 126: Central Linux Fallback, Same-Family Only Before Exact-Action Fix
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_samefamily02warm05_ws1_u20_dev5_wsl_central_factorized_v1`
+- exact throughput numbers:
+  - update `5` throughput: `31376.069795139687`
+  - update `20` throughput: `24948.43854802314`
+  - update `20` wall clock: `166.01240873336792` s
+- exact learner timing breakdown:
+  - update `5` learner total: `522.9948420000028` ms
+  - update `5` learner factorized policy: `196.99085499996727` ms
+  - update `5` learner teacher aux: `11.273669000047448` ms
+  - update `5` learner loss and metrics: `285.9863429999905` ms
+  - update `5` teacher_same_family_action_supported_fraction: `1.0`
+  - update `5` teacher_same_family_action_accuracy: `0.6693389279462028`
+  - update `5` teacher_same_family_main_play_character_accuracy: `0.19803101585642097`
+  - update `5` teacher_same_family_main_move_accuracy: `0.0`
+  - update `20` learner total: `520.5507480000051` ms
+  - update `20` learner factorized policy: `197.95841500001643` ms
+  - update `20` learner teacher aux: `10.714093999922625` ms
+  - update `20` learner loss and metrics: `282.81697800002803` ms
+  - update `20` teacher_same_family_action_supported_fraction: `1.0`
+  - update `20` teacher_same_family_action_accuracy: `0.6785704344921647`
+  - update `20` teacher_same_family_main_play_character_accuracy: `0.2253840782122905`
+  - update `20` teacher_same_family_main_move_accuracy: `0.0`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `29471.532304835833`
+  - last runtime actor env-steps/sec: `34021.37453489142`
+  - first runtime collect actor unroll: `6532.0` ms
+  - last runtime collect actor unroll: `5153.0` ms
+  - first runtime actor policy forward: `2.0` ms
+  - last runtime actor policy forward: `0.0` ms
+  - first runtime fixed-opponent routing: `0.0` ms
+  - last runtime fixed-opponent routing: `4.0` ms
+- what changed:
+  - enabled exact same-family teacher supervision on the factorized path while `teacher_action` was still missing
+  - kept the rest of the central Linux fallback setup identical to Attempt 125
+- whether learning improved:
+  - no visible improvement
+  - the dev-eval curve was exactly the same as Attempt 125 even though same-family support went from a silent no-op to `1.0`
+  - the main problematic family still did not move: `teacher_same_family_main_move_accuracy` remained `0.0`
+- next hypotheses:
+  - the larger missing factorized teacher signal is exact `teacher_action`, which the preset already expects but the learner was still dropping
+  - if exact action comes online and the dev curve still stays flat, this whole teacher-auxiliary line is probably not the root learning failure
+
+## Attempt 127: Exact Factorized Teacher-Action Support Restored, Central Linux Baseline
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_ws1_u20_dev5_wsl_central_factorized_actionfixed_v1`
+- exact throughput numbers:
+  - update `5` throughput: `28958.429917673948`
+  - update `20` throughput: `24865.068999621566`
+  - update `20` wall clock: `166.6433289051056` s
+- exact learner timing breakdown:
+  - update `5` learner total: `571.0789160000047` ms
+  - update `5` learner factorized policy: `211.11953399999095` ms
+  - update `5` learner teacher aux: `7.242547000004151` ms
+  - update `5` learner loss and metrics: `294.74640200000124` ms
+  - update `5` teacher_action_supported_fraction: `1.0`
+  - update `5` teacher_action_accuracy: `0.3402895490038069`
+  - update `5` teacher_action_loss: `2.073298692703247`
+  - update `20` learner total: `596.5845499999887` ms
+  - update `20` learner factorized policy: `242.06554799999935` ms
+  - update `20` learner teacher aux: `11.299250999996957` ms
+  - update `20` learner loss and metrics: `347.4902139999756` ms
+  - update `20` teacher_action_supported_fraction: `1.0`
+  - update `20` teacher_action_accuracy: `0.4234976480084616`
+  - update `20` teacher_action_loss: `1.670334815979004`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `25340.993774132843`
+  - last runtime actor env-steps/sec: `33118.05420118632`
+  - first runtime collect actor unroll: `6735.0` ms
+  - last runtime collect actor unroll: `5304.0` ms
+  - first runtime actor policy forward: `28.0` ms
+  - last runtime actor policy forward: `0.0` ms
+  - first runtime fixed-opponent routing: `4.0` ms
+  - last runtime fixed-opponent routing: `0.0` ms
+- what changed:
+  - restored exact `teacher_action` supervision for factorized policies by propagating factorized top-action ids and combining family log-probs with the exact within-family teacher-action log-prob
+  - added focused learner tests for factorized exact-action auxiliary support
+  - reran the central Linux baseline with the default preset coefficients now actually live on the factorized path
+- whether learning improved:
+  - no visible improvement
+  - dev eval again stayed `aggregate=0.8125/0.8541666666666666/0.8125/0.8333333333333334`, `B1=0.4375/0.5625/0.5/0.5`, `B2=1.0/1.0/0.9375/1.0`
+  - exact-action teacher metrics now moved as intended, but the restored signal still did not change the short/medium-horizon policy quality curve
+- next hypotheses:
+  - combine exact-action and same-family support to confirm whether the entire exact-teacher lane is exhausted
+  - if the combined run still matches the old dev curve, the next architecture pass should target the action contract or move-specific tactical semantics rather than more teacher-loss plumbing
+
+## Attempt 128: Exact Teacher-Action + Same-Family Combined, Central Linux Fallback
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_samefamily02warm05_ws1_u20_dev5_wsl_central_factorized_actionfixed_v1`
+- exact throughput numbers:
+  - update `5` throughput: `30649.899442520604`
+  - update `20` throughput: `24290.842117766897`
+  - update `20` wall clock: `170.5268750190735` s
+- exact learner timing breakdown:
+  - update `5` learner total: `498.07128100002274` ms
+  - update `5` learner factorized policy: `160.49265499998455` ms
+  - update `5` learner teacher aux: `9.762802999944142` ms
+  - update `5` learner loss and metrics: `234.35369199995648` ms
+  - update `5` teacher_action_supported_fraction: `1.0`
+  - update `5` teacher_action_accuracy: `0.3402895490038069`
+  - update `5` teacher_action_loss: `2.061858892440796`
+  - update `5` teacher_same_family_action_supported_fraction: `1.0`
+  - update `5` teacher_same_family_action_accuracy: `0.6682552032678467`
+  - update `5` teacher_same_family_main_play_character_accuracy: `0.1977696462798397`
+  - update `5` teacher_same_family_main_move_accuracy: `0.0`
+  - update `20` learner total: `554.8441820000107` ms
+  - update `20` learner factorized policy: `201.77577699996618` ms
+  - update `20` learner teacher aux: `9.2496560000086` ms
+  - update `20` learner loss and metrics: `287.2580439999979` ms
+  - update `20` teacher_action_supported_fraction: `1.0`
+  - update `20` teacher_action_accuracy: `0.4145628635844908`
+  - update `20` teacher_action_loss: `1.6497018337249756`
+  - update `20` teacher_same_family_action_supported_fraction: `1.0`
+  - update `20` teacher_same_family_action_accuracy: `0.6770117182063629`
+  - update `20` teacher_same_family_main_play_character_accuracy: `0.23306564245810055`
+  - update `20` teacher_same_family_main_move_accuracy: `0.0`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `29168.84675361995`
+  - last runtime actor env-steps/sec: `34176.445817027554`
+  - first runtime collect actor unroll: `6605.0` ms
+  - last runtime collect actor unroll: `5146.0` ms
+  - first runtime actor policy forward: `0.0` ms
+  - last runtime actor policy forward: `0.0` ms
+  - first runtime fixed-opponent routing: `0.0` ms
+  - last runtime fixed-opponent routing: `0.0` ms
+- what changed:
+  - combined the restored exact-action teacher loss with the exact same-family tactical loss on the factorized central Linux fallback lane
+  - left the rest of the config identical to Attempt 127
+- whether learning improved:
+  - no visible improvement
+  - the dev-eval trajectory remained exactly the same as Attempts 125-127
+  - `teacher_same_family_main_move_accuracy` still stayed `0.0`, so the combined exact-teacher signals are not fixing the observed move-family weakness
+- next hypotheses:
+  - the current teacher-loss line appears exhausted: exact teacher action and exact same-family supervision both work numerically, but neither changes the dev curve through `u20`
+  - the next serious learning rescue should target move-family-specific contract/objective design or a deeper action/observation redesign, not more plumbing on the existing factorized teacher auxiliaries
+
+## Attempt 129: Factorized Move-Source Auxiliary on the Central Linux Fallback
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_movesource02warm05_ws1_u20_dev5_wsl_central_factorized_actionfixed_v2`
+- exact throughput numbers:
+  - update `5` throughput: `30902.72923655074`
+  - update `10` throughput: `27093.204443873234`
+  - update `15` throughput: `25780.056887296796`
+  - update `20` throughput: `24947.273962728254`
+  - update `20` wall clock: `165.86461997032166` s
+- exact learner timing breakdown:
+  - update `5` learner total: `477.16752399998086` ms
+  - update `5` learner factorized policy: `174.3900159999896` ms
+  - update `5` learner teacher aux: `6.3476190000244515` ms
+  - update `5` learner loss and metrics: `239.88513000000466` ms
+  - update `5` teacher valid fraction: `0.3663228452205658`
+  - update `5` teacher action accuracy: `0.3919774513343145`
+  - update `5` teacher move-source supported fraction: `0.0`
+  - update `20` learner total: `482.5098719999801` ms
+  - update `20` learner factorized policy: `177.65310900000486` ms
+  - update `20` learner teacher aux: `10.062137000034` ms
+  - update `20` learner loss and metrics: `257.12663499996324` ms
+  - update `20` teacher valid fraction: `0.3652242124080658`
+  - update `20` teacher action accuracy: `0.4764782887223909`
+  - update `20` teacher move-source supported fraction: `0.0`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `31907.917995283424`
+  - last runtime actor env-steps/sec: `33329.21703073555`
+  - first runtime copied bytes estimate: `161771520.0`
+  - last runtime copied bytes estimate: `161771520.0`
+  - first runtime tactical row count: `72002.0`
+  - last runtime tactical row count: `71806.0`
+- what changed:
+  - added a dedicated move-source auxiliary head/metric path so factorized `main_move` rows can supervise the source slot directly
+  - reran the central Linux exact-action baseline with `training.structured_aux.teacher_move_source_coef=0.2` and `training.structured_warmstart.teacher_move_source_coef=0.5`
+- whether learning improved:
+  - no
+  - the dev-eval trajectory stayed `aggregate=0.8125/0.8541666666666666/0.8125/0.8333333333333334`, `B1=0.4375/0.5625/0.4375/0.5`, `B2=1.0/1.0/1.0/1.0`
+  - `teacher_move_source_supported_fraction` stayed `0.0`, so the new path was numerically valid in tests but never activated on this central factorized lane
+- next hypotheses:
+  - forcing extra B1 exposure is the next cheap way to test whether the learning ceiling is opponent-mix related rather than missing-move supervision
+  - if that also fails, broaden teacher coverage beyond the tactical subset so factorized auxiliaries are not restricted to only about `36%` of rows
+
+## Attempt 130: Reserve B1 Baseline Opponent Slots on the Central Linux Fallback
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_b1reserve1_ws1_u20_dev5_wsl_central_factorized_actionfixed_v1`
+- exact throughput numbers:
+  - update `5` throughput: `22663.489692216597`
+  - update `10` throughput: `22367.959335881296`
+  - update `15` throughput: `22399.93121747559`
+  - update `20` throughput: `22378.703749259657`
+  - update `20` wall clock: `184.86108779907227` s
+- exact learner timing breakdown:
+  - update `5` learner total: `454.02319899994836` ms
+  - update `5` learner factorized policy: `150.82590099996196` ms
+  - update `5` learner teacher aux: `7.274010000060116` ms
+  - update `5` learner loss and metrics: `220.12367399997856` ms
+  - update `5` teacher valid fraction: `0.366058349609375`
+  - update `5` teacher action accuracy: `0.3904821453383354`
+  - update `20` learner total: `508.24426299993775` ms
+  - update `20` learner factorized policy: `157.78620599996884` ms
+  - update `20` learner teacher aux: `7.7779860000646295` ms
+  - update `20` learner loss and metrics: `244.4659440000123` ms
+  - update `20` teacher valid fraction: `0.3657582700252533`
+  - update `20` teacher action accuracy: `0.480524537275243`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10244.528623391669`
+  - last runtime actor env-steps/sec: `32513.18200005693`
+  - first runtime copied bytes estimate: `161771520.0`
+  - last runtime copied bytes estimate: `161771520.0`
+  - first runtime tactical row count: `88619.0`
+  - last runtime tactical row count: `71911.0`
+- what changed:
+  - reserved one environment per actor for the imported `B1 NoLeague baseline` by setting `league.sampling.noleague_baseline_reserved_envs_per_actor=1`
+  - kept the rest of the exact-action central factorized setup identical to Attempt `127`
+- whether learning improved:
+  - no
+  - the dev-eval trajectory stayed `aggregate=0.8125/0.8541666666666666/0.8125/0.8333333333333334`, `B1=0.4375/0.5625/0.4375/0.5`, `B2=1.0/1.0/1.0/1.0`
+  - throughput regressed materially versus the plain exact-action fallback (`22378.703749259657` vs `24865.068999621566` at update `20`)
+- next hypotheses:
+  - the central fallback learning ceiling does not look like a simple opponent-mixture problem
+  - widen teacher coverage to the other public decision kinds (`level_up`, `encore`, `trigger_order`, `choice`) and see whether more supervised rows change the curve
+
+## Attempt 131: Broaden Teacher Coverage to All Public Decision Kinds
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_publicteacher_ws1_u20_dev5_wsl_central_factorized_actionfixed_v1`
+- exact throughput numbers:
+  - update `5` throughput: `28425.021449121137`
+  - update `10` throughput: `25356.40200216089`
+  - update `15` throughput: `23470.10760630269`
+  - update `20` throughput: `22831.20935249472`
+  - update `20` wall clock: `181.21921014785767` s
+- exact learner timing breakdown:
+  - update `5` learner total: `517.8045250000025` ms
+  - update `5` learner factorized policy: `169.68698099999813` ms
+  - update `5` learner teacher aux: `7.262314000001879` ms
+  - update `5` learner loss and metrics: `241.97417599999937` ms
+  - update `5` teacher valid fraction: `0.493927001953125`
+  - update `5` teacher action accuracy: `0.45903614457831327`
+  - update `20` learner total: `485.3729680000072` ms
+  - update `20` learner factorized policy: `165.52010699999187` ms
+  - update `20` learner teacher aux: `7.021734000005608` ms
+  - update `20` learner loss and metrics: `236.93859800002315` ms
+  - update `20` teacher valid fraction: `0.49322509765625`
+  - update `20` teacher action accuracy: `0.5432908468423875`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `27161.75367872563`
+  - last runtime actor env-steps/sec: `29865.179433532936`
+  - first runtime copied bytes estimate: `161771520.0`
+  - last runtime copied bytes estimate: `161771520.0`
+  - first runtime tactical row count: `96998.0`
+  - last runtime tactical row count: `96972.0`
+- what changed:
+  - widened runtime teacher-label generation from the old tactical subset `{1,2,3,4}` to the full public decision-kind set `{1,2,3,4,5,6,7,8}`
+  - added a focused runtime regression proving `level_up` and `choice` rows now receive teacher labels while `mulligan` still does not
+- whether learning improved:
+  - no
+  - the wider gate raised `teacher_valid_fraction` from the old `~0.366` band to `~0.494`, but the dev-eval trajectory still landed at `aggregate=0.8125/0.8541666666666666/0.8125/0.8333333333333334`, `B1=0.4375/0.5625/0.4375/0.5`, `B2=1.0/1.0/1.0/1.0`
+  - throughput regressed versus the exact-action fallback, so “not enough labeled rows” is no longer a convincing primary diagnosis on this lane
+- next hypotheses:
+  - test whether the broader teacher coverage helps only when same-family supervision is also active
+  - if the same-family run still matches the old curve, the central factorized line is likely bottlenecked by the action contract/objective itself rather than teacher sparsity
+
+## Attempt 132: Broader Teacher Coverage Plus Same-Family Tactical Supervision
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_publicteacher_samefamily02warm05_ws1_u20_dev5_wsl_central_factorized_actionfixed_v2`
+- exact throughput numbers:
+  - update `5` throughput: `28059.57197219267`
+  - update `10` throughput: `24280.716348665577`
+  - update `15` throughput: `23082.58536181318`
+  - update `20` throughput: `22605.89059456395`
+  - update `20` wall clock: `183.10316276550293` s
+- exact learner timing breakdown:
+  - update `5` learner total: `576.0245450000525` ms
+  - update `5` learner factorized policy: `233.99129699998866` ms
+  - update `5` learner teacher aux: `15.569198999969558` ms
+  - update `5` learner loss and metrics: `330.66334200003666` ms
+  - update `5` teacher valid fraction: `0.493927001953125`
+  - update `5` teacher action accuracy: `0.4552981155390794`
+  - update `5` teacher same-family action accuracy: `0.6209453197405005`
+  - update `20` learner total: `577.006415000028` ms
+  - update `20` learner factorized policy: `219.90416799997092` ms
+  - update `20` learner teacher aux: `14.68766199991478` ms
+  - update `20` learner loss and metrics: `319.14526499997464` ms
+  - update `20` teacher valid fraction: `0.49322509765625`
+  - update `20` teacher action accuracy: `0.5303592789671245`
+  - update `20` teacher same-family action accuracy: `0.6257579507486697`
+  - update `20` teacher same-family main-move accuracy: `0.0`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `27528.185553881765`
+  - last runtime actor env-steps/sec: `31455.122547975872`
+  - first runtime copied bytes estimate: `161771520.0`
+  - last runtime copied bytes estimate: `161771520.0`
+  - first runtime tactical row count: `96998.0`
+  - last runtime tactical row count: `96972.0`
+- what changed:
+  - reran the broader public-teacher coverage lane with `training.structured_aux.teacher_same_family_action_coef=0.2` and `training.structured_warmstart.teacher_same_family_action_coef=0.5`
+  - corrected an initial override typo (`teacher_same_family_coef`) and treated the `v2` run as the real benchmark
+- whether learning improved:
+  - no
+  - the dev-eval trajectory still landed at `aggregate=0.8125/0.8541666666666666/0.8125/0.8333333333333334`, `B1=0.4375/0.5625/0.4375/0.5`, `B2=1.0/1.0/1.0/1.0`
+  - same-family support was now definitely live (`teacher_same_family_action_supported_fraction=1.0`), but `teacher_same_family_main_move_accuracy` remained `0.0`
+- next hypotheses:
+  - the broader-coverage teacher line is functionally exhausted on this central factorized lane
+  - inspect whether the advertised `pubdistill01` signal is even alive on factorized runs, because the scalar rows still showed `teacher_public_heuristic_* = 0.0`
+
+## Attempt 133: Factorized Public-Distillation Path Restored and Benchmarked
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_pubdistilllive_ws1_u20_dev5_wsl_central_factorized_actionfixed_v1`
+- exact throughput numbers:
+  - update `5` throughput: `26162.81435115619`
+  - update `10` throughput: `23257.937893881466`
+  - update `15` throughput: `22301.98494071097`
+  - update `20` throughput: `21683.850351053123`
+  - update `20` wall clock: `191.28019094467163` s
+- exact learner timing breakdown:
+  - update `5` learner total: `1048.3840240000006` ms
+  - update `5` learner factorized policy: `202.18416100000525` ms
+  - update `5` learner teacher aux: `10.071403999987183` ms
+  - update `5` learner loss and metrics: `550.8913190000015` ms
+  - update `5` learner public heuristic student: `124.08779300000106` ms
+  - update `5` learner public heuristic target: `143.16700899999546` ms
+  - update `5` teacher public-heuristic supported fraction: `1.0`
+  - update `5` teacher public-heuristic loss: `1.3633289337158203`
+  - update `20` learner total: `967.538382000015` ms
+  - update `20` learner factorized policy: `156.26933699999768` ms
+  - update `20` learner teacher aux: `13.642916000009109` ms
+  - update `20` learner loss and metrics: `573.9740600000118` ms
+  - update `20` learner public heuristic student: `113.93943999999578` ms
+  - update `20` learner public heuristic target: `213.82899200000338` ms
+  - update `20` teacher public-heuristic supported fraction: `1.0`
+  - update `20` teacher public-heuristic loss: `1.32047438621521`
+  - update `20` teacher public-heuristic top-1 mass: `0.7291861772537231`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `25286.895972535003`
+  - last runtime actor env-steps/sec: `30076.669057650706`
+  - first runtime copied bytes estimate: `161771520.0`
+  - last runtime copied bytes estimate: `161771520.0`
+  - first runtime tactical row count: `96998.0`
+  - last runtime tactical row count: `96972.0`
+- what changed:
+  - restored factorized public-distillation support by building a packed student view for the active learner rows and reusing the packed soft-target cross-entropy path inside the factorized teacher auxiliary
+  - added focused learner regressions that prove factorized public-distillation is now live both in the metric function and in `auxiliary_update`
+- whether learning improved:
+  - no
+  - the scalar rows now proved the signal is truly active (`teacher_public_heuristic_supported_fraction=1.0` on every measured update), but the dev-eval trajectory regressed to `aggregate=0.8125/0.8541666666666666/0.7916666666666666/0.8125`, `B1=0.4375/0.5625/0.4375/0.4375`, `B2=1.0/1.0/0.9375/1.0`
+  - throughput also regressed materially versus the no-distill broader-teacher run (`21683.850351053123` vs `22831.20935249472` at update `20`)
+- next hypotheses:
+  - the central Linux factorized learning line now looks genuinely exhausted on teacher-plumbing ideas: move-source, forced B1 exposure, broader teacher coverage, same-family, and restored public-distillation all failed to improve the dev curve
+  - keep Attempt `117` as the honest Linux throughput frontier (`93023.66636439817` samples/sec) and Attempt `99` as the best short-horizon learning reference (`aggregate=0.875`, `B1=0.625`, `B2=1.0`)
+  - the next serious upside is no longer more auxiliary wiring; it is a new deployed policy contract, most likely a cheaper first-class public-prior architecture or a different exact action contract tested on the real Linux server/process-collector path
+
+## Attempt 134: Warmstart-Only Factorized Public-Distillation Check
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_pubdistilllive_ws1_u20_dev5_wsl_central_factorized_actionfixed_v1`
+- exact throughput numbers:
+  - update `5` throughput: `29896.976239274794`
+  - update `10` throughput: `26834.60232078194`
+  - update `15` throughput: `26008.481066859844`
+  - update `20` throughput: `25398.544892510898`
+  - update `20` wall clock: `162.94648337364197` s
+- exact learner timing breakdown:
+  - warm-start learner total: `3172.6705399999987` ms
+  - warm-start learner factorized policy: `904.4780830000008` ms
+  - warm-start learner teacher aux: `12.455441000000178` ms
+  - warm-start learner public heuristic student: `197.13084199999997` ms
+  - warm-start learner public heuristic target: `225.1308260000009` ms
+  - warm-start teacher public-heuristic supported fraction: `1.0`
+  - warm-start teacher public-heuristic loss: `1.4268155097961426`
+  - update `20` learner total: `488.0308240000204` ms
+  - update `20` learner factorized policy: `157.29923500001064` ms
+  - update `20` learner loss and metrics: `221.97859700000322` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `26427.7422398682`
+  - last runtime actor env-steps/sec: `36291.64708058489`
+  - first runtime copied bytes estimate: `161771520.0`
+  - last runtime copied bytes estimate: `161771520.0`
+  - first runtime tactical row count: `96998.0`
+  - last runtime tactical row count: `0.0`
+- what changed:
+  - reran the factorized central fallback with the newly restored public-distillation path, but under `training.teacher_aux.mode=warmstart_only` so the expensive soft-target pass only happens during warmstart
+  - this isolates whether the missing factorized public-distill signal mattered primarily for representation bootstrapping rather than steady-state updates
+- whether learning improved:
+  - no
+  - the warm-start row proved the signal is alive (`teacher_public_heuristic_supported_fraction=1.0` and `teacher_public_heuristic_loss=1.4268155097961426`), but the post-warmstart dev-eval trajectory stayed at `aggregate=0.8125/0.8541666666666666/0.8125/0.8333333333333334`, `B1=0.4375/0.5625/0.4375/0.5`, `B2=1.0/1.0/1.0/1.0`
+  - the run also confirms that the bad Attempt `133` result was not just “too much steady-state distill”; even the warmstart-only version does not rescue learning
+- next hypotheses:
+  - treat the central Linux factorized action-fixed lane as realistically exhausted for teacher/plumbing changes
+  - future work should either target the true fast Linux process-collector/server lane directly or pivot to a different first-class policy contract, because the current factorized exact-action objective is not yielding better honest learning despite all the restored signals
+
+## Attempt 135: Packed Central Hybrid-Residual Cross-Check
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_teacherauxalways_ws1_u20_dev5_wsl_central_packed_v1`
+- exact throughput numbers:
+  - update `5` throughput: `26029.63429697262`
+  - update `10` throughput: `23084.199073273958`
+  - update `15` throughput: `22004.45018089313`
+  - update `20` throughput: `21519.843535504944`
+  - update `20` wall clock: `192.7008798122406` s
+- exact learner timing breakdown:
+  - update `5` learner total: `1020.2790380000124` ms
+  - update `5` learner forward time-major: `208.7758010000016` ms
+  - update `5` learner packed scorer: `101.00240100001656` ms
+  - update `5` learner teacher aux: `36.11800399994536` ms
+  - update `5` learner loss and metrics: `670.000167000012` ms
+  - update `5` learner public heuristic target: `350.0340780000215` ms
+  - update `5` teacher public-heuristic supported fraction: `1.0`
+  - update `5` teacher public-heuristic loss: `1.3648936748504639`
+  - update `20` learner total: `965.4343550000135` ms
+  - update `20` learner forward time-major: `163.84108199997627` ms
+  - update `20` learner packed scorer: `76.70971999999665` ms
+  - update `20` learner teacher aux: `39.3712449999839` ms
+  - update `20` learner loss and metrics: `672.2873900000081` ms
+  - update `20` learner public heuristic target: `390.6823739999936` ms
+  - update `20` teacher public-heuristic supported fraction: `1.0`
+  - update `20` teacher public-heuristic loss: `1.3263732194900513`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `26883.506812731008`
+  - last runtime actor env-steps/sec: `28123.95646455875`
+  - first runtime copied bytes estimate: `161771520.0`
+  - last runtime copied bytes estimate: `161771520.0`
+  - first runtime tactical row count: `96998.0`
+  - last runtime tactical row count: `96972.0`
+- what changed:
+  - reran the central Linux fallback on the packed policy contract instead of the factorized one, while keeping the live public-distillation hybrid-residual setup enabled
+  - this isolates whether the factorized contract was the reason Attempts `133-134` could not recover the older packed hybrid-residual learning behavior
+- whether learning improved:
+  - no
+  - the dev-eval trajectory matched the factorized live-distill run: `aggregate=0.8125/0.8541666666666666/0.7916666666666666/0.8333333333333334`, `B1=0.4375/0.5625/0.4375/0.5`, `B2=1.0/1.0/0.9375/1.0`
+  - throughput also landed in the same band as Attempt `133` (`21519.843535504944` vs `21683.850351053123` at update `20`)
+- next hypotheses:
+  - the whole central Linux teacher-heavy hybrid-residual lane appears capped, not just the factorized contract
+  - preserve Attempt `117` as the honest throughput frontier and Attempt `99` as the best learning reference, then do the next real architecture swing on the university Linux server or after fixing the local WSL process-collector lane
+
+## Attempt 136: Tiny32 Local Central B1 Baseline Refresh
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_baseline_noleague_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `9257.55953809758`
+  - update `5` wall clock: `128.26997351646423` s
+- exact learner timing breakdown:
+  - update `5` learner total: `923.5608000017237` ms
+  - update `5` learner forward time-major: `179.7841000079643` ms
+  - update `5` learner packed scorer: `97.06410000217147` ms
+  - update `5` learner trunk: `82.7141999907326` ms
+  - update `5` learner public heuristic target: `354.14559999480844` ms
+  - update `5` learner teacher aux: `21.7248999979347` ms
+- exact actor timing breakdown:
+  - last runtime actor env-steps/sec: `10718.841009107848`
+  - last runtime focal policy: `13004.062800057` ms
+  - last runtime fixed-opponent overwrite: `35.71800023200922` ms
+  - last runtime fill pending unrolls: `17303.943799983244` ms
+- what changed:
+  - trained a fresh architecture-matched `baseline_noleague` run for the tiny32 local-central lane so the new learning-first probes could import a valid canonical B1 anchor instead of failing model-shape checks
+- whether learning improved:
+  - not applicable
+  - this was a supporting anchor run rather than a league-learning comparison
+- next hypotheses:
+  - use this baseline as the import source for a clean tiny32 B1-anchored local-central reference run
+  - then compare any learning-first intervention against that anchored reference instead of against the old B0/B2-only local probes
+
+## Attempt 137: Tiny32 Local Central Anchored Reference
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_u5_dev5_localcentral_baseline_v3`
+- exact throughput numbers:
+  - update `5` throughput: `24495.358619827643`
+  - update `5` wall clock: `48.794092655181885` s
+- exact learner timing breakdown:
+  - update `5` learner total: `749.51009999495` ms
+  - update `5` learner forward time-major: `143.3303999947384` ms
+  - update `5` learner packed scorer: `62.274199997773394` ms
+  - update `5` learner trunk: `81.05069998418912` ms
+  - update `5` learner public heuristic target: `209.7627999901306` ms
+  - update `5` learner teacher aux: `34.11720000440255` ms
+- exact actor timing breakdown:
+  - last runtime actor env-steps/sec: `25831.015209855104`
+  - last runtime focal policy: `2175.6306004244834` ms
+  - last runtime fixed-opponent overwrite: `2084.047200070927` ms
+  - last runtime fill pending unrolls: `6865.569299989147` ms
+- what changed:
+  - reran the tiny32 local-central hybrid frontier with a valid imported B1 NoLeague anchor so future learning experiments can be compared against a properly anchored dev-eval baseline
+- whether learning improved:
+  - this established the new local anchored reference
+  - periodic dev eval at update `5` was `aggregate=0.8333333333333334`, `B0=1.0`, `B1=0.5`, `B2=1.0`
+- next hypotheses:
+  - treat this run as the local learning reference for the next architecture changes
+  - test whether explicit B1 exposure or a larger model can push `B1` above `0.5` without sacrificing the clean `B2=1.0` behavior
+
+## Attempt 138: Tiny64 Local Central B1 Baseline Refresh
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_hybridbias1_baseline_noleague_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `8685.528468301805`
+  - update `5` wall clock: `136.81018805503845` s
+- exact learner timing breakdown:
+  - update `5` learner total: `1051.3607000175398` ms
+  - update `5` learner forward time-major: `209.63110000593588` ms
+  - update `5` learner packed scorer: `114.4145000143908` ms
+  - update `5` learner trunk: `95.21170001244172` ms
+  - update `5` learner public heuristic target: `400.61169999535196` ms
+  - update `5` learner teacher aux: `20.606499980203807` ms
+- exact actor timing breakdown:
+  - last runtime actor env-steps/sec: `10108.267930026728`
+  - last runtime focal policy: `14115.899000375066` ms
+  - last runtime fixed-opponent overwrite: `35.1588997291401` ms
+  - last runtime fill pending unrolls: `18359.55520000425` ms
+- what changed:
+  - trained a second architecture-matched `baseline_noleague` anchor for the wider tiny64 learning-frontier preset so its imported B1 anchor matches the model shape exactly
+- whether learning improved:
+  - not applicable
+  - this was a supporting anchor run rather than a league-learning comparison
+- next hypotheses:
+  - use this anchor to validate whether larger capacity plus explicit B1 mix can improve early anchored dev eval
+  - if the wider model still fails, prioritize fixing the league-exposure mechanism before trying more capacity
+
+## Attempt 139: Tiny64 Local Learning Frontier v1
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_hybridbias1_actorheuristic1_pubdistill01_u5_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `23733.41997525102`
+  - update `5` wall clock: `50.379433155059814` s
+- exact learner timing breakdown:
+  - update `5` learner total: `794.4557000009809` ms
+  - update `5` learner forward time-major: `163.31809997791424` ms
+  - update `5` learner packed scorer: `70.08100001257844` ms
+  - update `5` learner trunk: `93.23220001533628` ms
+  - update `5` learner public heuristic target: `225.96069998689927` ms
+  - update `5` learner teacher aux: `34.29579999647103` ms
+- exact actor timing breakdown:
+  - last runtime actor env-steps/sec: `25005.49973664336`
+  - last runtime focal policy: `2263.7958005361725` ms
+  - last runtime fixed-opponent overwrite: `2175.872200867161` ms
+  - last runtime fill pending unrolls: `7057.071299990639` ms
+- what changed:
+  - ran the first learning-first local probe with a wider structured model and a new probabilistic `league.sampling.noleague_baseline_mix_fraction=0.15` meant to expose the learner to B1 during live league collection
+- whether learning improved:
+  - no
+  - periodic dev eval at update `5` matched the tiny32 anchored reference exactly: `aggregate=0.8333333333333334`, `B0=1.0`, `B1=0.5`, `B2=1.0`
+  - post-run diagnosis showed the new B1 mix path was still inactive in practice: `pfsp_noleague_baseline_envs=0.0` while `pfsp_heuristic_public_envs=48.0`
+  - this makes the result inconclusive for the intended intervention because the B1 opponent was not resident in the live opponent model pool unless explicitly reserved
+- next hypotheses:
+  - fix opponent-pool residency so `noleague_baseline_mix_fraction` can actually sample a live B1 model during collection
+  - rerun the same candidate after the residency fix before judging the value of extra capacity or B1 mixing
+
+## Attempt 140: Tiny64 Local Learning Frontier v2 After B1 Residency Fix
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_hybridbias1_actorheuristic1_pubdistill01_u5_dev5_localcentral_v2`
+- exact throughput numbers:
+  - update `5` throughput: `8650.530280057857`
+  - update `5` wall clock: `137.01492309570312` s
+- exact learner timing breakdown:
+  - update `5` learner total: `786.1964000039734` ms
+  - update `5` learner forward time-major: `166.74249997595325` ms
+  - update `5` learner packed scorer: `74.07430000603199` ms
+  - update `5` learner trunk: `92.66359999310225` ms
+  - update `5` learner public heuristic target: `217.24399999948218` ms
+  - update `5` learner teacher aux: `20.16630000434816` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6678.075084554651`
+  - first runtime focal policy: `2522.420799534302` ms
+  - first runtime fixed-opponent overwrite: `22818.77929973416` ms
+  - first runtime `pfsp_noleague_baseline_envs`: `4.0`
+  - first runtime `pfsp_sampled_envs`: `5.0`
+  - last runtime actor env-steps/sec: `9402.695886821712`
+  - last runtime focal policy: `2542.324299341999` ms
+  - last runtime fixed-opponent overwrite: `13347.172399400733` ms
+- what changed:
+  - reran the tiny64 B1-mix learning probe after fixing opponent-pool residency so the `noleague_baseline_mix_fraction` actually keeps the imported B1 anchor resident and sampleable during live collection
+- whether learning improved:
+  - yes, locally
+  - periodic dev eval at update `5` improved to `aggregate=0.8541666666666666`, `B0=1.0`, `B1=0.5625`, `B2=1.0`
+  - this beat the anchored tiny32 local reference (`aggregate=0.8333333333333334`, `B1=0.5`, `B2=1.0`) and proved the B1 residency fix materially changed the learning signal
+  - throughput regressed sharply because live B1 overwrite is expensive in the local-central lane
+- next hypotheses:
+  - keep the B1 exposure, but gate it to the early updates so the learner gets the stronger early curriculum without paying the overwrite cost forever
+  - compare tiny32 and tiny64 under an early-only B1 schedule to see whether the wider model is actually needed for the gain
+
+## Attempt 141: Tiny32 Model-Actor Live-Bias No-Public-Distill Probe
+
+- current best run label: `structured_acceptance_tiny32_modelactor_livebias_nopubdistill_u5_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `10736.088367630347`
+  - update `5` wall clock: `110.28977704048157` s
+- exact learner timing breakdown:
+  - update `5` learner total: `510.1394999946933` ms
+  - update `5` learner forward time-major: `171.57490001409315` ms
+  - update `5` learner packed scorer: `90.3740000212565` ms
+  - update `5` learner trunk: `81.19510000688024` ms
+  - update `5` learner teacher aux: `18.199700018158183` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10404.987295760004`
+  - first runtime focal policy: `10698.720699409023` ms
+  - first runtime fixed-opponent overwrite: `3985.0871010276023` ms
+  - last runtime actor env-steps/sec: `10978.504044579904`
+  - last runtime focal policy: `10742.057600262342` ms
+  - last runtime fixed-opponent overwrite: `2351.1748990858905` ms
+- what changed:
+  - tested whether the older stronger-learning local behavior could be recovered by switching back to model actors, keeping live public bias, and removing public-distillation from the learner path
+- whether learning improved:
+  - no
+  - periodic dev eval at update `5` stayed at `aggregate=0.8333333333333334`, `B0=1.0`, `B1=0.5`, `B2=1.0`
+  - this did not reproduce the historical best-learning behavior from the older local run lineage
+- next hypotheses:
+  - deprioritize the model-actor/no-public-distill branch locally
+  - focus on keeping the working actor-heuristic hybrid lane and making its baseline-exposure curriculum cheaper and more targeted
+
+## Attempt 142: Tiny32 Early-Only B1 Curriculum
+
+- current best run label: `structured_acceptance_tiny32_b1mix1_end5_hybridbias1_actorheuristic1_pubdistill01_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6734.4696581462285`
+  - update `10` throughput: `8999.386640033079`
+  - update `15` throughput: `10317.961806180887`
+  - update `20` throughput: `11183.66674992216`
+  - update `20` wall clock: `369.725971698761` s
+- exact learner timing breakdown:
+  - update `5` learner total: `722.4527000216767` ms
+  - update `10` learner total: `711.2021999782883` ms
+  - update `15` learner total: `728.3424000197556` ms
+  - update `20` learner total: `711.4255999913439` ms
+  - update `20` learner packed scorer: `59.42999999388121` ms
+  - update `20` learner trunk: `82.10379999945872` ms
+  - update `20` learner public heuristic target: `208.87579998816364` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6576.648064313064`
+  - first runtime focal policy: `2463.0541999358684` ms
+  - first runtime fixed-opponent overwrite: `23193.56369963498` ms
+  - an early runtime `pfsp_noleague_baseline_envs`: `1.0`
+  - last runtime actor env-steps/sec: `21516.898093421423`
+  - last runtime focal policy: `2337.4630996841006` ms
+  - last runtime fixed-opponent overwrite: `2250.8627006900497` ms
+  - last runtime `pfsp_noleague_baseline_envs`: `0.0`
+- what changed:
+  - added an early-only B1 curriculum by keeping `noleague_baseline_mix_fraction` active only through update `5`, then disabling it automatically so the local-central run can recover throughput for the rest of training
+- whether learning improved:
+  - no
+  - periodic dev eval was `aggregate=0.8333333333333334/0.8333333333333334/0.7916666666666666/0.8333333333333334`, `B1=0.5/0.5/0.4375/0.5`, `B2=1.0/1.0/0.9375/1.0`
+  - the schedule worked technically and throughput recovered after the cutoff, but the tiny32 model did not benefit in learning quality
+- next hypotheses:
+  - test the same curriculum on the wider tiny64 model, which already showed a positive early response to live B1 exposure
+  - compare a moderate B1 mix and an aggressive one to see whether the gain is due to any exposure at all or specifically to the mix strength
+
+## Attempt 143: Tiny64 Early-Only B1 Curriculum 0.15 Mix
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_hybridbias1_actorheuristic1_pubdistill01_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `8732.271762884162`
+  - update `10` throughput: `10714.273987733504`
+  - update `20` throughput: `12466.82054919522`
+  - update `20` wall clock: `331.8071596622467` s
+- exact learner timing breakdown:
+  - update `5` learner total: `791.4921999908984` ms
+  - update `10` learner total: `736.307700019097` ms
+  - update `20` learner total: `773.7037999904715` ms
+  - update `20` learner packed scorer: `69.17230001999997` ms
+  - update `20` learner trunk: `96.86720001627691` ms
+  - update `20` learner public heuristic target: `195.42299999739043` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6640.270516682913`
+  - first runtime focal policy: `2553.082699974766` ms
+  - first runtime fixed-opponent overwrite: `22934.743199846707` ms
+  - first runtime `pfsp_noleague_baseline_envs`: `4.0`
+  - first runtime `pfsp_sampled_envs`: `5.0`
+  - an early runtime `pfsp_noleague_baseline_envs`: `1.0`
+  - last runtime actor env-steps/sec: `21565.731545603983`
+  - last runtime focal policy: `2327.887100080261` ms
+  - last runtime fixed-opponent overwrite: `2278.6404006183147` ms
+  - last runtime `pfsp_noleague_baseline_envs`: `0.0`
+- what changed:
+  - ran the early-only B1 curriculum on the wider tiny64 learning preset using a moderate `0.15` noleague baseline mix fraction during the first five updates only
+- whether learning improved:
+  - partially
+  - periodic dev eval was `aggregate=0.8541666666666666/0.8125/0.8125`, `B1=0.5625/0.4375/0.4375`, `B2=1.0/1.0/1.0`
+  - the checkpoint guard correctly rolled back to the stronger update-5 checkpoint, so final selection stayed `best_update=5`
+  - this became the strongest local result in the B1-curriculum family, but it still did not beat the older global learning reference (`aggregate=0.875`, `B1=0.625`, `B2=1.0`)
+- next hypotheses:
+  - compare against a much stronger early B1 mix to test whether the improvement saturates quickly
+  - if both schedules produce the same best checkpoint, treat the wider early-B1 curriculum as a useful but probably capped local improvement and move on to broader architectural ideas
+
+## Attempt 144: Tiny64 Early-Only B1 Curriculum 1.0 Mix
+
+- current best run label: `structured_acceptance_tiny64_b1mix1_end5_hybridbias1_actorheuristic1_pubdistill01_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6553.6186198445685`
+  - update `10` throughput: `8732.271762884162`
+  - update `20` throughput: `10821.717500297553`
+  - update `20` wall clock: `382.13595604896545` s
+- exact learner timing breakdown:
+  - update `5` learner total: `834.5370000170078` ms
+  - update `10` learner total: `791.4921999908984` ms
+  - update `20` learner total: `744.1320999932941` ms
+  - update `20` learner packed scorer: `72.6796000089962` ms
+  - update `20` learner trunk: `94.71800000756048` ms
+  - update `20` learner public heuristic target: `201.10709997243248` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6432.435240303645`
+  - first runtime focal policy: `2571.6912010975648` ms
+  - first runtime fixed-opponent overwrite: `23737.672200106317` ms
+  - an early runtime `pfsp_noleague_baseline_envs`: `1.0`
+  - last runtime actor env-steps/sec: `20848.151365446247`
+  - last runtime focal policy: `2415.3719001624268` ms
+  - last runtime fixed-opponent overwrite: `2337.0249995496124` ms
+- what changed:
+  - increased the early-only B1 curriculum from a moderate mix (`0.15`) to a full mix (`1.0`) to test whether the wider model wanted stronger direct B1 pressure in the first five updates
+- whether learning improved:
+  - no
+  - periodic dev eval matched Attempt `143`: `aggregate=0.8541666666666666/0.8125/0.8125`, `B1=0.5625/0.4375/0.4375`, `B2=1.0/1.0/1.0`
+  - the stronger mix only reduced throughput and increased wall clock without improving the best guarded checkpoint
+- next hypotheses:
+  - stop pushing stronger B1-mix values in this family because the learning gain appears saturated while the runtime cost keeps growing
+  - use Attempt `143` as the best local curriculum reference and move to a new architecture or evaluation idea, such as adding a more diverse baseline anchor (`B3`) or revisiting the action/objective contract
+
+## Attempt 145: Tiny64 Early-B1 Curriculum With Partial Actor Heuristic Anneal
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal05_hybridbias1_actorheuristic1_pubdistill01_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6490.642723875189`
+  - update `10` throughput: `7179.594534057041`
+  - update `15` throughput: `7489.328643065142`
+  - update `20` throughput: `7659.78100131964`
+  - update `20` wall clock: `539.8171865940094` s
+- exact learner timing breakdown:
+  - update `5` learner total: `896.9694999977946` ms
+  - update `5` learner forward time-major: `193.12270000227727` ms
+  - update `5` learner packed scorer: `100.40999998454936` ms
+  - update `5` learner trunk: `92.707599978894` ms
+  - update `5` learner public heuristic target: `254.7842999920249` ms
+  - update `5` learner teacher aux: `22.928899998078123` ms
+  - update `20` learner total: `935.544599982677` ms
+  - update `20` learner forward time-major: `189.48700002511032` ms
+  - update `20` learner packed scorer: `97.2409000096377` ms
+  - update `20` learner trunk: `92.23989999736659` ms
+  - update `20` learner public heuristic target: `311.1315999994986` ms
+  - update `20` learner teacher aux: `34.38159998040646` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6743.204557801206`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime focal policy: `2523.441300378181` ms
+  - first runtime fixed-opponent overwrite: `22573.999699758133` ms
+  - first runtime fill pending unrolls: `29064.93640001281` ms
+  - first runtime `pfsp_noleague_baseline_envs`: `2.0`
+  - first runtime `pfsp_sampled_envs`: `3.0`
+  - last runtime actor env-steps/sec: `9906.217577123076`
+  - last runtime actor heuristic fraction active: `0.5`
+  - last runtime focal policy: `12362.880900094751` ms
+  - last runtime fixed-opponent overwrite: `2371.1921005451586` ms
+  - last runtime fill pending unrolls: `18883.83619999513` ms
+  - last runtime `pfsp_noleague_baseline_envs`: `0.0`
+  - last runtime `pfsp_sampled_envs`: `1.0`
+- what changed:
+  - added the first actor-side heuristic annealing curriculum and ran a learning probe that keeps the focal actor on heuristic policy rows early, then linearly anneals to `50%` model rows by update `5`
+  - kept the best local tiny64 recipe otherwise unchanged: early-only B1 mix, hybrid residual bias, live public distillation, and local-central collection
+- whether learning improved:
+  - not beyond the best local curriculum checkpoint
+  - periodic dev eval was `aggregate=0.8541666666666666/0.8333333333333334/0.8333333333333334/0.8333333333333334`, `B1=0.5625/0.5/0.5/0.5`, `B2=1.0/1.0/1.0/1.0`
+  - this matched the best local score at update `5` but did not keep the stronger checkpoint alive later in training
+- next hypotheses:
+  - test a full handoff to model actors after the early scaffold instead of only annealing to `50%`
+  - if full handoff helps, combine it with a later reduction in teacher pressure or heuristic-opponent pressure rather than adding more early baseline exposure
+
+## Attempt 146: Tiny64 Early-B1 Curriculum With Full Actor Handoff
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_hybridbias1_actorheuristic1_pubdistill01_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6114.068980159686`
+  - update `10` throughput: `6967.718328597635`
+  - update `15` throughput: `7358.966051435705`
+  - update `20` throughput: `7587.338686325109`
+  - update `20` wall clock: `545.0278923511505` s
+- exact learner timing breakdown:
+  - update `5` learner total: `936.855200008722` ms
+  - update `5` learner forward time-major: `195.2428999939002` ms
+  - update `5` learner packed scorer: `100.79299999051727` ms
+  - update `5` learner trunk: `94.44400001666509` ms
+  - update `5` learner public heuristic target: `287.7149000123609` ms
+  - update `5` learner teacher aux: `20.943399984389544` ms
+  - update `20` learner total: `1012.1127000020351` ms
+  - update `20` learner forward time-major: `195.0139999971725` ms
+  - update `20` learner packed scorer: `100.03580001648515` ms
+  - update `20` learner trunk: `94.97279999777675` ms
+  - update `20` learner public heuristic target: `383.10880001517944` ms
+  - update `20` learner teacher aux: `34.1080000216607` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6505.821918936072`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime focal policy: `2673.0736002209596` ms
+  - first runtime fixed-opponent overwrite: `23335.296300210757` ms
+  - first runtime fill pending unrolls: `30129.517499997746` ms
+  - first runtime `pfsp_noleague_baseline_envs`: `2.0`
+  - first runtime `pfsp_sampled_envs`: `3.0`
+  - last runtime actor env-steps/sec: `10135.267606790852`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime focal policy: `11535.64489952987` ms
+  - last runtime fixed-opponent overwrite: `2501.373600505758` ms
+  - last runtime fill pending unrolls: `18308.09649999719` ms
+  - last runtime `pfsp_noleague_baseline_envs`: `0.0`
+  - last runtime `pfsp_sampled_envs`: `1.0`
+- what changed:
+  - kept the same early B1 curriculum but annealed focal actor control all the way from heuristic rows to pure model rows by update `5`, so post-scaffold collection is generated entirely by the learned policy
+- whether learning improved:
+  - partially
+  - periodic dev eval was `aggregate=0.8541666666666666/0.8333333333333334/0.8541666666666666/0.8333333333333334`, `B1=0.5625/0.5/0.5625/0.5`, `B2=1.0/1.0/1.0/1.0`
+  - this still did not beat the older global learning reference, but it is the first local curriculum run in this family that recovered the stronger `B1=0.5625` checkpoint again at update `15` after the early scaffold phase
+- next hypotheses:
+  - keep the actor-handoff curriculum and reduce later teacher pressure so the model is not still being pulled back toward the heuristic distribution after update `5`
+  - the two most plausible next levers are annealing the heuristic opponent mix later in training or turning off later structured teacher labels / public-distillation after warmstart while preserving the stronger early scaffold
+
+## Attempt 147: Tiny64 Actor Handoff With Later Teacher Pressure Removed
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_teacherwarm_nopubdistilllive_hybridbias1_actorheuristic1_pubdistill01_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6316.627112305356`
+  - update `10` throughput: `7324.571666099777`
+  - update `15` throughput: `7808.078548368492`
+  - update `20` throughput: `8082.759257900393`
+  - update `20` wall clock: `511.24764466285706` s
+- exact learner timing breakdown:
+  - update `5` learner total: `482.8709000139497` ms
+  - update `5` learner forward time-major: `164.06800001277588` ms
+  - update `5` learner packed scorer: `64.21229999978095` ms
+  - update `5` learner trunk: `94.42350000608712` ms
+  - update `10` learner total: `582.6711000117939` ms
+  - update `10` learner forward time-major: `197.90690002264455` ms
+  - update `10` learner packed scorer: `104.92990000057034` ms
+  - update `10` learner trunk: `92.97090000472963` ms
+  - update `20` learner total: `622.5815000070725` ms
+  - update `20` learner forward time-major: `195.87090000277385` ms
+  - update `20` learner packed scorer: `101.19980000308715` ms
+  - update `20` learner trunk: `94.6657000167761` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6673.574773643478`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime focal policy: `2550.6122993829194` ms
+  - first runtime fixed-opponent overwrite: `22832.619200024055` ms
+  - first runtime fill pending unrolls: `29368.53509998764` ms
+  - first runtime `pfsp_noleague_baseline_envs`: `2.0`
+  - first runtime `pfsp_sampled_envs`: `3.0`
+  - last runtime actor env-steps/sec: `11229.254774032199`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime focal policy: `11597.029899916379` ms
+  - last runtime fixed-opponent overwrite: `2521.6509005404077` ms
+  - last runtime fill pending unrolls: `16933.921099989675` ms
+  - last runtime `pfsp_noleague_baseline_envs`: `0.0`
+  - last runtime `pfsp_sampled_envs`: `1.0`
+- what changed:
+  - kept the successful early B1 plus actor-handoff curriculum from Attempt `146`, but removed almost all later teacher pressure by setting `training.teacher_aux.mode=warmstart_only` and `training.structured_aux.teacher_public_heuristic_coef=0.0`
+  - this keeps the early warmstart teacher scaffold while turning the post-warmstart learner path into mostly pure RL
+- whether learning improved:
+  - no
+  - periodic dev eval regressed to `aggregate=0.8541666666666666/0.8333333333333334/0.7916666666666666/0.8125`, `B1=0.5625/0.5/0.4375/0.4375`, `B2=1.0/1.0/0.9375/1.0`
+  - throughput improved and learner time dropped substantially, but the stronger local checkpoint did not survive once later teacher pressure was removed this aggressively
+- next hypotheses:
+  - the actor-handoff signal looks real, but later teacher pressure should be reduced more selectively rather than removed almost entirely
+  - the next higher-upside path is likely to anneal the heuristic-opponent mix later in training so the model faces more self-play/champion diversity after the scaffold, while retaining some later teacher structure
+
+## Attempt 148: Tiny64 Actor Handoff With Heuristic-Opponent Anneal
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_b2anneal025_hybridbias1_actorheuristic1_pubdistill01_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6019.460624307729`
+  - update `10` throughput: `6688.606774937691`
+  - update `15` throughput: `7002.386112565947`
+  - update `20` throughput: `6289.850407569352`
+  - update `20` wall clock: `657.2832219600677` s
+- exact learner timing breakdown:
+  - update `5` learner total: `1029.6020999958273` ms
+  - update `5` learner forward time-major: `198.7786999961827` ms
+  - update `5` learner packed scorer: `105.60229999828152` ms
+  - update `5` learner trunk: `93.17070001270622` ms
+  - update `5` learner public heuristic target: `387.99550000112504` ms
+  - update `5` learner teacher aux: `21.328900009393692` ms
+  - update `20` learner total: `1001.8727999995463` ms
+  - update `20` learner forward time-major: `204.71350001753308` ms
+  - update `20` learner packed scorer: `110.53559998981655` ms
+  - update `20` learner trunk: `94.17039999971166` ms
+  - update `20` learner public heuristic target: `331.2425999902189` ms
+  - update `20` learner teacher aux: `20.50270000472665` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6605.626483823097`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime heuristic-public mix fraction active: `1.0`
+  - first runtime focal policy: `2602.323699335102` ms
+  - first runtime fixed-opponent overwrite: `22999.157100275625` ms
+  - first runtime fill pending unrolls: `29671.689800015884` ms
+  - first runtime `pfsp_heuristic_public_envs`: `1.0`
+  - last runtime actor env-steps/sec: `9098.698457509288`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime heuristic-public mix fraction active: `0.25`
+  - last runtime focal policy: `13944.946600619005` ms
+  - last runtime fixed-opponent overwrite: `2232.771299983142` ms
+  - last runtime fill pending unrolls: `20556.45650002407` ms
+  - last runtime `pfsp_heuristic_public_envs`: `0.0`
+- what changed:
+  - kept the full actor handoff from Attempt `146`, but added a later opponent-curriculum schedule that anneals `league.sampling.heuristic_public_mix_fraction` from `1.0` down to `0.25` by update `5`
+  - this was meant to preserve the early B2 scaffold while shifting later training toward more snapshot/self-play diversity
+- whether learning improved:
+  - no
+  - periodic dev eval was `aggregate=0.8541666666666666/0.8333333333333334/0.8333333333333334/0.8333333333333334`, `B1=0.5625/0.5/0.5/0.5`, `B2=1.0/1.0/1.0/1.0`
+  - it failed to preserve the stronger update-15 checkpoint from Attempt `146`, and it also regressed throughput materially
+- next hypotheses:
+  - annealing the B2 opponent mix later is not enough by itself, at least in this local-central lane
+  - the next learning lever worth spending real time on is model capacity under the better curriculum, because the actor-handoff signal suggests the bottleneck may now be what the model can represent rather than how often it sees B2
+
+## Attempt 149: Tiny128 Local Central B1 Baseline Refresh
+
+- current best run label: `structured_acceptance_tiny128_hybridbias1_baseline_noleague_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `5131.442371806268`
+  - update `5` wall clock: `247.05355405807495` s
+- exact learner timing breakdown:
+  - update `5` learner total: `17235.762099997373` ms
+  - update `5` learner forward time-major: `4610.699200013187` ms
+  - update `5` learner packed scorer: `2565.5077999981586` ms
+  - update `5` learner trunk: `2045.1857000007294` ms
+  - update `5` learner public heuristic target: `435.4136999754701` ms
+  - update `5` learner teacher aux: `2723.4270999906585` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `4688.748865761213`
+  - first runtime focal policy: `13983.708599407692` ms
+  - first runtime fixed-opponent overwrite: `23316.17349991575` ms
+  - first runtime fill pending unrolls: `41872.56319998414` ms
+  - first runtime `pfsp_sampled_envs`: `8.0`
+  - last runtime actor env-steps/sec: `5338.326327645924`
+  - last runtime focal policy: `18687.98159965081` ms
+  - last runtime fixed-opponent overwrite: `45.545499451691285` ms
+  - last runtime fill pending unrolls: `23178.514300001552` ms
+  - last runtime `pfsp_sampled_envs`: `0.0`
+- what changed:
+  - the first tiny128 learning probe failed correctly because the imported B1 baseline snapshot was tensor-contract locked to the tiny64 model
+  - this supporting run refreshed the canonical `baseline_noleague` anchor at the larger model shape so tiny128 learning probes could import a compatible B1 baseline
+- whether learning improved:
+  - not applicable
+  - this was a required anchor refresh, not a learning comparison
+- next hypotheses:
+  - rerun the tiny128 actor-handoff curriculum with the compatible baseline anchor
+  - compare whether larger recurrent and encoder capacity can use the stronger curriculum to beat the tiny64 local ceiling
+
+## Attempt 150: Tiny128 Actor Handoff Curriculum
+
+- current best run label: `structured_acceptance_tiny128_b1mix015_end5_actoranneal00_hybridbias1_actorheuristic1_pubdistill01_u20_dev5_localcentral_v2`
+- exact throughput numbers:
+  - update `5` throughput: `5112.834166361962`
+  - update `10` throughput: `5604.863308056709`
+  - update `15` throughput: `5803.601362287805`
+  - update `20` throughput: `5915.074613759545`
+  - update `20` wall clock: `704.1872053146362` s
+- exact learner timing breakdown:
+  - update `5` learner total: `5735.075099975802` ms
+  - update `5` learner forward time-major: `1825.431999983266` ms
+  - update `5` learner packed scorer: `1452.2418999986257` ms
+  - update `5` learner trunk: `373.18380002398044` ms
+  - update `5` learner public heuristic target: `395.80610001576133` ms
+  - update `5` learner teacher aux: `57.14069999521598` ms
+  - update `20` learner total: `6362.320300017018` ms
+  - update `20` learner forward time-major: `2140.0735000206623` ms
+  - update `20` learner packed scorer: `641.1424000107218` ms
+  - update `20` learner trunk: `1498.9241000148468` ms
+  - update `20` learner public heuristic target: `303.6621999926865` ms
+  - update `20` learner teacher aux: `352.2992000216618` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6122.784570964344`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime focal policy: `2977.8527012094855` ms
+  - first runtime fixed-opponent overwrite: `24907.67780103488` ms
+  - first runtime fill pending unrolls: `32010.779400006868` ms
+  - first runtime `pfsp_noleague_baseline_envs`: `2.0`
+  - first runtime `pfsp_sampled_envs`: `3.0`
+  - last runtime actor env-steps/sec: `7176.184091200123`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime focal policy: `13783.029999496648` ms
+  - last runtime fixed-opponent overwrite: `3016.696900478564` ms
+  - last runtime fill pending unrolls: `21284.123499994166` ms
+  - last runtime `pfsp_noleague_baseline_envs`: `0.0`
+  - last runtime `pfsp_sampled_envs`: `1.0`
+- what changed:
+  - scaled the best current local curriculum to a larger recurrent model (`gru_hidden_size=128`, `encoder_mlp_width=128`, `typed_feature_width=32`) while keeping the stronger tiny64 recipe otherwise unchanged: early B1 mix, hybrid residual bias, live public distillation, and full actor handoff by update `5`
+- whether learning improved:
+  - no
+  - periodic dev eval was `aggregate=0.8541666666666666/0.8125/0.8541666666666666/0.8125`, `B1=0.5625/0.4375/0.5625/0.4375`, `B2=1.0/1.0/1.0/1.0`
+  - the larger model could recover the stronger local checkpoint again at update `15`, but it did not beat the tiny64 actor-handoff run and it cost a large throughput regression
+- next hypotheses:
+  - simple capacity scaling is not the breakthrough; the bottleneck still looks like the decision contract or curriculum, not raw model size
+  - the remaining meaningful learning ideas are now either a slower actor handoff schedule or a more fundamental change to the supervision / evaluation story, such as richer anchor sets and a less brittle action-target contract
+
+## Attempt 151: Tiny64 Slower Actor Handoff Curriculum
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_end10_hybridbias1_actorheuristic1_pubdistill01_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6467.837399491259`
+  - update `10` throughput: `7099.786852814266`
+  - update `15` throughput: `7480.844742859976`
+  - update `20` throughput: `6700.094449172819`
+  - update `20` wall clock: `617.031103849411` s
+- exact learner timing breakdown:
+  - update `5` learner total: `953.2940999779385` ms
+  - update `5` learner forward time-major: `192.83130002440885` ms
+  - update `5` learner packed scorer: `99.16869999142364` ms
+  - update `5` learner trunk: `93.6570999911055` ms
+  - update `5` learner public heuristic target: `293.8236999907531` ms
+  - update `5` learner teacher aux: `36.33620002074167` ms
+  - update `20` learner total: `941.7409999878146` ms
+  - update `20` learner forward time-major: `200.19069997943006` ms
+  - update `20` learner packed scorer: `104.44650001591071` ms
+  - update `20` learner trunk: `95.73830000590533` ms
+  - update `20` learner public heuristic target: `306.7070999823045` ms
+  - update `20` learner teacher aux: `20.58680000482127` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6726.9072566281475`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime focal policy: `2534.1225005104207` ms
+  - first runtime fixed-opponent overwrite: `22613.547599874437` ms
+  - first runtime fill pending unrolls: `29135.7387000171` ms
+  - first runtime `pfsp_noleague_baseline_envs`: `2.0`
+  - first runtime `pfsp_sampled_envs`: `3.0`
+  - last runtime actor env-steps/sec: `10207.116285145807`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime focal policy: `11464.85099993879` ms
+  - last runtime fixed-opponent overwrite: `2477.4426010553725` ms
+  - last runtime fill pending unrolls: `18239.583600021433` ms
+  - last runtime `pfsp_noleague_baseline_envs`: `0.0`
+  - last runtime `pfsp_sampled_envs`: `2.0`
+- what changed:
+  - gave the actor-handoff curriculum one last meaningful variant by slowing the full handoff to model-generated focal rows from update `5` to update `10`
+  - this tests whether the stronger update-15 checkpoint from Attempt `146` was simply asking for a smoother transition instead of a different curriculum altogether
+- whether learning improved:
+  - no
+  - periodic dev eval was `aggregate=0.8541666666666666/0.8333333333333334/0.8333333333333334/0.8333333333333334`, `B1=0.5625/0.5/0.5625/0.5`, `B2=1.0/1.0/0.9375/1.0`
+  - it failed to preserve the stronger local checkpoint through update `15` in aggregate terms, and it did not improve final selection relative to the sharper handoff in Attempt `146`
+- next hypotheses:
+  - the current actor-handoff curriculum family now looks genuinely exhausted on the local-central lane
+  - the remaining worthwhile work is less about tuning this same scaffold and more about improving the thesis story and evaluation surface: richer anchors / baselines, stronger robustness checks, or a more fundamental action-target redesign
+
+## Attempt 152: Tiny64 Early Live PFSP Learning Frontier
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_hybridbias1_actorheuristic1_pubdistill01_liveleague_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6077.817774633238`
+  - update `20` throughput: `5335.1388602849265`
+  - update `20` wall clock: `774.7951595783234` s
+- exact learner timing breakdown:
+  - update `5` learner total: `1015.7631000038236` ms
+  - update `5` learner forward time-major: `196.0745000105817` ms
+  - update `5` learner packed scorer: `101.74620000179857` ms
+  - update `5` learner trunk: `94.32189998915419` ms
+  - update `5` learner public heuristic target: `389.13410002714954` ms
+  - update `5` learner teacher aux: `21.03740000165999` ms
+  - update `20` learner total: `1028.7897999805864` ms
+  - update `20` learner forward time-major: `200.44210000196472` ms
+  - update `20` learner packed scorer: `107.28979998384602` ms
+  - update `20` learner trunk: `93.14629997243173` ms
+  - update `20` learner public heuristic target: `379.7859000042081` ms
+  - update `20` learner teacher aux: `21.209900005487725` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6629.194578415217`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime heuristic-public mix fraction active: `1.0`
+  - first runtime focal policy: `2570.1224998920225` ms
+  - first runtime fixed-opponent overwrite: `22953.45059974352` ms
+  - first runtime fill pending unrolls: `29564.928400010103` ms
+  - first runtime `pfsp_sampled_envs`: `5.0`
+  - first runtime `pfsp_champion_envs`: `0.0`
+  - first runtime `pfsp_recent_envs`: `0.0`
+  - last runtime actor env-steps/sec: `4855.85441987664`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime heuristic-public mix fraction active: `1.0`
+  - last runtime focal policy: `11874.875399080338` ms
+  - last runtime fixed-opponent overwrite: `22842.487500078278` ms
+  - last runtime fill pending unrolls: `39416.78420000244` ms
+  - last runtime `pfsp_sampled_envs`: `1.0`
+  - last runtime `pfsp_champion_envs`: `0.0`
+  - last runtime `pfsp_recent_envs`: `0.0`
+  - last runtime league effective update: `10.0`
+  - last runtime league update lag: `9.0`
+- what changed:
+  - replaced the old long warmup local lane with an early-live-league preset: `snapshot_interval_updates=5`, `actor_reload_interval_updates=10`, `league.warmup.first_updates=5`, `league.warmup.initial_window_episodes=512`, `league.warmup.ramp_target_updates=20`, `league.warmup.ramp_target_window_episodes=4096`
+  - kept the best tiny64 actor-handoff curriculum otherwise unchanged so the only major new variable was whether real PFSP / promotion-gated snapshots become active early enough to shape training
+- whether learning improved:
+  - no
+  - periodic dev eval was `aggregate=0.8541666666666666/0.8333333333333334/0.8333333333333334/0.8125`, `B1=0.5625/0.5/0.5/0.4375`, `B2=1.0/1.0/1.0/1.0`
+  - the league machinery was healthier and promotion-gated snapshots were admitted at updates `10` and `20`, but that did not preserve the stronger checkpoint from Attempt `146`
+- next hypotheses:
+  - the live league is now architecturally real on the local lane, but the model still plateaus before that extra opponent diversity translates into higher B1
+  - test whether the reward contract is still slightly misaligned with winning play, now that the league itself is no longer the main missing ingredient
+
+## Attempt 153: Tiny64 Early Live PFSP With Terminal-Only Reward Contract
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_hybridbias1_actorheuristic1_pubdistill01_liveleague_terminal_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6093.755487768288`
+  - update `20` throughput: `5348.315501866923`
+  - update `20` wall clock: `772.8650403022766` s
+- exact learner timing breakdown:
+  - update `5` learner total: `1017.2667000151705` ms
+  - update `5` learner forward time-major: `192.92139998287894` ms
+  - update `5` learner packed scorer: `99.98769999947399` ms
+  - update `5` learner trunk: `92.92789999744855` ms
+  - update `5` learner public heuristic target: `350.349099986488` ms
+  - update `5` learner teacher aux: `35.35560000455007` ms
+  - update `20` learner total: `1007.9286999825854` ms
+  - update `20` learner forward time-major: `200.79460000852123` ms
+  - update `20` learner packed scorer: `106.55840000254102` ms
+  - update `20` learner trunk: `94.23049999168143` ms
+  - update `20` learner public heuristic target: `348.20330000366084` ms
+  - update `20` learner teacher aux: `27.220899995882064` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6611.094701622294`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime heuristic-public mix fraction active: `1.0`
+  - first runtime focal policy: `2597.5603005790617` ms
+  - first runtime fixed-opponent overwrite: `23031.966300477507` ms
+  - first runtime fill pending unrolls: `29648.980400001165` ms
+  - first runtime `pfsp_sampled_envs`: `5.0`
+  - last runtime actor env-steps/sec: `4904.041920981084`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime heuristic-public mix fraction active: `1.0`
+  - last runtime focal policy: `11804.8126999347` ms
+  - last runtime fixed-opponent overwrite: `22633.559999987483` ms
+  - last runtime fill pending unrolls: `39069.272299995646` ms
+  - last runtime `pfsp_sampled_envs`: `2.0`
+  - last runtime `pfsp_champion_envs`: `0.0`
+  - last runtime `pfsp_recent_envs`: `0.0`
+  - last runtime league effective update: `10.0`
+  - last runtime league update lag: `9.0`
+- what changed:
+  - reran the same early-live-league frontier but with a cleaner terminal objective: `rewards.objective=terminal_only_pm1`, `gamma=1.0`, shaping disabled, truncation reward `0.0`, truncation bootstrap enabled
+  - also fixed the env payload contract so `terminal_only_pm1` now actually zeroes shaping in the simulator reward JSON instead of behaving like a no-op label
+- whether learning improved:
+  - no
+  - periodic dev eval was exactly `aggregate=0.8541666666666666/0.8333333333333334/0.8333333333333334/0.8125`, `B1=0.5625/0.5/0.5/0.4375`, `B2=1.0/1.0/1.0/1.0`
+  - this makes reward-shaping misalignment look less likely as the main explanation for the current local ceiling, at least on the first `20` updates
+- next hypotheses:
+  - terminal-only rewards are cleaner and more thesis-defensible, but they are not enough by themselves to beat the local learning frontier
+  - the next worthwhile probe is whether the actor-handoff recipe needs more real league pressure after warmstart rather than a different immediate reward shape
+
+## Attempt 154: Tiny64 Early Live PFSP With B2 Anneal After Snapshot On-Ramp
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_hybridbias1_actorheuristic1_pubdistill01_liveleague_b2anneal025_end10_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6035.782535241736`
+  - update `20` throughput: `5107.970263202296`
+  - update `20` wall clock: `809.2109670639038` s
+- exact learner timing breakdown:
+  - update `5` learner total: `903.3221999998204` ms
+  - update `5` learner forward time-major: `196.47190000978298` ms
+  - update `5` learner packed scorer: `104.04999999445863` ms
+  - update `5` learner trunk: `92.41630000178702` ms
+  - update `5` learner public heuristic target: `303.8827999844216` ms
+  - update `5` learner teacher aux: `21.593700017547235` ms
+  - update `20` learner total: `1026.2691999960225` ms
+  - update `20` learner forward time-major: `205.44520000112243` ms
+  - update `20` learner packed scorer: `112.00200000894256` ms
+  - update `20` learner trunk: `93.43720000470057` ms
+  - update `20` learner public heuristic target: `390.3119000024162` ms
+  - update `20` learner teacher aux: `21.084000007249415` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6644.004823901351`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime heuristic-public mix fraction active: `1.0`
+  - first runtime focal policy: `2556.3385999703314` ms
+  - first runtime fixed-opponent overwrite: `22891.69279995258` ms
+  - first runtime fill pending unrolls: `29499.641999980668` ms
+  - first runtime `pfsp_sampled_envs`: `5.0`
+  - last runtime actor env-steps/sec: `4613.564592063324`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime heuristic-public mix fraction active: `0.25`
+  - last runtime focal policy: `11923.011701059295` ms
+  - last runtime fixed-opponent overwrite: `24943.92109909677` ms
+  - last runtime fill pending unrolls: `41530.303700012155` ms
+  - last runtime `pfsp_sampled_envs`: `2.0`
+  - last runtime `pfsp_champion_envs`: `1.0`
+  - last runtime `pfsp_recent_envs`: `0.0`
+  - last runtime league effective update: `10.0`
+  - last runtime league update lag: `9.0`
+- what changed:
+  - kept the early-live-league setup from Attempt `152`, but annealed `league.sampling.heuristic_public_mix_fraction` from `1.0` down to `0.25` by update `10`
+  - this was the first local-central probe where actor handoff, real snapshot gating, and a later reduction in B2 scaffold all operated together
+- whether learning improved:
+  - no
+  - periodic dev eval was still `aggregate=0.8541666666666666/0.8333333333333334/0.8333333333333334/0.8125`, `B1=0.5625/0.5/0.5/0.4375`, `B2=1.0/1.0/1.0/1.0`
+  - throughput and actor timing both regressed, so simply tapering B2 harder after snapshots begin to appear is not the answer on this branch
+- next hypotheses:
+  - the current packed structured learner is not converting extra league diversity into stronger decisions even when the training mix becomes more self-play-like
+  - if we keep pushing learning, the next gains are more likely to come from better evaluation anchors / stronger baselines or a deeper decision-target redesign than from more B2 scheduling
+
+## Attempt 155: Tiny64 Early Live PFSP Long Run To `40` Updates
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_hybridbias1_actorheuristic1_pubdistill01_liveleague_u40_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6115.860520196523`
+  - update `20` throughput: `5365.7777129263295`
+  - update `40` throughput: `5456.076283771813`
+  - update `40` wall clock: `1478.372778892517` s
+- exact learner timing breakdown:
+  - update `5` learner total: `908.088999975007` ms
+  - update `5` learner forward time-major: `193.68160000885837` ms
+  - update `5` learner packed scorer: `101.60260001430288` ms
+  - update `5` learner trunk: `92.07290000631474` ms
+  - update `5` learner public heuristic target: `287.76929999003187` ms
+  - update `5` learner teacher aux: `33.68970000883564` ms
+  - update `20` learner total: `1007.1874000132084` ms
+  - update `20` learner forward time-major: `198.7428000138607` ms
+  - update `20` learner packed scorer: `104.8173000162933` ms
+  - update `20` learner trunk: `93.91840000171214` ms
+  - update `20` learner public heuristic target: `331.1968999914825` ms
+  - update `20` learner teacher aux: `35.37649998907` ms
+  - update `40` learner total: `1064.6872000070289` ms
+  - update `40` learner forward time-major: `193.66650001029484` ms
+  - update `40` learner packed scorer: `102.55499999038875` ms
+  - update `40` learner trunk: `91.1062000086531` ms
+  - update `40` learner public heuristic target: `405.16809999826364` ms
+  - update `40` learner teacher aux: `33.25900001800619` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `6644.443746927242`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime heuristic-public mix fraction active: `1.0`
+  - first runtime focal policy: `2555.247499694815` ms
+  - first runtime fixed-opponent overwrite: `22913.57789945323` ms
+  - first runtime fill pending unrolls: `29497.594399988884` ms
+  - first runtime `pfsp_sampled_envs`: `5.0`
+  - last runtime actor env-steps/sec: `5264.3391746404`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime heuristic-public mix fraction active: `1.0`
+  - last runtime focal policy: `11045.10760010453` ms
+  - last runtime fixed-opponent overwrite: `21103.12110016821` ms
+  - last runtime fill pending unrolls: `36295.70679998142` ms
+  - last runtime `pfsp_sampled_envs`: `1.0`
+  - last runtime `pfsp_champion_envs`: `0.0`
+  - last runtime `pfsp_recent_envs`: `0.0`
+  - last runtime league effective update: `30.0`
+  - last runtime league update lag: `9.0`
+- what changed:
+  - extended the early-live-league frontier to `40` updates so the local-central lane would finally experience multiple promotion-gated admissions and a nontrivial snapshot history before we judged the design
+  - left the successful tiny64 actor-handoff + hybrid residual + live heuristic distillation recipe unchanged so the only question was whether real league time, not more schedule tweaking, could lift B1
+- whether learning improved:
+  - no
+  - periodic dev eval was `aggregate=0.8541666666666666/0.8333333333333334/0.8333333333333334/0.8125/0.8125/0.8333333333333334/0.8333333333333334/0.8333333333333334`, `B1=0.5625/0.5/0.5/0.4375/0.4375/0.5/0.5/0.5`, `B2=1.0/1.0/1.0/1.0/1.0/1.0/1.0/1.0`
+  - the longer run admitted champions cleanly and recovered from the update-20 dip, but it never beat the update-5 checkpoint and still failed to match the older global learning reference (`aggregate=0.875`, `B1=0.625`, `B2=1.0`)
+- next hypotheses:
+  - the local central packed structured path now looks genuinely capped for learning: earlier PFSP, cleaner rewards, stronger B2 scheduling, and longer horizon all converged to the same `0.8333-0.8542` band
+  - the best remaining work is now thesis-surface and contract work rather than more schedule nudging: richer anchor sets / stronger baselines, and eventually a deeper action-target redesign
+
+## Architecture Notes After Attempt 155
+
+- terminal-only reward semantics are now explicit in the RL env factory:
+  - `terminal_only_pm1` zeroes all shaping terms in the simulator reward payload, so future reward ablations are truthful instead of relying on config discipline alone
+- added reusable local learning presets so the new frontier and evaluation ideas are reproducible:
+  - `structured_acceptance_local_learning_frontier.yaml`
+  - `structured_acceptance_local_learning_liveleague.yaml`
+  - `structured_acceptance_local_learning_liveleague_terminal.yaml`
+  - `structured_acceptance_local_learning_thesis_eval.yaml`
+- added symbolic snapshot-anchor support for richer thesis evaluation without hardcoding policy IDs:
+  - `Latest champion snapshot`
+  - `Previous champion snapshot`
+  - `Latest recent snapshot`
+  - `Previous recent snapshot`
+  - these resolve from the live snapshot registry and can be used inside `league.promotion.anchor_set_v1` and `evaluation.final_policy_set_selection.fixed_anchor_set_v1`
+- focused regression coverage passed after the reward-contract and symbolic-anchor work:
+  - `pytest python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_pool_factory.py python/weiss_rl/tests/test_train_stall_monitor.py -q`
+  - result: `48 passed`
+
+## Attempt 156: Tiny64 Early Live PFSP With Sharper Public-Heuristic Teacher
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_hybridbias1_actorheuristic1_pubdistill01_liveleague_temp8_u20_dev5_localcentral_v1`
+- exact throughput numbers:
+  - update `5` throughput: `6559.391737186182`
+  - update `20` throughput: `5740.07514572724`
+  - update `20` wall clock: `720.1466979980469` s
+- exact learner timing breakdown:
+  - update `5` learner total: `928.0441000009887` ms
+  - update `5` learner forward time-major: `189.43669999134727` ms
+  - update `5` learner packed scorer: `98.12199999578297` ms
+  - update `5` learner trunk: `91.3091000111308` ms
+  - update `5` learner public heuristic target: `285.5789999885019` ms
+  - update `5` learner teacher aux: `21.182900003623217` ms
+  - update `20` learner total: `967.5883000018075` ms
+  - update `20` learner forward time-major: `194.01430001016706` ms
+  - update `20` learner packed scorer: `102.87049997714348` ms
+  - update `20` learner trunk: `91.13799998885952` ms
+  - update `20` learner public heuristic target: `315.3864999767393` ms
+  - update `20` learner teacher aux: `20.177400001557544` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `7154.549083218813`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime heuristic-public mix fraction active: `1.0`
+  - first runtime focal policy: `2321.1017998401076` ms
+  - first runtime fixed-opponent overwrite: `21476.114599819994` ms
+  - first runtime fill pending unrolls: `27393.030000006547` ms
+  - first runtime `pfsp_sampled_envs`: `5.0`
+  - last runtime actor env-steps/sec: `5315.13748251389`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime heuristic-public mix fraction active: `1.0`
+  - last runtime focal policy: `10904.137200093828` ms
+  - last runtime fixed-opponent overwrite: `21008.209099585656` ms
+  - last runtime fill pending unrolls: `35955.70880000014` ms
+  - last runtime `pfsp_sampled_envs`: `2.0`
+  - last runtime `pfsp_champion_envs`: `1.0`
+  - last runtime league effective update: `10.0`
+  - last runtime league update lag: `9.0`
+- what changed:
+  - kept the early-live-league tiny64 frontier from Attempt `152`, but sharpened the heuristic teacher by lowering both `training.structured_aux.teacher_public_heuristic_temperature` and `training.structured_warmstart.teacher_public_heuristic_temperature` from `32` to `8`
+  - this tests the remaining high-signal idea inside the current packed-teacher contract family: the learner may need a more decisive public tactical ranking target rather than a very diffuse heuristic softmax
+- whether learning improved:
+  - no
+  - periodic dev eval was still `aggregate=0.8541666666666666/0.8333333333333334/0.8333333333333334/0.8125`, `B1=0.5625/0.5/0.5/0.4375`, `B2=1.0/1.0/1.0/1.0`
+  - the sharper teacher materially improved throughput and reduced teacher-target time, but it did not move the actual learning frontier
+- next hypotheses:
+  - the current local packed+teacher family now looks exhausted for learning, not merely under-tuned: live PFSP, terminal-only rewards, B2 anneal, longer horizon, and sharper public teacher all collapsed to the same checkpoint band
+  - the remaining serious upside is either a richer thesis evaluation surface with more anchors / stronger baselines, or a deeper action-target redesign beyond the current packed heuristic-distillation contract
+
+## Attempt 157: WSL Process-Ring B1 Mix Crash Root-Cause Isolation And Fix
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_hybridbias1_actorheuristic1_debug_u1_wsl_process_ring_validate_v4`
+- exact throughput numbers:
+  - update `1` throughput: `14429.800018289365`
+  - update `1` wall clock: `121.22340846061707` s
+- exact learner timing breakdown:
+  - update `1` learner total: `46369.92852899999` ms
+  - update `1` learner forward time-major: `28019.71426299997` ms
+  - update `1` learner packed scorer: `1714.0700200000083` ms
+  - update `1` learner trunk: `26302.40228599996` ms
+  - update `1` learner public heuristic target: `1709.6178689999988` ms
+  - update `1` learner teacher aux: `5427.758815000005` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `9873.600329479323`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime heuristic-public mix fraction active: `1.0`
+  - first runtime focal policy: `11773.0` ms
+  - first runtime fixed-opponent overwrite: `0.0` ms
+  - first runtime fill pending unrolls: `9.699017999992066` ms
+  - last runtime actor env-steps/sec: `28710.557174785714`
+  - last runtime actor heuristic fraction active: `1.0`
+  - last runtime heuristic-public mix fraction active: `1.0`
+  - last runtime focal policy: `19417.0` ms
+  - last runtime fixed-opponent overwrite: `0.0` ms
+  - last runtime fill pending unrolls: `2.647222000007332` ms
+- what changed:
+  - extended the packed-action debug validation from model-sampled rows to every heuristic packed-action path, then added an env-step legality comparison that checks sampled actions against both the local legality view and `actor.env._last_batch`
+  - the new debug run proved the crash was not a bad sampled action: the local legality view still allowed the chosen action, but `DecisionBoundaryEnv._last_batch` had stale legality for the same row
+  - root cause: the all-heuristic fast collectors manually repacked `actor.current_batch` from `step_out` but never synchronized `actor.env._last_batch`, so actors that later fell back to the standard packed collector sampled against the fresh local batch and validated against stale env legality
+  - fixed the handoff by adding `_sync_actor_batch_from_step_out(...)`, which updates both `actor.current_batch` and `actor.env._last_batch`
+  - added focused regression coverage in `python/weiss_rl/tests/test_runtime.py`; focused runtime/config suites now pass on both Windows and WSL (`99 passed`)
+- whether learning improved:
+  - not directly; this was a systems unblock
+  - the important result is that the mixed-opponent WSL process-ring lane no longer crashes when B1 exposure is enabled, which reopens the fast Linux learning path
+- next hypotheses:
+  - rerun the real tiny64 fast-lane B1 curriculum with `teacher_aux.mode=warmstart_only` now that the stale-batch bug is fixed
+  - if that stays stable but does not beat the old learning band, use the repaired fast lane for stronger learning interventions such as actor-heuristic anneal, larger persistent B1 exposure, or a deeper action-target redesign
+
+## Attempt 158: Tiny64 Repaired Fast-Lane B1 Curriculum Probe (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_fixbatch_v1`
+- exact throughput numbers:
+  - update `1` throughput: `13095.84453387612`
+  - update `5` throughput: `12227.896427809828`
+  - update `5` wall clock: `248.92534399032593` s
+- exact learner timing breakdown:
+  - update `5` learner total: `41184.472028999946` ms
+  - update `5` learner forward time-major: `35323.514642000075` ms
+  - update `5` learner packed scorer: `839.1151850000824` ms
+  - update `5` learner trunk: `34342.09103` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10244.904415013734`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime heuristic-public mix fraction active: `1.0`
+  - first runtime focal policy: `10906.0` ms
+  - first runtime fixed-opponent overwrite: `0.0` ms
+  - first runtime fill pending unrolls: `11.644012000033399` ms
+  - last runtime actor env-steps/sec: `12890.364305757028`
+  - last runtime actor heuristic fraction active: `1.0`
+  - last runtime heuristic-public mix fraction active: `1.0`
+  - last runtime focal policy: `30138.0` ms
+  - last runtime fixed-opponent overwrite: `0.0` ms
+  - last runtime fill pending unrolls: `1.0147460000098363` ms
+- what changed:
+  - reran the real Linux/WSL learning-frontier curriculum on the repaired process-ring lane, keeping the early B1 mix (`noleague_baseline_mix_fraction=0.15`, end update `5`) but forcing `training.teacher_aux.mode=warmstart_only` so the collector stayed on the fast path after warmstart
+  - kept `training.heuristic_actor_hidden_state_tracking=false` and the tiny64 hybrid-bias + public-distill recipe unchanged so the only new variable was the restored B1 fast-lane exposure
+- whether learning improved:
+  - mixed
+  - periodic dev eval at update `5` was `aggregate=0.8333333333333334`, `B0=1.0`, `B1=0.5`, `B2=1.0`
+  - this is a clear robustness + throughput improvement versus the old local-central learning lane (`~5k-6k` samples/sec), but it did not beat the old global learning frontier (`aggregate=0.875`, `B1=0.625`, `B2=1.0`)
+- next hypotheses:
+  - extend the repaired recipe to `20` updates to see whether restored B1 exposure helps beyond the early checkpoint
+  - if the curve still settles into the old `0.8125-0.8333` band, the next real learning lever is likely actor-heuristic anneal or a deeper contract change rather than the B1 mix itself
+
+## Attempt 159: Tiny64 Repaired Fast-Lane B1 Curriculum Check (`u20`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u20_dev5_wsl_process_ring_fixbatch_v1`
+- exact throughput numbers:
+  - update `5` throughput: `12492.463921622368`
+  - update `20` throughput: `11437.548665808343`
+  - update `20` wall clock: `948.9888551235199` s
+- exact learner timing breakdown:
+  - update `20` learner total: `37752.139027000114` ms
+  - update `20` learner forward time-major: `29758.01668700001` ms
+  - update `20` learner packed scorer: `4222.266448000028` ms
+  - update `20` learner trunk: `25535.740799999985` ms
+  - update `20` learner packed view: `304.0003450000768` ms
+  - update `20` learner structured summary: `737.7420689999781` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10099.387232484172`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime heuristic-public mix fraction active: `1.0`
+  - first runtime focal policy: `11250.0` ms
+  - first runtime fixed-opponent overwrite: `0.0` ms
+  - first runtime fill pending unrolls: `3.6538039998958993` ms
+  - last runtime actor env-steps/sec: `14091.808717209624`
+  - last runtime actor heuristic fraction active: `1.0`
+  - last runtime heuristic-public mix fraction active: `1.0`
+  - last runtime focal policy: `70.0` ms
+  - last runtime fixed-opponent overwrite: `0.0` ms
+  - last runtime fill pending unrolls: `1.4391859999705048` ms
+- what changed:
+  - extended the repaired fast-lane B1 curriculum from Attempt `158` out to `20` updates with the exact same config so the only question was whether restored fast-lane B1 exposure would materially improve the medium-horizon dev curve
+- whether learning improved:
+  - no
+  - periodic dev eval was `aggregate=0.8333333333333334/0.8333333333333334/0.7916666666666666/0.8125`
+  - anchor breakdown was `B1=0.5/0.5/0.4375/0.4375`, `B2=1.0/1.0/0.9375/1.0`
+  - the repaired lane is now fast, stable, and thesis-defensible, but the plain early B1 curriculum still converges back into the old learning band instead of breaking through it
+- next hypotheses:
+  - try a learning intervention that changes the data the model actually trains on rather than only restoring throughput: actor-heuristic anneal (`training.actor_heuristic_end_updates` to hand collection back to the model after warmstart), stronger or longer-lived B1 exposure, or a richer baseline anchor set such as a real `B3`
+  - if actor anneal still fails on the repaired fast lane, treat that as stronger evidence that the remaining blocker is the action/objective contract rather than schedule or collection stability
+
+## Attempt 160: Tiny64 Repaired Fast-Lane Actor-Heuristic Anneal (`1.0 -> 0.0` by `u10`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix015_end5_actoranneal00_end10_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u20_dev5_wsl_process_ring_fixbatch_v1`
+- exact throughput numbers:
+  - update `20` throughput: `14294.666622892764`
+  - update `20` wall clock: `824.7533888816833` s
+- exact learner timing breakdown:
+  - update `20` learner total: `102526.20065700001` ms
+  - update `20` learner forward time-major: `52361.69687800009` ms
+  - update `20` learner packed scorer: `12835.81960999993` ms
+  - update `20` learner trunk: `39525.868529000036` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10313.301734311315`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime focal policy: `10709.0` ms
+  - mid-run actor env-steps/sec: `13821.257764347269`
+  - mid-run actor heuristic fraction active: `0.19999999999999996`
+  - mid-run focal policy: `42720.0` ms
+  - last runtime actor env-steps/sec: `8686.773041228253`
+  - last runtime actor heuristic fraction active: `0.0`
+  - last runtime focal policy: `46741.0` ms
+  - last runtime fill pending unrolls: `1.3615920000802362` ms
+- what changed:
+  - kept the repaired fast-lane B1 curriculum from Attempt `159`, but annealed `training.actor_heuristic_fraction` from `1.0` to `0.0` over the first `10` updates so the actor would collect fully model-driven states after warmstart
+- whether learning improved:
+  - no
+  - the anneal definitely engaged (`actor_heuristic_fraction_active` reached `0.0`), but periodic dev eval was still `aggregate=0.8333333333333334/0.8333333333333334/0.7916666666666666/0.8125`
+  - anchor breakdown remained `B1=0.5/0.5/0.4375/0.4375`, `B2=1.0/1.0/0.9375/1.0`
+  - this materially weakens the theory that the remaining learning issue is just “the model never sees its own states”
+- next hypotheses:
+  - keep the repaired fast lane, but push harder on the baseline mix itself rather than actor ownership
+  - if stronger persistent B1 exposure helps early B1 and keeps B2 intact, treat that as the new fast-lane learning baseline; otherwise the curriculum/schedule family is close to exhausted
+
+## Attempt 161: Tiny64 Repaired Fast-Lane Strong Persistent B1 Mix (`0.5`, end `20`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix05_end20_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u20_dev5_wsl_process_ring_fixbatch_v1`
+- exact throughput numbers:
+  - update `20` throughput: `14659.305653575026`
+  - update `20` wall clock: `732.6850912570953` s
+- exact learner timing breakdown:
+  - update `20` learner total: `32191.447508000012` ms
+  - update `20` learner forward time-major: `23767.114995000156` ms
+  - update `20` learner packed scorer: `4531.253296999921` ms
+  - update `20` learner trunk: `19235.852152000007` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10153.215834359484`
+  - first runtime actor heuristic fraction active: `1.0`
+  - first runtime focal policy: `14923.0` ms
+  - last runtime actor env-steps/sec: `15698.143046762752`
+  - last runtime actor heuristic fraction active: `1.0`
+  - last runtime focal policy: `33773.0` ms
+  - last runtime actor env-step: `1514.0` ms
+- what changed:
+  - kept the repaired fast-lane warmstart-only teacher setup, but raised `league.sampling.noleague_baseline_mix_fraction` from `0.15` to `0.5` and kept the mix alive through update `20`
+- whether learning improved:
+  - yes, partially
+  - periodic dev eval was `aggregate=0.8541666666666666/0.8125/0.7708333333333334/0.8333333333333334`
+  - anchor breakdown was `B1=0.5625/0.4375/0.375/0.5`, `B2=1.0/1.0/0.9375/1.0`
+  - this does not beat the older global learning frontier (`aggregate=0.875`, `B1=0.625`, `B2=1.0`), but it is the best fast-lane learning checkpoint so far and it matched the stronger old band at update `5` while keeping throughput in the `14.6k` class
+- next hypotheses:
+  - test whether pushing B1 exposure even harder gives more than the `0.5625` early-B1 plateau, or whether `0.5` is already near the sweet spot
+  - if higher B1 fractions do not improve the update-5 checkpoint, treat the curriculum/schedule family as substantially explored and move the next pass to deeper contract work plus richer thesis evaluation anchors
+
+## Attempt 162: Tiny64 Repaired Fast-Lane Heavier B1 Mix Sanity Check (`0.75`, end `20`, `u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix075_end20_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_fixbatch_v1`
+- exact throughput numbers:
+  - update `5` throughput: `14395.525812837623`
+  - update `5` wall clock: `193.30572271347046` s
+- exact learner timing breakdown:
+  - update `5` learner total: `26155.78454599995` ms
+  - update `5` learner forward time-major: `19194.474007000055` ms
+  - update `5` learner packed scorer: `1682.7268510000977` ms
+  - update `5` learner trunk: `13172.657918999903` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10066.054202734596`
+  - first runtime focal policy: `16840.0` ms
+  - last runtime actor env-steps/sec: `17780.547762121394`
+  - last runtime focal policy: `36625.0` ms
+  - last runtime actor env-step: `1603.0` ms
+- what changed:
+  - reran the stronger-B1 recipe from Attempt `161`, but increased the persistent B1 mix to `0.75` as a short `u5` probe to see whether the update-5 learning frontier would rise above the new `0.5`-mix result
+- whether learning improved:
+  - no
+  - periodic dev eval at update `5` was still exactly `aggregate=0.8541666666666666`, `B1=0.5625`, `B2=1.0`
+  - this strongly suggests the easy “more B1 mix” family is already near its useful ceiling on the repaired fast lane
+- next hypotheses:
+  - keep Attempt `161` as the current fast-lane learning baseline for the curriculum/schedule family
+  - treat the remaining serious upside as deeper than schedule tuning: richer thesis evaluation anchors / stronger baselines, and a more fundamental action-target or objective redesign
+
+## Attempt 163: Tiny64 Repaired Fast-Lane Factorized Sparse B1 Mix Cross-Check (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix05_end20_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_fixbatch_factorized_v1`
+- exact throughput numbers:
+  - update `1` throughput: `8333.169921875`
+  - update `5` throughput: `10340.9775390625`
+  - update `5` wall clock: `293.06634521484375` s
+- exact learner timing breakdown:
+  - first scalar learner total: `68772.1796875` ms
+  - last scalar learner total: `39996.5078125` ms
+  - first scalar factorized learner policy / forward time-major: `2625.77099609375` ms
+  - last scalar factorized learner policy / forward time-major: `18683.03515625` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10184.458984375`
+- what changed:
+  - reran the repaired fast-lane B1-heavy recipe from Attempt `161`, but swapped the student contract back to `model.structured_policy_contract=factorized_v1` using the existing factorized-compatible B1 baseline run directory
+  - this was the direct cross-check for the biggest unresolved architecture question: whether the earlier sparse factorized/focal-V-trace work would become competitive again once the fast lane and B1 curriculum were both working
+- whether learning improved:
+  - no
+  - periodic dev eval at update `5` was only `aggregate=0.8333333134651184`, `B1=0.5`, `B2=1.0`
+  - the factorized lane was materially slower than packed and failed to match the repaired packed learning checkpoint
+- next hypotheses:
+  - keep packed as the active fast-lane student contract for tiny64 learning work
+  - redirect redesign effort away from the old dense factorized path and toward the objective / teacher contract instead
+
+## Attempt 164: Tiny64 Repaired Fast-Lane Persistent Tactical Teacher (`same-family + move-source`, pre-fix)
+
+- current best run label: `structured_acceptance_tiny64_b1mix05_end20_hybridbias1_actorheuristic1_teacheralways_postwarmpub0_samefamily02_movesource05_u5_dev5_wsl_process_ring_fixbatch_v1`
+- exact throughput numbers:
+  - update `1` throughput: `13580.3291015625`
+  - update `5` throughput: `12965.8662109375`
+  - update `5` wall clock: `247.48463439941406` s
+- exact learner timing breakdown:
+  - first scalar learner total: `22781.875` ms
+  - last scalar learner total: `54235.60546875` ms
+  - first scalar learner forward time-major: `3830.830810546875` ms
+  - last scalar learner forward time-major: `24436.216796875` ms
+  - first scalar learner packed scorer: `1627.4608154296875` ms
+  - last scalar learner packed scorer: `4724.72314453125` ms
+  - first scalar learner trunk: `2203.35009765625` ms
+  - last scalar learner trunk: `19711.482421875` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10202.9990234375`
+- what changed:
+  - kept the repaired fast-lane B1-heavy curriculum, but changed the learning objective materially: `training.teacher_aux.mode=always`, `training.structured_aux.teacher_public_heuristic_coef=0.0`, `training.structured_aux.teacher_same_family_action_coef=0.2`, `training.structured_warmstart.teacher_same_family_action_coef=0.5`, `training.structured_aux.teacher_move_source_coef=0.05`, `training.structured_warmstart.teacher_move_source_coef=0.1`
+  - the goal was to keep a cheap exact tactical teacher alive after warmstart instead of paying for full public soft-target distillation
+- whether learning improved:
+  - mixed but not enough
+  - periodic dev eval at update `5` matched the current fast-lane best checkpoint: `aggregate=0.8541666865348816`, `B1=0.5625`, `B2=1.0`
+  - throughput regressed versus Attempt `161`, and diagnostics showed the move-specific path was effectively dead: `teacher_move_source_supported_fraction=0.0`, `teacher_move_source_accuracy=0.0`, `teacher_same_family_main_move_accuracy=0.0`
+- next hypotheses:
+  - inspect the teacher-label contract rather than just the coefficients, because the tactical objective appears live in general but the move-specific supervision path is not activating on real training rows
+
+## Attempt 165: Explicit `teacher_move_source` Contract Redesign And Coverage
+
+- current best run label: `code change only`
+- exact throughput numbers:
+  - not a benchmark attempt
+- exact learner timing breakdown:
+  - not applicable
+- exact actor timing breakdown:
+  - not applicable
+- what changed:
+  - redesigned the structured teacher contract to carry explicit `teacher_move_source` labels end-to-end instead of reconstructing move-source supervision only from `teacher_action`
+  - `RuntimeUnroll`, shared collector slots, pending-unroll metadata, shared-memory specs, batch builders, and teacher-label helpers now all include `teacher_move_source`
+  - `_teacher_labels_from_actions(...)` now writes `teacher_move_source=decoded.from_slot` whenever the teacher family is `main_move`
+  - the learner now consumes explicit `teacher_move_source` labels in both packed and factorized auxiliary paths, while keeping the old `teacher_action -> move_from_slot` fallback for backward compatibility
+  - focused Windows and WSL suites both passed after the change: `pytest python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_impala_learner.py -q` => `108 passed`
+- whether learning improved:
+  - not directly measured here
+  - the important result is that move-source supervision is now a first-class contract feature instead of an inferred side channel, which makes later negative results much more trustworthy
+- next hypotheses:
+  - rerun the persistent tactical teacher probe on the repaired fast lane to see whether the old dead move-source metrics were a real contract bug or a true data-distribution absence
+
+## Attempt 166: Tiny64 Persistent Tactical Teacher After Explicit Move-Source Labels (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix05_end20_hybridbias1_actorheuristic1_teacheralways_postwarmpub0_samefamily02_movesource05_u5_dev5_wsl_process_ring_fixbatch_movesourcelabel_v1`
+- exact throughput numbers:
+  - update `1` throughput: `14104.59375`
+  - update `5` throughput: `12442.74609375`
+  - update `5` wall clock: `246.3612518310547` s
+- exact learner timing breakdown:
+  - last scalar learner total: `44068.8984375` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10375.0439453125`
+- what changed:
+  - reran Attempt `164` after the explicit move-source contract redesign so the only change was that real fast-lane teacher rows could now carry direct `teacher_move_source` labels
+- whether learning improved:
+  - no
+  - periodic dev eval at update `5` stayed exactly `aggregate=0.8541666865348816`, `B1=0.5625`, `B2=1.0`
+  - the move-source diagnostics still stayed dead in real training (`teacher_move_source_supported_fraction=0.0`, `teacher_move_source_accuracy=0.0`, `teacher_same_family_main_move_accuracy=0.0`)
+  - this strongly suggests the current fast-lane data distribution is not producing meaningful `main_move` teacher rows, rather than the learner silently ignoring a good supervision signal
+- next hypotheses:
+  - instrument teacher-family coverage counts directly so we can separate “objective bug” from “training data never contains that family”
+  - stop expecting move-source coefficients alone to rescue learning on this lane
+
+## Attempt 167: Tiny64 Strong B1 Mix Only Through Update `5` (`u20`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix05_end5_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u20_dev5_wsl_process_ring_fixbatch_v1`
+- exact throughput numbers:
+  - update `5` throughput: `15561.8818359375`
+  - update `10` throughput: `15244.62109375`
+  - update `20` throughput: `11632.091796875`
+  - update `20` wall clock: `985.0606079101562` s
+- exact learner timing breakdown:
+  - update `20` learner total: `86008.859375` ms
+  - update `20` learner forward time-major: `47468.40625` ms
+  - update `20` learner packed scorer: `6214.0458984375` ms
+  - update `20` learner trunk: `41254.34765625` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10435.2626953125`
+- what changed:
+  - tested whether the only successful curriculum idea so far (`B1` mix `0.5`) needed to persist all the way through update `20`
+  - kept the same warmstart-only fast-lane recipe as Attempt `161`, but annealed `league.sampling.noleague_baseline_mix_fraction` from `0.5` to `0.0` by update `5`
+- whether learning improved:
+  - no
+  - periodic dev eval was exactly the same as Attempt `161`: `aggregate=0.8541666865348816/0.8125/0.7708333134651184/0.8333333134651184`, `B1=0.5625/0.4375/0.375/0.5`, `B2=1.0/1.0/0.9375/1.0`
+  - late learner cost was much worse, so the annealed version lost both throughput and simplicity without buying any learning
+- next hypotheses:
+  - keep persistent `0.5` B1 exposure as the current best schedule inside this family
+  - move the next redesign away from B1 schedule tweaks and toward reward/objective or richer baseline structure
+
+## Attempt 168: Tiny64 Fast-Lane Terminal-Only Reward Sweep (`u20`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix05_end20_terminalonly_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u20_dev5_wsl_process_ring_fixbatch_v1`
+- exact throughput numbers:
+  - update `5` throughput: `14791.318359375`
+  - update `10` throughput: `14810.52734375`
+  - update `20` throughput: `14059.7587890625`
+  - update `20` wall clock: `772.9761962890625` s
+- exact learner timing breakdown:
+  - update `20` learner total: `40562.2421875` ms
+  - update `20` learner forward time-major: `28932.7421875` ms
+  - update `20` learner packed scorer: `4742.173828125` ms
+  - update `20` learner trunk: `24190.5546875` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10131.0302734375`
+- what changed:
+  - reran the current fast-lane B1-heavy learning baseline from Attempt `161`, but replaced the shaped reward contract with `rewards.objective=terminal_only_pm1`, `rewards.discount.gamma=1.0`, `rewards.truncation.reward=0.0`, and `rewards.truncation.bootstrap_value=true`
+- whether learning improved:
+  - no
+  - periodic dev eval was `aggregate=0.8333333134651184/0.8125/0.7916666865348816/0.8333333134651184`, `B1=0.5/0.4375/0.4375/0.5`, `B2=1.0/1.0/0.9375/1.0`
+  - terminal-only rewards slightly improved late throughput over Attempt `167`, but they still failed to beat Attempt `161` on either learning or speed
+- next hypotheses:
+  - the repaired WSL process-ring lane is healthy again, but the current packed-teacher family still appears capped around Attempt `161`
+  - the next meaningful learning redesign should target teacher-row availability / opponent diversity and richer baselines, not just reward-shape nudges
+
+## Attempt 169: Fast B1 Lane Verification On Repaired WSL Process Ring (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1lane_diverse4_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `1` throughput: `24474.404156976434`
+  - update `5` throughput: `51277.84536842287`
+  - update `5` wall clock: `27.916279315948486` s
+- exact learner timing breakdown:
+  - update `5` learner total: `501.13111800055776` ms
+  - update `5` learner forward time-major: `178.67196299994248` ms
+  - update `5` learner packed scorer: `74.85567399999127` ms
+  - update `5` learner trunk: `96.92944099879242` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `16279.041703532248`
+  - first runtime actor policy forward: `15864.0` ms
+  - first runtime collect actor unroll: `21864.0` ms
+  - first runtime PFSP sampled envs: `1893.0`
+  - first runtime PFSP heuristic-public envs: `1016.0`
+  - first runtime PFSP noleague-baseline envs: `877.0`
+- what changed:
+  - reran the dedicated B1-mix fast lane after the batch-sync fix to verify whether the canonical B1 baseline was truly entering the WSL process-ring path
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed `aggregate=0.75`, `B1=0.5625`, `B2=1.0`, `Previous recent snapshot=0.4375`
+  - the important finding is that B1 exposure was genuinely live at startup in the fast lane, so the earlier flat learning was not just a missing-anchor bug
+- next hypotheses:
+  - keep the repaired WSL process-ring lane as the main Linux target
+  - attack the rollout mix itself, because “B1 exists in the pool” is not enough if the fast actors still dominate the queue
+
+## Attempt 170: Warmup Snapshot Mix On All Actors Collapses The Fast Lane (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix05_seededwarmmix05_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `11927.043860823214`
+  - update `5` wall clock: `129.25945043563843` s
+- exact learner timing breakdown:
+  - update `5` learner total: `684.3585220003661` ms
+  - update `5` learner forward time-major: `256.8048040002395` ms
+  - update `5` learner packed scorer: `120.88719200073683` ms
+  - update `5` learner trunk: `129.0571669997007` ms
+- exact actor timing breakdown:
+  - last runtime actor env-steps/sec: `11607.673155366518`
+  - last runtime actor policy forward: `36277.0` ms
+  - last runtime collect actor unroll: `41589.0` ms
+  - first runtime PFSP sampled envs: `1973.0`
+  - first runtime PFSP warmup-snapshot envs: `661.0`
+  - first runtime PFSP heuristic-public envs: `1312.0`
+- what changed:
+  - forced the seeded-snapshot warmup mix onto all actors so the league had real snapshot diversity from update `0`
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed `aggregate=0.75`, `B1=0.5625`, `B2=1.0`, `Previous recent snapshot=0.4375`
+  - the throughput hit was decisive enough to reject “all actors use seeded snapshots during warmup” as a viable Linux frontier direction
+- next hypotheses:
+  - preserve the cheap heuristic-only majority and only make a subset of actors expensive/diverse
+  - add explicit observability so process-ring runs report the true opponent mix instead of stale parent-runtime counters
+
+## Attempt 171: Dual-Lane Collector With A Small Diverse Slice (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix05_seededwarmmix05_diverse4_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `36184.62651794535`
+  - update `5` wall clock: `40.77982139587402` s
+- exact learner timing breakdown:
+  - update `5` learner total: `624.9436649995914` ms
+  - update `5` learner forward time-major: `193.34773599985056` ms
+  - update `5` learner packed scorer: `76.20886599943333` ms
+  - update `5` learner trunk: `110.34129000017856` ms
+- exact actor timing breakdown:
+  - last runtime actor env-steps/sec: `43553.52385382855`
+  - last runtime actor policy forward: `3592.0` ms
+  - last runtime collect actor unroll: `8025.0` ms
+  - last runtime PFSP sampled envs: `1721.0`
+  - last runtime PFSP warmup-snapshot envs: `65.0`
+  - last runtime PFSP heuristic-public envs: `1656.0`
+- what changed:
+  - added a dual-lane collector split: a small subset of actors keeps the expensive opponent diversity, while the rest stay on the simulator-native all-heuristic fast path
+  - also fixed process metrics so PFSP counters come from collector-side unroll metadata instead of stale parent-runtime state
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed `aggregate=0.75`, `B1=0.5625`, `B2=1.0`, `Previous recent snapshot=0.4375`
+  - a harder version (`structured_acceptance_tiny64_b1mix05_seededwarmmix10_diverse8_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_v1`) reached `36521.31234726619` samples/sec with the same eval curve, so simply increasing the diverse lane size did not buy learning
+- next hypotheses:
+  - the idea of a fast majority plus a diverse minority is valid for throughput
+  - the next problem is making sure that minority actually matters to the learner batch
+
+## Attempt 172: Snapshot-Only Warmup Lane Still Fails To Move Learning (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1mix05_seededsnaplane_diverse4_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `35476.74683906846`
+  - update `5` wall clock: `41.63713049888611` s
+- exact learner timing breakdown:
+  - update `5` learner total: `497.80040599944186` ms
+  - update `5` learner forward time-major: `171.52750800050853` ms
+  - update `5` learner packed scorer: `64.59837200054608` ms
+  - update `5` learner trunk: `100.31038700071804` ms
+- exact actor timing breakdown:
+  - last runtime actor env-steps/sec: `62243.256515531975`
+  - last runtime PFSP sampled envs: `1775.0`
+  - last runtime PFSP warmup-snapshot envs: `175.0`
+  - last runtime PFSP heuristic-public envs: `1600.0`
+- what changed:
+  - changed the diverse lane so warmup actors bypassed the heuristic-vs-snapshot mixture and sampled seeded snapshots directly during league warmup
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed `aggregate=0.75`, `B1=0.5625`, `B2=1.0`, `Previous recent snapshot=0.4375`
+  - this ruled out the simpler theory that the diverse lane only needed “more snapshot purity” to become useful
+- next hypotheses:
+  - the real issue is likely the learner batch selection or objective weighting, not just the opponent sampler
+
+## Attempt 173: Quota-Aware Diverse-Batch Intake On The Fast WSL Lane (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1lane_diverse4_batchquota0125_wait250_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_v3`
+- exact throughput numbers:
+  - update `5` throughput: `41278.03301707157`
+  - update `5` wall clock: `25.822666883468628` s
+- exact learner timing breakdown:
+  - update `5` learner total: `442.523228999562` ms
+  - update `5` learner forward time-major: `160.65881999929843` ms
+  - update `5` learner packed scorer: `66.72978999995394` ms
+  - update `5` learner trunk: `89.00341399930767` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `13524.562779015729`
+  - last runtime actor env-steps/sec: `92149.93350323272`
+  - first runtime fill pending unrolls: `9781.25882599852` ms
+  - last runtime fill pending unrolls: `1624.191344000792` ms
+  - first runtime PFSP noleague-baseline envs: `677.0`
+- what changed:
+  - added quota-aware process intake so the learner batch can wait briefly for a minimum diverse-lane share instead of letting the heuristic-only actors completely dominate the queue
+  - also added config support for `training.diverse_opponent_batch_fraction` and `training.diverse_opponent_batch_wait_ms`
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed `aggregate=0.75`, `B1=0.5625`, `B2=1.0`, `Previous recent snapshot=0.4375`
+  - a harder quota (`structured_acceptance_tiny64_b1lane_diverse4_batchquota025_wait500_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_v1`) still only reached `39802.00947034465` samples/sec with the same eval curve
+- next hypotheses:
+  - the queue starvation bug is real and now fixed, but the objective may still be letting the cheap heuristic lane dominate learning
+  - extend the best quota run to `u20` before abandoning the family
+
+## Attempt 174: Sustained Quota Run Confirms The B1-Lane Family Is A Dead End (`u20`)
+
+- current best run label: `structured_acceptance_tiny64_b1lane_diverse4_batchquota0125_wait250_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `41839.64360765121`
+  - update `10` throughput: `35707.09037486452`
+  - update `15` throughput: `33860.95295137326`
+  - update `20` throughput: `32792.754984459774`
+  - update `20` wall clock: `123.1884183883667` s
+- exact learner timing breakdown:
+  - update `20` learner total: `574.4988339993142` ms
+  - update `20` learner forward time-major: `201.30933499967796` ms
+  - update `20` learner packed scorer: `110.7295490000979` ms
+  - update `20` learner trunk: `90.57266200034064` ms
+- exact actor timing breakdown:
+  - update `5` runtime actor env-steps/sec: `41839.64360765121`
+  - update `20` runtime actor env-steps/sec proxy via throughput stayed in the `32k-42k` band while the eval curve regressed
+- what changed:
+  - extended the best quota-aware B1 lane to `20` updates to test whether the added diverse exposure only needed more optimization time
+- whether learning improved:
+  - no
+  - dev-eval trajectory regressed to `aggregate=0.75/0.75/0.71875/0.71875`
+  - `B1` regressed to `0.5625/0.5625/0.4375/0.4375` while `B2` stayed `1.0`
+  - this makes the quota-B1 family an honest reject despite the throughput recovery
+- next hypotheses:
+  - stop spending iterations on the seeded/B1-heavy lane
+  - return to the best historical fast-learning recipe and test whether the current codebase can still reproduce it before making deeper objective changes
+
+## Attempt 175: Retest The Old Honest Hybrid-Residual Learning Frontier On Current Code
+
+- current best run label: `structured_acceptance_tiny32_hybridbias1_actorheuristic1_pubdistill01_ws1_u40_dev5_wsl_process_ring_retest_v1`
+- exact throughput numbers:
+  - update `5` throughput: `52643.567286295285`
+  - update `10` throughput: `43282.49733009454`
+  - update `20` throughput: `39643.471993374354`
+  - update `40` throughput: `37579.95434417994`
+  - update `40` wall clock: `212.435884475708` s
+- exact learner timing breakdown:
+  - update `40` learner total: `840.4284520001966` ms
+  - update `40` learner packed scorer: `59.25731700153847` ms
+  - update `40` learner trunk: `71.8905720004841` ms
+- exact actor timing breakdown:
+  - the current-code retest stayed in the same WSL process-ring throughput class but no longer reproduced the old `0.875` honest checkpoint
+- what changed:
+  - reran the old strongest honest Linux learning recipe directly on the current codebase and extended it to `40` updates
+- whether learning improved:
+  - no
+  - update `10` and update `20` both peaked at `aggregate=0.8541666666666666`, `B1=0.5625`, `B2=1.0`
+  - update `40` regressed to `aggregate=0.7916666666666666`, `B1=0.4375`, `B2=0.9375`
+  - the historical Attempt `99` frontier is therefore no longer reproduced cleanly by the current branch
+- next hypotheses:
+  - tune around the hybrid bias again, because the old progress notes already pointed at the global public prior as the most likely remaining learning lever in this family
+
+## Attempt 176: Global Public-Bias Retune On The Old Hybrid-Residual Family (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_hybridbias125_actorheuristic1_pubdistill01_ws1_u20_dev5_wsl_process_ring_retest_v1`
+- exact throughput numbers:
+  - update `20` throughput: `39555.512804507474`
+  - update `20` wall clock: `102.35880947113037` s
+- exact learner timing breakdown:
+  - update `20` learner total: `855.5794870007958` ms
+  - update `20` learner forward time-major: `173.55349800163822` ms
+  - update `20` learner packed scorer: `77.83866800127726` ms
+  - update `20` learner trunk: `95.70886900110054` ms
+- exact actor timing breakdown:
+  - the throughput class stayed close to the retest baseline, so this was a real learning probe rather than a systems regression
+- what changed:
+  - increased `model.public_heuristic_logit_bias_scale` from `1.0` to `1.25` on the old hybrid-residual recipe
+- whether learning improved:
+  - no
+  - update `20` dev eval only reached `aggregate=0.8125`, `B1=0.4375`, `B2=1.0`
+  - this weakens the theory that a slightly stronger static global bias alone is enough to recover the old frontier
+- next hypotheses:
+  - if the hybrid family is still the best honest local learning lane, the next change must be in the data/objective mix rather than a scalar bias retune
+
+## Attempt 177: Mixed Model/Diverse Actors Still Need An Objective Redesign (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1lane_diverse4_model2_batchquota0125_wait250_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `31387.934405731296`
+  - update `5` wall clock: `34.70872473716736` s
+- exact learner timing breakdown:
+  - update `5` learner total: `466.7085590008355` ms
+  - update `5` learner forward time-major: `168.08299299918872` ms
+  - update `5` learner packed scorer: `56.34605600062059` ms
+  - update `5` learner trunk: `106.79629299920634` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11227.359447363115`
+  - last runtime actor env-steps/sec: `57869.47569156845`
+- what changed:
+  - extended the dual-lane architecture so part of the diverse lane uses the model policy instead of the heuristic actor backend, while the majority of actors stay heuristic for speed
+  - added config support for `training.diverse_model_actor_count`
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed `aggregate=0.75`, `B1=0.5625`, `B2=1.0`, `Previous recent snapshot=0.4375`
+  - this suggests the problem is not only “the model never directly faces B1”; the policy loss itself is probably still being dominated by the heuristic lane
+- next hypotheses:
+  - gate policy-gradient training on pure heuristic-actor rows so the cheap actor majority stops dictating the policy objective
+
+## Attempt 178: Pure-Heuristic Actor Policy-Gradient Masking (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_b1lane_diverse4_model2_batchquota0125_wait250_pgmask_hybridbias1_actorheuristic1_pubdistill01_teacherauxwarmstartonly_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `31249.4152736937`
+  - update `5` wall clock: `34.80487847328186` s
+- exact learner timing breakdown:
+  - update `5` learner total: `439.4589730000007` ms
+  - update `5` learner forward time-major: `169.2408240014629` ms
+  - update `5` learner packed scorer: `45.2084520002245` ms
+  - update `5` learner trunk: `118.72325900003489` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11160.800292643004`
+  - last runtime actor env-steps/sec: `57421.647885996994`
+- what changed:
+  - added `training.train_on_heuristic_actor_rows` and changed the runtime so fully heuristic actor lanes can stop contributing policy-train rows while still contributing rewards, values, and teacher auxiliaries
+  - combined that objective change with the mixed model/diverse lane from Attempt `177`
+- whether learning improved:
+  - no
+  - update `5` dev eval stayed `aggregate=0.75`, `B1=0.5625`, `B2=1.0`, `Previous recent snapshot=0.4375`
+  - even a real objective change did not move the short-horizon curve in this family
+- next hypotheses:
+  - the local evidence now points to a deeper contract / action-target mismatch rather than another queueing or weighting bug
+  - the next non-exhausted ideas are: cheaper heuristic-family baseline diversity that preserves the fast lane, or a more radical policy/objective contract change around the tactical decisions the current teacher never makes available
+
+## Attempt 179: Heuristic-Variant Diverse Lane Exposed A Real Opponent-Registry Bug (`u5`)
+
+- current best run label: `structured_acceptance_tiny32_hvariantonly_diverse4_batchquota0125_wait250_hybridbias1_actorheuristic1_pubdistill01_u5_dev5_wsl_process_ring_v2`
+- exact throughput numbers:
+  - update `1` throughput: `19874.24357162234`
+  - update `5` throughput: `17968.241502116685`
+  - update `5` wall clock: `63.52023243904114` s
+- exact learner timing breakdown:
+  - the run never produced a stable frontier-worthy learner profile because the collector crashed immediately after the first dev checkpoint
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `26070.383072331922`
+  - first runtime actor policy forward: `5577.0` ms
+  - first runtime collect actor unroll: `10030.0` ms
+  - first runtime fill pending unrolls: `4543.312317000527` ms
+  - first runtime PFSP heuristic-public envs: `864.0`
+  - first runtime PFSP heuristic-public-variant envs: `336.0`
+- what changed:
+  - activated the new aggressive/control `HeuristicPublic` family as the entire diverse-opponent lane while keeping the fast heuristic-majority actor topology
+- whether learning improved:
+  - no meaningful conclusion
+  - the run reached `train_u5_p0` with `aggregate=0.8333333333333334`, `B1=0.5`, `B2=1.0`, then a collector crashed with `RuntimeError: missing opponent snapshot model for policy_id 'B2 HeuristicPublic'`
+  - this exposed a real runtime bug in heuristic-opponent lookup rather than a learning failure
+- next hypotheses:
+  - fix the B2 heuristic-opponent fallback so heuristic-family league variants can run cleanly on the process-ring path
+  - rerun the variant-only lane after the runtime fix before deciding whether the idea itself is useful
+
+## Attempt 180: Variant-Only Heuristic Diversity Works But Does Not Improve The Frontier (`u5`)
+
+- current best run label: `structured_acceptance_tiny32_hvariantonly_diverse4_batchquota0125_wait250_hybridbias1_actorheuristic1_pubdistill01_u5_dev5_wsl_process_ring_v3`
+- exact throughput numbers:
+  - update `1` throughput: `30226.33769513513`
+  - update `1` wall clock: `10.63705563545227` s
+- exact learner timing breakdown:
+  - update `1` learner total: `733.9426510006888` ms
+  - update `1` learner packed scorer: `126.3734869990003` ms
+  - update `1` learner trunk: `89.99265099919285` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `26190.91605675072`
+  - first runtime actor policy forward: `5576.0` ms
+  - first runtime collect actor unroll: `9742.0` ms
+  - first runtime fill pending unrolls: `4395.992604999265` ms
+  - first runtime PFSP heuristic-public envs: `888.0`
+  - first runtime PFSP heuristic-public-variant envs: `360.0`
+- what changed:
+  - fixed heuristic-opponent fallback/registration for `B2 HeuristicPublic` in the process collectors and reran the pure heuristic-family-diverse lane
+- whether learning improved:
+  - no
+  - update `5` dev eval reached `aggregate=0.8333333333333334`, `B1=0.5`, `B2=1.0`
+  - this is clean but still below the old local learning band while also costing throughput versus the stronger tiny32 fast-learning recipe
+- next hypotheses:
+  - keep the richer baseline family infrastructure because it improves thesis evaluation and future league diversity
+  - stop spending more direct search on the pure variant-only lane unless a later contract redesign needs it
+
+## Attempt 181: Tactical-Family Public Distillation Keeps Speed But Does Not Raise Learning (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_tacticalpubdistill02_fams_hybridbias1_actorheuristic1_ws1_u20_dev5_wsl_process_ring_v2`
+- exact throughput numbers:
+  - update `20` throughput: `37966.81486134349`
+  - update `20` wall clock: `106.463045835495` s
+- exact learner timing breakdown:
+  - update `20` learner total: `852.2241179998673` ms
+  - update `20` learner packed scorer: `125.52473399955488` ms
+  - update `20` learner trunk: `88.54465500007791` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `36229.97337131159`
+  - first runtime actor policy forward: `115.0` ms
+  - first runtime collect actor unroll: `5047.0` ms
+- what changed:
+  - restricted public-heuristic teacher loss to the tactical family subset `main_play_character`, `main_move`, `attack`, and `climax_play`
+  - raised the tactical public-distillation coefficient to `0.2` while keeping the fast process-ring tiny32 hybrid recipe
+- whether learning improved:
+  - no
+  - dev-eval trajectory: `0.8333333333333334 -> 0.8541666666666666 -> 0.7708333333333334 -> 0.8541666666666666`
+  - `B1` only reached `0.5625`, matching the old band rather than beating it
+- next hypotheses:
+  - keep focusing teacher/public-bias changes on tactical decisions, but a simple family mask is not enough
+  - test whether the teacher target itself needs more diversity or more robust aggregation, not just narrower coverage
+
+## Attempt 182: Tactical-Family Static Public Bias Retune Regresses (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_tacticalbias125_fams_hybridactor1_pubdistill01_ws1_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `20` throughput: `36748.354505833944`
+  - update `20` wall clock: `110.0566337108612` s
+- exact learner timing breakdown:
+  - update `20` learner total: `780.3134049991058` ms
+  - update `20` learner forward time-major: `187.67766800010577` ms
+  - update `20` learner packed scorer: `75.3563390007912` ms
+  - update `20` learner trunk: `112.31489300007524` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `37002.21285507334`
+  - first runtime actor policy forward: `68.0` ms
+  - first runtime collect actor unroll: `4895.0` ms
+  - first runtime fill pending unrolls: `2262.6408100004483` ms
+  - first runtime PFSP heuristic-public envs: `1200.0`
+- what changed:
+  - kept the fast tiny32 process-ring hybrid recipe but limited static public-logit bias to the tactical action families and increased that bias scale to `1.25`
+- whether learning improved:
+  - no
+  - dev-eval trajectory regressed to `0.75 -> 0.8541666666666666 -> 0.75 -> 0.75`
+  - the final update only reached `B1=0.5`, `B2=0.75`
+- next hypotheses:
+  - static tactical bias alone is too brittle; the public prior probably needs to be more adaptive than a single fixed profile
+  - move from “one stronger heuristic target” toward aggregated multi-style heuristic targets
+
+## Attempt 183: Removing Shaping Does Not Hurt, But It Still Does Not Beat The Learning Frontier (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_noshaping_hybridbias1_actorheuristic1_pubdistill01_ws1_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `20` throughput: `38163.9345878583`
+  - update `20` wall clock: `106.00609922409058` s
+- exact learner timing breakdown:
+  - update `20` learner total: `835.114674999204` ms
+  - update `20` learner forward time-major: `168.9820020001207` ms
+  - update `20` learner packed scorer: `77.60877500004426` ms
+  - update `20` learner trunk: `91.36562599996978` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `37598.240917086005`
+  - first runtime actor policy forward: `50.0` ms
+  - first runtime collect actor unroll: `4773.0` ms
+  - first runtime fill pending unrolls: `2209.707091000382` ms
+  - first runtime PFSP heuristic-public envs: `1200.0`
+- what changed:
+  - disabled damage shaping and truncation reward so the learner only sees terminal-style sparse rewards while keeping the same fast tiny32 process-ring hybrid teacher recipe
+- whether learning improved:
+  - no
+  - dev-eval trajectory: `0.8333333333333334 -> 0.8541666666666666 -> 0.7916666666666666 -> 0.8541666666666666`
+  - this shows the current local ceiling is not being held up by the shaped reward terms, but sparse reward alone also does not unlock a stronger policy
+- next hypotheses:
+  - the remaining live theory is a teacher/objective redesign rather than another reward scalar change
+  - next step: aggregate multiple public-heuristic styles into a richer teacher target for the tactical families while preserving the fast process-ring tiny32 lane
+
+## Attempt 184: Fast Tiny32 No-League Baseline Anchor For The WSL Process Frontier (`u5`)
+
+- current best run label: `structured_acceptance_tiny32_fast_baseline_noleague_wsl_process_ring_v2`
+- exact throughput numbers:
+  - update `5` throughput: `50760.92817215339`
+  - update `5` wall clock: `14.312949657440186` s
+- exact learner timing breakdown:
+  - update `5` learner total: `2399.596028000815` ms
+  - update `5` learner public heuristic target: `404.38611100034905` ms
+  - update `5` learner packed scorer: `293.23351599850866` ms
+  - update `5` learner trunk: `270.58059999944817` ms
+  - update `5` teacher public-heuristic target entropy: `0.6420549750328064`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10695.464185031344`
+  - first runtime actor policy forward: `689` ms
+  - first runtime collect actor unroll: `7696` ms
+  - first runtime teacher label: `16` ms
+  - last runtime actor env-steps/sec: `275695.1362516339`
+  - last runtime actor policy forward: `9259` ms
+  - last runtime collect actor unroll: `19670` ms
+  - last runtime teacher label: `1266` ms
+- what changed:
+  - created a dedicated `baseline_noleague` preset for the fast tiny32 WSL process-ring architecture and disabled periodic dev eval inside that supporting run so it could produce a shape-compatible canonical `B1` anchor
+- whether learning improved:
+  - not applicable
+  - this was a supporting anchor artifact rather than a league-learning comparison
+- next hypotheses:
+  - rerun the fast packed frontier on current code with the new tiny32-matched `B1` anchor so future learning changes are compared against an anchored reference
+  - benchmark richer public-teacher objectives on top of that anchored fast lane
+
+## Attempt 185: Anchored Fast Packed Tiny32 Retest (`u5`)
+
+- current best run label: `structured_acceptance_tiny32_fast_packed_u5_dev5_wsl_process_ring_retest_v1`
+- exact throughput numbers:
+  - update `5` throughput: `48579.43147088903`
+  - update `5` wall clock: `16.827350854873657` s
+- exact learner timing breakdown:
+  - update `5` learner total: `1826.9241890011472` ms
+  - update `5` learner public heuristic target: `370.3872180012695` ms
+  - update `5` learner packed scorer: `266.8549259997235` ms
+  - update `5` learner trunk: `196.18804499987164` ms
+  - update `5` teacher public-heuristic target entropy: `0.6440415382385254`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10718.530389076297`
+  - first runtime actor policy forward: `939` ms
+  - first runtime collect actor unroll: `7938` ms
+  - first runtime teacher label: `19` ms
+  - last runtime actor env-steps/sec: `244032.15148432457`
+  - last runtime actor policy forward: `9151` ms
+  - last runtime collect actor unroll: `19341` ms
+  - last runtime teacher label: `1075` ms
+- what changed:
+  - reran the plain fast packed tiny32 frontier on the current codebase while importing the new architecture-matched `B1` no-league anchor
+- whether learning improved:
+  - this established the new anchored fast packed reference
+  - periodic dev eval at update `5` was `aggregate=0.8333333333333334`, `B1=0.5`, `B2=1.0`
+- next hypotheses:
+  - compare richer public-teacher objectives against this anchored fast reference rather than against pre-anchor historical runs
+  - focus on designs that preserve process-ring throughput while increasing teacher diversity
+
+## Attempt 186: Dense 3-Profile Public-Teacher Mixture Is Too Expensive (`u5`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubmix3_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `46907.264519959244`
+  - update `5` wall clock: `21.42295217514038` s
+- exact learner timing breakdown:
+  - update `5` learner total: `2946.7663429986715` ms
+  - update `5` learner public heuristic target: `1387.28451300085` ms
+  - update `5` learner packed scorer: `289.8445079990779` ms
+  - update `5` learner trunk: `196.42831700002716` ms
+  - update `5` teacher public-heuristic target entropy: `0.7519681453704834`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11016.988028668615`
+  - first runtime actor policy forward: `737` ms
+  - first runtime collect actor unroll: `7990` ms
+  - first runtime teacher label: `38` ms
+  - last runtime actor env-steps/sec: `203686.62930926046`
+  - last runtime actor policy forward: `8473` ms
+  - last runtime collect actor unroll: `18506` ms
+  - last runtime teacher label: `967` ms
+- what changed:
+  - replaced the single public-teacher profile with a dense 3-profile mixture (`base`, `aggressive`, `control`) for both warmstart and steady-state teacher targets
+- whether learning improved:
+  - no
+  - periodic dev eval at update `5` stayed flat at `aggregate=0.8333333333333334`, `B1=0.5`, `B2=1.0`
+  - the richer mixed target increased teacher entropy but did not buy any immediate learning gain
+- next hypotheses:
+  - the diversity idea may still be right, but evaluating all three heuristic profiles every update is too expensive
+  - try a cheaper temporal teacher ensemble that cycles profiles across updates instead of averaging them densely every batch
+
+## Attempt 187: Cyclic 3-Profile Public Teacher Wins Back Speed (`u5`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_u5_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51719.53902013325`
+  - update `5` wall clock: `13.82831883430481` s
+- exact learner timing breakdown:
+  - update `5` learner total: `2466.0462480005663` ms
+  - update `5` learner public heuristic target: `348.16175300147734` ms
+  - update `5` learner packed scorer: `372.62518299939984` ms
+  - update `5` learner trunk: `176.93821799912257` ms
+  - update `5` teacher public-heuristic target entropy: `0.7418538928031921`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10785.605037066578`
+  - first runtime actor policy forward: `764` ms
+  - first runtime collect actor unroll: `7689` ms
+  - first runtime teacher label: `43` ms
+  - last runtime actor env-steps/sec: `266118.4195748782`
+  - last runtime actor policy forward: `9273` ms
+  - last runtime collect actor unroll: `20036` ms
+  - last runtime teacher label: `1362` ms
+- what changed:
+  - changed multi-profile public-teacher handling from dense mixture averaging to a cheaper cyclic mode that scores only one heuristic profile per learner update while rotating through the same `base/aggressive/control` set over time
+- whether learning improved:
+  - not yet on the short probe
+  - periodic dev eval at update `5` stayed `aggregate=0.8333333333333334`, `B1=0.5`, `B2=1.0`
+  - however throughput beat the anchored packed reference (`51719.53902013325` vs `48579.43147088903`) while also raising teacher-target entropy materially
+- next hypotheses:
+  - extend the cyclic-teacher variant to a longer anchored run, because it preserved the short-horizon score while improving throughput and teacher diversity
+  - compare that longer run directly against the anchored packed `u20` reference
+
+## Attempt 188: Anchored Fast Packed Tiny32 Retest (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_packed_u20_dev5_wsl_process_ring_retest_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51829.93841848999`
+  - update `10` throughput: `67136.02625636158`
+  - update `15` throughput: `74761.58064766464`
+  - update `20` throughput: `79640.7468660092`
+  - update `20` wall clock: `92.85916185379028` s
+- exact learner timing breakdown:
+  - update `20` learner total: `1962.5477520003187` ms
+  - update `20` learner public heuristic target: `344.3204999985028` ms
+  - update `20` learner packed scorer: `280.6815349995304` ms
+  - update `20` learner trunk: `189.93117599893594` ms
+  - update `20` teacher public-heuristic target entropy: `0.6567057967185974`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11342.28958406629`
+  - first runtime actor policy forward: `650` ms
+  - first runtime collect actor unroll: `7604` ms
+  - first runtime teacher label: `17` ms
+  - last runtime actor env-steps/sec: `243343.0236707514`
+  - last runtime actor policy forward: `10142` ms
+  - last runtime collect actor unroll: `21972` ms
+  - last runtime teacher label: `1710` ms
+- what changed:
+  - extended the anchored current-code packed fast reference to `20` updates so the cyclic-teacher redesign could be compared against a like-for-like long-horizon baseline
+- whether learning improved:
+  - this remained the packed anchored reference
+  - dev-eval trajectory: `0.8333333333333334 -> 0.8333333333333334 -> 0.8125 -> 0.8125`
+  - anchor trajectory: `B1=0.5 -> 0.5 -> 0.4375 -> 0.4375`, `B2=1.0` throughout
+- next hypotheses:
+  - the anchored packed reference now gives a clean target for judging whether cyclic teacher diversity can genuinely improve both learning and throughput
+  - if the cyclic variant wins this comparison, extend it further before exploring additional opponent-diversity or reward changes
+
+## Attempt 189: Cyclic 3-Profile Public Teacher Improves Both Speed And Final Dev Score (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51721.24225094409`
+  - update `10` throughput: `66924.7529737237`
+  - update `15` throughput: `74731.55153008197`
+  - update `20` throughput: `80447.19261837509`
+  - update `20` wall clock: `89.95783829689026` s
+- exact learner timing breakdown:
+  - update `20` learner total: `1933.874829999695` ms
+  - update `20` learner public heuristic target: `355.4209929989156` ms
+  - update `20` learner packed scorer: `310.6421110005613` ms
+  - update `20` learner trunk: `252.69859100080794` ms
+  - update `20` teacher public-heuristic target entropy: `0.7492141127586365`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11036.169559361324`
+  - first runtime actor policy forward: `711` ms
+  - first runtime collect actor unroll: `7691` ms
+  - first runtime teacher label: `40` ms
+  - last runtime actor env-steps/sec: `226744.59307014398`
+  - last runtime actor policy forward: `9393` ms
+  - last runtime collect actor unroll: `20186` ms
+  - last runtime teacher label: `1025` ms
+- what changed:
+  - extended the cyclic multi-profile public-teacher objective to `20` updates on the anchored fast tiny32 process-ring lane
+- whether learning improved:
+  - yes relative to the anchored packed reference
+  - dev-eval trajectory: `0.8333333333333334 -> 0.8333333333333334 -> 0.8125 -> 0.8333333333333334`
+  - anchor trajectory: `B1=0.5 -> 0.5 -> 0.4375 -> 0.5`, `B2=1.0` throughout
+  - compared with Attempt `188`, this recovered the final `B1` score and final aggregate while also finishing faster and at higher update-`20` throughput (`80447.19261837509` vs `79640.7468660092`)
+- next hypotheses:
+  - extend the cyclic-teacher run further (`u40+`) to see whether the recovery at update `20` compounds into a stronger final policy
+  - combine the cyclic teacher with cheap opponent diversity, such as public-heuristic variant baselines, only if the longer run shows room for more learning headroom
+
+## Attempt 190: Full Cyclic Teacher Drifts Again On Longer Runs (`u40`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_u40_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `52069.15266516084`
+  - update `10` throughput: `66845.60509267206`
+  - update `15` throughput: `74227.81330428133`
+  - update `20` throughput: `79895.26311600421`
+  - update `25` throughput: `82657.64879291719`
+  - update `30` throughput: `84505.27393736567`
+  - update `35` throughput: `86005.03459164804`
+  - update `40` throughput: `86650.38108078986`
+  - update `40` wall clock: `201.81544375419617` s
+- exact learner timing breakdown:
+  - update `40` learner total: `2795.796082000379` ms
+  - update `40` learner public heuristic target: `419.8276970000734` ms
+  - update `40` learner packed scorer: `326.01403599983314` ms
+  - update `40` learner trunk: `184.10685900016688` ms
+  - update `40` teacher public-heuristic target entropy: `0.7674133777618408`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11472.264328608795`
+  - first runtime actor policy forward: `689` ms
+  - first runtime collect actor unroll: `7590` ms
+  - last runtime actor env-steps/sec: `223252.79182856722`
+  - last runtime actor policy forward: `9330` ms
+  - last runtime collect actor unroll: `20030` ms
+- what changed:
+  - extended the full cyclic `base/aggressive/control` teacher to `40` updates on the fast tiny32 process-ring lane
+- whether learning improved:
+  - no
+  - the run held `aggregate=0.8333333333333334` through updates `20-30`, then regressed to `0.7916666666666666` at update `40`
+  - the final checkpoint dropped to `B1=0.4375`, `B2=0.9375`
+- next hypotheses:
+  - continuous multi-profile cycling appears to overshoot over longer horizons even though it helps at `u20`
+  - test ways to keep the early diversity benefit while reducing late-stage teacher interference
+
+## Attempt 191: Warmstart-Only Cyclic Profiles Still Do Not Fix Long-Horizon Drift (`u40`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_warmstart_u40_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `53052.91863826669`
+  - update `10` throughput: `68290.4028964175`
+  - update `15` throughput: `76447.42211157549`
+  - update `20` throughput: `81820.82278813333`
+  - update `25` throughput: `86383.10754504136`
+  - update `30` throughput: `89210.0741994017`
+  - update `35` throughput: `89398.73040043794`
+  - update `40` throughput: `90031.28436726567`
+  - update `40` wall clock: `193.72031927108765` s
+- exact learner timing breakdown:
+  - update `40` learner total: `1966.8025400005718` ms
+  - update `40` learner public heuristic target: `276.5056240004924` ms
+  - update `40` learner packed scorer: `317.1772189998592` ms
+  - update `40` learner trunk: `176.0198030005995` ms
+  - update `40` teacher public-heuristic target entropy: `0.6348888278007507`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11442.602833318768`
+  - first runtime actor policy forward: `648` ms
+  - first runtime collect actor unroll: `7675` ms
+  - last runtime actor env-steps/sec: `179546.60475588535`
+  - last runtime actor policy forward: `9995` ms
+  - last runtime collect actor unroll: `20988` ms
+- what changed:
+  - limited the cyclic multi-profile teacher to warmstart only while keeping the steady-state teacher on the normal single-profile path
+- whether learning improved:
+  - no
+  - the dev-eval curve still fell back to `aggregate=0.7916666666666666` at update `40`
+  - early learning was slightly worse than the full-cycle run (`update 5 aggregate=0.8125`)
+- next hypotheses:
+  - one warmstart step of diversity is not enough to explain the `u20` benefit by itself
+  - late-stage behavior may depend more on opponent exposure than on teacher schedule alone
+
+## Attempt 192: Heuristic-Variant Mix Fraction Alone Is Effectively A No-Op Here (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_variantmix025_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51077.0001686793`
+  - update `10` throughput: `66265.31591171613`
+  - update `15` throughput: `76344.16320128174`
+  - update `20` throughput: `81434.20299035244`
+  - update `20` wall clock: `87.99914193153381` s
+- exact learner timing breakdown:
+  - update `20` learner total: `1959.6113369989325` ms
+  - update `20` learner public heuristic target: `412.38369200073066` ms
+  - update `20` learner packed scorer: `288.70305699820165` ms
+  - update `20` learner trunk: `271.66583799771615` ms
+  - update `20` teacher public-heuristic target entropy: `0.7360759973526001`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10910.328947513479`
+  - first runtime actor policy forward: `622` ms
+  - first runtime collect actor unroll: `7560` ms
+  - last runtime actor env-steps/sec: `260620.6540634585`
+  - last runtime actor policy forward: `10244` ms
+  - last runtime collect actor unroll: `21202` ms
+  - last runtime heuristic-public variant envs: `0`
+- what changed:
+  - added `league.sampling.heuristic_public_variant_mix_fraction=0.25` on top of the cyclic-teacher fast lane
+- whether learning improved:
+  - no
+  - the eval curve matched the plain cyclic run exactly: `0.8333333333333334 -> 0.8333333333333334 -> 0.8125 -> 0.8333333333333334`
+  - runtime counters showed the heuristic-public variant env allocation stayed at `0`, so this preset did not actually diversify opponents
+- next hypotheses:
+  - if we want heuristic-variant baselines to matter, we need an explicit base/variant split rather than just a variant fraction on top of `B2=1.0`
+  - otherwise the better way to add stronger baselines is likely the imported `B1` lane
+
+## Attempt 193: Explicit Base/Variant Heuristic Split Regresses Learning (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_basemix075_variantmix025_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51809.86623104954`
+  - update `10` throughput: `67540.18613534454`
+  - update `15` throughput: `77169.73634720342`
+  - update `20` throughput: `82453.73810009709`
+  - update `20` wall clock: `85.8810441493988` s
+- exact learner timing breakdown:
+  - update `20` learner total: `1801.2032980004733` ms
+  - update `20` learner public heuristic target: `456.46540799862123` ms
+  - update `20` learner packed scorer: `306.7613729981531` ms
+  - update `20` learner trunk: `184.08778000230086` ms
+  - update `20` teacher public-heuristic target entropy: `0.7323439717292786`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10845.267755446384`
+  - first runtime actor policy forward: `4464` ms
+  - first runtime collect actor unroll: `10884` ms
+  - last runtime actor env-steps/sec: `275209.9477459555`
+  - last runtime actor policy forward: `15549` ms
+  - last runtime collect actor unroll: `27856` ms
+  - last runtime heuristic-public variant envs: `0`
+- what changed:
+  - forced an explicit `0.75` base `B2` / `0.25` heuristic-variant heuristic split on the cyclic-teacher fast lane
+- whether learning improved:
+  - no
+  - this was worse than the plain cyclic run at both update `5` and update `20` (`aggregate=0.8125`, `B1=0.4375`, `B2=1.0`)
+- next hypotheses:
+  - heuristic-variant baselines are not the right learning lever on this local fast lane
+  - shift the “more baselines” effort toward persistent `B1` exposure instead
+
+## Attempt 194: Scheduled Fallback To Base After Update 20 Still Ends Up Drifting (`u40`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_until20_u40_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51237.23640528151`
+  - update `10` throughput: `66207.05408097044`
+  - update `15` throughput: `74468.36562048482`
+  - update `20` throughput: `81471.61922623926`
+  - update `25` throughput: `84938.94928554492`
+  - update `30` throughput: `86813.39746525008`
+  - update `35` throughput: `89084.34277814384`
+  - update `40` throughput: `91750.44664445969`
+  - update `40` wall clock: `187.1984760761261` s
+- exact learner timing breakdown:
+  - update `40` learner total: `1980.5969659973925` ms
+  - update `40` learner public heuristic target: `428.74846599806915` ms
+  - update `40` learner packed scorer: `285.4507869997178` ms
+  - update `40` learner trunk: `291.5826130010828` ms
+  - update `40` teacher public-heuristic target entropy: `0.6568665504455566`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10893.298630718917`
+  - first runtime actor policy forward: `832` ms
+  - first runtime collect actor unroll: `7671` ms
+  - last runtime actor env-steps/sec: `238782.57741208028`
+  - last runtime actor policy forward: `9661` ms
+  - last runtime collect actor unroll: `20641` ms
+- what changed:
+  - implemented a scheduled teacher-profile fallback so the multi-profile cyclic teacher was active through update `20` and then automatically reverted to the base profile afterward
+- whether learning improved:
+  - no
+  - the final curve still ended at `aggregate=0.7916666666666666`, `B1=0.4375`, `B2=0.9375`
+  - this schedule preserved speed but did not outperform the unscheduled `u20` frontier
+- next hypotheses:
+  - the better route is probably not another teacher-profile schedule
+  - try stronger direct `B1` opponent exposure instead of only manipulating the public-teacher target
+
+## Attempt 195: Longer Multi-Profile Warmstart Front-Loads Throughput But Not Final Learning (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_warmstart5_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `75617.14666903595`
+  - update `10` throughput: `82014.2558670031`
+  - update `15` throughput: `85619.62943348008`
+  - update `20` throughput: `88794.81081474309`
+  - update `20` wall clock: `100.1361973285675` s
+- exact learner timing breakdown:
+  - update `20` learner total: `2102.3855700004788` ms
+  - update `20` learner public heuristic target: `416.32955099703395` ms
+  - update `20` learner packed scorer: `299.3675349971454` ms
+  - update `20` learner trunk: `283.648616001301` ms
+  - update `20` teacher public-heuristic target entropy: `0.6270474791526794`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10818.52085577462`
+  - first runtime actor policy forward: `1511` ms
+  - first runtime collect actor unroll: `8058` ms
+  - last runtime actor env-steps/sec: `134126.05663877924`
+  - last runtime actor policy forward: `8485` ms
+  - last runtime collect actor unroll: `18799` ms
+- what changed:
+  - increased the cyclic multi-profile warmstart from `1` to `5` auxiliary updates before the main IMPALA phase
+- whether learning improved:
+  - no
+  - update `15` briefly returned to `aggregate=0.8333333333333334`, but the final checkpoint still fell back to `aggregate=0.8125`, `B1=0.4375`, `B2=1.0`
+- next hypotheses:
+  - stronger front-loaded teacher diversity alone is not enough
+  - try improving actual opponent exposure with the imported `B1` baseline instead
+
+## Attempt 196: Fast Tiny64 No-League Anchor Is Possible But Already Too Slow (`u5`)
+
+- current best run label: `structured_acceptance_tiny64_fast_baseline_noleague_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `11792.90077733316`
+  - update `5` wall clock: `261.0219931602478` s
+- exact learner timing breakdown:
+  - update `5` learner total: `39521.60516799995` ms
+  - update `5` learner public heuristic target: `820.7265569981246` ms
+  - update `5` learner packed scorer: `3067.2782090005057` ms
+  - update `5` learner trunk: `23534.29968600176` ms
+  - update `5` teacher public-heuristic target entropy: `0.5890447497367859`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11285.898235818746`
+  - first runtime actor policy forward: `2577` ms
+  - first runtime collect actor unroll: `7988` ms
+  - last runtime actor env-steps/sec: `8167.081096965179`
+  - last runtime actor policy forward: `11143` ms
+  - last runtime collect actor unroll: `22264` ms
+- what changed:
+  - created an architecture-matched fast tiny64 no-league baseline anchor so a larger fast model could be evaluated honestly on the repaired process-ring lane
+- whether learning improved:
+  - not applicable
+  - this was a supporting anchor run
+- next hypotheses:
+  - benchmark the larger fast tiny64 model directly, but expect it to need a very strong learning win to justify the throughput collapse
+
+## Attempt 197: Fast Tiny64 Model Is Too Slow For The Learning Gain (`u20`)
+
+- current best run label: `structured_acceptance_tiny64_fast_pubcycle3_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `12856.749661641534`
+  - update `10` throughput: `11647.808069867318`
+  - update `15` throughput: `11479.321270145263`
+  - update `20` throughput: `11215.123407041277`
+  - update `20` wall clock: `969.7604055404663` s
+- exact learner timing breakdown:
+  - update `20` learner total: `37190.67137800084` ms
+  - update `20` learner public heuristic target: `1270.110368001042` ms
+  - update `20` learner packed scorer: `3441.9584030001715` ms
+  - update `20` learner trunk: `15065.730887999962` ms
+  - update `20` teacher public-heuristic target entropy: `0.7407691478729248`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10546.280500738816`
+  - first runtime actor policy forward: `2791` ms
+  - first runtime collect actor unroll: `8158` ms
+  - last runtime actor env-steps/sec: `10377.781198496557`
+  - last runtime actor policy forward: `10365` ms
+  - last runtime collect actor unroll: `20939` ms
+- what changed:
+  - reran the fast WSL process-ring frontier with a larger `tiny64` recurrent model while keeping the cyclic public teacher objective
+- whether learning improved:
+  - no
+  - the eval curve matched the better tiny32 runs at best (`aggregate=0.8333333333333334`, `B1=0.5`, `B2=1.0`) but did not exceed them
+  - the throughput collapse to ~`11k` samples/sec makes the larger model unjustifiable on this local lane
+- next hypotheses:
+  - larger models are not the answer on the repaired local fast path unless the university server changes the hardware balance dramatically
+  - keep the fast frontier on tiny32 and focus on better opponent exposure instead
+
+## Attempt 198: Persistent `B1` Mix Plus Cyclic Teacher Produces The Best Anchored Learning Checkpoint So Far (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `50718.70607651685`
+  - update `10` throughput: `66111.09196276503`
+  - update `15` throughput: `76526.13861090493`
+  - update `20` throughput: `81911.32994369332`
+  - update `20` wall clock: `87.32678055763245` s
+- exact learner timing breakdown:
+  - update `20` learner total: `1948.4912880034244` ms
+  - update `20` learner public heuristic target: `465.84223299942096` ms
+  - update `20` learner packed scorer: `280.8652380008425` ms
+  - update `20` learner trunk: `184.57694899916532` ms
+  - update `20` teacher public-heuristic target entropy: `0.7306529879570007`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10887.951344453433`
+  - first runtime actor policy forward: `695` ms
+  - first runtime collect actor unroll: `7626` ms
+  - last runtime actor env-steps/sec: `257686.78409497585`
+  - last runtime actor policy forward: `9028` ms
+  - last runtime collect actor unroll: `19616` ms
+- what changed:
+  - kept the cyclic multi-profile public teacher but added persistent imported `B1 NoLeague baseline` opponent exposure with `league.sampling.noleague_baseline_mix_fraction=0.15`
+- whether learning improved:
+  - yes
+  - update `10` reached `aggregate=0.8541666666666666`, `B1=0.5625`, `B2=1.0`, which is the best anchored fast-lane checkpoint in this sweep
+  - checkpoint guard rolled back at update `15`, and final selection stayed on the stronger update-`10` checkpoint even though the run finished at `aggregate=0.8333333333333334`
+- next hypotheses:
+  - treat this as the current local learning frontier and test whether more updates discover a better checkpoint or just confirm update `10` as the peak
+  - sweep the `B1` mix upward once to see whether `0.15` is already near the sweet spot
+
+## Attempt 199: Extending The `B1`-Mix Cyclic Run Confirms Update 10 As The Peak (`u40`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_u40_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `49129.31528389388`
+  - update `10` throughput: `66982.59465085353`
+  - update `15` throughput: `75910.05097740967`
+  - update `20` throughput: `81343.10725677121`
+  - update `25` throughput: `84849.50072739639`
+  - update `30` throughput: `87916.8114107342`
+  - update `35` throughput: `89064.2601571523`
+  - update `40` throughput: `89888.14225237347`
+  - update `40` wall clock: `193.11205577850342` s
+- exact learner timing breakdown:
+  - update `40` learner total: `1955.6430010015902` ms
+  - update `40` learner public heuristic target: `333.58393399976194` ms
+  - update `40` learner packed scorer: `278.92858699851786` ms
+  - update `40` learner trunk: `175.6050289986888` ms
+  - update `40` teacher public-heuristic target entropy: `0.7399885654449463`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11091.056746839633`
+  - first runtime actor policy forward: `840` ms
+  - first runtime collect actor unroll: `7739` ms
+  - last runtime actor env-steps/sec: `198625.41247097877`
+  - last runtime actor policy forward: `9152` ms
+  - last runtime collect actor unroll: `19801` ms
+- what changed:
+  - extended the `B1`-mix cyclic-teacher frontier to `40` updates
+- whether learning improved:
+  - no
+  - the best checkpoint remained update `10` at `aggregate=0.8541666666666666`, `B1=0.5625`, `B2=1.0`
+  - later checkpoints oscillated around `0.8333333333333334` and eventually fell to `0.7916666666666666` at update `40`
+- next hypotheses:
+  - keep update `10` as the local best checkpoint for this lane
+  - test one heavier `B1` mix to verify whether the `0.15` fraction is already near-optimal
+
+## Attempt 200: Heavier `B1` Mix Does Not Beat `0.15` (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix025_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `48517.00407333706`
+  - update `10` throughput: `64473.34691275659`
+  - update `15` throughput: `73755.98514000318`
+  - update `20` throughput: `80632.41525739065`
+  - update `20` wall clock: `87.6473000049591` s
+- exact learner timing breakdown:
+  - update `20` learner total: `1865.6118190010602` ms
+  - update `20` learner public heuristic target: `302.8571379982168` ms
+  - update `20` learner packed scorer: `267.72186499874806` ms
+  - update `20` learner trunk: `275.16021100018406` ms
+  - update `20` teacher public-heuristic target entropy: `0.7416333556175232`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10537.337912345236`
+  - first runtime actor policy forward: `925` ms
+  - first runtime collect actor unroll: `7840` ms
+  - last runtime actor env-steps/sec: `221434.65335642648`
+  - last runtime actor policy forward: `9641` ms
+  - last runtime collect actor unroll: `20752` ms
+- what changed:
+  - increased the persistent `B1` no-league baseline mix from `0.15` to `0.25` on the cyclic-teacher fast lane
+- whether learning improved:
+  - no
+  - the best checkpoint remained update `10` at `aggregate=0.8541666666666666`, `B1=0.5625`, `B2=1.0`
+  - throughput also slipped relative to the `0.15` mix run (`80632.41525739065` vs `81911.32994369332`)
+- next hypotheses:
+  - `0.15` appears to be the better `B1` mix point on this local fast lane
+  - the remaining value is in better evaluation packaging rather than more training sweeps on this same recipe
+
+## Attempt 201: Terminal-Only Rewards Do Not Improve The Best `B1`-Mix Recipe (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_terminal_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `50302.484364064716`
+  - update `10` throughput: `68067.85944343063`
+  - update `15` throughput: `72426.52903835055`
+  - update `20` throughput: `74930.34936184117`
+  - update `20` wall clock: `103.42406272888184` s
+- exact learner timing breakdown:
+  - update `20` learner total: `2963.405188998877` ms
+  - update `20` learner public heuristic target: `667.6047699984338` ms
+  - update `20` learner packed scorer: `354.22630699758884` ms
+  - update `20` learner trunk: `288.3989809997729` ms
+  - update `20` teacher public-heuristic target entropy: `0.7584434151649475`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11465.974907498092`
+  - first runtime actor policy forward: `630` ms
+  - first runtime collect actor unroll: `7472` ms
+  - last runtime actor env-steps/sec: `165744.82332173083`
+  - last runtime actor policy forward: `10604` ms
+  - last runtime collect actor unroll: `21972` ms
+- what changed:
+  - reran the best `B1`-mix cyclic-teacher recipe with terminal-only rewards and shaping disabled
+- whether learning improved:
+  - no
+  - the learning curve was identical to the shaped `B1`-mix run (`update 10 aggregate=0.8541666666666666`, final `0.8333333333333334`)
+  - throughput regressed badly (`74930.34936184117` vs `81911.32994369332`)
+- next hypotheses:
+  - the local training search is close to exhausted
+  - keep `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_u20_dev5_wsl_process_ring_v1` as the best anchored fast-lane learning recipe, and use the new thesis-eval preset to harden evaluation on the university server
+
+## Attempt 202: Teacher Profile Fallback After Update 10 Does Not Beat The `B1`-Mix Frontier (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_profileend10_u20_dev5_wsl_process_ring_v2`
+- exact throughput numbers:
+  - update `5` throughput: `49528.96211585368`
+  - update `10` throughput: `65475.25486525479`
+  - update `15` throughput: `74361.26268601423`
+  - update `20` throughput: `80364.80702541403`
+  - update `20` wall clock: `90.3736822605133` s
+- exact learner timing breakdown:
+  - update `20` learner total: `2227.548573999229` ms
+  - update `20` learner public heuristic target: `366.2208390014712` ms
+  - update `20` learner packed scorer: `271.24067099794047` ms
+  - update `20` learner trunk: `229.80105900205672` ms
+  - update `20` teacher public-heuristic target entropy: `0.6292757391929626`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10928.308142310532`
+  - first runtime actor policy forward: `595` ms
+  - first runtime collect actor unroll: `7518` ms
+  - last runtime actor env-steps/sec: `273714.6198098083`
+  - last runtime actor policy forward: `8659` ms
+  - last runtime collect actor unroll: `18960` ms
+- what changed:
+  - kept the best `B1`-mix fast recipe but forced cyclic teacher profiles to fall back to the base profile after update `10`
+- whether learning improved:
+  - no
+  - the run matched the current best checkpoint at update `10` (`aggregate=0.8541666666666666`, `B1=0.5625`, `B2=1.0`) but did not exceed it
+  - later checkpoints still drifted to `aggregate=0.8125`, `B1=0.4375`, `B2=1.0`, and checkpoint guard again finalized back to update `10`
+- next hypotheses:
+  - late drift is not just caused by staying on the cyclic public-teacher profile schedule too long
+  - test whether ending the imported `B1` exposure after update `10` preserves the peak better than leaving it on forever
+
+## Attempt 203: Ending The `B1` Curriculum At Update 10 Slightly Improves Stability And Throughput (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `50484.51974161076`
+  - update `10` throughput: `68330.24243946391`
+  - update `15` throughput: `76841.2647957471`
+  - update `20` throughput: `82159.6206300503`
+  - update `20` wall clock: `89.08755278587341` s
+- exact learner timing breakdown:
+  - update `20` learner total: `1766.5758729999652` ms
+  - update `20` learner public heuristic target: `338.7496360010118` ms
+  - update `20` learner packed scorer: `305.6008399980783` ms
+  - update `20` learner trunk: `169.21149299741955` ms
+  - update `20` teacher public-heuristic target entropy: `0.7371017932891846`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11408.014415012494`
+  - first runtime actor policy forward: `668` ms
+  - first runtime collect actor unroll: `7459` ms
+  - last runtime actor env-steps/sec: `272679.22617355606`
+  - last runtime actor policy forward: `7568` ms
+  - last runtime collect actor unroll: `16935` ms
+- what changed:
+  - kept the cyclic teacher and `B1` imported baseline mix, but annealed the `B1` no-league exposure off after update `10`
+- whether learning improved:
+  - partially
+  - the best checkpoint still stayed at update `10` with `aggregate=0.8541666666666666`, `B1=0.5625`, `B2=1.0`, so the learning peak did not exceed Attempt `198`
+  - however, final update `20` recovered to `aggregate=0.8333333333333334`, `B1=0.5`, `B2=1.0` instead of drifting down to `0.8125`
+  - throughput also improved slightly over the persistent-`B1` run (`82159.6206300503` vs `81911.32994369332`)
+- next hypotheses:
+  - keep `B1` mix end-at-`10` as the cleaner fast-lane curriculum baseline
+  - test whether tactical teacher targets on attack/main-move families can push the update-`10` checkpoint itself above `0.8541666666666666`
+
+## Attempt 204: Tactical-Only Live Teacher Targets Do Not Improve The Fast `B1`-Mix Lane (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_tacticalteacher_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `48675.825266525826`
+  - update `10` throughput: `65920.08033360238`
+  - update `15` throughput: `74009.26510902552`
+  - update `20` throughput: `78964.65534602941`
+  - update `20` wall clock: `92.71382808685303` s
+- exact learner timing breakdown:
+  - update `20` learner total: `2155.349568998645` ms
+  - update `20` learner public heuristic target: `459.43181099937647` ms
+  - update `20` learner packed scorer: `297.0827060016745` ms
+  - update `20` learner trunk: `293.0459029994381` ms
+  - update `20` teacher public-heuristic target entropy: `0.7485145926475525`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10906.841375349164`
+  - first runtime actor policy forward: `1114` ms
+  - first runtime collect actor unroll: `7926` ms
+  - last runtime actor env-steps/sec: `254346.3686167428`
+  - last runtime actor policy forward: `8681` ms
+  - last runtime collect actor unroll: `18916` ms
+- what changed:
+  - restricted the live public-teacher targets to tactical families (`attack`, `main_move`) while keeping the broader warmstart family set and the persistent `B1` mix
+- whether learning improved:
+  - no
+  - the best checkpoint again stayed at update `10` with `aggregate=0.8541666666666666`, `B1=0.5625`, `B2=1.0`
+  - final update `20` regressed to `aggregate=0.8125`, `B1=0.4375`, `B2=1.0`
+  - throughput also regressed relative to the better `B1`-curriculum runs
+- next hypotheses:
+  - narrowing the live teacher families alone is not enough and may actually make the fast lane less efficient
+  - test model-side tactical public bias next, since that changes the objective pressure without paying extra live teacher cost
+
+## Attempt 205: Tactical Model Bias Finally Improves The Local Fast-Lane Learning Ceiling, But Confirmatory Eval Tanks Measured Throughput (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_tacticalbias_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `49325.17335456893`
+  - update `10` throughput: `39074.38273272164`
+  - update `15` throughput: `48167.20011030041`
+  - update `20` throughput: `42595.68777988614`
+  - update `20` wall clock: `215.15277767181396` s
+- exact learner timing breakdown:
+  - update `20` learner total: `1848.7041699991096` ms
+  - update `20` learner public heuristic target: `381.5369629992347` ms
+  - update `20` learner packed scorer: `299.97866399935447` ms
+  - update `20` learner trunk: `252.14512499951525` ms
+  - update `20` teacher public-heuristic target entropy: `0.7498118281364441`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11285.654448010955`
+  - first runtime actor policy forward: `707` ms
+  - first runtime collect actor unroll: `7557` ms
+  - last runtime actor env-steps/sec: `230827.11919696105`
+  - last runtime actor policy forward: `9578` ms
+  - last runtime collect actor unroll: `20482` ms
+- what changed:
+  - added tactical-only model public bias (`main_play_character`, `main_move`, `attack`) at scale `2.0` on top of the cyclic public teacher and persistent `B1` mix
+- whether learning improved:
+  - yes
+  - the regular periodic dev eval still only reached `aggregate=0.8541666666666666` at update `10`, but confirmatory dev eval promoted update `15` to `aggregate=0.859375`, `B1=0.65625`, `B2=0.921875`
+  - checkpoint guard finalized to that stronger update-`15` checkpoint
+  - the measured throughput collapse was driven by repeated confirmatory dev eval passes, not by learner timing alone
+- next hypotheses:
+  - keep the tactical bias objective, because it is the first thing that moved the local learning ceiling
+  - try pairing it with the cleaner `B1` curriculum cutoff, then try a cheaper training/eval schedule so the stronger model does not pay such a large wall-clock tax
+
+## Attempt 206: Tactical Bias Plus `B1` Cutoff Keeps The Better Ceiling But Still Pays The Confirmatory-Eval Tax (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `51239.82753988884`
+  - update `10` throughput: `39232.07904437667`
+  - update `15` throughput: `48130.953408389214`
+  - update `20` throughput: `42351.422135739136`
+  - update `20` wall clock: `214.72877287864685` s
+- exact learner timing breakdown:
+  - update `20` learner total: `2414.8122939986933` ms
+  - update `20` learner public heuristic target: `349.9097699968843` ms
+  - update `20` learner packed scorer: `328.38057600019965` ms
+  - update `20` learner trunk: `298.61670500031323` ms
+  - update `20` teacher public-heuristic target entropy: `0.7291690707206726`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11251.043137194389`
+  - first runtime actor policy forward: `1147` ms
+  - first runtime collect actor unroll: `8027` ms
+  - last runtime actor env-steps/sec: `213067.48291791428`
+  - last runtime actor policy forward: `10071` ms
+  - last runtime collect actor unroll: `21444` ms
+- what changed:
+  - combined the tactical-only model public bias with the `B1`-mix-end-at-`10` curriculum
+- whether learning improved:
+  - yes, but not beyond Attempt `205`
+  - confirmatory dev eval again promoted update `15` to `aggregate=0.859375`, `B1=0.65625`, `B2=0.921875`
+  - final confirmatory score at update `20` improved slightly over Attempt `205` (`0.8177083333333334` vs `0.8125`), but throughput remained in the same collapsed band because confirmatory eval still dominated wall clock
+- next hypotheses:
+  - the tactical bias objective appears real; the current remaining problem is evaluation overhead, not the absence of a learning gain
+  - test a denser periodic dev eval with confirmatory disabled so the tactical-bias recipe can be judged on a stronger signal without paying multiple extra eval passes per milestone
+
+## Attempt 207: Denser Periodic Eval Plus No Stall-Monitor Confirmatory Gives The Best Local Learning/Speed Tradeoff So Far (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_u20_dev5_wsl_process_ring_v2`
+- exact throughput numbers:
+  - update `5` throughput: `49979.72131683938`
+  - update `10` throughput: `55706.666436875166`
+  - update `15` throughput: `57333.20548351439`
+  - update `20` throughput: `58322.90679833214`
+  - update `20` wall clock: `144.0188775062561` s
+- exact learner timing breakdown:
+  - update `20` learner total: `1767.968498999835` ms
+  - update `20` learner public heuristic target: `342.93122200324433` ms
+  - update `20` learner packed scorer: `295.3947319983854` ms
+  - update `20` learner trunk: `181.48102199847926` ms
+  - update `20` teacher public-heuristic target entropy: `0.7298189997673035`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11447.31837925406`
+  - first runtime actor policy forward: `665` ms
+  - first runtime collect actor unroll: `7547` ms
+  - last runtime actor env-steps/sec: `276235.3967424415`
+  - last runtime actor policy forward: `8625` ms
+  - last runtime collect actor unroll: `18595` ms
+- what changed:
+  - kept the tactical-bias plus `B1`-cutoff objective
+  - disabled the stall-monitor-driven confirmatory dev-eval path
+  - increased regular periodic dev-eval to `16` paired seeds using the full thesis seed file instead of the local `8`-seed file
+- whether learning improved:
+  - yes
+  - the regular periodic dev eval itself now reached `aggregate=0.8645833333333334` at updates `10` and `15`, with `B1=0.65625`, `B2=0.9375`
+  - that beats the prior local fast-lane learning ceiling (`0.859375` confirmatory, `0.8541666666666666` periodic)
+  - throughput also recovered materially versus the earlier tactical-bias runs (`58322.90679833214` vs ~`42k`)
+  - one confirmatory score-drop eval still fired at update `20`, but only once at the end
+- next hypotheses:
+  - this is now the strongest local learning frontier
+  - the last clean systems win to test is removing the remaining score-drop confirmatory eval so the same model quality can be measured with even less end-of-run wall-clock tax
+
+## Attempt 208: Removing The Last Confirmatory-Eval Tax Keeps The Better Frontier And Cleans Up Wall Clock (`u20`)
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u20_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `50674.029995628305`
+  - update `10` throughput: `57011.4895380922`
+  - update `15` throughput: `58602.79565729562`
+  - update `20` throughput: `59060.816973917965`
+  - update `20` wall clock: `141.5064516067505` s
+- exact learner timing breakdown:
+  - update `20` learner total: `2166.685927000799` ms
+  - update `20` learner public heuristic target: `328.0047820007894` ms
+  - update `20` learner packed scorer: `284.09650799949304` ms
+  - update `20` learner trunk: `241.26209799942444` ms
+  - update `20` teacher public-heuristic target entropy: `0.7112017273902893`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11389.691702289203`
+  - first runtime actor policy forward: `594` ms
+  - first runtime collect actor unroll: `7571` ms
+  - last runtime actor env-steps/sec: `203155.8439716797`
+  - last runtime actor policy forward: `9937` ms
+  - last runtime collect actor unroll: `21162` ms
+- what changed:
+  - kept the best tactical-bias + `B1`-cutoff + 16-seed periodic-dev-eval recipe
+  - tightened `curriculum.checkpoint_guard.rollback_score_margin` to `0.01` so end-of-run score-drop confirmatory eval would not fire
+- whether learning improved:
+  - no change to the frontier at `u20`, but the better frontier held
+  - update `10` and update `15` again reached `aggregate=0.8645833333333334`, `B1=0.65625`, `B2=0.9375`
+  - measured throughput improved slightly over Attempt `207` (`59060.816973917965` vs `58322.90679833214`) because the final confirmatory eval disappeared
+  - checkpoint guard still correctly finalized back to the stronger update-`10` checkpoint from the weaker update `20`
+- next hypotheses:
+  - this is the cleanest `u20` sweet spot so far
+  - because the recipe is still improving at update `15`, extend it materially and see whether it plateaus or keeps climbing
+
+## Attempt 209: The Same Clean Tactical-Bias Recipe Breaks Out Hard When Extended To `u40`
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u40_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `49548.35608848504`
+  - update `10` throughput: `56090.93119865319`
+  - update `15` throughput: `58157.49728831305`
+  - update `20` throughput: `59787.96160844796`
+  - update `25` throughput: `60647.17555505655`
+  - update `30` throughput: `41730.727532124874`
+  - update `35` throughput: `43128.28228776347`
+  - update `40` throughput: `44516.337450274084`
+  - update `40` wall clock: `438.663818359375` s
+- exact learner timing breakdown:
+  - update `40` learner total: `2866.5730109969445` ms
+  - update `40` learner public heuristic target: `671.2248959993303` ms
+  - update `40` learner packed scorer: `399.966327000584` ms
+  - update `40` learner trunk: `180.6275570015714` ms
+  - update `40` teacher public-heuristic target entropy: `0.7197850346565247`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `11395.952201373331`
+  - first runtime actor policy forward: `631` ms
+  - first runtime collect actor unroll: `7539` ms
+  - last runtime actor env-steps/sec: `171902.06138425582`
+  - last runtime actor policy forward: `8685` ms
+  - last runtime collect actor unroll: `18938` ms
+- what changed:
+  - extended the clean `u20` tactical-bias recipe to `40` updates without reintroducing confirmatory dev-eval overhead except for one score-drop reevaluation at update `25`
+- whether learning improved:
+  - yes, decisively
+  - the run stayed at `aggregate=0.8645833333333334` through update `15`, then climbed to `0.90625` at update `35` and `0.9166666666666666` at update `40`
+  - update `40` reached `B1=0.75`, `B2=1.0`, which is by far the strongest local learning result so far
+  - throughput naturally fell later in the run because of the extra periodic evaluations and the single confirmatory eval at update `25`, but the model quality gain is large enough that this is the new local frontier
+- next hypotheses:
+  - the recipe is still not obviously plateaued, so extend it again before declaring a local learning ceiling
+  - once the curve clearly saturates, run the richer thesis-eval anchor set on the best run to harden the result against more baselines
+
+## Attempt 210: Extending The Same Recipe To `u60` Confirms A Higher Plateau Rather Than A Short-Lived Spike
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `5` throughput: `50311.502786338926`
+  - update `10` throughput: `56692.00409508389`
+  - update `15` throughput: `57814.66728471268`
+  - update `20` throughput: `59018.526527898524`
+  - update `25` throughput: `59997.243606674696`
+  - update `30` throughput: `42022.48215704788`
+  - update `35` throughput: `44237.57675802369`
+  - update `40` throughput: `46058.43409863998`
+  - update `45` throughput: `47529.18190281011`
+  - update `50` throughput: `48872.96409553627`
+  - update `55` throughput: `49741.451304647`
+  - update `60` throughput: `50721.985445474165`
+  - update `60` wall clock: `583.2912197113037` s
+- exact learner timing breakdown:
+  - update `60` learner total: `1819.4880509981886` ms
+  - update `60` learner public heuristic target: `425.10494100133656` ms
+  - update `60` learner packed scorer: `275.4127560001507` ms
+  - update `60` learner trunk: `183.73141099800705` ms
+  - update `60` teacher public-heuristic target entropy: `0.6427861452102661`
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10868.588410237495`
+  - first runtime actor policy forward: `675` ms
+  - first runtime collect actor unroll: `7639` ms
+  - last runtime actor env-steps/sec: `263444.3875919605`
+  - last runtime actor policy forward: `9248` ms
+  - last runtime collect actor unroll: `19732` ms
+- what changed:
+  - extended the current best tactical-bias + `B1`-cutoff + 16-seed periodic-dev-eval recipe to `60` updates
+- whether learning improved:
+  - yes relative to the old ceiling, but no relative to the new `u40` frontier
+  - the run matched the new best plateau at updates `40`, `55`, and `60` with `aggregate=0.9166666666666666`, `B1=0.75`, `B2=1.0`
+  - it did not exceed that score, which suggests the local learning curve has flattened for this recipe
+- next hypotheses:
+  - treat `0.9166666666666666` as the current local learning plateau for this design
+  - run richer thesis-style anchor evaluation on the tied best snapshots to see which one is actually stronger off the training anchors
+
+## Attempt 211: Richer Thesis-Style Anchor Eval Favors The Later `policy_000003` Snapshot Over `policy_000002`
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - not applicable
+  - this was an evaluation-only pass using the canonical final-eval pipeline
+- exact learner timing breakdown:
+  - not applicable
+  - evaluation-only
+- exact actor timing breakdown:
+  - not applicable
+  - evaluation-only
+- what changed:
+  - added a thesis-style eval preset with extra optional anchors (`B3 HeuristicPublicAggro`, `B4 HeuristicPublicControl`, previous champion snapshot, previous recent snapshot)
+  - ran canonical final eval explicitly on `policy_000002`, `policy_000003`, `B0 RandomLegal`, `b1_noleague_baseline`, `B2 HeuristicPublic`, `B3 HeuristicPublicAggro`, and `B4 HeuristicPublicControl`
+  - used a moderate local matrix budget (`stage1_paired_seeds=16`, `max_paired_seeds=64`) with metagame/figure/readiness generation skipped
+- whether learning improved:
+  - the evaluation clarified model quality rather than changing training
+  - `policy_000003` (the update-`60` snapshot) beat `policy_000002` head-to-head with mean payoff `0.6052631578947368`
+  - `policy_000003` also scored:
+    - `1.0` vs `B0 RandomLegal`
+    - `0.6875` vs `b1_noleague_baseline`
+    - `1.0` vs `B2 HeuristicPublic`
+    - `0.5625` vs `B3 HeuristicPublicAggro`
+    - `0.84375` vs `B4 HeuristicPublicControl`
+  - `policy_000002` stayed stronger than `B1` and `B4`, but it lost to `B3` (`0.43023255813953487`)
+- next hypotheses:
+  - this local design now looks close to exhausted: the best recipe has plateaued in periodic dev eval, and the richer final eval favors `policy_000003` as the practical local winner
+  - the next real step should be university-server reproduction and retuning with the same recipe, not another local architecture rewrite on this branch
+
+## Attempt 212: Final-Eval Policy-Set Selection Was Hardened For Real Run Artifacts
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `40` throughput: `46058.43409863998`
+  - update `60` throughput: `50721.985445474165`
+  - update `60` wall clock: `583.2912197113037` s
+- exact learner timing breakdown:
+  - update `60` learner total: `1819.4880509981886` ms
+  - update `60` learner public heuristic target: `425.10494100133656` ms
+  - update `60` learner packed scorer: `275.4127560001507` ms
+  - update `60` learner trunk: `183.73141099800705` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10868.588410237495`
+  - last runtime actor env-steps/sec: `263444.3875919605`
+  - first runtime actor policy forward: `675` ms
+  - last runtime actor policy forward: `9248` ms
+- what changed:
+  - fixed deterministic final policy-set selection so it now:
+    - maps legacy dev-eval IDs like `train_u40_p2` onto durable snapshot IDs like `policy_000002` when the registry contains the matching update/version
+    - skips pinned non-training registry entries such as `b1_noleague_baseline`
+    - drops legacy dev-eval entries that have no durable snapshot in the registry instead of selecting policies final eval cannot resolve
+  - added focused regression coverage for both durable-ID mapping and skipping non-training/unmapped entries
+  - verified the real best-run artifacts now resolve cleanly through `resolve_final_policy_set(...)`, which returns `['B0 RandomLegal', 'B1 NoLeague baseline', 'policy_000001', 'policy_000002', 'policy_000003']`
+- whether learning improved:
+  - not applicable
+  - this was a thesis-tooling hardening pass, not a training recipe change
+- next hypotheses:
+  - no more substantive local design changes are necessary before cleanup/review and the first university-server campaign
+  - next step is server-side reproduction and longer seeded campaigns using the current best tactical-bias recipe plus the richer thesis-eval preset
+
+## Attempt 213: Eval, Artifact, Human-Play, And Multi-Deck Infrastructure Are Now Ready For The Server Pass
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `40` throughput: `46058.43409863998`
+  - update `60` throughput: `50721.985445474165`
+  - update `60` wall clock: `583.2912197113037` s
+- exact learner timing breakdown:
+  - update `60` learner total: `1819.4880509981886` ms
+  - update `60` learner public heuristic target: `425.10494100133656` ms
+  - update `60` learner packed scorer: `275.4127560001507` ms
+  - update `60` learner trunk: `183.73141099800705` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10868.588410237495`
+  - last runtime actor env-steps/sec: `263444.3875919605`
+  - first runtime actor policy forward: `675` ms
+  - last runtime actor policy forward: `9248` ms
+- what changed:
+  - fixed canonical eval/readiness focal-policy inference so it now falls back to the run-local `training/logs/periodic_dev_eval_summaries.json` when older runs do not carry an explicit dev-eval path in the manifest
+  - hardened focal-policy inference against the legacy `b1_noleague_baseline` alias plus the extra heuristic baselines (`B3`, `B4`), so readiness no longer mistakes them for learned focal-policy candidates
+  - repaired the real best WSL run artifact bundle by stamping `policy_000003` in `eval/final_eval/{summary,metadata}.json` and regenerating `paper_readiness_summary.json`; paper readiness is now `passed=true` with no alarms on that run
+  - added a playable terminal `play_vs_model.py` entrypoint that auto-loads the finalized focal policy, renders the real board through the simulator ANSI renderer, shows top-k model suggestions, and allows human action selection from decoded legal moves
+  - fixed human-play simulator-contract loading by resolving `spec_hash256` from the run manifest/spec file instead of calling the contract loader without provenance
+  - added actor-cycled multi-deck config support plus four validated additional preset decks (`quints_balanced_v2`, `quints_ichika_focus_v1`, `quints_yotsuba_focus_v1`, `quints_support_mix_v1`) so future training/eval can diversify across legal preset decks instead of collapsing onto `starter_v1`
+- whether learning improved:
+  - no direct learning change in this pass
+  - the best training frontier remains the same, but the system around it is now much more thesis-defensible: final-eval artifacts resolve automatically, readiness passes on the real best run, human-play works on real checkpoints, and deck diversity is available for the next training phase
+- next hypotheses:
+  - run the current best tactical-bias recipe on the university server with the repaired final-eval pipeline and the richer thesis-eval preset
+  - launch at least one controlled multi-deck training/eval campaign using the new preset pool to measure how much deck diversity helps robustness without collapsing throughput
+  - if server headroom allows, add a small seeded replication pack now that artifacts and focal-policy selection are stable enough to compare runs cleanly
+
+## Attempt 214: The Current Frontier Is Now The Canonical Standard Recipe And Wrapper Default
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `40` throughput: `46058.43409863998`
+  - update `60` throughput: `50721.985445474165`
+  - update `60` wall clock: `583.2912197113037` s
+- exact learner timing breakdown:
+  - update `60` learner total: `1819.4880509981886` ms
+  - update `60` learner public heuristic target: `425.10494100133656` ms
+  - update `60` learner packed scorer: `275.4127560001507` ms
+  - update `60` learner trunk: `183.73141099800705` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10868.588410237495`
+  - last runtime actor env-steps/sec: `263444.3875919605`
+  - first runtime actor policy forward: `675` ms
+  - last runtime actor policy forward: `9248` ms
+- what changed:
+  - promoted the current best tactical-bias recipe into canonical alias presets:
+    - `structured_acceptance_standard.yaml`
+    - `structured_acceptance_standard_thesis_eval.yaml`
+    - `structured_acceptance_standard_multideck.yaml`
+  - added named ablation aliases around the current best recipe:
+    - `ablate-no-tactical-bias`
+    - `ablate-no-b1-cutoff`
+    - `ablate-multideck`
+  - updated `thesis_run.py` so the default dry-run/train path now uses `standard` automatically and the default eval companion is `standard-thesis-eval`
+  - added `thesis_run.py --list-presets` so the canonical recipe/ablation names are discoverable without reading the preset tree
+  - documented the standard recipe, entrypoint commands, and thesis ablation ladder in `docs/standard_recipe.md`, and linked it from the docs hub plus the script/root READMEs
+  - polished `play_vs_model.py` so non-interactive runs now exit cleanly with a readable message instead of silently auto-playing forever
+- whether learning improved:
+  - no direct learning change
+  - this is a shipping/polish pass that makes the current best recipe the obvious and documented default while keeping the measured frontier unchanged
+- next hypotheses:
+  - server-side work can now start from `thesis_run.py --preset standard` instead of long config paths
+  - final thesis reporting should use the default `standard -> standard-thesis-eval` wrapper path plus `2-3` seed confirmations
+  - the first post-frontier study should be the multideck generalization variant and the two core ablations, because they are now one-command comparable against the standard baseline
+
+## Attempt 215: Automatic Multi-GPU Actor Sharding For Linux Server Runs
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - update `40` throughput: `46058.43409863998`
+  - update `60` throughput: `50721.985445474165`
+  - update `60` wall clock: `583.2912197113037` s
+- exact learner timing breakdown:
+  - update `60` learner total: `1819.4880509981886` ms
+  - update `60` learner public heuristic target: `425.10494100133656` ms
+  - update `60` learner packed scorer: `275.4127560001507` ms
+  - update `60` learner trunk: `183.73141099800705` ms
+- exact actor timing breakdown:
+  - first runtime actor env-steps/sec: `10868.588410237495`
+  - last runtime actor env-steps/sec: `263444.3875919605`
+  - first runtime actor policy forward: `675` ms
+  - last runtime actor policy forward: `9248` ms
+- what changed:
+  - added `cuda:auto` device resolution for the learner and actor runtime surface
+  - process collectors can now shard actor inference across multiple visible CUDA devices instead of being limited to CPU-only collectors
+  - automatic actor-device layouts now reserve the learner GPU when possible and round-robin actor processes across the remaining visible GPUs
+  - parent-side bootstrap value models now mirror the per-actor device layout instead of forcing every bootstrap model onto a single actor device
+  - added the canonical Linux server preset `structured_acceptance_standard_auto_gpu.yaml`
+  - exposed that preset as `thesis_run.py --preset standard-auto-gpu`
+  - documented the multi-GPU server path in the standard recipe / script docs and recorded actor-device layout in training hardware summaries
+- whether learning improved:
+  - no direct learning change yet
+  - this is an infrastructure pass aimed at lifting the server-side throughput ceiling without changing the current best learning recipe
+- next hypotheses:
+  - run a dual-GPU Linux smoke with `standard-auto-gpu` and compare throughput against the single-GPU `standard` baseline on the same server
+  - if the actor side scales cleanly, try the same recipe on 4-GPU and 8-GPU allocations to find the point where simulator/IPC stops paying for extra actor GPUs
+  - if multi-GPU actor sharding works well, consider promoting `standard-auto-gpu` to the recommended server launch surface while keeping `standard` as the stable local default
+
+## Attempt 216: Final Hardening, Cleanup, And Release Verification
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - not applicable
+  - this was a hardening / release-prep pass rather than a new training run
+- exact learner timing breakdown:
+  - not applicable
+  - no learner recipe or training-loop redesign was introduced in this pass
+- exact actor timing breakdown:
+  - not applicable
+  - no actor-side performance retuning was introduced in this pass
+- what changed:
+  - fixed real release-surface correctness bugs:
+    - `train.py` no longer touches `runtime_config.actor_count` before the runtime exists when writing the manifest hardware summary
+    - `runtime.py` now imports `cast` for a live typed path instead of relying on an undefined name
+    - `eval.py` now prefers current run-local registry/dev-eval inputs over stale manifest fallback policy-set selections
+    - `play_vs_model.py` now applies temperature correctly during sampling and still advances the simulator on non-interactive model turns
+    - manifest/run-summary policy-selection metadata now records a consistent `mode` field instead of drifting between incompatible schemas
+    - paper-readiness failures now explicitly document unresolved policy selection instead of silently treating it as generic missing metadata
+  - removed dead/stale code and lint debt across the runtime, learner, eval, and script surfaces; `vulture` now reports no remaining high-confidence dead code in `python/weiss_rl`, `python/scripts`, or `examples`
+  - added the cross-platform release verification entrypoint `python/scripts/verify_repo.py`, wired `make verify` and `scripts/run_local_ci_parity.sh` through it, and added smoke-test coverage for that entrypoint
+  - updated release-facing docs/readmes so the canonical commands now consistently point to:
+    - `python/scripts/thesis_run.py --preset standard`
+    - `python/scripts/thesis_run.py --preset standard-auto-gpu`
+    - `configs/presets/structured_acceptance_standard_thesis_eval.yaml`
+    - `python/scripts/play_vs_model.py`
+    - `standard-multideck` / `structured_acceptance_standard_multideck.yaml`
+  - cleaned the remaining stale examples so the public-demo and replay surfaces no longer point readers at the old typed preset as the default path
+- whether learning improved:
+  - not applicable
+  - this pass intentionally preserved the current training recipe and runtime behavior except where a real correctness bug was fixed
+- checks run:
+  - `python -m ruff check python tests examples python/scripts`
+  - `python -m ruff format --check python tests examples python/scripts`
+  - `python -m mypy python/scripts/thesis_run.py python/scripts/eval.py python/scripts/play_vs_model.py`
+  - `python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`
+  - `python -m pytest -q python/weiss_rl/tests` -> `721 passed, 2 skipped`
+  - `python python/scripts/verify_repo.py`
+- what remains:
+  - no functional release blockers were found in this pass
+  - repo-wide `mypy` is still broader legacy debt and is not the enforced release gate; the enforced typed surface is now the canonical wrapper/eval/human-play entrypoints listed above

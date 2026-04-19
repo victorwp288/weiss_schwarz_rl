@@ -10,6 +10,7 @@ from pathlib import Path
 
 import torch
 
+from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.model import PolicyValueModel
@@ -568,6 +569,7 @@ def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
     assert manifest["spec_bundle"] == bundle
     assert manifest["policy_set_selection"] == []
     assert manifest["policy_set_selection_details"] == {
+        "mode": "not_configured",
         "status": "not_configured",
         "source_paths": {
             "snapshot_registry_json": None,
@@ -638,6 +640,7 @@ def test_train_entrypoint_resolves_policy_set_selection_when_inputs_are_supplied
         "policy_000350",
     ]
     assert manifest["policy_set_selection_details"] == {
+        "mode": "deterministic_v1",
         "status": "resolved",
         "version": "deterministic_v1",
         "final_policy_set_size": 10,
@@ -648,6 +651,109 @@ def test_train_entrypoint_resolves_policy_set_selection_when_inputs_are_supplied
         "missing_inputs": [],
         "selected_policy_count": 10,
     }
+
+
+def test_eval_entrypoint_prefers_run_local_policy_selection_over_manifest_fallback(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_policy_selection"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+    manifest = {
+        "policy_set_selection": ["B0 RandomLegal", "policy_stale_only"],
+        "policy_set_selection_details": {
+            "mode": "deterministic_v1",
+            "status": "resolved",
+        },
+    }
+
+    policy_ids, details, resolved_snapshot_registry, resolved_dev_eval = eval_script._resolve_policy_ids_for_run(
+        policy_ids=[],
+        stack=stack,
+        manifest=manifest,
+        layout=layout,
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+    )
+
+    assert policy_ids == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "policy_000400",
+        "policy_000100",
+        "policy_000200",
+        "policy_000300",
+        "policy_000150",
+        "policy_000250",
+        "policy_000350",
+    ]
+    assert details["mode"] == "deterministic_v1"
+    assert resolved_snapshot_registry == layout.training_snapshots_dir / "registry.json"
+    assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
+
+
+def test_eval_entrypoint_honors_completed_manifest_policy_selection(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_policy_selection_locked"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+    layout.run_summary_path.write_text(
+        json.dumps({"kind": "run_summary_v1", "canonical_eval_completed": True}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "policy_set_selection": ["B0 RandomLegal", "policy_locked"],
+        "policy_set_selection_details": {
+            "mode": "deterministic_v1",
+            "status": "resolved",
+        },
+    }
+
+    policy_ids, details, resolved_snapshot_registry, resolved_dev_eval = eval_script._resolve_policy_ids_for_run(
+        policy_ids=[],
+        stack=stack,
+        manifest=manifest,
+        layout=layout,
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+    )
+
+    assert policy_ids == ["B0 RandomLegal", "policy_locked"]
+    assert details["mode"] == "deterministic_v1"
+    assert details["status"] == "resolved"
+    assert details["policy_count"] == 2
+    assert resolved_snapshot_registry == layout.training_snapshots_dir / "registry.json"
+    assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
+
+
+def test_eval_git_commit_override_does_not_mutate_manifest_payload() -> None:
+    import scripts.eval as eval_script
+
+    manifest = {"run_id256": "ab" * 32}
+
+    effective = eval_script._effective_manifest_git_commit(
+        manifest=manifest,
+        git_commit_override="deadbeef" * 5,
+    )
+
+    assert effective == "deadbeef" * 5
+    assert "git_commit" not in manifest
 
 
 def test_train_entrypoint_uses_default_run_dir_when_no_label_override(tmp_path: Path) -> None:

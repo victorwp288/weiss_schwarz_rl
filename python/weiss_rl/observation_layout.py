@@ -106,7 +106,11 @@ def _parse_player_blocks(value: object, *, obs_len: int) -> tuple[ObservationPla
         block = _require_mapping(item, context="observation.player_blocks[]")
         base = _require_int(block.get("base"), field_name="observation.player_blocks[].base", minimum=0)
         raw_name = block.get("name")
-        name = f"player_{block_index}" if raw_name is None else _require_text(raw_name, field_name="observation.player_blocks[].name")
+        name = (
+            f"player_{block_index}"
+            if raw_name is None
+            else _require_text(raw_name, field_name="observation.player_blocks[].name")
+        )
         slices_raw = _require_list(block.get("slices", []), context="observation.player_blocks[].slices")
         slices: list[ObservationSlice] = []
         max_relative_stop = 0
@@ -140,9 +144,7 @@ def _parse_player_blocks(value: object, *, obs_len: int) -> tuple[ObservationPla
             else max_relative_stop
         )
         if block_length < 1:
-            raise ValueError(
-                f"observation.player_blocks[{name!r}] must define len>=1 or at least one non-empty slice"
-            )
+            raise ValueError(f"observation.player_blocks[{name!r}] must define len>=1 or at least one non-empty slice")
         if block_length < max_relative_stop:
             raise ValueError(
                 f"observation.player_blocks[{name!r}].len must cover all slices: "
@@ -150,8 +152,7 @@ def _parse_player_blocks(value: object, *, obs_len: int) -> tuple[ObservationPla
             )
         if base + block_length > obs_len:
             raise ValueError(
-                f"observation.player_blocks[{name!r}] exceeds obs_len ({obs_len}): "
-                f"base={base}, len={block_length}"
+                f"observation.player_blocks[{name!r}] exceeds obs_len ({obs_len}): base={base}, len={block_length}"
             )
         parsed.append(
             ObservationPlayerBlock(

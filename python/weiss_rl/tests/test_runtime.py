@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import queue
 from collections import deque
 from dataclasses import replace
 from pathlib import Path
@@ -21,8 +22,10 @@ from weiss_rl.runtime import (
     QueueRuntime,
     QueueRuntimeConfig,
     RuntimeUnroll,
+    _SharedPendingUnroll,
     _MIRROR_OPPONENT_POLICY_ID,
     _NOLEAGUE_BASELINE_POLICY_ID,
+    _handle_collector_commands,
     _create_shared_collector_slot_config,
     _concatenate_legal_actions,
     _gae_advantages,
@@ -30,11 +33,16 @@ from weiss_rl.runtime import (
     _open_shared_collector_slot,
     _read_unroll_from_shared_slot,
     _resolve_actor_topology,
+    resolve_actor_device_layout,
     _shared_unroll_metadata,
     _write_unroll_to_shared_slot,
     build_runtime_config,
 )
-from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
+from weiss_rl.eval.policy_set import (
+    HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
+    HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
+    HEURISTIC_PUBLIC_POLICY_ID,
+)
 
 
 def _make_runtime_unroll(
@@ -94,6 +102,531 @@ def test_maybe_compile_runtime_actor_model_uses_structured_trunk_compile_hook() 
     assert model.compile_mode == "reduce-overhead"
 
 
+class _FactorizedRuntimeActorModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bias = torch.nn.Parameter(torch.zeros(()))
+        self.supports_legal_candidate_scoring = True
+        self.supports_factorized_legal_policy = True
+        self.factorized_calls = 0
+        self.packed_calls = 0
+
+    def sample_factorized_packed_seat_aware(
+        self,
+        obs: torch.Tensor,
+        acting_seat: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch,
+        sample_seeds: torch.Tensor,
+        pass_action_id: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        del acting_seat, legal_actions, sample_seeds, pass_action_id
+        self.factorized_calls += 1
+        batch = int(obs.shape[0])
+        next_hidden = (
+            torch.zeros((batch, 2, 3), dtype=obs.dtype, device=obs.device)
+            if seat_hidden_state is None
+            else seat_hidden_state + 1.0
+        )
+        return (
+            torch.full((batch,), 7, dtype=torch.long, device=obs.device),
+            torch.full((batch,), -0.25, dtype=obs.dtype, device=obs.device),
+            torch.full((batch,), 0.5, dtype=obs.dtype, device=obs.device),
+            next_hidden,
+        )
+
+    def sample_packed_seat_aware(
+        self, *args: Any, **kwargs: Any
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        del args, kwargs
+        self.packed_calls += 1
+        raise AssertionError("factorized runtime path should bypass packed sampler")
+
+
+def test_apply_policy_rows_ids_prefers_factorized_structured_sampler() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._actor_amp_enabled = False
+    runtime_any.config = SimpleNamespace(pass_action_id=8)
+
+    model = _FactorizedRuntimeActorModel()
+    hidden_state = torch.zeros((2, 2, 3), dtype=torch.float32)
+    row_indices = np.asarray([0, 1], dtype=np.int64)
+    obs_step = np.zeros((2, 4), dtype=np.float32)
+    actor_step = np.asarray([0, 1], dtype=np.int64)
+    legal_ids = np.asarray([0, 7, 8, 1, 7, 8], dtype=np.uint32)
+    legal_offsets = np.asarray([0, 3, 6], dtype=np.uint32)
+    legal_meta = np.asarray(
+        [
+            [0, 0, 0, np.iinfo(np.uint16).max],
+            [1, 0, 0, np.iinfo(np.uint16).max],
+            [2, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max],
+            [0, 1, 0, np.iinfo(np.uint16).max],
+            [1, 1, 0, np.iinfo(np.uint16).max],
+            [2, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max],
+        ],
+        dtype=np.uint16,
+    )
+    values_out = np.zeros((2,), dtype=np.float32)
+    actions_out = np.zeros((2,), dtype=np.int64)
+    logp_out = np.zeros((2,), dtype=np.float32)
+
+    QueueRuntime._apply_policy_rows_ids(
+        runtime,
+        model=model,
+        hidden_state=hidden_state,
+        row_indices=row_indices,
+        obs_step=obs_step,
+        actor_step=actor_step,
+        legal_ids=legal_ids,
+        legal_offsets=legal_offsets,
+        legal_action_meta=legal_meta,
+        logits_out=None,
+        values_out=values_out,
+        actions_out=actions_out,
+        logp_out=logp_out,
+        rng=np.random.default_rng(123),
+        sample_actions=True,
+    )
+
+    assert model.factorized_calls == 1
+    assert model.packed_calls == 0
+    assert actions_out.tolist() == [7, 7]
+    assert np.allclose(logp_out, -0.25)
+    assert np.allclose(values_out, 0.5)
+    assert torch.allclose(hidden_state, torch.ones_like(hidden_state))
+
+
+def test_sync_actor_batch_from_step_out_updates_env_last_batch() -> None:
+    runtime = object.__new__(QueueRuntime)
+    stale_batch = SimpleNamespace(
+        ids_offsets=(
+            np.array([51], dtype=np.uint32),
+            np.array([0, 0, 1], dtype=np.uint32),
+        )
+    )
+    actor = SimpleNamespace(
+        current_batch=stale_batch,
+        env=SimpleNamespace(_last_batch=stale_batch),
+    )
+    step_out = SimpleNamespace(
+        obs=np.zeros((2, 3), dtype=np.float32),
+        rewards=np.zeros((2,), dtype=np.float32),
+        terminated=np.zeros((2,), dtype=np.bool_),
+        truncated=np.zeros((2,), dtype=np.bool_),
+        actor=np.array([0, 1], dtype=np.int64),
+        decision_kind=np.zeros((2,), dtype=np.int32),
+        decision_id=np.array([11, 12], dtype=np.uint32),
+        engine_status=np.zeros((2,), dtype=np.uint32),
+        decision_count=np.zeros((2,), dtype=np.uint32),
+        tick_count=np.zeros((2,), dtype=np.uint32),
+        no_progress_count=np.zeros((2,), dtype=np.uint32),
+        episode_seed=np.array([101, 202], dtype=np.uint64),
+        episode_key=np.array([301, 402], dtype=np.uint64),
+        legal_ids=np.array([51, 474, 51, 102], dtype=np.uint32),
+        legal_offsets=np.array([0, 2, 4], dtype=np.uint32),
+    )
+    pool = SimpleNamespace(action_space=512)
+
+    batch = runtime._sync_actor_batch_from_step_out(
+        actor=actor,
+        step_out=step_out,
+        pool=pool,
+    )
+
+    assert actor.current_batch is batch
+    assert actor.env._last_batch is batch
+    assert actor.current_batch is not stale_batch
+    npt.assert_array_equal(batch.ids_offsets[0], np.array([51, 474, 51, 102], dtype=np.uint32))
+    npt.assert_array_equal(batch.ids_offsets[1], np.array([0, 2, 4], dtype=np.uint32))
+
+
+class _HeuristicRuntimeActorModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bias = torch.nn.Parameter(torch.zeros(()))
+        self.forward_legal_flags: list[bool] = []
+
+    def forward_seat_aware(
+        self,
+        obs: torch.Tensor,
+        acting_seat: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        del acting_seat
+        self.forward_legal_flags.append(legal_actions is not None)
+        batch = int(obs.shape[0])
+        next_hidden = (
+            torch.zeros((batch, 2, 3), dtype=obs.dtype, device=obs.device)
+            if seat_hidden_state is None
+            else seat_hidden_state + 1.0
+        )
+        return (
+            torch.zeros((batch, 8), dtype=obs.dtype, device=obs.device),
+            torch.full((batch,), 0.25, dtype=obs.dtype, device=obs.device),
+            next_hidden,
+        )
+
+
+class _HeuristicAdvanceOnlyRuntimeActorModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bias = torch.nn.Parameter(torch.zeros(()))
+        self.advance_calls = 0
+        self.forward_calls = 0
+
+    def advance_seat_hidden(
+        self,
+        obs: torch.Tensor,
+        acting_seat: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        del obs, acting_seat
+        self.advance_calls += 1
+        if seat_hidden_state is None:
+            return torch.zeros((0, 2, 3), dtype=self.bias.dtype, device=self.bias.device)
+        return seat_hidden_state + 1.0
+
+    def forward_seat_aware(
+        self,
+        obs: torch.Tensor,
+        acting_seat: torch.Tensor,
+        seat_hidden_state: torch.Tensor | None = None,
+        *,
+        legal_actions: LegalActionBatch | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        del obs, acting_seat, seat_hidden_state, legal_actions
+        self.forward_calls += 1
+        raise AssertionError(
+            "heuristic actor rows should use advance_seat_hidden when behavior values are not required"
+        )
+
+
+def test_fill_policy_outputs_ids_can_use_heuristic_actor_backend_for_focal_rows() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._actor_amp_enabled = False
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._teacher_policy = object()
+    runtime_any.config = SimpleNamespace(pass_action_id=8)
+    runtime_any._heuristic_public_actions_from_ids = lambda **_kwargs: np.array([7, 8], dtype=np.int64)
+
+    model = _HeuristicRuntimeActorModel()
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            model=model,
+            compiled_model=None,
+            seat_hidden=torch.zeros((2, 2, 3), dtype=torch.float32),
+            focal_seat_by_env=np.array([0, 1], dtype=np.int64),
+            opponent_policy_id_by_env=np.array(["mirror", "mirror"], dtype=object),
+            rng=np.random.default_rng(123),
+        ),
+    )
+    obs_step = np.zeros((2, 4), dtype=np.float32)
+    actor_step = np.array([0, 1], dtype=np.int64)
+    legal_ids = np.array([0, 7, 8, 1, 7, 8], dtype=np.uint32)
+    legal_offsets = np.array([0, 3, 6], dtype=np.uint32)
+    legal_meta = np.array(
+        [
+            [0, 0, 0, np.iinfo(np.uint16).max],
+            [1, 0, 0, np.iinfo(np.uint16).max],
+            [2, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max],
+            [0, 1, 0, np.iinfo(np.uint16).max],
+            [1, 1, 0, np.iinfo(np.uint16).max],
+            [2, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max],
+        ],
+        dtype=np.uint16,
+    )
+    values_out = np.zeros((2,), dtype=np.float32)
+    actions_out = np.zeros((2,), dtype=np.int64)
+    logp_out = np.zeros((2,), dtype=np.float32)
+
+    QueueRuntime._fill_policy_outputs_ids(
+        runtime,
+        actor=actor,
+        obs_step=obs_step,
+        actor_step=actor_step,
+        focal_rows=np.array([True, True], dtype=np.bool_),
+        legal_ids=legal_ids,
+        legal_offsets=legal_offsets,
+        legal_action_meta=legal_meta,
+        logits_out=None,
+        values_out=values_out,
+        actions_out=actions_out,
+        logp_out=logp_out,
+        rng=np.random.default_rng(321),
+        sample_actions=True,
+    )
+
+    assert model.forward_legal_flags == [False]
+    assert np.array_equal(actions_out, np.array([7, 8], dtype=np.int64))
+    assert np.allclose(logp_out, 0.0)
+    assert np.allclose(values_out, 0.25)
+    assert torch.allclose(actor.seat_hidden, torch.ones_like(actor.seat_hidden))
+
+
+def test_fill_policy_outputs_ids_heuristic_actor_backend_can_skip_behavior_values() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._actor_amp_enabled = False
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._actor_behavior_values_required = False
+    runtime_any._teacher_policy = object()
+    runtime_any.config = SimpleNamespace(pass_action_id=8)
+    runtime_any._heuristic_public_actions_from_ids = lambda **_kwargs: np.array([7, 8], dtype=np.int64)
+
+    model = _HeuristicAdvanceOnlyRuntimeActorModel()
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            model=model,
+            compiled_model=None,
+            seat_hidden=torch.zeros((2, 2, 3), dtype=torch.float32),
+            focal_seat_by_env=np.array([0, 1], dtype=np.int64),
+            opponent_policy_id_by_env=np.array(["mirror", "mirror"], dtype=object),
+            rng=np.random.default_rng(123),
+        ),
+    )
+    obs_step = np.zeros((2, 4), dtype=np.float32)
+    actor_step = np.array([0, 1], dtype=np.int64)
+    legal_ids = np.array([0, 7, 8, 1, 7, 8], dtype=np.uint32)
+    legal_offsets = np.array([0, 3, 6], dtype=np.uint32)
+    legal_meta = np.array(
+        [
+            [0, 0, 0, np.iinfo(np.uint16).max],
+            [1, 0, 0, np.iinfo(np.uint16).max],
+            [2, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max],
+            [0, 1, 0, np.iinfo(np.uint16).max],
+            [1, 1, 0, np.iinfo(np.uint16).max],
+            [2, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max],
+        ],
+        dtype=np.uint16,
+    )
+    values_out = np.full((2,), 9.0, dtype=np.float32)
+    actions_out = np.zeros((2,), dtype=np.int64)
+    logp_out = np.zeros((2,), dtype=np.float32)
+
+    QueueRuntime._fill_policy_outputs_ids(
+        runtime,
+        actor=actor,
+        obs_step=obs_step,
+        actor_step=actor_step,
+        focal_rows=np.array([True, True], dtype=np.bool_),
+        legal_ids=legal_ids,
+        legal_offsets=legal_offsets,
+        legal_action_meta=legal_meta,
+        logits_out=None,
+        values_out=values_out,
+        actions_out=actions_out,
+        logp_out=logp_out,
+        rng=np.random.default_rng(321),
+        sample_actions=True,
+    )
+
+    assert model.advance_calls == 1
+    assert model.forward_calls == 0
+    assert np.array_equal(actions_out, np.array([7, 8], dtype=np.int64))
+    assert np.allclose(logp_out, 0.0)
+    assert np.allclose(values_out, 0.0)
+    assert torch.allclose(actor.seat_hidden, torch.ones_like(actor.seat_hidden))
+
+
+def test_fill_policy_outputs_ids_heuristic_actor_backend_can_skip_hidden_tracking() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._actor_amp_enabled = False
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._actor_behavior_values_required = False
+    runtime_any._heuristic_actor_hidden_state_tracking = False
+    runtime_any._teacher_policy = object()
+    runtime_any.config = SimpleNamespace(pass_action_id=8)
+    runtime_any._heuristic_public_actions_from_ids = lambda **_kwargs: np.array([7, 8], dtype=np.int64)
+
+    model = _HeuristicAdvanceOnlyRuntimeActorModel()
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            model=model,
+            compiled_model=None,
+            seat_hidden=torch.zeros((2, 2, 3), dtype=torch.float32),
+            focal_seat_by_env=np.array([0, 1], dtype=np.int64),
+            opponent_policy_id_by_env=np.array(["mirror", "mirror"], dtype=object),
+            rng=np.random.default_rng(123),
+        ),
+    )
+    obs_step = np.zeros((2, 4), dtype=np.float32)
+    actor_step = np.array([0, 1], dtype=np.int64)
+    legal_ids = np.array([0, 7, 8, 1, 7, 8], dtype=np.uint32)
+    legal_offsets = np.array([0, 3, 6], dtype=np.uint32)
+    legal_meta = np.array(
+        [
+            [0, 0, 0, np.iinfo(np.uint16).max],
+            [1, 0, 0, np.iinfo(np.uint16).max],
+            [2, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max],
+            [0, 1, 0, np.iinfo(np.uint16).max],
+            [1, 1, 0, np.iinfo(np.uint16).max],
+            [2, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max, np.iinfo(np.uint16).max],
+        ],
+        dtype=np.uint16,
+    )
+    values_out = np.full((2,), 9.0, dtype=np.float32)
+    actions_out = np.zeros((2,), dtype=np.int64)
+    logp_out = np.zeros((2,), dtype=np.float32)
+
+    QueueRuntime._fill_policy_outputs_ids(
+        runtime,
+        actor=actor,
+        obs_step=obs_step,
+        actor_step=actor_step,
+        focal_rows=np.array([True, True], dtype=np.bool_),
+        legal_ids=legal_ids,
+        legal_offsets=legal_offsets,
+        legal_action_meta=legal_meta,
+        logits_out=None,
+        values_out=values_out,
+        actions_out=actions_out,
+        logp_out=logp_out,
+        rng=np.random.default_rng(321),
+        sample_actions=True,
+    )
+
+    assert model.advance_calls == 0
+    assert model.forward_calls == 0
+    assert np.array_equal(actions_out, np.array([7, 8], dtype=np.int64))
+    assert np.allclose(logp_out, 0.0)
+    assert np.allclose(values_out, 0.0)
+    assert torch.allclose(actor.seat_hidden, torch.zeros_like(actor.seat_hidden))
+
+
+def test_collect_all_heuristic_ids_fast_requires_all_heuristic_linux_frontier_conditions() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._fixed_opponent_backend = "simulator_native"
+    runtime_any._teacher_policy = object()
+    runtime_any._league_config = SimpleNamespace(sampling=SimpleNamespace(heuristic_public_mix_fraction=1.0))
+    runtime_any._fixed_opponent_policy_is_active = lambda policy_id: bool(str(policy_id).strip())
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            layout_name="i16_legal_ids",
+            opponent_policy_id_by_env=np.array(
+                [HEURISTIC_PUBLIC_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID],
+                dtype=object,
+            ),
+            fixed_opponent_policy_id_by_env=np.array(["", HEURISTIC_PUBLIC_POLICY_ID], dtype=object),
+        ),
+    )
+
+    assert QueueRuntime._can_collect_all_heuristic_ids_fast(runtime, actor) is True
+
+
+def test_collect_all_heuristic_ids_fast_rejects_nonheuristic_opponent_assignments() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._fixed_opponent_backend = "simulator_native"
+    runtime_any._teacher_policy = object()
+    runtime_any._league_config = SimpleNamespace(sampling=SimpleNamespace(heuristic_public_mix_fraction=1.0))
+    runtime_any._fixed_opponent_policy_is_active = lambda policy_id: bool(str(policy_id).strip())
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            layout_name="i16_legal_ids",
+            opponent_policy_id_by_env=np.array(
+                [HEURISTIC_PUBLIC_POLICY_ID, "latest_policy_mirror"],
+                dtype=object,
+            ),
+            fixed_opponent_policy_id_by_env=np.array(["", ""], dtype=object),
+        ),
+    )
+
+    assert QueueRuntime._can_collect_all_heuristic_ids_fast(runtime, actor) is False
+
+
+def test_collect_all_heuristic_ids_native_rollout_requires_stateless_heuristic_actor() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._fixed_opponent_backend = "simulator_native"
+    runtime_any._teacher_policy = object()
+    runtime_any._league_config = SimpleNamespace(sampling=SimpleNamespace(heuristic_public_mix_fraction=1.0))
+    runtime_any._fixed_opponent_policy_is_active = lambda policy_id: bool(str(policy_id).strip())
+    runtime_any._heuristic_native_rollout_enabled = True
+    runtime_any._actor_behavior_values_required = False
+    runtime_any._heuristic_actor_hidden_state_tracking = False
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            layout_name="i16_legal_ids",
+            env=SimpleNamespace(
+                pool=SimpleNamespace(
+                    rollout_heuristic_public_into_i16_legal_ids=lambda *args, **kwargs: None,
+                    reset_done_into_i16_legal_ids=lambda *args, **kwargs: None,
+                )
+            ),
+            opponent_policy_id_by_env=np.array(
+                [HEURISTIC_PUBLIC_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID],
+                dtype=object,
+            ),
+            fixed_opponent_policy_id_by_env=np.array(["", HEURISTIC_PUBLIC_POLICY_ID], dtype=object),
+        ),
+    )
+
+    assert QueueRuntime._can_collect_all_heuristic_ids_native_rollout(runtime, actor) is True
+
+
+def test_collect_all_heuristic_ids_native_rollout_rejects_hidden_tracking() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._fixed_opponent_backend = "simulator_native"
+    runtime_any._teacher_policy = object()
+    runtime_any._league_config = SimpleNamespace(sampling=SimpleNamespace(heuristic_public_mix_fraction=1.0))
+    runtime_any._fixed_opponent_policy_is_active = lambda policy_id: bool(str(policy_id).strip())
+    runtime_any._heuristic_native_rollout_enabled = True
+    runtime_any._actor_behavior_values_required = False
+    runtime_any._heuristic_actor_hidden_state_tracking = True
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            layout_name="i16_legal_ids",
+            env=SimpleNamespace(
+                pool=SimpleNamespace(
+                    rollout_heuristic_public_into_i16_legal_ids=lambda *args, **kwargs: None,
+                    reset_done_into_i16_legal_ids=lambda *args, **kwargs: None,
+                )
+            ),
+            opponent_policy_id_by_env=np.array(
+                [HEURISTIC_PUBLIC_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID],
+                dtype=object,
+            ),
+            fixed_opponent_policy_id_by_env=np.array(["", HEURISTIC_PUBLIC_POLICY_ID], dtype=object),
+        ),
+    )
+
+    assert QueueRuntime._can_collect_all_heuristic_ids_native_rollout(runtime, actor) is False
+
+
 def _teacher_test_catalog() -> ActionCatalog:
     return ActionCatalog.from_spec_bundle(
         {
@@ -145,6 +678,74 @@ def test_select_pending_unrolls_train_ordered_keeps_same_behavior_version() -> N
         (0, 0, 0),
         (0, 0, 1),
     ]
+
+
+def test_select_pending_unrolls_reserves_diverse_lane_quota_in_async_mode() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any.config = QueueRuntimeConfig(
+        mode="train_async_fast",
+        actor_count=6,
+        envs_per_actor=1,
+        unroll_length=1,
+        batch_unrolls_per_update=4,
+        queue_capacity_unrolls=8,
+        profile="fast",
+        base_seed=7,
+        pass_action_id=51,
+        actor_reload_interval_updates=1,
+    )
+    runtime_any._diverse_opponent_actor_count = 2
+    runtime_any._diverse_opponent_batch_fraction = 0.5
+    runtime_any._pending_unrolls = deque(
+        [
+            _make_runtime_unroll(actor_id=4, unroll_seq=0, behavior_policy_version=0),
+            _make_runtime_unroll(actor_id=5, unroll_seq=1, behavior_policy_version=0),
+            _make_runtime_unroll(actor_id=0, unroll_seq=2, behavior_policy_version=0),
+            _make_runtime_unroll(actor_id=1, unroll_seq=3, behavior_policy_version=0),
+            _make_runtime_unroll(actor_id=3, unroll_seq=4, behavior_policy_version=0),
+        ]
+    )
+
+    selected = QueueRuntime._select_pending_unrolls(runtime)
+
+    assert len(selected) == 4
+    assert sum(1 for item in selected if item.actor_id in {0, 1}) == 2
+    assert [item.actor_id for item in selected[:2]] == [0, 1]
+
+
+def test_split_focal_actor_rows_forces_model_policy_on_diverse_model_lane() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._teacher_policy = object()
+    runtime_any._active_actor_heuristic_fraction = lambda: 1.0
+
+    model_rows, heuristic_rows = QueueRuntime._split_focal_actor_rows(
+        runtime,
+        actor=cast(Any, SimpleNamespace(force_model_policy_lane=True)),
+        focal_indices=np.asarray([0, 2, 4], dtype=np.int64),
+        rng=np.random.default_rng(7),
+    )
+
+    npt.assert_array_equal(model_rows, np.asarray([0, 2, 4], dtype=np.int64))
+    assert heuristic_rows.size == 0
+
+
+def test_policy_train_mask_for_actor_can_exclude_pure_heuristic_lane() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._train_on_heuristic_actor_rows = False
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._active_actor_heuristic_fraction = lambda: 1.0
+
+    mask = QueueRuntime._policy_train_mask_for_actor(
+        runtime,
+        actor=cast(Any, SimpleNamespace(force_model_policy_lane=False)),
+        focal_rows=np.asarray([True, False, True, False], dtype=np.bool_),
+    )
+
+    npt.assert_array_equal(mask, np.asarray([False, False, False, False], dtype=np.bool_))
 
 
 def test_reset_done_rows_fallback_reinitializes_full_actor_state() -> None:
@@ -302,7 +903,9 @@ def test_sample_packed_action_scores_falls_back_to_last_candidate_when_cdf_under
     monkeypatch.setattr(
         model_module,
         "_packed_local_cdf",
-        lambda probabilities, offsets: torch.tensor([0.4, 0.8, 0.9999999], dtype=probabilities.dtype, device=probabilities.device),
+        lambda probabilities, offsets: torch.tensor(
+            [0.4, 0.8, 0.9999999], dtype=probabilities.dtype, device=probabilities.device
+        ),
     )
 
     actions, logp = model_module._sample_packed_action_scores(
@@ -437,9 +1040,9 @@ def test_structured_warmstart_source_mix_process_collectors_pushes_fixed_sources
             HEURISTIC_PUBLIC_POLICY_ID,
         )
 
-    for queue in control_queues:
-        assert len(queue.commands) == 2
-        apply_payload, restore_payload = queue.commands
+    for control_queue in control_queues:
+        assert len(control_queue.commands) == 2
+        apply_payload, restore_payload = control_queue.commands
         assert apply_payload["kind"] == "set_fixed_opponents"
         assert apply_payload["restore_defaults"] is False
         assert apply_payload["activate_teacher_heuristic"] is True
@@ -468,6 +1071,74 @@ def test_disable_mirror_policy_fusion_context_restores_previous_state() -> None:
     with QueueRuntime.disable_mirror_policy_fusion(runtime):
         assert runtime_any._disable_mirror_policy_fusion is True
     assert runtime_any._disable_mirror_policy_fusion is True
+
+
+def test_handle_collector_commands_tracks_update_and_refreshes_pool() -> None:
+    refresh_calls: list[int] = []
+
+    runtime = cast(
+        Any,
+        SimpleNamespace(
+            _current_learner_update=0,
+            _effective_learner_update=0,
+            refresh_opponent_pool=lambda: refresh_calls.append(1),
+            _teacher_policy=None,
+            _opponent_heuristic_policies={},
+            _opponent_models={},
+            _opponent_model_locks={},
+            _forced_fixed_opponent_policy_ids=(),
+            _reset_actor_state_for_fixed_opponents=lambda actor: None,
+        ),
+    )
+
+    class _FakeModel:
+        def __init__(self) -> None:
+            self.loaded = 0
+            self.evaluated = 0
+
+        def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+            self.loaded += len(state_dict)
+
+        def eval(self) -> "_FakeModel":
+            self.evaluated += 1
+            return self
+
+    actor = cast(Any, SimpleNamespace(model=_FakeModel(), snapshot_version=0, fixed_opponent_policy_id_by_env=None))
+
+    class _Queue:
+        def __init__(self, commands: list[dict[str, Any]]) -> None:
+            self._commands = list(commands)
+
+        def get_nowait(self) -> dict[str, Any]:
+            if not self._commands:
+                raise queue.Empty
+            return self._commands.pop(0)
+
+    queue_obj = _Queue(
+        [
+            {"kind": "set_update", "update": 7, "refresh_opponent_pool": True},
+            {"kind": "reload", "model_state_dict": {"w": torch.tensor([1.0])}, "update": 8, "effective_update": 5},
+            {"kind": "refresh_opponent_pool", "update": 9},
+        ]
+    )
+
+    should_stop = _handle_collector_commands(
+        runtime=runtime,
+        actor=actor,
+        control_queue=queue_obj,
+        default_fixed_slots=None,
+        default_forced_policy_ids=(),
+        default_teacher_active=False,
+        default_has_noleague_baseline=False,
+    )
+
+    assert should_stop is False
+    assert actor.snapshot_version == 8
+    assert runtime._current_learner_update == 9
+    assert runtime._effective_learner_update == 5
+    assert actor.model.loaded == 1
+    assert actor.model.evaluated == 1
+    assert len(refresh_calls) == 2
 
 
 def test_refresh_opponent_pool_excludes_fixed_b1_anchor(tmp_path: Path) -> None:
@@ -554,6 +1225,59 @@ def test_refresh_opponent_pool_keeps_reserved_b1_anchor_resident(tmp_path: Path)
     runtime_any._opponent_heuristic_policies = {}
     runtime_any._heuristic_public_reserved_envs_per_actor = 0
     runtime_any._noleague_baseline_reserved_envs_per_actor = 1
+    runtime_any._pfsp_pool_size = 0
+    runtime_any._load_snapshot_model = lambda path: f"loaded::{path}"
+
+    QueueRuntime.refresh_opponent_pool(runtime)
+
+    assert runtime_any._opponent_candidate_ids == ("policy_000007",)
+    assert runtime_any._opponent_models == {
+        "policy_000007": "loaded::training/snapshots/policy_000007/weights.pt",
+        "b1_noleague_baseline": "loaded::training/snapshots/b1_noleague_baseline/weights.pt",
+    }
+
+
+def test_refresh_opponent_pool_keeps_mixed_b1_anchor_resident(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    registry_path = run_dir / "training" / "snapshots" / "registry.json"
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="policy_000007",
+        update=7,
+        weights_sha256="7" * 64,
+        path="training/snapshots/policy_000007/weights.pt",
+    )
+    registry.add_snapshot(
+        policy_id="b1_noleague_baseline",
+        update=999,
+        weights_sha256="b" * 64,
+        path="training/snapshots/b1_noleague_baseline/weights.pt",
+    )
+    registry.pin_snapshot("b1_noleague_baseline")
+    registry.save(registry_path)
+
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._registry_path = registry_path
+    runtime_any._league_config = SimpleNamespace(
+        snapshot_pool_recent_size=8,
+        snapshot_pool_champion_size=2,
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.2,
+        promotion_gate_enabled=False,
+        sampling=SimpleNamespace(
+            noleague_baseline_mix_fraction=0.15,
+            noleague_baseline_mix_end_updates=-1,
+        ),
+    )
+    runtime_any._opponent_sampler = None
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_model_locks = {}
+    runtime_any._opponent_heuristic_policies = {}
+    runtime_any._heuristic_public_reserved_envs_per_actor = 0
+    runtime_any._noleague_baseline_reserved_envs_per_actor = 0
     runtime_any._pfsp_pool_size = 0
     runtime_any._load_snapshot_model = lambda path: f"loaded::{path}"
 
@@ -1123,6 +1847,421 @@ def test_sample_opponent_policy_ids_can_force_heuristic_public_bucket_before_pfs
     assert runtime_any._pfsp_last_heuristic_public_envs == 4
 
 
+def test_sample_opponent_policy_ids_can_force_noleague_baseline_bucket_before_pfsp_ready() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._opponent_hard_negative_ids = ()
+    runtime_any._opponent_champion_ids = ()
+    runtime_any._opponent_recent_ids = ()
+    runtime_any._opponent_heuristic_policies = {}
+    runtime_any._league_config = SimpleNamespace(
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.0,
+        sampling=SimpleNamespace(
+            heuristic_public_start_updates=0,
+            heuristic_public_mix_fraction=0.0,
+            noleague_baseline_mix_fraction=1.0,
+            noleague_baseline_mix_end_updates=-1,
+            champion_mix_fraction=0.0,
+            hard_negative_mix_fraction=0.0,
+        ),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_models = {_NOLEAGUE_BASELINE_POLICY_ID: object()}
+    runtime_any._pfsp_sampling_ready = lambda: False
+    runtime_any._league_reference_update = lambda: 0
+
+    sampled = QueueRuntime._sample_opponent_policy_ids(
+        runtime,
+        count=4,
+        rng=np.random.default_rng(7),
+    )
+
+    assert sampled == (
+        _NOLEAGUE_BASELINE_POLICY_ID,
+        _NOLEAGUE_BASELINE_POLICY_ID,
+        _NOLEAGUE_BASELINE_POLICY_ID,
+        _NOLEAGUE_BASELINE_POLICY_ID,
+    )
+    assert runtime_any._pfsp_last_sampled_envs == 4
+    assert runtime_any._pfsp_last_mirror_envs == 0
+    assert runtime_any._pfsp_last_noleague_baseline_envs == 4
+
+
+def test_sample_opponent_policy_ids_disables_noleague_mix_after_end_update() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._opponent_hard_negative_ids = ()
+    runtime_any._opponent_champion_ids = ()
+    runtime_any._opponent_recent_ids = ()
+    runtime_any._opponent_heuristic_policies = {}
+    runtime_any._league_config = SimpleNamespace(
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.0,
+        sampling=SimpleNamespace(
+            heuristic_public_start_updates=0,
+            heuristic_public_mix_fraction=0.0,
+            noleague_baseline_mix_fraction=1.0,
+            noleague_baseline_mix_end_updates=1,
+            champion_mix_fraction=0.0,
+            hard_negative_mix_fraction=0.0,
+        ),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_models = {_NOLEAGUE_BASELINE_POLICY_ID: object()}
+    runtime_any._pfsp_sampling_ready = lambda: False
+    runtime_any._league_reference_update = lambda: 1
+
+    sampled = QueueRuntime._sample_opponent_policy_ids(
+        runtime,
+        count=4,
+        rng=np.random.default_rng(7),
+    )
+
+    assert sampled == (
+        _MIRROR_OPPONENT_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+    )
+    assert runtime_any._pfsp_last_sampled_envs == 0
+    assert runtime_any._pfsp_last_mirror_envs == 4
+    assert runtime_any._pfsp_last_noleague_baseline_envs == 0
+
+
+def test_sample_opponent_policy_ids_can_force_warmup_snapshot_bucket_before_pfsp_ready() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._pfsp_last_warmup_snapshot_envs = 0
+    runtime_any._opponent_candidate_ids = ("seed_recent_a", "seed_recent_b")
+    runtime_any._opponent_hard_negative_ids = ()
+    runtime_any._opponent_champion_ids = ()
+    runtime_any._opponent_recent_ids = ()
+    runtime_any._opponent_heuristic_policies = {}
+    runtime_any._league_config = SimpleNamespace(
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.0,
+        warmup=SimpleNamespace(first_updates=200000),
+        sampling=SimpleNamespace(
+            heuristic_public_start_updates=0,
+            heuristic_public_mix_fraction=0.0,
+            noleague_baseline_mix_fraction=0.0,
+            noleague_baseline_mix_end_updates=-1,
+            warmup_snapshot_mix_fraction=1.0,
+            champion_mix_fraction=0.0,
+            hard_negative_mix_fraction=0.0,
+        ),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_models = {"seed_recent_a": object(), "seed_recent_b": object()}
+    runtime_any._pfsp_sampling_ready = lambda: False
+    runtime_any._league_reference_update = lambda: 0
+
+    sampled = QueueRuntime._sample_opponent_policy_ids(
+        runtime,
+        count=4,
+        rng=np.random.default_rng(7),
+    )
+
+    assert set(sampled) <= {"seed_recent_a", "seed_recent_b"}
+    assert len(sampled) == 4
+    assert runtime_any._pfsp_last_sampled_envs == 4
+    assert runtime_any._pfsp_last_mirror_envs == 0
+    assert runtime_any._pfsp_last_recent_envs == 0
+    assert runtime_any._pfsp_last_warmup_snapshot_envs == 4
+
+
+def test_active_heuristic_public_mix_fraction_linearly_anneals_with_update() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_config = SimpleNamespace(
+        sampling=SimpleNamespace(
+            heuristic_public_mix_fraction=1.0,
+            heuristic_public_mix_end_updates=5,
+            heuristic_public_final_mix_fraction=0.25,
+        )
+    )
+    runtime_any._current_learner_update = 0
+    runtime_any._effective_learner_update = 0
+
+    assert QueueRuntime._active_heuristic_public_mix_fraction(runtime) == pytest.approx(1.0)
+
+    runtime_any._effective_learner_update = 3
+
+    assert QueueRuntime._active_heuristic_public_mix_fraction(runtime) == pytest.approx(0.55)
+
+    runtime_any._effective_learner_update = 5
+
+    assert QueueRuntime._active_heuristic_public_mix_fraction(runtime) == pytest.approx(0.25)
+
+
+def test_active_heuristic_public_variant_mix_fraction_linearly_anneals_with_update() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_config = SimpleNamespace(
+        sampling=SimpleNamespace(
+            heuristic_public_variant_mix_fraction=0.4,
+            heuristic_public_variant_mix_end_updates=4,
+            heuristic_public_variant_final_mix_fraction=0.1,
+        )
+    )
+    runtime_any._current_learner_update = 0
+    runtime_any._effective_learner_update = 0
+    runtime_any._league_reference_update = lambda: runtime_any._effective_learner_update
+
+    assert QueueRuntime._active_heuristic_public_variant_mix_fraction(runtime) == pytest.approx(0.4)
+
+    runtime_any._effective_learner_update = 2
+
+    assert QueueRuntime._active_heuristic_public_variant_mix_fraction(runtime) == pytest.approx(0.25)
+
+    runtime_any._effective_learner_update = 4
+
+    assert QueueRuntime._active_heuristic_public_variant_mix_fraction(runtime) == pytest.approx(0.1)
+
+
+def test_heuristic_opponent_policy_falls_back_to_teacher_for_b2() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    teacher_policy = object()
+    runtime_any._teacher_policy = teacher_policy
+    runtime_any._opponent_heuristic_policies = {
+        HEURISTIC_PUBLIC_AGGRO_POLICY_ID: object(),
+    }
+
+    assert QueueRuntime._heuristic_opponent_policy(runtime, HEURISTIC_PUBLIC_POLICY_ID) is teacher_policy
+    assert (
+        QueueRuntime._heuristic_opponent_policy(runtime, HEURISTIC_PUBLIC_AGGRO_POLICY_ID)
+        is runtime_any._opponent_heuristic_policies[HEURISTIC_PUBLIC_AGGRO_POLICY_ID]
+    )
+
+
+def test_active_warmup_snapshot_mix_fraction_turns_off_after_league_warmup() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_config = SimpleNamespace(
+        warmup=SimpleNamespace(first_updates=5),
+        sampling=SimpleNamespace(warmup_snapshot_mix_fraction=0.4),
+    )
+    runtime_any._opponent_candidate_ids = ("seed_a",)
+    runtime_any._opponent_models = {"seed_a": object()}
+    runtime_any._current_learner_update = 0
+    runtime_any._effective_learner_update = 0
+
+    assert QueueRuntime._active_warmup_snapshot_mix_fraction(runtime) == pytest.approx(0.4)
+
+    runtime_any._effective_learner_update = 5
+
+    assert QueueRuntime._active_warmup_snapshot_mix_fraction(runtime) == pytest.approx(0.0)
+
+
+def test_assign_episode_roles_uses_snapshot_only_on_diverse_warmup_lane() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._pfsp_last_warmup_snapshot_envs = 0
+    runtime_any._league_enabled = True
+    runtime_any._league_config = SimpleNamespace()
+    runtime_any._pfsp_sampling_ready = lambda: False
+    runtime_any._active_warmup_snapshot_mix_fraction = lambda: 0.5
+    runtime_any._opponent_candidate_ids = ("seed_recent_a", "seed_recent_b")
+    runtime_any._sample_warmup_snapshot_policy_ids = lambda *, count, rng: ("seed_recent_a",) * count
+    runtime_any._sample_opponent_policy_ids = lambda *, count, rng: ("unexpected",) * count
+    runtime_any._fixed_opponent_policy_is_active = lambda policy_id: False
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            actor_id=0,
+            rng=np.random.default_rng(7),
+            focal_seat_by_env=np.asarray([0, 1], dtype=np.int64),
+            opponent_policy_id_by_env=np.asarray(
+                [_MIRROR_OPPONENT_POLICY_ID, _MIRROR_OPPONENT_POLICY_ID], dtype=object
+            ),
+            fixed_opponent_policy_id_by_env=None,
+            diverse_opponent_lane=True,
+        ),
+    )
+
+    QueueRuntime._assign_episode_roles(
+        runtime,
+        actor,
+        np.asarray([True, True], dtype=np.bool_),
+        initial=False,
+    )
+
+    assert actor.opponent_policy_id_by_env.tolist() == ["seed_recent_a", "seed_recent_a"]
+
+
+def test_sample_opponent_policy_ids_respects_heuristic_public_mix_anneal_end_update() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._opponent_hard_negative_ids = ()
+    runtime_any._opponent_champion_ids = ()
+    runtime_any._opponent_recent_ids = ()
+    runtime_any._opponent_heuristic_policies = {"B2 HeuristicPublic": object()}
+    runtime_any._league_config = SimpleNamespace(
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.0,
+        sampling=SimpleNamespace(
+            heuristic_public_start_updates=0,
+            heuristic_public_mix_fraction=1.0,
+            heuristic_public_mix_end_updates=1,
+            heuristic_public_final_mix_fraction=0.0,
+            champion_mix_fraction=0.0,
+            hard_negative_mix_fraction=0.0,
+        ),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_models = {}
+    runtime_any._pfsp_sampling_ready = lambda: False
+    runtime_any._league_reference_update = lambda: 1
+
+    sampled = QueueRuntime._sample_opponent_policy_ids(
+        runtime,
+        count=4,
+        rng=np.random.default_rng(7),
+    )
+
+    assert sampled == (
+        _MIRROR_OPPONENT_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+    )
+    assert runtime_any._pfsp_last_sampled_envs == 0
+    assert runtime_any._pfsp_last_mirror_envs == 4
+    assert runtime_any._pfsp_last_heuristic_public_envs == 0
+
+
+def test_sample_opponent_policy_ids_can_force_heuristic_public_variant_bucket_before_pfsp_ready() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_heuristic_public_variant_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._pfsp_last_warmup_snapshot_envs = 0
+    runtime_any._league_enabled = True
+    runtime_any._league_config = SimpleNamespace(
+        sampling=SimpleNamespace(
+            heuristic_public_start_updates=0,
+            heuristic_public_mix_fraction=0.0,
+            heuristic_public_variant_mix_fraction=1.0,
+            champion_mix_fraction=0.0,
+            hard_negative_mix_fraction=0.0,
+        ),
+        pfsp_power=1.5,
+        pfsp_epsilon_uniform=0.3,
+    )
+    runtime_any._opponent_heuristic_policies = {
+        HEURISTIC_PUBLIC_AGGRO_POLICY_ID: object(),
+        HEURISTIC_PUBLIC_CONTROL_POLICY_ID: object(),
+    }
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._pfsp_sampling_ready = lambda: False
+    runtime_any._league_reference_update = lambda: 0
+
+    sampled = QueueRuntime._sample_opponent_policy_ids(
+        runtime,
+        count=8,
+        rng=np.random.default_rng(7),
+    )
+
+    assert set(sampled).issubset({HEURISTIC_PUBLIC_AGGRO_POLICY_ID, HEURISTIC_PUBLIC_CONTROL_POLICY_ID})
+    assert runtime_any._pfsp_last_heuristic_public_envs == 0
+    assert runtime_any._pfsp_last_heuristic_public_variant_envs == 8
+
+
+def test_active_actor_heuristic_fraction_linearly_anneals_with_update() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._actor_heuristic_end_updates = 5
+    runtime_any._actor_heuristic_final_fraction = 0.25
+    runtime_any._current_learner_update = 0
+    runtime_any._effective_learner_update = 0
+
+    assert QueueRuntime._active_actor_heuristic_fraction(runtime) == pytest.approx(1.0)
+
+    runtime_any._effective_learner_update = 3
+
+    assert QueueRuntime._active_actor_heuristic_fraction(runtime) == pytest.approx(0.55)
+
+    runtime_any._effective_learner_update = 5
+
+    assert QueueRuntime._active_actor_heuristic_fraction(runtime) == pytest.approx(0.25)
+
+
+def test_split_focal_actor_rows_respects_actor_heuristic_anneal_endpoint() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._teacher_policy = object()
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._actor_heuristic_end_updates = 5
+    runtime_any._actor_heuristic_final_fraction = 0.0
+    runtime_any._current_learner_update = 5
+    runtime_any._effective_learner_update = 5
+
+    model_rows, heuristic_rows = QueueRuntime._split_focal_actor_rows(
+        runtime,
+        actor=cast(Any, SimpleNamespace(force_model_policy_lane=False)),
+        focal_indices=np.asarray([0, 1, 2, 3], dtype=np.int64),
+        rng=np.random.default_rng(7),
+    )
+
+    assert model_rows.tolist() == [0, 1, 2, 3]
+    assert heuristic_rows.tolist() == []
+
+
 def test_assign_episode_roles_prioritizes_fixed_anchor_lanes() -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
@@ -1161,7 +2300,9 @@ def test_assign_episode_roles_prioritizes_fixed_anchor_lanes() -> None:
         ),
     )
 
-    QueueRuntime._assign_episode_roles(runtime, actor, np.asarray([True, True, True, True], dtype=np.bool_), initial=False)
+    QueueRuntime._assign_episode_roles(
+        runtime, actor, np.asarray([True, True, True, True], dtype=np.bool_), initial=False
+    )
 
     assert actor.opponent_policy_id_by_env.tolist() == [
         "B2 HeuristicPublic",
@@ -1361,7 +2502,9 @@ def test_overwrite_central_outputs_with_batched_opponents_batches_heuristic_publ
             model=shared_model,
             compiled_model=None,
             focal_seat_by_env=np.asarray([0, 0], dtype=np.int64),
-            opponent_policy_id_by_env=np.asarray([HEURISTIC_PUBLIC_POLICY_ID, _MIRROR_OPPONENT_POLICY_ID], dtype=object),
+            opponent_policy_id_by_env=np.asarray(
+                [HEURISTIC_PUBLIC_POLICY_ID, _MIRROR_OPPONENT_POLICY_ID], dtype=object
+            ),
             seat_hidden=torch.zeros((2, 3)),
             opponent_hidden=torch.zeros((2, 3)),
         ),
@@ -1372,7 +2515,9 @@ def test_overwrite_central_outputs_with_batched_opponents_batches_heuristic_publ
             model=shared_model,
             compiled_model=None,
             focal_seat_by_env=np.asarray([1, 1], dtype=np.int64),
-            opponent_policy_id_by_env=np.asarray([_MIRROR_OPPONENT_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID], dtype=object),
+            opponent_policy_id_by_env=np.asarray(
+                [_MIRROR_OPPONENT_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID], dtype=object
+            ),
             seat_hidden=torch.zeros((2, 3)),
             opponent_hidden=torch.zeros((2, 3)),
         ),
@@ -1743,7 +2888,9 @@ def test_build_learner_batch_preserves_teacher_labels() -> None:
         initial_hidden_state=np.zeros((1, 1), dtype=np.float32),
         teacher_family=np.array([[1], [2]], dtype=np.int32),
         teacher_slot=np.array([[0], [-1]], dtype=np.int32),
+        teacher_move_source=np.array([[-1], [2]], dtype=np.int32),
         teacher_attack_type=np.array([[-1], [1]], dtype=np.int32),
+        teacher_action=np.array([[7], [9]], dtype=np.int32),
         teacher_valid=np.array([[True], [False]], dtype=np.bool_),
     )
 
@@ -1759,8 +2906,47 @@ def test_build_learner_batch_preserves_teacher_labels() -> None:
 
     assert np.array_equal(batch["teacher_family"], unroll.teacher_family)
     assert np.array_equal(batch["teacher_slot"], unroll.teacher_slot)
+    assert np.array_equal(batch["teacher_move_source"], unroll.teacher_move_source)
     assert np.array_equal(batch["teacher_attack_type"], unroll.teacher_attack_type)
+    assert np.array_equal(batch["teacher_action"], unroll.teacher_action)
     assert np.array_equal(batch["teacher_valid"], unroll.teacher_valid)
+
+
+def test_build_learner_batch_preserves_bootstrap_inputs_for_learner_values() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any.action_dim = 3
+    unroll = replace(
+        _make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=0),
+        obs=np.zeros((2, 1, 1), dtype=np.float32),
+        actions=np.zeros((2, 1), dtype=np.int64),
+        rewards=np.zeros((2, 1), dtype=np.float32),
+        terminated=np.zeros((2, 1), dtype=np.bool_),
+        truncated=np.zeros((2, 1), dtype=np.bool_),
+        to_play_seat=np.zeros((2, 1), dtype=np.int64),
+        behavior_logp=np.zeros((2, 1), dtype=np.float32),
+        values=np.zeros((2, 1), dtype=np.float32),
+        legal_actions=LegalActionBatch.from_mask(np.ones((2, 1, 3), dtype=np.bool_)),
+        bootstrap_obs=np.array([[3.0]], dtype=np.float32),
+        bootstrap_actor=np.array([1], dtype=np.int64),
+        final_hidden_state=np.array([[[1.0, 2.0]]], dtype=np.float32),
+        bootstrap_value=np.zeros((1,), dtype=np.float32),
+        initial_hidden_state=np.zeros((1, 1), dtype=np.float32),
+    )
+
+    batch = QueueRuntime._build_learner_batch(
+        runtime,
+        [unroll],
+        gamma=0.99,
+        truncation_reward=0.0,
+        truncation_bootstrap_value=True,
+        vtrace_rho_bar=1.0,
+        vtrace_c_bar=1.0,
+    )
+
+    assert np.array_equal(batch["bootstrap_obs"], unroll.bootstrap_obs)
+    assert np.array_equal(batch["bootstrap_actor"], unroll.bootstrap_actor)
+    assert np.array_equal(batch["final_hidden_state"], unroll.final_hidden_state)
 
 
 def test_build_ppo_batch_does_not_double_apply_truncation_reward() -> None:
@@ -1804,6 +2990,16 @@ def test_runtime_metrics_report_window_and_cumulative_env_step_rates(monkeypatch
     runtime_any._last_published_snapshot_version = 5
     runtime_any._current_learner_update = 5
     runtime_any._effective_learner_update = 3
+    runtime_any._league_config = SimpleNamespace(
+        sampling=SimpleNamespace(
+            heuristic_public_mix_fraction=1.0,
+            heuristic_public_mix_end_updates=5,
+            heuristic_public_final_mix_fraction=0.25,
+        )
+    )
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._actor_heuristic_end_updates = 5
+    runtime_any._actor_heuristic_final_fraction = 0.25
     runtime_any._pfsp_pool_size = 3
     runtime_any._pfsp_quarantined_opponents = 1
     runtime_any._pfsp_champion_pool_size = 1
@@ -1848,6 +3044,8 @@ def test_runtime_metrics_report_window_and_cumulative_env_step_rates(monkeypatch
     assert metrics["policy_version_lag_p50"] == pytest.approx(0.5)
     assert metrics["league_effective_update"] == pytest.approx(3.0)
     assert metrics["league_update_lag"] == pytest.approx(2.0)
+    assert metrics["actor_heuristic_fraction_active"] == pytest.approx(0.55)
+    assert metrics["heuristic_public_mix_fraction_active"] == pytest.approx(0.55)
     assert metrics["pfsp_quarantined_opponents"] == pytest.approx(1.0)
     assert metrics["pfsp_champion_pool_size"] == pytest.approx(1.0)
     assert metrics["pfsp_heuristic_public_envs"] == pytest.approx(2.0)
@@ -1919,7 +3117,9 @@ def test_runtime_honors_non_cpu_actor_device_and_disables_process_collectors(
     monkeypatch.setattr(
         QueueRuntime,
         "_build_actor_state",
-        lambda self, *, model, actor_id: cast(Any, SimpleNamespace(actor_id=actor_id, env=SimpleNamespace(close=lambda: None))),
+        lambda self, *, model, actor_id: cast(
+            Any, SimpleNamespace(actor_id=actor_id, env=SimpleNamespace(close=lambda: None))
+        ),
     )
     monkeypatch.setattr(QueueRuntime, "refresh_opponent_pool", lambda self: None)
 
@@ -1957,6 +3157,100 @@ def test_runtime_honors_non_cpu_actor_device_and_disables_process_collectors(
         assert runtime_any._device == torch.device("cuda:0")
         assert runtime_any._actor_amp_enabled is True
         assert runtime_any._use_process_collectors is False
+    finally:
+        runtime.close()
+
+
+def test_resolve_actor_device_layout_spreads_cuda_auto_across_non_learner_gpus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("weiss_rl.runtime.torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr("weiss_rl.runtime.torch.cuda.device_count", lambda: 4)
+
+    stack = cast(
+        Any,
+        SimpleNamespace(
+            config=SimpleNamespace(system=SimpleNamespace(actor_device="cuda:auto", learner_device="cuda:auto"))
+        ),
+    )
+
+    layout = resolve_actor_device_layout(
+        stack,
+        actor_count=5,
+        learner_device=torch.device("cuda:0"),
+        prefer_process_collectors=True,
+    )
+
+    assert layout == ("cuda:1", "cuda:2", "cuda:3", "cuda:1", "cuda:2")
+
+
+def test_runtime_can_force_process_collectors_for_structured_cuda_auto_async_league(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class _DummyProcessModel:
+        def to(self, device: torch.device) -> "_DummyProcessModel":
+            return self
+
+    started_with: list[Any] = []
+
+    monkeypatch.setattr("weiss_rl.runtime.torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr("weiss_rl.runtime.torch.cuda.device_count", lambda: 4)
+    monkeypatch.setattr(
+        QueueRuntime,
+        "_start_process_collectors",
+        lambda self, model: started_with.append(model),
+    )
+    monkeypatch.setattr(QueueRuntime, "refresh_opponent_pool", lambda self: None)
+
+    dummy_model = _DummyProcessModel()
+    runtime = QueueRuntime(
+        stack=cast(
+            Any,
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    system=SimpleNamespace(
+                        actor_device="cuda:auto",
+                        learner_device="cuda:auto",
+                        actor_torch_threads=1,
+                        collection_backend="process",
+                    ),
+                    training=SimpleNamespace(
+                        mixed_precision=True,
+                        compile_learner=False,
+                        structured_warmstart=SimpleNamespace(enabled=True),
+                    ),
+                    experiment=SimpleNamespace(role="main"),
+                    league=SimpleNamespace(enabled=True, pfsp_window_episodes=50_000),
+                    model=SimpleNamespace(encoder_kind="structured_v2"),
+                )
+            ),
+        ),
+        config=QueueRuntimeConfig(
+            mode="train_async_fast",
+            actor_count=4,
+            envs_per_actor=64,
+            unroll_length=32,
+            batch_unrolls_per_update=96,
+            queue_capacity_unrolls=256,
+            profile="fast",
+            base_seed=7,
+            pass_action_id=51,
+            actor_reload_interval_updates=1000,
+        ),
+        model=cast(Any, dummy_model),
+        observation_dim=8,
+        action_dim=16,
+        run_dir=tmp_path / "league_run",
+        learner_device=torch.device("cuda:0"),
+    )
+    try:
+        runtime_any = cast(Any, runtime)
+        assert runtime_any._league_enabled is True
+        assert runtime_any._collection_backend == "process"
+        assert runtime_any._use_central_batched_collection is False
+        assert runtime_any._use_process_collectors is True
+        assert runtime_any._process_actor_device_names == ("cuda:1", "cuda:2", "cuda:3", "cuda:1")
+        assert started_with == [dummy_model]
     finally:
         runtime.close()
 
@@ -2245,6 +3539,197 @@ def test_runtime_keeps_central_batched_collection_for_typed_cpu_async_league(
         runtime.close()
 
 
+def test_runtime_can_force_process_collectors_for_structured_cpu_async_league(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    started_with: list[Any] = []
+
+    monkeypatch.setattr("weiss_rl.runtime.torch.cuda.is_available", lambda: False)
+    monkeypatch.setattr(
+        QueueRuntime,
+        "_start_process_collectors",
+        lambda self, model: started_with.append(model),
+    )
+    monkeypatch.setattr(QueueRuntime, "refresh_opponent_pool", lambda self: None)
+
+    dummy_model = torch.nn.Linear(8, 4)
+    runtime = QueueRuntime(
+        stack=cast(
+            Any,
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    system=SimpleNamespace(actor_device="cpu", actor_torch_threads=1, collection_backend="process"),
+                    training=SimpleNamespace(
+                        mixed_precision=False,
+                        compile_learner=False,
+                        structured_warmstart=SimpleNamespace(enabled=True),
+                    ),
+                    experiment=SimpleNamespace(role="main"),
+                    league=SimpleNamespace(enabled=True, pfsp_window_episodes=50_000),
+                    model=SimpleNamespace(encoder_kind="structured_v2"),
+                )
+            ),
+        ),
+        config=QueueRuntimeConfig(
+            mode="train_async_fast",
+            actor_count=2,
+            envs_per_actor=64,
+            unroll_length=32,
+            batch_unrolls_per_update=96,
+            queue_capacity_unrolls=256,
+            profile="fast",
+            base_seed=7,
+            pass_action_id=51,
+            actor_reload_interval_updates=1000,
+        ),
+        model=cast(Any, dummy_model),
+        observation_dim=8,
+        action_dim=16,
+        run_dir=tmp_path / "league_run",
+    )
+    try:
+        runtime_any = cast(Any, runtime)
+        assert runtime_any._league_enabled is True
+        assert runtime_any._collection_backend == "process"
+        assert runtime_any._use_central_batched_collection is False
+        assert runtime_any._use_process_collectors is True
+        assert started_with == [dummy_model]
+    finally:
+        runtime.close()
+
+
+def test_runtime_process_collectors_start_before_refreshing_opponent_pool(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    call_order: list[str] = []
+
+    monkeypatch.setattr("weiss_rl.runtime.torch.cuda.is_available", lambda: False)
+    monkeypatch.setattr(
+        QueueRuntime,
+        "_start_process_collectors",
+        lambda self, model: call_order.append("start"),
+    )
+    monkeypatch.setattr(QueueRuntime, "refresh_opponent_pool", lambda self: call_order.append("refresh"))
+
+    runtime = QueueRuntime(
+        stack=cast(
+            Any,
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    system=SimpleNamespace(actor_device="cpu", actor_torch_threads=1, collection_backend="process"),
+                    training=SimpleNamespace(
+                        mixed_precision=False,
+                        compile_learner=False,
+                        structured_warmstart=SimpleNamespace(enabled=True),
+                    ),
+                    experiment=SimpleNamespace(role="main"),
+                    league=SimpleNamespace(enabled=True, pfsp_window_episodes=50_000),
+                    model=SimpleNamespace(encoder_kind="structured_v2"),
+                )
+            ),
+        ),
+        config=QueueRuntimeConfig(
+            mode="train_async_fast",
+            actor_count=2,
+            envs_per_actor=64,
+            unroll_length=32,
+            batch_unrolls_per_update=96,
+            queue_capacity_unrolls=256,
+            profile="fast",
+            base_seed=7,
+            pass_action_id=51,
+            actor_reload_interval_updates=1000,
+        ),
+        model=cast(Any, torch.nn.Linear(8, 4)),
+        observation_dim=8,
+        action_dim=16,
+        run_dir=tmp_path / "league_run",
+    )
+    try:
+        assert call_order == ["start", "refresh"]
+    finally:
+        runtime.close()
+
+
+def test_fill_pending_unrolls_spills_shared_slots_when_target_exceeds_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+
+    class _ResultQueue:
+        def __init__(self, payloads: list[dict[str, Any]]) -> None:
+            self._payloads = deque(payloads)
+
+        def get(self) -> dict[str, Any]:
+            return self._payloads.popleft()
+
+    freed_slots: list[int] = []
+    copied_payloads: list[tuple[int, int]] = []
+
+    runtime_any._collector_result_queue = _ResultQueue(
+        [
+            {"actor_id": 0, "slot_id": 0, "unroll_seq": 1, "behavior_policy_version": 1},
+            {"actor_id": 0, "slot_id": 0, "unroll_seq": 2, "behavior_policy_version": 1},
+        ]
+    )
+    runtime_any._use_shared_collector_transport = True
+    runtime_any._collector_shared_slots = {0: (object(),)}
+    runtime_any._collector_free_queues = [SimpleNamespace(put=lambda slot_id: freed_slots.append(int(slot_id)))]
+    runtime_any._pending_unrolls = deque()
+    runtime_any.config = SimpleNamespace(queue_capacity_unrolls=8)
+
+    def fake_read(slot: object, metadata: dict[str, Any]) -> SimpleNamespace:
+        del slot
+        copied_payloads.append((int(metadata["actor_id"]), int(metadata["slot_id"])))
+        return SimpleNamespace(kind="copied", unroll_seq=int(metadata["unroll_seq"]))
+
+    monkeypatch.setattr("weiss_rl.runtime._read_unroll_from_shared_slot", fake_read)
+
+    occupancy_samples: list[float] = []
+    runtime._fill_pending_unrolls(target_count=2, occupancy_samples=occupancy_samples)
+
+    assert len(runtime_any._pending_unrolls) == 2
+    assert all(not isinstance(item, _SharedPendingUnroll) for item in runtime_any._pending_unrolls)
+    assert copied_payloads == [(0, 0), (0, 0)]
+    assert freed_slots == [0, 0]
+
+
+def test_fill_pending_unrolls_waits_for_diverse_lane_payloads_when_quota_enabled() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+
+    class _ResultQueue:
+        def __init__(self, payloads: list[RuntimeUnroll]) -> None:
+            self._payloads = deque(payloads)
+
+        def get(self, timeout: float | None = None) -> RuntimeUnroll:
+            del timeout
+            if not self._payloads:
+                raise queue.Empty
+            return self._payloads.popleft()
+
+    runtime_any.config = SimpleNamespace(queue_capacity_unrolls=8)
+    runtime_any._collector_result_queue = _ResultQueue(
+        [
+            _make_runtime_unroll(actor_id=4, unroll_seq=0, behavior_policy_version=0),
+            _make_runtime_unroll(actor_id=5, unroll_seq=1, behavior_policy_version=0),
+            _make_runtime_unroll(actor_id=0, unroll_seq=2, behavior_policy_version=0),
+        ]
+    )
+    runtime_any._use_shared_collector_transport = False
+    runtime_any._pending_unrolls = deque()
+    runtime_any._diverse_opponent_actor_count = 2
+    runtime_any._diverse_opponent_batch_fraction = 0.5
+    runtime_any._diverse_opponent_batch_wait_ms = 50
+
+    occupancy_samples: list[float] = []
+    QueueRuntime._fill_pending_unrolls(runtime, target_count=2, occupancy_samples=occupancy_samples)
+
+    assert [item.actor_id for item in runtime_any._pending_unrolls] == [4, 5, 0]
+    assert QueueRuntime._pending_diverse_unroll_count(runtime) == 1
+
+
 def test_fill_pending_unrolls_uses_parallel_executor_for_distinct_actors() -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
@@ -2260,10 +3745,7 @@ def test_fill_pending_unrolls_uses_parallel_executor_for_distinct_actors() -> No
         pass_action_id=51,
         actor_reload_interval_updates=1,
     )
-    runtime_any._actors = [
-        cast(Any, SimpleNamespace(actor_id=actor_id))
-        for actor_id in range(4)
-    ]
+    runtime_any._actors = [cast(Any, SimpleNamespace(actor_id=actor_id)) for actor_id in range(4)]
     runtime_any._collector_result_queue = None
     runtime_any._pending_unrolls = deque()
     runtime_any._next_actor_index = 0
@@ -2350,7 +3832,9 @@ def test_shared_collector_slot_round_trip_preserves_packed_unroll_payload() -> N
             policy_train_mask=np.array([[True, False], [True, True]], dtype=np.bool_),
             teacher_family=np.array([[1, 2], [3, -1]], dtype=np.int32),
             teacher_slot=np.array([[0, -1], [2, -1]], dtype=np.int32),
+            teacher_move_source=np.array([[-1, 1], [0, -1]], dtype=np.int32),
             teacher_attack_type=np.array([[-1, 1], [0, -1]], dtype=np.int32),
+            teacher_action=np.array([[4, 9], [12, -1]], dtype=np.int32),
             teacher_valid=np.array([[True, True], [True, False]], dtype=np.bool_),
             behavior_logits=None,
         )
@@ -2368,7 +3852,9 @@ def test_shared_collector_slot_round_trip_preserves_packed_unroll_payload() -> N
         assert np.array_equal(restored.final_hidden_state, unroll.final_hidden_state)
         assert np.array_equal(restored.teacher_family, unroll.teacher_family)
         assert np.array_equal(restored.teacher_slot, unroll.teacher_slot)
+        assert np.array_equal(restored.teacher_move_source, unroll.teacher_move_source)
         assert np.array_equal(restored.teacher_attack_type, unroll.teacher_attack_type)
+        assert np.array_equal(restored.teacher_action, unroll.teacher_action)
         assert np.array_equal(restored.teacher_valid, unroll.teacher_valid)
         assert restored.legal_actions.ids is not None
         assert restored.legal_actions.offsets is not None
@@ -2381,31 +3867,217 @@ def test_shared_collector_slot_round_trip_preserves_packed_unroll_payload() -> N
         slot.close(unlink=True)
 
 
+def test_shared_pending_unroll_keeps_shared_views_until_release() -> None:
+    slot_config = _create_shared_collector_slot_config(
+        actor_id=1,
+        slot_id=3,
+        profile="fast",
+        unroll_length=2,
+        envs_per_actor=2,
+        observation_dim=3,
+        action_dim=5,
+        hidden_size=4,
+        layout_name="i16_legal_ids",
+    )
+    slot = _open_shared_collector_slot(slot_config, create=True)
+    try:
+        packed = LegalActionBatch.from_packed(
+            np.array([0, 1, 2, 3, 4, 1], dtype=np.uint32),
+            np.array([0, 2, 3, 5, 6], dtype=np.uint32),
+            meta=np.array(
+                [
+                    [1, 0, 0, 0],
+                    [1, 1, 0, 0],
+                    [2, 0, 0, 0],
+                    [3, 0, 1, 0],
+                    [3, 1, 1, 0],
+                    [8, 0, 0, 0],
+                ],
+                dtype=np.uint16,
+            ),
+            action_space=5,
+        )
+        unroll = RuntimeUnroll(
+            actor_id=1,
+            unroll_seq=9,
+            behavior_policy_version=4,
+            unroll_hash="shared-view",
+            obs=np.arange(12, dtype=np.int16).reshape(2, 2, 3),
+            actions=np.array([[1, 2], [3, 4]], dtype=np.uint16),
+            rewards=np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32),
+            terminated=np.array([[False, True], [False, False]], dtype=np.bool_),
+            truncated=np.array([[False, False], [True, False]], dtype=np.bool_),
+            to_play_seat=np.array([[0, 1], [1, 0]], dtype=np.int8),
+            behavior_logp=np.array([[0.5, 0.6], [0.7, 0.8]], dtype=np.float32),
+            values=np.array([[1.0, 1.1], [1.2, 1.3]], dtype=np.float32),
+            legal_actions=packed,
+            bootstrap_obs=np.arange(6, dtype=np.float32).reshape(2, 3),
+            bootstrap_actor=np.array([0, 1], dtype=np.int64),
+            bootstrap_value=np.array([0.25, -0.5], dtype=np.float32),
+            initial_hidden_state=np.arange(16, dtype=np.float32).reshape(2, 2, 4),
+            final_hidden_state=np.arange(16, 32, dtype=np.float32).reshape(2, 2, 4),
+            episode_seed=np.array([[5, 6], [7, 8]], dtype=np.uint64),
+            policy_train_mask=np.array([[True, False], [True, True]], dtype=np.bool_),
+            teacher_family=np.array([[1, 2], [3, -1]], dtype=np.int32),
+            teacher_slot=np.array([[0, -1], [2, -1]], dtype=np.int32),
+            teacher_move_source=np.array([[-1, 1], [0, -1]], dtype=np.int32),
+            teacher_attack_type=np.array([[-1, 1], [0, -1]], dtype=np.int32),
+            teacher_action=np.array([[4, 9], [12, -1]], dtype=np.int32),
+            teacher_valid=np.array([[True, True], [True, False]], dtype=np.bool_),
+            behavior_logits=None,
+        )
+
+        _write_unroll_to_shared_slot(slot, unroll)
+        pending = _SharedPendingUnroll.from_metadata(slot, _shared_unroll_metadata(unroll, slot_id=3))
+
+        assert pending.slot_id == 3
+        assert pending.obs is slot.obs
+        assert np.shares_memory(pending.legal_actions.ids, slot.legal_ids)
+        assert np.shares_memory(pending.legal_actions.meta, slot.legal_action_meta)
+        assert pending.teacher_move_source is slot.teacher_move_source
+        assert pending.teacher_action is slot.teacher_action
+
+        runtime = object.__new__(QueueRuntime)
+        runtime_any = cast(Any, runtime)
+        runtime_any._use_shared_collector_transport = True
+        runtime_any._collector_free_queues = [queue.Queue(), queue.Queue()]
+
+        QueueRuntime._release_shared_pending_unrolls(runtime, [pending])
+
+        assert runtime_any._collector_free_queues[1].get_nowait() == 3
+    finally:
+        slot.close(unlink=True)
+
+
 def test_teacher_labels_from_actions_group_main_play_and_attack_semantics() -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
     action_catalog = _teacher_test_catalog()
+    main_move_to_slot_2 = next(
+        action_id
+        for action_id in range(action_catalog.action_space_size)
+        if ((decoded := action_catalog.decode(action_id)).family == "main_move" and decoded.to_slot == 2)
+    )
     runtime_any._teacher_guidance_enabled = True
     runtime_any._teacher_action_catalog = action_catalog
-    runtime_any._teacher_family_index = {
-        family.name: index for index, family in enumerate(action_catalog.families)
-    }
+    runtime_any._teacher_family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
     runtime_any._teacher_attack_type_index = {
         name: index for index, name in enumerate(action_catalog.attack_type_names)
     }
 
-    teacher_family, teacher_slot, teacher_attack_type, teacher_valid = QueueRuntime._teacher_labels_from_actions(
-        runtime,
-        row_indices=np.array([0, 1, 2], dtype=np.int64),
-        chosen_actions=np.array([0, 14, 40], dtype=np.int64),
-        num_rows=3,
+    teacher_family, teacher_slot, teacher_move_source, teacher_attack_type, teacher_action, teacher_valid = (
+        QueueRuntime._teacher_labels_from_actions(
+            runtime,
+            row_indices=np.array([0, 1, 2, 3], dtype=np.int64),
+            chosen_actions=np.array([0, 14, main_move_to_slot_2, 40], dtype=np.int64),
+            num_rows=4,
+        )
     )
 
-    assert teacher_valid.tolist() == [True, True, True]
+    assert teacher_valid.tolist() == [True, True, True, True]
     assert teacher_family.tolist() == [
         runtime_any._teacher_family_index["main_play_character"],
         runtime_any._teacher_family_index["attack"],
+        runtime_any._teacher_family_index["main_move"],
         runtime_any._teacher_family_index["pass"],
     ]
-    assert teacher_slot.tolist() == [0, 1, -1]
-    assert teacher_attack_type.tolist() == [-1, 1, -1]
+    assert teacher_slot.tolist() == [0, 1, 2, -1]
+    assert teacher_move_source.tolist() == [-1, -1, 0, -1]
+    assert teacher_attack_type.tolist() == [-1, 1, -1, -1]
+    assert teacher_action.tolist() == [0, 14, main_move_to_slot_2, 40]
+
+
+def test_teacher_guidance_active_for_collection_respects_warmstart_only() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._teacher_guidance_enabled = True
+    runtime_any._teacher_aux_mode = "warmstart_only"
+    runtime_any._teacher_guidance_warmstart_updates = 1
+    runtime_any._current_learner_update = 0
+
+    assert QueueRuntime._teacher_guidance_active_for_collection(runtime) is True
+
+    runtime_any._current_learner_update = 1
+
+    assert QueueRuntime._teacher_guidance_active_for_collection(runtime) is False
+
+
+def test_teacher_labels_from_actions_skip_after_warmstart_only_phase() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    action_catalog = _teacher_test_catalog()
+    runtime_any._teacher_guidance_enabled = True
+    runtime_any._teacher_aux_mode = "warmstart_only"
+    runtime_any._teacher_guidance_warmstart_updates = 1
+    runtime_any._current_learner_update = 1
+    runtime_any._teacher_action_catalog = action_catalog
+    runtime_any._teacher_family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    runtime_any._teacher_attack_type_index = {
+        name: index for index, name in enumerate(action_catalog.attack_type_names)
+    }
+
+    teacher_family, teacher_slot, teacher_move_source, teacher_attack_type, teacher_action, teacher_valid = (
+        QueueRuntime._teacher_labels_from_actions(
+            runtime,
+            row_indices=np.array([0], dtype=np.int64),
+            chosen_actions=np.array([0], dtype=np.int64),
+            num_rows=1,
+        )
+    )
+
+    assert teacher_valid.tolist() == [False]
+    assert teacher_family.tolist() == [-1]
+    assert teacher_slot.tolist() == [-1]
+    assert teacher_move_source.tolist() == [-1]
+    assert teacher_attack_type.tolist() == [-1]
+    assert teacher_action.tolist() == [-1]
+
+
+def test_teacher_labels_from_ids_cover_public_decision_kinds_beyond_tactical_subset() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    action_catalog = _teacher_test_catalog()
+    runtime_any._teacher_guidance_enabled = True
+    runtime_any._teacher_policy = object()
+    runtime_any._teacher_action_catalog = action_catalog
+    runtime_any._teacher_family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    runtime_any._teacher_attack_type_index = {
+        name: index for index, name in enumerate(action_catalog.attack_type_names)
+    }
+    runtime_any._heuristic_public_actions_from_ids = lambda **kwargs: np.asarray(
+        [
+            int(kwargs["legal_ids"][int(kwargs["legal_offsets"][row_index])])
+            for row_index in np.asarray(kwargs["row_indices"], dtype=np.int64).tolist()
+        ],
+        dtype=np.int64,
+    )
+
+    legal_ids = np.asarray([0, 40, 14, 40, 39, 40, 40, 40], dtype=np.uint32)
+    legal_offsets = np.asarray([0, 2, 4, 6, 8], dtype=np.uint32)
+    counters = {"teacher_tactical_row_count": 0}
+
+    teacher_family, teacher_slot, teacher_move_source, teacher_attack_type, teacher_action, teacher_valid = (
+        QueueRuntime._teacher_labels_from_ids(
+            runtime,
+            focal_rows=np.asarray([True, True, True, True], dtype=np.bool_),
+            decision_kind=np.asarray([1, 5, 8, 0], dtype=np.int32),
+            obs_step=np.zeros((4, 4), dtype=np.float32),
+            legal_ids=legal_ids,
+            legal_offsets=legal_offsets,
+            legal_action_meta=None,
+            counters=counters,
+        )
+    )
+
+    assert teacher_valid.tolist() == [True, True, True, False]
+    assert teacher_family.tolist() == [
+        runtime_any._teacher_family_index["main_play_character"],
+        runtime_any._teacher_family_index["attack"],
+        runtime_any._teacher_family_index["climax_play"],
+        -1,
+    ]
+    assert teacher_slot.tolist() == [0, 1, -1, -1]
+    assert teacher_move_source.tolist() == [-1, -1, -1, -1]
+    assert teacher_attack_type.tolist() == [-1, 1, -1, -1]
+    assert teacher_action.tolist() == [0, 14, 39, -1]
+    assert counters["teacher_tactical_row_count"] == 3

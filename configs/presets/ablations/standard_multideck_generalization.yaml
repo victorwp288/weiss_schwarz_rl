@@ -1,0 +1,3 @@
+schema_version: 2
+description: deck-diversity/generalization variant of the canonical standard preset
+extends: ../structured_acceptance_standard_multideck.yaml

@@ -1,0 +1,30 @@
+schema_version: 2
+description: structured_acceptance tiny32 fast packed WSL frontier
+extends: structured_acceptance.yaml
+system:
+  collection_backend: process
+  actor_process_count: 32
+  actor_torch_threads: 1
+  learner_torch_threads: 16
+model:
+  gru_hidden_size: 32
+  encoder_mlp_width: 32
+  typed_feature_width: 8
+  public_heuristic_logit_bias_scale: 1.0
+  public_heuristic_actor_logit_bias_scale: 1.0
+training:
+  profile_timers: true
+  fixed_opponent_backend: simulator_native
+  actor_policy_backend: heuristic_public
+  actor_heuristic_fraction: 1.0
+  structured_aux:
+    teacher_public_heuristic_coef: 0.10
+  structured_warmstart:
+    updates: 1
+    teacher_public_heuristic_coef: 0.50
+evaluation:
+  periodic_dev_eval_interval_updates: 5
+league:
+  sampling:
+    heuristic_public_start_updates: 0
+    heuristic_public_mix_fraction: 1.0

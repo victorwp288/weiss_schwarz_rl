@@ -1,0 +1,17 @@
+schema_version: 2
+description: structured_acceptance local tiny64 learning frontier with richer snapshot anchors for thesis evaluation
+extends: structured_acceptance_local_learning_frontier.yaml
+league:
+  promotion:
+    anchor_set_v1:
+      optional_if_available:
+        - B2 HeuristicPublic
+        - Previous champion snapshot
+        - Previous recent snapshot
+evaluation:
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      optional_if_available:
+        - B2 HeuristicPublic
+        - Previous champion snapshot
+        - Previous recent snapshot

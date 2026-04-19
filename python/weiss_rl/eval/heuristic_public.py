@@ -1,9 +1,9 @@
-"""Deterministic public-only heuristic policy used for the optional B2 anchor."""
+"""Deterministic public-only heuristic policies used for heuristic anchors."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Mapping
+from dataclasses import dataclass, replace
+from typing import Any, Mapping
 
 import numpy as np
 
@@ -19,6 +19,108 @@ _SLOT_PREFERENCE = {
     4: 6,
 }
 _SLOT_PREFERENCE_ARRAY = np.asarray([_SLOT_PREFERENCE[index] for index in range(5)], dtype=np.int64)
+
+
+@dataclass(frozen=True, slots=True)
+class HeuristicPublicScoringProfile:
+    name: str
+    attack_priority: int = 900
+    encore_pay_priority: int = 700
+    play_priority: int = 650
+    climax_priority: int = 550
+    clock_priority: int = 500
+    event_priority: int = 320
+    choice_select_priority: int = 300
+    level_up_priority: int = 290
+    trigger_order_priority: int = 280
+    mulligan_confirm_priority: int = 260
+    move_priority: int = 120
+    pager_priority: int = 170
+    pass_priority: int = 160
+    mulligan_select_priority: int = 120
+    encore_decline_priority: int = 110
+    attack_direct_open_bonus: int = 60
+    attack_direct_blocked_bonus: int = 15
+    attack_frontal_win_bonus: int = 45
+    attack_frontal_loss_bonus: int = 25
+    attack_side_allowed_bonus: int = 40
+    attack_side_blocked_bonus: int = 5
+    attack_soul_scale: int = 4
+    play_front_bonus: int = 40
+    play_back_bonus: int = 20
+    move_back_to_front_bonus: int = 30
+    move_center_bonus: int = 15
+    climax_attacker_scale: int = 10
+    climax_defender_scale: int = 4
+    climax_active_bonus: int = 10
+    climax_inactive_bonus: int = -20
+    early_clock_score: int = 40
+    late_clock_score: int = 10
+
+
+_BASE_HEURISTIC_PUBLIC_SCORING_PROFILE = HeuristicPublicScoringProfile(name="base")
+_HEURISTIC_PUBLIC_SCORING_PROFILES = {
+    "base": _BASE_HEURISTIC_PUBLIC_SCORING_PROFILE,
+    "aggressive": replace(
+        _BASE_HEURISTIC_PUBLIC_SCORING_PROFILE,
+        name="aggressive",
+        attack_priority=940,
+        climax_priority=610,
+        move_priority=210,
+        pass_priority=115,
+        attack_direct_open_bonus=85,
+        attack_direct_blocked_bonus=42,
+        attack_frontal_win_bonus=40,
+        attack_frontal_loss_bonus=12,
+        attack_side_allowed_bonus=18,
+        attack_side_blocked_bonus=-10,
+        attack_soul_scale=7,
+        play_front_bonus=60,
+        play_back_bonus=6,
+        move_back_to_front_bonus=48,
+        move_center_bonus=28,
+        climax_attacker_scale=16,
+        climax_defender_scale=8,
+        climax_active_bonus=18,
+        climax_inactive_bonus=-32,
+        early_clock_score=18,
+        late_clock_score=4,
+    ),
+    "control": replace(
+        _BASE_HEURISTIC_PUBLIC_SCORING_PROFILE,
+        name="control",
+        attack_priority=870,
+        play_priority=680,
+        climax_priority=505,
+        move_priority=195,
+        pass_priority=185,
+        attack_direct_open_bonus=38,
+        attack_direct_blocked_bonus=0,
+        attack_frontal_win_bonus=58,
+        attack_frontal_loss_bonus=35,
+        attack_side_allowed_bonus=52,
+        attack_side_blocked_bonus=0,
+        attack_soul_scale=2,
+        play_front_bonus=22,
+        play_back_bonus=38,
+        move_back_to_front_bonus=18,
+        move_center_bonus=6,
+        climax_attacker_scale=6,
+        climax_defender_scale=2,
+        climax_active_bonus=6,
+        climax_inactive_bonus=-8,
+        early_clock_score=48,
+        late_clock_score=14,
+    ),
+}
+
+
+def heuristic_public_scoring_profile(name: str) -> HeuristicPublicScoringProfile:
+    profile = _HEURISTIC_PUBLIC_SCORING_PROFILES.get(str(name).strip().lower())
+    if profile is None:
+        supported = ", ".join(sorted(_HEURISTIC_PUBLIC_SCORING_PROFILES))
+        raise ValueError(f"unknown heuristic public profile {name!r}; expected one of: {supported}")
+    return profile
 
 
 def _require_mapping(value: object, *, context: str) -> Mapping[str, object]:
@@ -187,13 +289,22 @@ class PublicObservationLayout:
 class HeuristicPublicPolicy:
     """Deterministic action selection that only consults public observation features."""
 
-    def __init__(self, *, action_catalog: ActionCatalog, observation_layout: PublicObservationLayout) -> None:
+    def __init__(
+        self,
+        *,
+        action_catalog: ActionCatalog,
+        observation_layout: PublicObservationLayout,
+        scoring_profile: HeuristicPublicScoringProfile | str = "base",
+    ) -> None:
         self._action_catalog = action_catalog
         self._observation_layout = observation_layout
+        self._scoring_profile = (
+            scoring_profile
+            if isinstance(scoring_profile, HeuristicPublicScoringProfile)
+            else heuristic_public_scoring_profile(str(scoring_profile))
+        )
         self._decode_cache: dict[int, DecodedAction] = {}
-        self._family_index = {
-            family.name: index for index, family in enumerate(self._action_catalog.families)
-        }
+        self._family_index = {family.name: index for index, family in enumerate(self._action_catalog.families)}
         self._attack_type_index = {
             str(name): index for index, name in enumerate(self._action_catalog.attack_type_names)
         }
@@ -220,13 +331,22 @@ class HeuristicPublicPolicy:
         self._meta_unused = int(np.iinfo(np.uint16).max)
 
     @classmethod
-    def from_spec_bundle(cls, spec_bundle: Mapping[str, object]) -> HeuristicPublicPolicy:
+    def from_spec_bundle(
+        cls,
+        spec_bundle: Mapping[str, object],
+        *,
+        scoring_profile: HeuristicPublicScoringProfile | str = "base",
+    ) -> HeuristicPublicPolicy:
         action_catalog = ActionCatalog.from_spec_bundle(spec_bundle)
         observation_layout = PublicObservationLayout.from_spec_bundle(
             spec_bundle,
             stage_slot_count=action_catalog.max_stage,
         )
-        return cls(action_catalog=action_catalog, observation_layout=observation_layout)
+        return cls(
+            action_catalog=action_catalog,
+            observation_layout=observation_layout,
+            scoring_profile=scoring_profile,
+        )
 
     @property
     def pass_action_id(self) -> int:
@@ -346,11 +466,10 @@ class HeuristicPublicPolicy:
             if np.any(valid):
                 valid_rows = rows[valid]
                 valid_slots = slots[valid]
-                out[valid] = (
-                    _slot_preference(valid_slots)
-                    + np.maximum(self_power[valid_rows, valid_slots], 0) // 1000
-                )
+                out[valid] = _slot_preference(valid_slots) + np.maximum(self_power[valid_rows, valid_slots], 0) // 1000
             return out
+
+        profile = self._scoring_profile
 
         attack_mask = family_ids == self._attack_family_id
         if np.any(attack_mask):
@@ -360,34 +479,38 @@ class HeuristicPublicPolicy:
             type_score = np.zeros(slots.shape, dtype=np.int64)
             if self._direct_attack_type_id >= 0:
                 direct = attack_types == self._direct_attack_type_id
-                type_score[direct] = np.where(opp_occupied[attack_rows[direct], slots[direct]], 15, 60)
+                type_score[direct] = np.where(
+                    opp_occupied[attack_rows[direct], slots[direct]],
+                    profile.attack_direct_blocked_bonus,
+                    profile.attack_direct_open_bonus,
+                )
             if self._frontal_attack_type_id >= 0:
                 frontal = attack_types == self._frontal_attack_type_id
                 type_score[frontal] = np.where(
                     self_power[attack_rows[frontal], slots[frontal]] >= opp_power[attack_rows[frontal], slots[frontal]],
-                    45,
-                    25,
+                    profile.attack_frontal_win_bonus,
+                    profile.attack_frontal_loss_bonus,
                 )
             if self._side_attack_type_id >= 0:
                 side = attack_types == self._side_attack_type_id
                 type_score[side] = np.where(
                     self_side_attack_allowed[attack_rows[side], slots[side]],
-                    40,
-                    5,
+                    profile.attack_side_allowed_bonus,
+                    profile.attack_side_blocked_bonus,
                 )
             attack_score = (
                 type_score
                 + _slot_preference(slots)
-                + np.maximum(self_soul[attack_rows, slots], 0) * 4
+                + np.maximum(self_soul[attack_rows, slots], 0) * profile.attack_soul_scale
                 + np.maximum(self_power[attack_rows, slots], 0) // 1000
             )
             attack_score = np.where(self_occupied[attack_rows, slots], attack_score, -1000)
-            score0[attack_mask] = 900
+            score0[attack_mask] = profile.attack_priority
             score1[attack_mask] = attack_score
 
         encore_pay_mask = family_ids == self._encore_pay_family_id
         if np.any(encore_pay_mask):
-            score0[encore_pay_mask] = 700
+            score0[encore_pay_mask] = profile.encore_pay_priority
             score1[encore_pay_mask] = _score_slot_action(row_ids[encore_pay_mask], arg0[encore_pay_mask])
 
         play_mask = family_ids == self._play_family_id
@@ -395,60 +518,70 @@ class HeuristicPublicPolicy:
             play_rows = row_ids[play_mask]
             slots = np.where(arg1[play_mask] >= 0, arg1[play_mask], 0)
             play_score = _slot_preference(slots)
-            play_score = play_score + np.where(slots <= 2, 40, np.where(slots <= 4, 20, 0))
+            play_score = play_score + np.where(
+                slots <= 2,
+                profile.play_front_bonus,
+                np.where(slots <= 4, profile.play_back_bonus, 0),
+            )
             play_score = np.where(self_occupied[play_rows, slots], -1000, play_score)
-            score0[play_mask] = 650
+            score0[play_mask] = profile.play_priority
             score1[play_mask] = play_score
             score2[play_mask] = _prefer_lower(arg0[play_mask])
 
         climax_mask = family_ids == self._climax_family_id
         if np.any(climax_mask):
-            attackers = np.count_nonzero(self_occupied[:, :3] & ~self_attacked[:, :3], axis=1).astype(np.int64, copy=False)
+            attackers = np.count_nonzero(self_occupied[:, :3] & ~self_attacked[:, :3], axis=1).astype(
+                np.int64, copy=False
+            )
             defenders = np.count_nonzero(opp_occupied[:, :3], axis=1).astype(np.int64, copy=False)
             climax_rows = row_ids[climax_mask]
-            score0[climax_mask] = 550
-            score1[climax_mask] = attackers[climax_rows] * 10 + defenders[climax_rows] * 4 + np.where(
-                attackers[climax_rows] > 0,
-                10,
-                -20,
+            score0[climax_mask] = profile.climax_priority
+            score1[climax_mask] = (
+                attackers[climax_rows] * profile.climax_attacker_scale
+                + defenders[climax_rows] * profile.climax_defender_scale
+                + np.where(
+                    attackers[climax_rows] > 0,
+                    profile.climax_active_bonus,
+                    profile.climax_inactive_bonus,
+                )
             )
             score2[climax_mask] = _prefer_lower(arg0[climax_mask])
 
         clock_mask = family_ids == self._clock_family_id
         if np.any(clock_mask):
             clock_rows = row_ids[clock_mask]
-            score0[clock_mask] = 500
+            score0[clock_mask] = profile.clock_priority
             score1[clock_mask] = np.where(
                 (self_level_count[clock_rows] <= 0) & (self_clock_count[clock_rows] < 6),
-                40 - self_clock_count[clock_rows],
-                10,
+                profile.early_clock_score - self_clock_count[clock_rows],
+                profile.late_clock_score,
             )
             score2[clock_mask] = _prefer_lower(arg0[clock_mask])
 
         event_mask = family_ids == self._event_family_id
         if np.any(event_mask):
-            score0[event_mask] = 320
+            score0[event_mask] = profile.event_priority
             score1[event_mask] = 10
             score2[event_mask] = _prefer_lower(arg0[event_mask])
 
         choice_select_mask = family_ids == self._choice_select_family_id
         if np.any(choice_select_mask):
-            score0[choice_select_mask] = 300
+            score0[choice_select_mask] = profile.choice_select_priority
             score1[choice_select_mask] = _prefer_lower(arg0[choice_select_mask])
 
         level_up_mask = family_ids == self._level_up_family_id
         if np.any(level_up_mask):
-            score0[level_up_mask] = 290
+            score0[level_up_mask] = profile.level_up_priority
             score1[level_up_mask] = _prefer_lower(arg0[level_up_mask])
 
         trigger_order_mask = family_ids == self._trigger_order_family_id
         if np.any(trigger_order_mask):
-            score0[trigger_order_mask] = 280
+            score0[trigger_order_mask] = profile.trigger_order_priority
             score1[trigger_order_mask] = _prefer_lower(arg0[trigger_order_mask])
 
         mulligan_confirm_mask = family_ids == self._mulligan_confirm_family_id
         if np.any(mulligan_confirm_mask):
-            score0[mulligan_confirm_mask] = 260
+            score0[mulligan_confirm_mask] = profile.mulligan_confirm_priority
 
         move_mask = family_ids == self._move_family_id
         if np.any(move_mask):
@@ -468,37 +601,37 @@ class HeuristicPublicPolicy:
                 valid_to = to_slots[valid]
                 improvement = _slot_preference(valid_to) - _slot_preference(valid_from)
                 bonus = np.zeros(valid_to.shape, dtype=np.int64)
-                bonus[(valid_from >= 3) & (valid_to <= 2)] += 30
-                bonus[(valid_to == 1) & (valid_from != 1)] += 15
+                bonus[(valid_from >= 3) & (valid_to <= 2)] += profile.move_back_to_front_bonus
+                bonus[(valid_to == 1) & (valid_from != 1)] += profile.move_center_bonus
                 legal = self_occupied[valid_rows, valid_from] & ~self_occupied[valid_rows, valid_to]
                 move_score[valid] = np.where(legal, improvement + bonus, -1000)
-            score0[move_mask] = 120
+            score0[move_mask] = profile.move_priority
             score1[move_mask] = move_score
 
         next_page_mask = family_ids == self._next_page_family_id
         if np.any(next_page_mask):
             next_rows = row_ids[next_page_mask]
-            score0[next_page_mask] = 170
+            score0[next_page_mask] = profile.pager_priority
             score1[next_page_mask] = np.maximum(choice_total[next_rows] - (choice_page_start[next_rows] + 16), 0)
 
         prev_page_mask = family_ids == self._prev_page_family_id
         if np.any(prev_page_mask):
             prev_rows = row_ids[prev_page_mask]
-            score0[prev_page_mask] = 170
+            score0[prev_page_mask] = profile.pager_priority
             score1[prev_page_mask] = np.maximum(choice_page_start[prev_rows], 0)
 
         pass_mask = family_ids == self._pass_family_id
         if np.any(pass_mask):
-            score0[pass_mask] = 160
+            score0[pass_mask] = profile.pass_priority
 
         mulligan_select_mask = family_ids == self._mulligan_select_family_id
         if np.any(mulligan_select_mask):
-            score0[mulligan_select_mask] = 120
+            score0[mulligan_select_mask] = profile.mulligan_select_priority
             score1[mulligan_select_mask] = _prefer_lower(arg0[mulligan_select_mask])
 
         encore_decline_mask = family_ids == self._encore_decline_family_id
         if np.any(encore_decline_mask):
-            score0[encore_decline_mask] = 110
+            score0[encore_decline_mask] = profile.encore_decline_priority
             score1[encore_decline_mask] = _score_slot_action(row_ids[encore_decline_mask], arg0[encore_decline_mask])
 
         chosen_actions = np.full((obs_batch.shape[0],), self.pass_action_id, dtype=np.int64)
@@ -550,9 +683,15 @@ class HeuristicPublicPolicy:
         self_stage = self._stage_arrays(obs_batch, self._observation_layout.self_player)
         opponent_stage = self._stage_arrays(obs_batch, self._observation_layout.opponent_player)
         return {
-            "self_level_count": obs_batch[:, self._observation_layout.self_player.level_count_index].astype(np.int64, copy=False),
-            "self_clock_count": obs_batch[:, self._observation_layout.self_player.clock_count_index].astype(np.int64, copy=False),
-            "choice_page_start": obs_batch[:, self._observation_layout.choice_page_start_index].astype(np.int64, copy=False),
+            "self_level_count": obs_batch[:, self._observation_layout.self_player.level_count_index].astype(
+                np.int64, copy=False
+            ),
+            "self_clock_count": obs_batch[:, self._observation_layout.self_player.clock_count_index].astype(
+                np.int64, copy=False
+            ),
+            "choice_page_start": obs_batch[:, self._observation_layout.choice_page_start_index].astype(
+                np.int64, copy=False
+            ),
             "choice_total": obs_batch[:, self._observation_layout.choice_total_index].astype(np.int64, copy=False),
             "self_occupied": self_stage["occupied"],
             "self_attacked": self_stage["has_attacked"],
@@ -597,45 +736,52 @@ class HeuristicPublicPolicy:
         return decoded
 
     def _score_action(self, action: DecodedAction, board: PublicBoardState) -> tuple[int, int, int, int]:
+        profile = self._scoring_profile
         family = action.family
         if family == "attack":
-            return (900, self._score_attack(action, board), 0, 0)
+            return (profile.attack_priority, self._score_attack(action, board), 0, 0)
         if family == "encore_pay":
-            return (700, self._score_slot_action(action.slot, board.self_stage), 0, 0)
+            return (profile.encore_pay_priority, self._score_slot_action(action.slot, board.self_stage), 0, 0)
         if family == "main_play_character":
-            return (650, self._score_play_character(action, board), self._prefer_lower(action.hand_index), 0)
+            return (
+                profile.play_priority,
+                self._score_play_character(action, board),
+                self._prefer_lower(action.hand_index),
+                0,
+            )
         if family == "climax_play":
-            return (550, self._score_climax(board), self._prefer_lower(action.hand_index), 0)
+            return (profile.climax_priority, self._score_climax(board), self._prefer_lower(action.hand_index), 0)
         if family == "clock_from_hand":
-            return (500, self._score_clock(board), self._prefer_lower(action.hand_index), 0)
+            return (profile.clock_priority, self._score_clock(board), self._prefer_lower(action.hand_index), 0)
         if family == "main_play_event":
-            return (320, 10, self._prefer_lower(action.hand_index), 0)
+            return (profile.event_priority, 10, self._prefer_lower(action.hand_index), 0)
         if family == "choice_select":
-            return (300, self._prefer_lower(action.index), 0, 0)
+            return (profile.choice_select_priority, self._prefer_lower(action.index), 0, 0)
         if family == "level_up":
-            return (290, self._prefer_lower(action.index), 0, 0)
+            return (profile.level_up_priority, self._prefer_lower(action.index), 0, 0)
         if family == "trigger_order":
-            return (280, self._prefer_lower(action.index), 0, 0)
+            return (profile.trigger_order_priority, self._prefer_lower(action.index), 0, 0)
         if family == "mulligan_confirm":
-            return (260, 0, 0, 0)
+            return (profile.mulligan_confirm_priority, 0, 0, 0)
         if family == "main_move":
-            return (120, self._score_move(action, board), 0, 0)
+            return (profile.move_priority, self._score_move(action, board), 0, 0)
         if family == "choice_next_page":
             remaining = max(board.choice_total - (board.choice_page_start + 16), 0)
-            return (170, remaining, 0, 0)
+            return (profile.pager_priority, remaining, 0, 0)
         if family == "choice_prev_page":
-            return (170, max(board.choice_page_start, 0), 0, 0)
+            return (profile.pager_priority, max(board.choice_page_start, 0), 0, 0)
         if family == "pass":
-            return (160, 0, 0, 0)
+            return (profile.pass_priority, 0, 0, 0)
         if family == "mulligan_select":
-            return (120, self._prefer_lower(action.hand_index), 0, 0)
+            return (profile.mulligan_select_priority, self._prefer_lower(action.hand_index), 0, 0)
         if family == "encore_decline":
-            return (110, self._score_slot_action(action.slot, board.self_stage), 0, 0)
+            return (profile.encore_decline_priority, self._score_slot_action(action.slot, board.self_stage), 0, 0)
         if family == "concede":
             return (-1000, 0, 0, 0)
         raise RuntimeError(f"Unhandled B2 heuristic action family: {family!r}")
 
     def _score_attack(self, action: DecodedAction, board: PublicBoardState) -> int:
+        profile = self._scoring_profile
         slot = 0 if action.slot is None else int(action.slot)
         attacker = board.self_stage[slot]
         defender = board.opponent_stage[slot]
@@ -643,33 +789,43 @@ class HeuristicPublicPolicy:
             return -1000
         attack_type = action.attack_type or "frontal"
         if attack_type == "direct":
-            type_score = 60 if not defender.occupied else 15
+            type_score = (
+                profile.attack_direct_open_bonus if not defender.occupied else profile.attack_direct_blocked_bonus
+            )
         elif attack_type == "frontal":
-            type_score = 45 if attacker.power >= defender.power else 25
+            type_score = (
+                profile.attack_frontal_win_bonus
+                if attacker.power >= defender.power
+                else profile.attack_frontal_loss_bonus
+            )
         elif attack_type == "side":
-            type_score = 40 if attacker.side_attack_allowed else 5
+            type_score = (
+                profile.attack_side_allowed_bonus if attacker.side_attack_allowed else profile.attack_side_blocked_bonus
+            )
         else:
             type_score = 0
         return (
             type_score
             + _SLOT_PREFERENCE.get(slot, 0)
-            + max(attacker.effective_soul, 0) * 4
+            + max(attacker.effective_soul, 0) * profile.attack_soul_scale
             + max(attacker.power, 0) // 1000
         )
 
     def _score_play_character(self, action: DecodedAction, board: PublicBoardState) -> int:
+        profile = self._scoring_profile
         slot = 0 if action.stage_slot is None else int(action.stage_slot)
         stage = board.self_stage[slot]
         if stage.occupied:
             return -1000
         bonus = _SLOT_PREFERENCE.get(slot, 0)
         if slot in _FRONT_ROW_SLOTS:
-            return 40 + bonus
+            return profile.play_front_bonus + bonus
         if slot in _BACK_ROW_SLOTS:
-            return 20 + bonus
+            return profile.play_back_bonus + bonus
         return bonus
 
     def _score_move(self, action: DecodedAction, board: PublicBoardState) -> int:
+        profile = self._scoring_profile
         if action.from_slot is None or action.to_slot is None:
             return -1000
         origin = board.self_stage[int(action.from_slot)]
@@ -679,24 +835,30 @@ class HeuristicPublicPolicy:
         improvement = _SLOT_PREFERENCE.get(int(action.to_slot), 0) - _SLOT_PREFERENCE.get(int(action.from_slot), 0)
         bonus = 0
         if int(action.from_slot) in _BACK_ROW_SLOTS and int(action.to_slot) in _FRONT_ROW_SLOTS:
-            bonus += 30
+            bonus += profile.move_back_to_front_bonus
         if int(action.to_slot) == 1 and int(action.from_slot) != 1:
-            bonus += 15
+            bonus += profile.move_center_bonus
         return improvement + bonus
 
     def _score_climax(self, board: PublicBoardState) -> int:
+        profile = self._scoring_profile
         attackers = sum(
             1
             for slot in _FRONT_ROW_SLOTS
             if board.self_stage[slot].occupied and not board.self_stage[slot].has_attacked
         )
         defenders = sum(1 for slot in _FRONT_ROW_SLOTS if board.opponent_stage[slot].occupied)
-        return attackers * 10 + defenders * 4 + (10 if attackers > 0 else -20)
+        return (
+            attackers * profile.climax_attacker_scale
+            + defenders * profile.climax_defender_scale
+            + (profile.climax_active_bonus if attackers > 0 else profile.climax_inactive_bonus)
+        )
 
     def _score_clock(self, board: PublicBoardState) -> int:
+        profile = self._scoring_profile
         if board.self_level_count <= 0 and board.self_clock_count < 6:
-            return 40 - board.self_clock_count
-        return 10
+            return profile.early_clock_score - board.self_clock_count
+        return profile.late_clock_score
 
     def _score_slot_action(self, slot: int | None, stage: tuple[StageSlotPublic, ...]) -> int:
         if slot is None:
@@ -716,7 +878,9 @@ __all__ = [
     "ActionCatalog",
     "DecodedAction",
     "HeuristicPublicPolicy",
+    "HeuristicPublicScoringProfile",
     "PublicBoardState",
     "PublicObservationLayout",
     "StageSlotPublic",
+    "heuristic_public_scoring_profile",
 ]

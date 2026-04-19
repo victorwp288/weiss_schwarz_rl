@@ -199,10 +199,14 @@ def load_study_config(path: Path | str) -> StudyConfig:
     _reject_unknown_keys(doc, allowed=_TOP_LEVEL_KEYS, context=str(config_file))
     metagame = _parse_metagame_config(_require_mapping(doc["metagame"], context="metagame"))
     sensitivity = _parse_sensitivity_config(_require_mapping(doc["sensitivity"], context="sensitivity"))
-    schema_version = None if "schema_version" not in doc else _require_int(
-        doc["schema_version"],
-        field_name="schema_version",
-        minimum=1,
+    schema_version = (
+        None
+        if "schema_version" not in doc
+        else _require_int(
+            doc["schema_version"],
+            field_name="schema_version",
+            minimum=1,
+        )
     )
     description = _require_text(doc.get("description", config_file.stem), field_name="description")
     return StudyConfig(

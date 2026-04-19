@@ -13,6 +13,7 @@ from weiss_rl.eval import (
     build_matchup_export,
     build_paper_readiness_summary,
     build_seat_advantage_diagnostics,
+    load_dev_eval_summaries,
     load_eval_game_records,
     resolve_final_policy_set,
     run_final_eval,
@@ -22,6 +23,7 @@ from weiss_rl.eval import (
     write_paper_readiness_json,
 )
 from weiss_rl.eval.payoff_folding import PayoffFoldScheme
+from weiss_rl.eval.policy_set import recommend_focal_policy_id
 from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
 from weiss_rl.metagame import build_sensitivity_report
 from weiss_rl.plotting.paper_figures import render_paper_figures
@@ -39,6 +41,7 @@ from weiss_rl.toy_public_demo import (
 )
 
 _SHA256_HEX_LENGTH = 64
+_GIT_COMMIT_HEX_LENGTH = 40
 
 
 def _normalize_sha256(value: str) -> str:
@@ -62,6 +65,15 @@ def _expected_sha256(value: str, *, flag_name: str) -> str:
 def _require_matching_hash(*, flag_name: str, expected: str, actual: str) -> None:
     if expected and expected != actual:
         raise RuntimeError(f"{flag_name} mismatch: expected {expected}, observed {actual}")
+
+
+def _normalize_git_commit(value: str) -> str:
+    normalized = value.strip().lower()
+    if len(normalized) != _GIT_COMMIT_HEX_LENGTH:
+        return ""
+    if any(char not in "0123456789abcdef" for char in normalized):
+        return ""
+    return normalized
 
 
 def _resolve_run_label(parser: argparse.ArgumentParser, run_label: str, run_id_alias: str) -> str:
@@ -92,6 +104,17 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _effective_manifest_git_commit(
+    *,
+    manifest: dict[str, Any],
+    git_commit_override: str,
+) -> str:
+    current = _normalize_git_commit(str(manifest.get("git_commit", "")))
+    if current:
+        return current
+    return _normalize_git_commit(git_commit_override)
 
 
 def _persist_policy_selection_in_manifest(
@@ -133,6 +156,66 @@ def _resolve_selection_inputs_from_manifest(
     return _resolve(source_paths.get("snapshot_registry_json")), _resolve(source_paths.get("dev_eval_summaries_json"))
 
 
+def _default_dev_eval_summaries_path(layout: ArtifactLayout) -> Path | None:
+    for candidate in (
+        layout.training_logs_dir / "dev_eval_summaries.json",
+        layout.training_logs_dir / "periodic_dev_eval_summaries.json",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _run_summary_marks_canonical_eval_completed(layout: ArtifactLayout) -> bool:
+    if not layout.run_summary_path.is_file():
+        return False
+    try:
+        run_summary = _load_json_object(layout.run_summary_path, label="run summary")
+    except Exception:
+        return False
+    return bool(run_summary.get("canonical_eval_completed", False))
+
+
+def _authoritative_manifest_policy_selection(
+    *,
+    manifest: dict[str, Any],
+    layout: ArtifactLayout,
+    snapshot_registry_path: Path | None,
+    dev_eval_summaries_path: Path | None,
+) -> tuple[list[str], dict[str, Any]] | None:
+    if snapshot_registry_path is not None or dev_eval_summaries_path is not None:
+        return None
+
+    manifest_policy_ids = manifest.get("policy_set_selection")
+    if not isinstance(manifest_policy_ids, list):
+        return None
+    resolved_from_manifest = [str(policy_id).strip() for policy_id in manifest_policy_ids if str(policy_id).strip()]
+    if not resolved_from_manifest:
+        return None
+
+    details = manifest.get("policy_set_selection_details")
+    resolved_by = ""
+    status = ""
+    selection_details: dict[str, Any] = {}
+    if isinstance(details, dict):
+        selection_details = dict(details)
+        resolved_by = str(details.get("resolved_by", "")).strip()
+        status = str(details.get("status", "")).strip().lower()
+    if status == "unresolved":
+        return None
+
+    has_completed_eval_artifacts = (
+        layout.final_eval_summary_json().is_file() or _run_summary_marks_canonical_eval_completed(layout)
+    )
+    if not has_completed_eval_artifacts and resolved_by != "canonical_eval_pipeline_v1":
+        return None
+
+    selection_details.setdefault("mode", "manifest_policy_set_selection")
+    selection_details.setdefault("status", "resolved")
+    selection_details["policy_count"] = len(resolved_from_manifest)
+    return resolved_from_manifest, selection_details
+
+
 def _resolve_policy_ids_for_run(
     *,
     policy_ids: list[str],
@@ -142,66 +225,101 @@ def _resolve_policy_ids_for_run(
     snapshot_registry_path: Path | None,
     dev_eval_summaries_path: Path | None,
 ) -> tuple[list[str], dict[str, Any], Path | None, Path | None]:
+    manifest_snapshot_registry, manifest_dev_eval = _resolve_selection_inputs_from_manifest(
+        stack_root=stack.root,
+        manifest=manifest,
+    )
+    resolved_snapshot_registry: Path | None = (
+        snapshot_registry_path or manifest_snapshot_registry or (layout.training_snapshots_dir / "registry.json")
+    )
+    if resolved_snapshot_registry is None or not resolved_snapshot_registry.is_file():
+        resolved_snapshot_registry = None
+    resolved_dev_eval = dev_eval_summaries_path or manifest_dev_eval
+    if resolved_dev_eval is None or not resolved_dev_eval.is_file():
+        resolved_dev_eval = _default_dev_eval_summaries_path(layout)
+
     explicit_policy_ids = [policy_id.strip() for policy_id in policy_ids if policy_id.strip()]
     if explicit_policy_ids:
         return (
             explicit_policy_ids,
             {"mode": "explicit_cli", "policy_count": len(explicit_policy_ids)},
-            snapshot_registry_path,
-            dev_eval_summaries_path,
+            resolved_snapshot_registry,
+            resolved_dev_eval,
         )
 
+    authoritative_manifest_selection = _authoritative_manifest_policy_selection(
+        manifest=manifest,
+        layout=layout,
+        snapshot_registry_path=snapshot_registry_path,
+        dev_eval_summaries_path=dev_eval_summaries_path,
+    )
+    if authoritative_manifest_selection is not None:
+        resolved_from_manifest, selection_details = authoritative_manifest_selection
+        return resolved_from_manifest, selection_details, resolved_snapshot_registry, resolved_dev_eval
+
     manifest_policy_ids = manifest.get("policy_set_selection")
-    if isinstance(manifest_policy_ids, list):
-        resolved_from_manifest = [str(policy_id).strip() for policy_id in manifest_policy_ids if str(policy_id).strip()]
-        if resolved_from_manifest:
-            return (
-                resolved_from_manifest,
-                {
-                    "mode": "manifest_policy_set_selection",
-                    "policy_count": len(resolved_from_manifest),
-                },
-                snapshot_registry_path,
-                dev_eval_summaries_path,
-            )
+    resolved_from_manifest = (
+        [str(policy_id).strip() for policy_id in manifest_policy_ids if str(policy_id).strip()]
+        if isinstance(manifest_policy_ids, list)
+        else []
+    )
 
     evaluation = stack.config.evaluation
     if evaluation is None:
         raise ValueError("stack config is missing evaluation settings")
 
-    manifest_snapshot_registry, manifest_dev_eval = _resolve_selection_inputs_from_manifest(
-        stack_root=stack.root,
-        manifest=manifest,
-    )
-    resolved_snapshot_registry = (
-        snapshot_registry_path or manifest_snapshot_registry or (layout.training_snapshots_dir / "registry.json")
-    )
-    resolved_dev_eval = dev_eval_summaries_path or manifest_dev_eval
-    if not resolved_snapshot_registry.is_file():
-        raise FileNotFoundError(
-            f"final policy-set resolution requires a snapshot registry; checked {resolved_snapshot_registry}"
+    if resolved_snapshot_registry is not None and resolved_dev_eval is not None:
+        resolved = resolve_final_policy_set(
+            snapshot_registry_path=resolved_snapshot_registry,
+            dev_eval_summaries_path=resolved_dev_eval,
+            config=evaluation.final_policy_set_selection,
+            final_policy_set_size=evaluation.final_policy_set_size,
         )
-    if resolved_dev_eval is None or not resolved_dev_eval.is_file():
-        raise FileNotFoundError(f"final policy-set resolution requires dev-eval summaries; checked {resolved_dev_eval}")
+        return (
+            resolved,
+            {
+                "mode": "deterministic_v1",
+                "policy_count": len(resolved),
+                "snapshot_registry_path": resolved_snapshot_registry.as_posix(),
+                "dev_eval_summaries_path": resolved_dev_eval.as_posix(),
+                "final_policy_set_size": int(evaluation.final_policy_set_size),
+            },
+            resolved_snapshot_registry,
+            resolved_dev_eval,
+        )
 
-    resolved = resolve_final_policy_set(
-        snapshot_registry_path=resolved_snapshot_registry,
-        dev_eval_summaries_path=resolved_dev_eval,
-        config=evaluation.final_policy_set_selection,
-        final_policy_set_size=evaluation.final_policy_set_size,
-    )
-    return (
-        resolved,
-        {
-            "mode": "deterministic_v1",
-            "policy_count": len(resolved),
-            "snapshot_registry_path": resolved_snapshot_registry.as_posix(),
-            "dev_eval_summaries_path": resolved_dev_eval.as_posix(),
-            "final_policy_set_size": int(evaluation.final_policy_set_size),
-        },
-        resolved_snapshot_registry,
-        resolved_dev_eval,
-    )
+    if resolved_from_manifest:
+        return (
+            resolved_from_manifest,
+            {
+                "mode": "manifest_policy_set_selection_fallback",
+                "policy_count": len(resolved_from_manifest),
+            },
+            resolved_snapshot_registry,
+            resolved_dev_eval,
+        )
+
+    if resolved_snapshot_registry is None:
+        raise FileNotFoundError(
+            "final policy-set resolution requires a snapshot registry; checked "
+            f"{snapshot_registry_path or manifest_snapshot_registry or (layout.training_snapshots_dir / 'registry.json')}"
+        )
+    if resolved_dev_eval is None:
+        checked_paths = [
+            path.as_posix()
+            for path in (
+                dev_eval_summaries_path,
+                manifest_dev_eval,
+                layout.training_logs_dir / "dev_eval_summaries.json",
+                layout.training_logs_dir / "periodic_dev_eval_summaries.json",
+            )
+            if path is not None
+        ]
+        raise FileNotFoundError(
+            "final policy-set resolution requires dev-eval summaries; checked "
+            + (", ".join(checked_paths) if checked_paths else "<none>")
+        )
+    raise AssertionError("policy-set resolution should have returned or raised before reaching this point")
 
 
 def _update_run_level_reports(
@@ -274,6 +392,7 @@ def _run_canonical_eval_pipeline(
     study_config_path: Path | None,
     skip_figures: bool,
     skip_readiness: bool,
+    git_commit_override: str,
 ) -> int:
     layout = ArtifactLayout.from_run_dir(run_dir)
     layout.ensure_directories()
@@ -284,6 +403,16 @@ def _run_canonical_eval_pipeline(
         )
 
     manifest = _load_json_object(layout.manifest_path, label="run manifest")
+    effective_git_commit = _effective_manifest_git_commit(
+        manifest=manifest,
+        git_commit_override=git_commit_override,
+    )
+    if effective_git_commit:
+        manifest_git_commit = _normalize_git_commit(str(manifest.get("git_commit", "")))
+        if manifest_git_commit:
+            print(f"Eval provenance git commit: {manifest_git_commit}")
+        else:
+            print(f"Eval provenance git commit override (not persisted): {effective_git_commit}")
     run_id256 = str(manifest.get("run_id256", "")).strip()
     if len(run_id256) != 64:
         raise ValueError(f"run manifest is missing a valid run_id256: {layout.manifest_path}")
@@ -366,6 +495,19 @@ def _run_canonical_eval_pipeline(
     if resolved_stage1 > resolved_max:
         raise ValueError(f"stage1 paired seeds ({resolved_stage1}) cannot exceed max paired seeds ({resolved_max})")
 
+    recommended_focal_policy_id = None
+    if resolved_registry_path is not None and resolved_dev_eval_path is not None:
+        try:
+            from weiss_rl.league.registry import SnapshotRegistry
+
+            recommended_focal_policy_id = recommend_focal_policy_id(
+                snapshot_registry=SnapshotRegistry.load(resolved_registry_path),
+                dev_eval_summaries=load_dev_eval_summaries(resolved_dev_eval_path),
+                candidate_policy_ids=resolved_policy_ids,
+            )
+        except Exception:
+            recommended_focal_policy_id = None
+
     try:
         if not tensorboard_logger.enabled:
             unavailable_reason = tensorboard_unavailable_reason()
@@ -400,7 +542,8 @@ def _run_canonical_eval_pipeline(
                     "selection": dict(selection_details),
                     "seed_file": seed_file_path.as_posix(),
                     "paired_seed_limit": None if paired_seed_limit is None else int(paired_seed_limit),
-                }
+                },
+                "recommended_focal_policy_id": recommended_focal_policy_id,
             },
             seed_file_path=seed_file_path,
         )
@@ -421,7 +564,10 @@ def _run_canonical_eval_pipeline(
 
         readiness_payload: dict[str, Any] | None = None
         if not skip_readiness:
-            readiness_payload = build_paper_readiness_summary(run_dir=run_dir)
+            readiness_payload = build_paper_readiness_summary(
+                run_dir=run_dir,
+                focal_policy_id=recommended_focal_policy_id,
+            )
             write_paper_readiness_json(layout.paper_readiness_summary_path, readiness_payload)
 
         _update_run_level_reports(
@@ -565,6 +711,12 @@ def main() -> None:
         "--skip-readiness",
         action="store_true",
         help="Skip paper-readiness auditing in canonical non-demo mode",
+    )
+    parser.add_argument(
+        "--git-commit-override",
+        type=str,
+        default="",
+        help="Optional 40-hex git commit shown in eval logs when manifest provenance is missing; never persisted",
     )
     parser.add_argument(
         "--public-demo-paired-seeds",
@@ -720,6 +872,7 @@ def main() -> None:
                 study_config_path=None if args.study_config is None else args.study_config.resolve(),
                 skip_figures=bool(args.skip_figures),
                 skip_readiness=bool(args.skip_readiness),
+                git_commit_override=str(args.git_commit_override),
             )
         )
 

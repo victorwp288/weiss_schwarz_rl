@@ -14,8 +14,9 @@ Goal: get a fresh clone to a successful verification run without needing a 1:1 w
 The repo now supports three useful lanes:
 
 - `configs/stack_smoke.yaml` with `make train-min` is the explicit scaffold-only path. It proves config loading, simulator provenance capture, and run-manifest writing, but it does not claim thesis-grade training.
-- `configs/presets/typed_thesis_locked.yaml` with the published `weiss-sim` package is the canonical simulator-backed path. It is the one to use for real train/eval, metagame, figures, and readiness checks.
-- `configs/presets/typed_local.yaml` is the local typed default when you want a less locked preset for iteration.
+- `python/scripts/thesis_run.py --preset standard` is the canonical simulator-backed thesis path for local train/eval.
+- `python/scripts/thesis_run.py --preset standard-auto-gpu` is the canonical Linux server variant when you want automatic multi-GPU actor sharding.
+- `configs/presets/typed_thesis_locked.yaml` and `configs/presets/typed_local.yaml` remain available as lower-level legacy/compatibility stack surfaces.
 - `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline.
 
 The full runtime modes are described in `runtime_modes.md`; this page stays focused on the quickest honest onboarding path.
@@ -100,17 +101,18 @@ Use this for the real thesis-oriented train/eval path. It exercises the single-n
 
 Requirements:
 
-- use `configs/presets/typed_thesis_locked.yaml`
+- use `python/scripts/thesis_run.py --preset standard` for the local single-GPU path, or `--preset standard-auto-gpu` on a multi-GPU Linux node
 - install the published simulator package with `uv sync --extra dev --extra sim`, or otherwise ensure the active interpreter can import the same validated `weiss_sim`
 - keep the run on a single machine for the canonical path
 
 Run:
 
 ```bash
-uv run python python/scripts/train.py --stack-config configs/presets/typed_thesis_locked.yaml --run-label thesis_local --device cpu
-uv run python python/scripts/eval.py --stack-config configs/presets/typed_thesis_locked.yaml --run-dir runs/thesis_local
+uv run python python/scripts/thesis_run.py --preset standard --run-label thesis_local --device cpu --max-updates 1 --skip-compare
 uv run python python/scripts/make_figures.py --run-dir runs/thesis_local
 ```
+
+That wrapper call trains with `structured_acceptance_standard.yaml` and, by default, evaluates with `structured_acceptance_standard_thesis_eval.yaml`.
 
 Expected training artifacts when the runtime is available:
 
@@ -132,11 +134,10 @@ You should see fields like `run_id256`, `spec_hash256`, `config_hash256`, `simul
 These are the follow-up checks for the other top-level entrypoints:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/presets/typed_thesis_locked.yaml
+uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
-make verify
-bash scripts/run_local_ci_parity.sh
+uv run python python/scripts/verify_repo.py
 ```
 
 Expected outcomes:
@@ -151,12 +152,12 @@ This path is intentionally synthetic. It exists so CI and public readers can exe
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --stack-config configs/presets/structured_acceptance_standard.yaml \
   --public-demo \
   --run-label toy_public_demo
 
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/typed_thesis_locked.yaml \
+  --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml \
   --public-demo \
   --run-dir runs/toy_public_demo
 

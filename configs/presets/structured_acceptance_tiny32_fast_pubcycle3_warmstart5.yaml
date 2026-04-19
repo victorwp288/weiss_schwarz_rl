@@ -1,0 +1,11 @@
+schema_version: 2
+description: structured_acceptance tiny32 fast packed WSL frontier with 5 cyclic public-teacher warmstart updates
+extends: structured_acceptance_tiny32_fast_packed.yaml
+training:
+  structured_warmstart:
+    updates: 5
+    teacher_public_heuristic_profiles:
+      - base
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle

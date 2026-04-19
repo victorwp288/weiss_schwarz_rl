@@ -83,6 +83,7 @@ The repo may keep short-lived compatibility aliases while paths migrate, but pap
 
 ```bash
 make artifact-hygiene
+uv run python python/scripts/verify_repo.py
 make verify
 bash scripts/run_local_ci_parity.sh
 ```

@@ -1,0 +1,6 @@
+schema_version: 2
+description: structured_acceptance tiny32 fast packed WSL frontier with cyclic public teacher through update 20 then base fallback
+extends: structured_acceptance_tiny32_fast_pubcycle3.yaml
+training:
+  structured_aux:
+    teacher_public_heuristic_profiles_end_updates: 20

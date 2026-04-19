@@ -72,6 +72,7 @@ _EXPERIMENT_ROLES = frozenset(
     }
 )
 _MODEL_ENCODER_KINDS = frozenset({"mlp", "typed_v1", "structured_v2"})
+_STRUCTURED_POLICY_CONTRACTS = frozenset({"packed_v1", "factorized_v1"})
 _MODEL_RECURRENT_CORES = frozenset({"gru", "none"})
 _TRAINING_ALGORITHMS = frozenset(
     {"impala_vtrace_gru", "impala_vtrace_ff", "ppo_lite_masked_v1", "structured_v2", "impala_vtrace_structured_v1"}
@@ -79,6 +80,9 @@ _TRAINING_ALGORITHMS = frozenset(
 _TRAINING_STRUCTURED_METRICS_MODES = frozenset({"off", "sampled", "full"})
 _TRAINING_TEACHER_AUX_MODES = frozenset({"off", "warmstart_only", "always"})
 _TRAINING_FIXED_OPPONENT_BACKENDS = frozenset({"python_scalar", "python_batched", "simulator_native"})
+_TRAINING_ACTOR_POLICY_BACKENDS = frozenset({"model", "heuristic_public"})
+_TRAINING_PUBLIC_HEURISTIC_PROFILES = frozenset({"base", "aggressive", "control"})
+_TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES = frozenset({"mixture", "cycle"})
 _TOP_LEVEL_KEYS = frozenset(
     {
         "schema_version",
@@ -241,6 +245,7 @@ def _parse_system_config(body: dict[str, Any]) -> SystemConfig:
         allowed={
             "profile",
             "mp_start_method",
+            "collection_backend",
             "learner_device",
             "actor_device",
             "actor_process_count",
@@ -269,12 +274,21 @@ def _parse_system_config(body: dict[str, Any]) -> SystemConfig:
             ),
         ),
         mp_start_method=_require_text(body["mp_start_method"], field_name="system.mp_start_method"),
+        collection_backend=_require_choice(
+            body.get("collection_backend", "auto"),
+            field_name="system.collection_backend",
+            allowed=("auto", "central", "process"),
+        ),
         learner_device=_require_text(body["learner_device"], field_name="system.learner_device"),
         actor_device=_require_text(body["actor_device"], field_name="system.actor_device"),
-        actor_process_count=_require_int(body["actor_process_count"], field_name="system.actor_process_count", minimum=1),
+        actor_process_count=_require_int(
+            body["actor_process_count"], field_name="system.actor_process_count", minimum=1
+        ),
         envs_per_actor=_require_int(body["envs_per_actor"], field_name="system.envs_per_actor", minimum=1),
         total_envs=_require_int(body["total_envs"], field_name="system.total_envs", minimum=1),
-        actor_torch_threads=_require_int(body["actor_torch_threads"], field_name="system.actor_torch_threads", minimum=1),
+        actor_torch_threads=_require_int(
+            body["actor_torch_threads"], field_name="system.actor_torch_threads", minimum=1
+        ),
         learner_torch_threads=_require_int(
             body["learner_torch_threads"], field_name="system.learner_torch_threads", minimum=1
         ),
@@ -299,10 +313,14 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
             "encoder_mlp_width",
             "encoder_mlp_layers",
             "encoder_kind",
+            "structured_policy_contract",
             "typed_feature_width",
             "recurrent_core",
             "candidate_scoring_chunk_size",
             "cuda_learner_candidate_scoring_chunk_size",
+            "public_heuristic_logit_bias_scale",
+            "public_heuristic_actor_logit_bias_scale",
+            "public_heuristic_logit_bias_families",
             "layer_norm",
             "dropout",
         },
@@ -318,6 +336,11 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
             body.get("encoder_kind", "mlp"),
             field_name="model.encoder_kind",
             allowed=_MODEL_ENCODER_KINDS,
+        ),
+        structured_policy_contract=_require_choice(
+            body.get("structured_policy_contract", "packed_v1"),
+            field_name="model.structured_policy_contract",
+            allowed=_STRUCTURED_POLICY_CONTRACTS,
         ),
         typed_feature_width=_require_int(
             body.get("typed_feature_width", 64),
@@ -338,6 +361,18 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
             body.get("cuda_learner_candidate_scoring_chunk_size", 262144),
             field_name="model.cuda_learner_candidate_scoring_chunk_size",
             minimum=1,
+        ),
+        public_heuristic_logit_bias_scale=_require_float(
+            body.get("public_heuristic_logit_bias_scale", 0.0),
+            field_name="model.public_heuristic_logit_bias_scale",
+        ),
+        public_heuristic_actor_logit_bias_scale=_require_float(
+            body.get("public_heuristic_actor_logit_bias_scale", -1.0),
+            field_name="model.public_heuristic_actor_logit_bias_scale",
+        ),
+        public_heuristic_logit_bias_families=_require_str_list(
+            body.get("public_heuristic_logit_bias_families", []),
+            field_name="model.public_heuristic_logit_bias_families",
         ),
         layer_norm=_require_bool(body["layer_norm"], field_name="model.layer_norm"),
         dropout=ModelDropoutConfig(
@@ -366,6 +401,16 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             "structured_metrics",
             "teacher_aux",
             "fixed_opponent_backend",
+            "actor_policy_backend",
+            "actor_heuristic_fraction",
+            "actor_heuristic_end_updates",
+            "actor_heuristic_final_fraction",
+            "train_on_heuristic_actor_rows",
+            "diverse_opponent_actor_count",
+            "diverse_model_actor_count",
+            "diverse_opponent_batch_fraction",
+            "diverse_opponent_batch_wait_ms",
+            "heuristic_actor_hidden_state_tracking",
         },
         context="training",
     )
@@ -416,12 +461,41 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
     )
     _reject_unknown_keys(
         structured_aux,
-        allowed={"enabled", "teacher_family_coef", "teacher_slot_coef", "teacher_attack_type_coef"},
+        allowed={
+            "enabled",
+            "teacher_family_coef",
+            "teacher_slot_coef",
+            "teacher_move_source_coef",
+            "teacher_attack_type_coef",
+            "teacher_action_coef",
+            "teacher_same_family_action_coef",
+            "teacher_public_heuristic_coef",
+            "teacher_public_heuristic_temperature",
+            "teacher_public_heuristic_families",
+            "teacher_public_heuristic_profiles",
+            "teacher_public_heuristic_profile_mode",
+            "teacher_public_heuristic_profiles_end_updates",
+        },
         context="training.structured_aux",
     )
     _reject_unknown_keys(
         structured_warmstart,
-        allowed={"enabled", "updates", "teacher_family_coef", "teacher_slot_coef", "teacher_attack_type_coef"},
+        allowed={
+            "enabled",
+            "updates",
+            "teacher_family_coef",
+            "teacher_slot_coef",
+            "teacher_move_source_coef",
+            "teacher_attack_type_coef",
+            "teacher_action_coef",
+            "teacher_same_family_action_coef",
+            "teacher_public_heuristic_coef",
+            "teacher_public_heuristic_temperature",
+            "teacher_public_heuristic_families",
+            "teacher_public_heuristic_profiles",
+            "teacher_public_heuristic_profile_mode",
+            "teacher_public_heuristic_profiles_end_updates",
+        },
         context="training.structured_warmstart",
     )
     _reject_unknown_keys(structured_metrics, allowed={"mode"}, context="training.structured_metrics")
@@ -434,11 +508,134 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         field_name="training.fixed_opponent_backend",
         allowed=_TRAINING_FIXED_OPPONENT_BACKENDS,
     )
+    actor_policy_backend = _require_choice(
+        body.get("actor_policy_backend", "model"),
+        field_name="training.actor_policy_backend",
+        allowed=_TRAINING_ACTOR_POLICY_BACKENDS,
+    )
+    actor_heuristic_fraction = _require_float(
+        body.get("actor_heuristic_fraction", 1.0),
+        field_name="training.actor_heuristic_fraction",
+    )
+    if actor_heuristic_fraction < 0.0 or actor_heuristic_fraction > 1.0:
+        raise ValueError(
+            f"training.actor_heuristic_fraction must be between 0.0 and 1.0 inclusive, got {actor_heuristic_fraction}"
+        )
+    actor_heuristic_end_updates = _require_int(
+        body.get("actor_heuristic_end_updates", -1),
+        field_name="training.actor_heuristic_end_updates",
+        minimum=-1,
+    )
+    actor_heuristic_final_fraction = _require_float(
+        body.get("actor_heuristic_final_fraction", actor_heuristic_fraction),
+        field_name="training.actor_heuristic_final_fraction",
+    )
+    if actor_heuristic_final_fraction < 0.0 or actor_heuristic_final_fraction > 1.0:
+        raise ValueError(
+            "training.actor_heuristic_final_fraction must be between 0.0 and 1.0 inclusive, "
+            f"got {actor_heuristic_final_fraction}"
+        )
+    heuristic_actor_hidden_state_tracking = _require_bool(
+        body.get("heuristic_actor_hidden_state_tracking", True),
+        field_name="training.heuristic_actor_hidden_state_tracking",
+    )
+    train_on_heuristic_actor_rows = _require_bool(
+        body.get("train_on_heuristic_actor_rows", True),
+        field_name="training.train_on_heuristic_actor_rows",
+    )
+    diverse_opponent_actor_count = _require_int(
+        body.get("diverse_opponent_actor_count", 0),
+        field_name="training.diverse_opponent_actor_count",
+        minimum=0,
+    )
+    diverse_model_actor_count = _require_int(
+        body.get("diverse_model_actor_count", 0),
+        field_name="training.diverse_model_actor_count",
+        minimum=0,
+    )
+    diverse_opponent_batch_fraction = _require_float(
+        body.get("diverse_opponent_batch_fraction", 0.0),
+        field_name="training.diverse_opponent_batch_fraction",
+    )
+    if diverse_opponent_batch_fraction < 0.0 or diverse_opponent_batch_fraction > 1.0:
+        raise ValueError(
+            "training.diverse_opponent_batch_fraction must be between 0.0 and 1.0 inclusive, "
+            f"got {diverse_opponent_batch_fraction}"
+        )
+    diverse_opponent_batch_wait_ms = _require_int(
+        body.get("diverse_opponent_batch_wait_ms", 0),
+        field_name="training.diverse_opponent_batch_wait_ms",
+        minimum=0,
+    )
+    structured_aux_public_temperature = _require_float(
+        structured_aux.get("teacher_public_heuristic_temperature", 32.0),
+        field_name="training.structured_aux.teacher_public_heuristic_temperature",
+    )
+    if structured_aux_public_temperature <= 0.0:
+        raise ValueError("training.structured_aux.teacher_public_heuristic_temperature must be > 0")
+    structured_warmstart_public_temperature = _require_float(
+        structured_warmstart.get("teacher_public_heuristic_temperature", 32.0),
+        field_name="training.structured_warmstart.teacher_public_heuristic_temperature",
+    )
+    if structured_warmstart_public_temperature <= 0.0:
+        raise ValueError("training.structured_warmstart.teacher_public_heuristic_temperature must be > 0")
+    structured_aux_public_profiles = tuple(
+        name.strip().lower()
+        for name in _require_str_list(
+            structured_aux.get("teacher_public_heuristic_profiles", []),
+            field_name="training.structured_aux.teacher_public_heuristic_profiles",
+        )
+        if name.strip()
+    )
+    invalid_aux_public_profiles = sorted(set(structured_aux_public_profiles) - _TRAINING_PUBLIC_HEURISTIC_PROFILES)
+    if invalid_aux_public_profiles:
+        raise ValueError(
+            "training.structured_aux.teacher_public_heuristic_profiles contains unsupported profiles: "
+            + ", ".join(invalid_aux_public_profiles)
+        )
+    structured_warmstart_public_profiles = tuple(
+        name.strip().lower()
+        for name in _require_str_list(
+            structured_warmstart.get("teacher_public_heuristic_profiles", []),
+            field_name="training.structured_warmstart.teacher_public_heuristic_profiles",
+        )
+        if name.strip()
+    )
+    invalid_warmstart_public_profiles = sorted(
+        set(structured_warmstart_public_profiles) - _TRAINING_PUBLIC_HEURISTIC_PROFILES
+    )
+    if invalid_warmstart_public_profiles:
+        raise ValueError(
+            "training.structured_warmstart.teacher_public_heuristic_profiles contains unsupported profiles: "
+            + ", ".join(invalid_warmstart_public_profiles)
+        )
+    structured_aux_public_profile_mode = _require_choice(
+        structured_aux.get("teacher_public_heuristic_profile_mode", "mixture"),
+        field_name="training.structured_aux.teacher_public_heuristic_profile_mode",
+        allowed=_TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES,
+    )
+    structured_aux_public_profiles_end_updates = _require_int(
+        structured_aux.get("teacher_public_heuristic_profiles_end_updates", -1),
+        field_name="training.structured_aux.teacher_public_heuristic_profiles_end_updates",
+        minimum=-1,
+    )
+    structured_warmstart_public_profile_mode = _require_choice(
+        structured_warmstart.get("teacher_public_heuristic_profile_mode", "mixture"),
+        field_name="training.structured_warmstart.teacher_public_heuristic_profile_mode",
+        allowed=_TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES,
+    )
+    structured_warmstart_public_profiles_end_updates = _require_int(
+        structured_warmstart.get("teacher_public_heuristic_profiles_end_updates", -1),
+        field_name="training.structured_warmstart.teacher_public_heuristic_profiles_end_updates",
+        minimum=-1,
+    )
 
     return TrainingConfig(
         algorithm=_require_choice(body["algorithm"], field_name="training.algorithm", allowed=_TRAINING_ALGORITHMS),
         rollout=TrainingRolloutConfig(
-            unroll_length=_require_int(rollout["unroll_length"], field_name="training.rollout.unroll_length", minimum=1),
+            unroll_length=_require_int(
+                rollout["unroll_length"], field_name="training.rollout.unroll_length", minimum=1
+            ),
             batch_unrolls_per_update=_require_int(
                 rollout["batch_unrolls_per_update"],
                 field_name="training.rollout.batch_unrolls_per_update",
@@ -465,8 +662,12 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             ),
         ),
         precision=TrainingPrecisionConfig(
-            mixed_precision=_require_bool(precision["mixed_precision"], field_name="training.precision.mixed_precision"),
-            compile_learner=_require_bool(precision["compile_learner"], field_name="training.precision.compile_learner"),
+            mixed_precision=_require_bool(
+                precision["mixed_precision"], field_name="training.precision.mixed_precision"
+            ),
+            compile_learner=_require_bool(
+                precision["compile_learner"], field_name="training.precision.compile_learner"
+            ),
             compile_actor_inference=_require_bool(
                 precision.get("compile_actor_inference", False),
                 field_name="training.precision.compile_actor_inference",
@@ -526,10 +727,34 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
                 structured_aux.get("teacher_slot_coef", 0.0),
                 field_name="training.structured_aux.teacher_slot_coef",
             ),
+            teacher_move_source_coef=_require_float(
+                structured_aux.get("teacher_move_source_coef", 0.0),
+                field_name="training.structured_aux.teacher_move_source_coef",
+            ),
             teacher_attack_type_coef=_require_float(
                 structured_aux.get("teacher_attack_type_coef", 0.0),
                 field_name="training.structured_aux.teacher_attack_type_coef",
             ),
+            teacher_action_coef=_require_float(
+                structured_aux.get("teacher_action_coef", 0.0),
+                field_name="training.structured_aux.teacher_action_coef",
+            ),
+            teacher_same_family_action_coef=_require_float(
+                structured_aux.get("teacher_same_family_action_coef", 0.0),
+                field_name="training.structured_aux.teacher_same_family_action_coef",
+            ),
+            teacher_public_heuristic_coef=_require_float(
+                structured_aux.get("teacher_public_heuristic_coef", 0.0),
+                field_name="training.structured_aux.teacher_public_heuristic_coef",
+            ),
+            teacher_public_heuristic_temperature=structured_aux_public_temperature,
+            teacher_public_heuristic_families=_require_str_list(
+                structured_aux.get("teacher_public_heuristic_families", []),
+                field_name="training.structured_aux.teacher_public_heuristic_families",
+            ),
+            teacher_public_heuristic_profiles=structured_aux_public_profiles,
+            teacher_public_heuristic_profile_mode=structured_aux_public_profile_mode,
+            teacher_public_heuristic_profiles_end_updates=structured_aux_public_profiles_end_updates,
         ),
         structured_warmstart=TrainingStructuredWarmstartConfig(
             enabled=_require_bool(
@@ -549,10 +774,34 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
                 structured_warmstart.get("teacher_slot_coef", 0.0),
                 field_name="training.structured_warmstart.teacher_slot_coef",
             ),
+            teacher_move_source_coef=_require_float(
+                structured_warmstart.get("teacher_move_source_coef", 0.0),
+                field_name="training.structured_warmstart.teacher_move_source_coef",
+            ),
             teacher_attack_type_coef=_require_float(
                 structured_warmstart.get("teacher_attack_type_coef", 0.0),
                 field_name="training.structured_warmstart.teacher_attack_type_coef",
             ),
+            teacher_action_coef=_require_float(
+                structured_warmstart.get("teacher_action_coef", 0.0),
+                field_name="training.structured_warmstart.teacher_action_coef",
+            ),
+            teacher_same_family_action_coef=_require_float(
+                structured_warmstart.get("teacher_same_family_action_coef", 0.0),
+                field_name="training.structured_warmstart.teacher_same_family_action_coef",
+            ),
+            teacher_public_heuristic_coef=_require_float(
+                structured_warmstart.get("teacher_public_heuristic_coef", 0.0),
+                field_name="training.structured_warmstart.teacher_public_heuristic_coef",
+            ),
+            teacher_public_heuristic_temperature=structured_warmstart_public_temperature,
+            teacher_public_heuristic_families=_require_str_list(
+                structured_warmstart.get("teacher_public_heuristic_families", []),
+                field_name="training.structured_warmstart.teacher_public_heuristic_families",
+            ),
+            teacher_public_heuristic_profiles=structured_warmstart_public_profiles,
+            teacher_public_heuristic_profile_mode=structured_warmstart_public_profile_mode,
+            teacher_public_heuristic_profiles_end_updates=structured_warmstart_public_profiles_end_updates,
         ),
         structured_metrics=TrainingStructuredMetricsConfig(
             mode=_require_choice(
@@ -569,6 +818,16 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             ),
         ),
         fixed_opponent_backend=fixed_opponent_backend,
+        actor_policy_backend=actor_policy_backend,
+        actor_heuristic_fraction=actor_heuristic_fraction,
+        actor_heuristic_end_updates=actor_heuristic_end_updates,
+        actor_heuristic_final_fraction=actor_heuristic_final_fraction,
+        train_on_heuristic_actor_rows=train_on_heuristic_actor_rows,
+        diverse_opponent_actor_count=diverse_opponent_actor_count,
+        diverse_model_actor_count=diverse_model_actor_count,
+        diverse_opponent_batch_fraction=diverse_opponent_batch_fraction,
+        diverse_opponent_batch_wait_ms=diverse_opponent_batch_wait_ms,
+        heuristic_actor_hidden_state_tracking=heuristic_actor_hidden_state_tracking,
     )
 
 
@@ -585,6 +844,8 @@ def _parse_environment_config(body: dict[str, Any]) -> EnvironmentConfig:
             "max_learner_steps_per_episode",
             "max_ticks",
             "deck_set_size",
+            "deck_pool",
+            "opponent_deck_pool",
         },
         context="environment",
     )
@@ -596,7 +857,9 @@ def _parse_environment_config(body: dict[str, Any]) -> EnvironmentConfig:
             field_name="environment.observation_visibility",
         ),
         visibility=_require_text(body["visibility"], field_name="environment.visibility"),
-        truncate_on_max_steps=_require_bool(body["truncate_on_max_steps"], field_name="environment.truncate_on_max_steps"),
+        truncate_on_max_steps=_require_bool(
+            body["truncate_on_max_steps"], field_name="environment.truncate_on_max_steps"
+        ),
         max_raw_decisions_per_episode=_require_int(
             body["max_raw_decisions_per_episode"],
             field_name="environment.max_raw_decisions_per_episode",
@@ -615,8 +878,15 @@ def _parse_environment_config(body: dict[str, Any]) -> EnvironmentConfig:
         ),
         max_ticks=_require_int(body["max_ticks"], field_name="environment.max_ticks", minimum=1),
         deck_set_size=DeckSetSizeConfig(
-            bring_up=_require_int(deck_set_size["bring_up"], field_name="environment.deck_set_size.bring_up", minimum=1),
+            bring_up=_require_int(
+                deck_set_size["bring_up"], field_name="environment.deck_set_size.bring_up", minimum=1
+            ),
             paper=_require_int(deck_set_size["paper"], field_name="environment.deck_set_size.paper", minimum=1),
+        ),
+        deck_pool=_require_str_list(body.get("deck_pool", []), field_name="environment.deck_pool"),
+        opponent_deck_pool=_require_str_list(
+            body.get("opponent_deck_pool", []),
+            field_name="environment.opponent_deck_pool",
         ),
     )
 
@@ -791,6 +1061,14 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
             "pfsp_window_episodes",
             "heuristic_public_start_updates",
             "heuristic_public_mix_fraction",
+            "heuristic_public_mix_end_updates",
+            "heuristic_public_final_mix_fraction",
+            "heuristic_public_variant_mix_fraction",
+            "heuristic_public_variant_mix_end_updates",
+            "heuristic_public_variant_final_mix_fraction",
+            "noleague_baseline_mix_fraction",
+            "noleague_baseline_mix_end_updates",
+            "warmup_snapshot_mix_fraction",
             "heuristic_public_reserved_envs_per_actor",
             "noleague_baseline_reserved_envs_per_actor",
             "champion_mix_fraction",
@@ -810,7 +1088,9 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
         allowed={"enabled", "paired_seeds", "threshold", "anchor_set_v1", "seed_file", "gate"},
         context="league.promotion",
     )
-    _reject_unknown_keys(anchor_set, allowed={"required", "optional_if_available"}, context="league.promotion.anchor_set_v1")
+    _reject_unknown_keys(
+        anchor_set, allowed={"required", "optional_if_available"}, context="league.promotion.anchor_set_v1"
+    )
     _reject_unknown_keys(
         gate,
         allowed={"uncertainty_method", "weighting", "seat_swap", "folding", "guardrails", "record_file"},
@@ -827,9 +1107,7 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
         field_name="league.sampling.pfsp_stats_source",
     )
     if pfsp_stats_source != "online_outcomes":
-        raise ValueError(
-            "league.sampling.pfsp_stats_source currently only supports 'online_outcomes'"
-        )
+        raise ValueError("league.sampling.pfsp_stats_source currently only supports 'online_outcomes'")
 
     return LeagueConfig(
         enabled=_require_bool(body["enabled"], field_name="league.enabled"),
@@ -843,7 +1121,9 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
             ),
         ),
         sampling=LeagueSamplingConfig(
-            opponent_sampling=_require_text(sampling["opponent_sampling"], field_name="league.sampling.opponent_sampling"),
+            opponent_sampling=_require_text(
+                sampling["opponent_sampling"], field_name="league.sampling.opponent_sampling"
+            ),
             pfsp_power=_require_float(sampling["pfsp_power"], field_name="league.sampling.pfsp_power"),
             pfsp_epsilon_uniform=_require_float(
                 sampling["pfsp_epsilon_uniform"],
@@ -863,6 +1143,47 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
             heuristic_public_mix_fraction=_require_float(
                 sampling.get("heuristic_public_mix_fraction", 0.0),
                 field_name="league.sampling.heuristic_public_mix_fraction",
+            ),
+            heuristic_public_mix_end_updates=_require_int(
+                sampling.get("heuristic_public_mix_end_updates", -1),
+                field_name="league.sampling.heuristic_public_mix_end_updates",
+                minimum=-1,
+            ),
+            heuristic_public_final_mix_fraction=_require_float(
+                sampling.get(
+                    "heuristic_public_final_mix_fraction",
+                    sampling.get("heuristic_public_mix_fraction", 0.0),
+                ),
+                field_name="league.sampling.heuristic_public_final_mix_fraction",
+            ),
+            heuristic_public_variant_mix_fraction=_require_float(
+                sampling.get("heuristic_public_variant_mix_fraction", 0.0),
+                field_name="league.sampling.heuristic_public_variant_mix_fraction",
+            ),
+            heuristic_public_variant_mix_end_updates=_require_int(
+                sampling.get("heuristic_public_variant_mix_end_updates", -1),
+                field_name="league.sampling.heuristic_public_variant_mix_end_updates",
+                minimum=-1,
+            ),
+            heuristic_public_variant_final_mix_fraction=_require_float(
+                sampling.get(
+                    "heuristic_public_variant_final_mix_fraction",
+                    sampling.get("heuristic_public_variant_mix_fraction", 0.0),
+                ),
+                field_name="league.sampling.heuristic_public_variant_final_mix_fraction",
+            ),
+            noleague_baseline_mix_fraction=_require_float(
+                sampling.get("noleague_baseline_mix_fraction", 0.0),
+                field_name="league.sampling.noleague_baseline_mix_fraction",
+            ),
+            noleague_baseline_mix_end_updates=_require_int(
+                sampling.get("noleague_baseline_mix_end_updates", -1),
+                field_name="league.sampling.noleague_baseline_mix_end_updates",
+                minimum=-1,
+            ),
+            warmup_snapshot_mix_fraction=_require_float(
+                sampling.get("warmup_snapshot_mix_fraction", 0.0),
+                field_name="league.sampling.warmup_snapshot_mix_fraction",
             ),
             heuristic_public_reserved_envs_per_actor=_require_int(
                 sampling.get("heuristic_public_reserved_envs_per_actor", 0),
@@ -915,7 +1236,9 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
             paired_seeds=_require_int(promotion["paired_seeds"], field_name="league.promotion.paired_seeds", minimum=1),
             threshold=_require_text(promotion["threshold"], field_name="league.promotion.threshold"),
             anchor_set_v1=PromotionAnchorSetConfig(
-                required=_require_str_list(anchor_set["required"], field_name="league.promotion.anchor_set_v1.required"),
+                required=_require_str_list(
+                    anchor_set["required"], field_name="league.promotion.anchor_set_v1.required"
+                ),
                 optional_if_available=_require_str_list(
                     anchor_set["optional_if_available"],
                     field_name="league.promotion.anchor_set_v1.optional_if_available",
@@ -975,8 +1298,12 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
     legal = _require_mapping(body["legal_fingerprint_checks"], context="evaluation.legal_fingerprint_checks")
     decision = _require_mapping(body["decision_kind_tagging"], context="evaluation.decision_kind_tagging")
     selection = _require_mapping(body["final_policy_set_selection"], context="evaluation.final_policy_set_selection")
-    fixed_anchor = _require_mapping(selection["fixed_anchor_set_v1"], context="evaluation.final_policy_set_selection.fixed_anchor_set_v1")
-    _reject_unknown_keys(stop_rules, allowed={"stop_delta_ci_half_width", "stop_confidence"}, context="evaluation.stop_rules")
+    fixed_anchor = _require_mapping(
+        selection["fixed_anchor_set_v1"], context="evaluation.final_policy_set_selection.fixed_anchor_set_v1"
+    )
+    _reject_unknown_keys(
+        stop_rules, allowed={"stop_delta_ci_half_width", "stop_confidence"}, context="evaluation.stop_rules"
+    )
     _reject_unknown_keys(
         legal,
         allowed={"enabled", "version", "require_strictly_increasing_legal_ids", "mismatch_policy"},
@@ -1016,8 +1343,7 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
     )
     if mismatch_policy != "hard_fail":
         raise ValueError(
-            "evaluation.legal_fingerprint_checks.mismatch_policy must be 'hard_fail', "
-            f"got {mismatch_policy!r}"
+            f"evaluation.legal_fingerprint_checks.mismatch_policy must be 'hard_fail', got {mismatch_policy!r}"
         )
     return EvaluationConfig(
         seat_swap=_require_bool(body["seat_swap"], field_name="evaluation.seat_swap"),
@@ -1031,7 +1357,9 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
             body["eval_assert_sorted_legal_ids"],
             field_name="evaluation.eval_assert_sorted_legal_ids",
         ),
-        seed_files={key: _require_text(value, field_name=f"evaluation.seed_files.{key}") for key, value in seed_files.items()},
+        seed_files={
+            key: _require_text(value, field_name=f"evaluation.seed_files.{key}") for key, value in seed_files.items()
+        },
         periodic_dev_eval_interval_updates=_require_int(
             body["periodic_dev_eval_interval_updates"],
             field_name="evaluation.periodic_dev_eval_interval_updates",
@@ -1042,7 +1370,9 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
             field_name="evaluation.periodic_dev_eval_paired_seeds",
             minimum=1,
         ),
-        final_policy_set_size=_require_int(body["final_policy_set_size"], field_name="evaluation.final_policy_set_size", minimum=1),
+        final_policy_set_size=_require_int(
+            body["final_policy_set_size"], field_name="evaluation.final_policy_set_size", minimum=1
+        ),
         final_matrix_stage1_paired_seeds=_require_int(
             body["final_matrix_stage1_paired_seeds"],
             field_name="evaluation.final_matrix_stage1_paired_seeds",
@@ -1130,10 +1460,16 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
                     field_name="evaluation.final_policy_set_selection.fixed_anchor_set_v1.optional_if_available",
                 ),
             ),
-            seed_file=_require_text(selection["seed_file"], field_name="evaluation.final_policy_set_selection.seed_file"),
+            seed_file=_require_text(
+                selection["seed_file"], field_name="evaluation.final_policy_set_selection.seed_file"
+            ),
             folding=_require_text(selection["folding"], field_name="evaluation.final_policy_set_selection.folding"),
-            seat_swap=_require_bool(selection["seat_swap"], field_name="evaluation.final_policy_set_selection.seat_swap"),
-            tie_break=_require_text(selection["tie_break"], field_name="evaluation.final_policy_set_selection.tie_break"),
+            seat_swap=_require_bool(
+                selection["seat_swap"], field_name="evaluation.final_policy_set_selection.seat_swap"
+            ),
+            tie_break=_require_text(
+                selection["tie_break"], field_name="evaluation.final_policy_set_selection.tie_break"
+            ),
         ),
     )
 
@@ -1141,7 +1477,14 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
 def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig:
     _reject_unknown_keys(
         body,
-        allowed={"spec_bundle", "ids", "seed_derivation", "seed_files", "determinism_requirements", "legal_fingerprint"},
+        allowed={
+            "spec_bundle",
+            "ids",
+            "seed_derivation",
+            "seed_files",
+            "determinism_requirements",
+            "legal_fingerprint",
+        },
         context="reproducibility",
     )
     spec_bundle = _require_mapping(body["spec_bundle"], context="reproducibility.spec_bundle")
@@ -1156,7 +1499,13 @@ def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig
     )
     _reject_unknown_keys(
         ids,
-        allowed={"run_id_hash", "config_hash", "spec_hash", "store_full_256_bit_ids", "store_short_64_bit_ids_for_filenames"},
+        allowed={
+            "run_id_hash",
+            "config_hash",
+            "spec_hash",
+            "store_full_256_bit_ids",
+            "store_short_64_bit_ids_for_filenames",
+        },
         context="reproducibility.ids",
     )
     _reject_unknown_keys(
@@ -1221,7 +1570,10 @@ def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig
                 field_name="reproducibility.seed_derivation.episode_seed_formula",
             ),
         ),
-        seed_files={key: _require_text(value, field_name=f"reproducibility.seed_files.{key}") for key, value in seed_files.items()},
+        seed_files={
+            key: _require_text(value, field_name=f"reproducibility.seed_files.{key}")
+            for key, value in seed_files.items()
+        },
         determinism_requirements=_require_str_list(
             body["determinism_requirements"],
             field_name="reproducibility.determinism_requirements",
@@ -1307,9 +1659,7 @@ def _build_stack_config_from_component_doc(
     reproducibility = _parse_reproducibility_config(reproducibility_doc) if reproducibility_doc is not None else None
 
     component_docs = {
-        key: _require_mapping(value, context=key)
-        for key, value in doc.items()
-        if key in _CONFIG_SECTION_KEYS
+        key: _require_mapping(value, context=key) for key, value in doc.items() if key in _CONFIG_SECTION_KEYS
     }
     seed_sets = (
         _parse_seed_sets_override(root=root, seed_sets_doc=seed_sets_override)
@@ -1370,9 +1720,7 @@ def load_stack_config(stack_path: Path | str) -> StackConfig:
     root = _resolve_repo_root(stack_file)
     doc = _load_preset_document(stack_file)
     schema_version = (
-        _require_int(doc["schema_version"], field_name="schema_version", minimum=1)
-        if "schema_version" in doc
-        else None
+        _require_int(doc["schema_version"], field_name="schema_version", minimum=1) if "schema_version" in doc else None
     )
     description = _require_text(doc.get("description", stack_file.stem), field_name="description")
     component_doc = {key: value for key, value in doc.items() if key in _CONFIG_SECTION_KEYS}

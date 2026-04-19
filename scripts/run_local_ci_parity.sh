@@ -53,11 +53,7 @@ run_module() {
   "${RUN[@]}" -m "$@"
 }
 
-run_python_file "Core placeholder gate" python/scripts/check_core_placeholders.py
-run_module "Ruff check" ruff check python tests examples python/scripts
-run_module "Ruff format check" ruff format --check python tests examples python/scripts
-run_module "Mypy" mypy
-run_module "Pytest" pytest -q python/weiss_rl/tests
+run_python_file "Cross-platform verify" python/scripts/verify_repo.py
 
 echo
 echo "Local CI parity checks completed."

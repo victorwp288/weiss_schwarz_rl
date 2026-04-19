@@ -7,7 +7,12 @@ import sys
 import time
 from pathlib import Path
 
-from weiss_rl.job_telemetry import ProcessTreeTelemetrySampler, build_benchmark_summary, query_gpu_metrics, write_telemetry_sample
+from weiss_rl.job_telemetry import (
+    ProcessTreeTelemetrySampler,
+    build_benchmark_summary,
+    query_gpu_metrics,
+    write_telemetry_sample,
+)
 
 
 def _repo_root() -> Path:
@@ -25,7 +30,9 @@ def main() -> None:
     parser.add_argument("--max-updates", type=int, default=None)
     parser.add_argument("--runtime-mode", default=None)
     parser.add_argument("--sample-interval-seconds", type=float, default=2.0)
-    parser.add_argument("--python-executable", default=None, help="Optional python executable. Defaults to sys.executable.")
+    parser.add_argument(
+        "--python-executable", default=None, help="Optional python executable. Defaults to sys.executable."
+    )
     parser.add_argument(
         "--override",
         "--config-override",
@@ -34,7 +41,9 @@ def main() -> None:
         default=None,
         help="Forwarded to train.py. Repeat per override.",
     )
-    parser.add_argument("--train-arg", action="append", default=None, help="Extra raw train.py token. Repeat per token.")
+    parser.add_argument(
+        "--train-arg", action="append", default=None, help="Extra raw train.py token. Repeat per token."
+    )
     args = parser.parse_args()
 
     repo_root = _repo_root()
@@ -45,7 +54,14 @@ def main() -> None:
     telemetry_path = run_dir / "job_telemetry.jsonl"
     summary_path = run_dir / "job_telemetry_summary.json"
 
-    command = [args.python_executable or sys.executable, "python/scripts/train.py", "--stack-config", args.stack_config, "--run-label", args.run_label]
+    command = [
+        args.python_executable or sys.executable,
+        "python/scripts/train.py",
+        "--stack-config",
+        args.stack_config,
+        "--run-label",
+        args.run_label,
+    ]
     if args.device:
         command.extend(["--device", args.device])
     if args.profile:
@@ -62,7 +78,10 @@ def main() -> None:
         command.extend(["--override", override])
     command.extend(args.train_arg or [])
 
-    with stdout_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open("w", encoding="utf-8") as stderr_handle:
+    with (
+        stdout_path.open("w", encoding="utf-8") as stdout_handle,
+        stderr_path.open("w", encoding="utf-8") as stderr_handle,
+    ):
         process = subprocess.Popen(command, cwd=repo_root, stdout=stdout_handle, stderr=stderr_handle)
         sampler = ProcessTreeTelemetrySampler()
         try:

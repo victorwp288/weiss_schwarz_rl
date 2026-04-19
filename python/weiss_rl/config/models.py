@@ -32,6 +32,7 @@ class SystemConfig:
     learner_torch_threads: int
     actor_queue_capacity_unrolls: int
     learner_prefetch_batches: int
+    collection_backend: str = "auto"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,10 +49,14 @@ class ModelConfig:
     layer_norm: bool
     dropout: ModelDropoutConfig
     encoder_kind: str = "mlp"
+    structured_policy_contract: str = "packed_v1"
     typed_feature_width: int = 64
     recurrent_core: str = "gru"
     candidate_scoring_chunk_size: int = 65536
     cuda_learner_candidate_scoring_chunk_size: int = 262144
+    public_heuristic_logit_bias_scale: float = 0.0
+    public_heuristic_actor_logit_bias_scale: float = -1.0
+    public_heuristic_logit_bias_families: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +126,16 @@ class TrainingStructuredAuxConfig:
     enabled: bool = False
     teacher_family_coef: float = 0.0
     teacher_slot_coef: float = 0.0
+    teacher_move_source_coef: float = 0.0
     teacher_attack_type_coef: float = 0.0
+    teacher_action_coef: float = 0.0
+    teacher_same_family_action_coef: float = 0.0
+    teacher_public_heuristic_coef: float = 0.0
+    teacher_public_heuristic_temperature: float = 32.0
+    teacher_public_heuristic_families: tuple[str, ...] = field(default_factory=tuple)
+    teacher_public_heuristic_profiles: tuple[str, ...] = field(default_factory=tuple)
+    teacher_public_heuristic_profile_mode: str = "mixture"
+    teacher_public_heuristic_profiles_end_updates: int = -1
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +144,16 @@ class TrainingStructuredWarmstartConfig:
     updates: int = 0
     teacher_family_coef: float = 0.0
     teacher_slot_coef: float = 0.0
+    teacher_move_source_coef: float = 0.0
     teacher_attack_type_coef: float = 0.0
+    teacher_action_coef: float = 0.0
+    teacher_same_family_action_coef: float = 0.0
+    teacher_public_heuristic_coef: float = 0.0
+    teacher_public_heuristic_temperature: float = 32.0
+    teacher_public_heuristic_families: tuple[str, ...] = field(default_factory=tuple)
+    teacher_public_heuristic_profiles: tuple[str, ...] = field(default_factory=tuple)
+    teacher_public_heuristic_profile_mode: str = "mixture"
+    teacher_public_heuristic_profiles_end_updates: int = -1
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +171,16 @@ class TrainingConfig:
     structured_metrics: TrainingStructuredMetricsConfig = field(default_factory=TrainingStructuredMetricsConfig)
     teacher_aux: TrainingTeacherAuxConfig = field(default_factory=TrainingTeacherAuxConfig)
     fixed_opponent_backend: str = "python_scalar"
+    actor_policy_backend: str = "model"
+    actor_heuristic_fraction: float = 1.0
+    actor_heuristic_end_updates: int = -1
+    actor_heuristic_final_fraction: float = 1.0
+    train_on_heuristic_actor_rows: bool = True
+    diverse_opponent_actor_count: int = 0
+    diverse_model_actor_count: int = 0
+    diverse_opponent_batch_fraction: float = 0.0
+    diverse_opponent_batch_wait_ms: int = 0
+    heuristic_actor_hidden_state_tracking: bool = True
     profile_timers: bool = False
     torch_profiler: bool = False
 
@@ -264,8 +297,44 @@ class TrainingConfig:
         return float(self.structured_aux.teacher_slot_coef)
 
     @property
+    def teacher_move_source_coef(self) -> float:
+        return float(self.structured_aux.teacher_move_source_coef)
+
+    @property
     def teacher_attack_type_coef(self) -> float:
         return float(self.structured_aux.teacher_attack_type_coef)
+
+    @property
+    def teacher_action_coef(self) -> float:
+        return float(self.structured_aux.teacher_action_coef)
+
+    @property
+    def teacher_same_family_action_coef(self) -> float:
+        return float(self.structured_aux.teacher_same_family_action_coef)
+
+    @property
+    def teacher_public_heuristic_coef(self) -> float:
+        return float(self.structured_aux.teacher_public_heuristic_coef)
+
+    @property
+    def teacher_public_heuristic_temperature(self) -> float:
+        return float(self.structured_aux.teacher_public_heuristic_temperature)
+
+    @property
+    def teacher_public_heuristic_families(self) -> tuple[str, ...]:
+        return tuple(self.structured_aux.teacher_public_heuristic_families)
+
+    @property
+    def teacher_public_heuristic_profiles(self) -> tuple[str, ...]:
+        return tuple(self.structured_aux.teacher_public_heuristic_profiles)
+
+    @property
+    def teacher_public_heuristic_profile_mode(self) -> str:
+        return str(self.structured_aux.teacher_public_heuristic_profile_mode)
+
+    @property
+    def teacher_public_heuristic_profiles_end_updates(self) -> int:
+        return int(self.structured_aux.teacher_public_heuristic_profiles_end_updates)
 
     @property
     def structured_warmstart_enabled(self) -> bool:
@@ -289,6 +358,8 @@ class EnvironmentConfig:
     max_learner_steps_per_episode: int
     max_ticks: int
     deck_set_size: DeckSetSizeConfig
+    deck_pool: tuple[str, ...] = field(default_factory=tuple)
+    opponent_deck_pool: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,6 +484,14 @@ class LeagueSamplingConfig:
     pfsp_window_episodes: int
     heuristic_public_start_updates: int
     heuristic_public_mix_fraction: float
+    heuristic_public_mix_end_updates: int
+    heuristic_public_final_mix_fraction: float
+    heuristic_public_variant_mix_fraction: float
+    heuristic_public_variant_mix_end_updates: int
+    heuristic_public_variant_final_mix_fraction: float
+    noleague_baseline_mix_fraction: float
+    noleague_baseline_mix_end_updates: int
+    warmup_snapshot_mix_fraction: float
     heuristic_public_reserved_envs_per_actor: int
     noleague_baseline_reserved_envs_per_actor: int
     champion_mix_fraction: float

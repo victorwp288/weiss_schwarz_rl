@@ -1,0 +1,10 @@
+schema_version: 2
+description: structured_acceptance Linux/WSL learning-first frontier preset
+extends: structured_acceptance_linux_hybrid_frontier.yaml
+model:
+  gru_hidden_size: 64
+  encoder_mlp_width: 64
+  typed_feature_width: 16
+league:
+  sampling:
+    noleague_baseline_mix_fraction: 0.15

@@ -3,20 +3,20 @@
 UV := $(shell command -v uv 2>/dev/null)
 VENV ?= .venv
 PY_SYS ?= python3
-PY_VENV := $(VENV)/bin/python
+PY_VENV = $(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,$(VENV)/Scripts/python.exe)
 
 export PYTHONPATH := python
 
 ifeq ($(UV),)
-PY := $(if $(wildcard $(PY_VENV)),$(PY_VENV),$(PY_SYS))
-PYRUN := $(PY)
+PY = $(if $(wildcard $(PY_VENV)),$(PY_VENV),$(PY_SYS))
+PYRUN = $(PY)
 SYNC_MSG := "[make] uv not found; using venv at $(VENV)"
 else
 PYRUN := uv run --extra dev python
 SYNC_MSG := "[make] using uv"
 endif
 
-.PHONY: sync sync-sim lint fmt fmt-check type test verify check check-placeholders package-smoke simulator-check train-min train-inline-smoke toy-public-e2e artifact-hygiene artifact-contract eval-dev figures clean
+.PHONY: sync sync-sim lint fmt fmt-check type deadcode test verify check check-placeholders standard-wrapper-smoke standard-auto-gpu-wrapper-smoke package-smoke simulator-check train-min train-inline-smoke toy-public-e2e artifact-hygiene artifact-contract eval-dev figures clean
 
 FIGURE_FORMAT_ARGS = $(foreach fmt,$(FORMATS),--format $(fmt))
 FIGURE_ID_ARG = $(if $(FIG_ID),--fig-id "$(FIG_ID)")
@@ -54,13 +54,22 @@ fmt-check:
 	@$(PYRUN) -m ruff format --check python tests examples python/scripts
 
 type:
-	@$(PYRUN) -m mypy
+	@$(PYRUN) -m mypy python/scripts/thesis_run.py python/scripts/eval.py python/scripts/play_vs_model.py
+
+deadcode:
+	@$(PYRUN) -m vulture python/weiss_rl python/scripts examples --min-confidence 80
 
 test:
 	@$(PYRUN) -m pytest -q python/weiss_rl/tests
 
-verify:
-	@bash scripts/run_local_ci_parity.sh
+standard-wrapper-smoke:
+	@$(PYRUN) python/scripts/thesis_run.py --preset standard --run-label standard_surface_ci --dry-run --skip-compare
+
+standard-auto-gpu-wrapper-smoke:
+	@$(PYRUN) python/scripts/thesis_run.py --preset standard-auto-gpu --run-label standard_auto_gpu_surface_ci --dry-run --skip-compare
+
+verify: sync
+	@$(PYRUN) python/scripts/verify_repo.py
 
 check: verify
 
@@ -90,12 +99,12 @@ train-min:
 	@$(PYRUN) python/scripts/train.py --stack-config configs/stack_smoke.yaml
 
 train-inline-smoke:
-	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) python/scripts/train.py --stack-config configs/presets/typed_thesis_locked.yaml --run-label m3_08_smoke --device cpu
+	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --run-label m3_08_smoke --device cpu
 
 toy-public-e2e:
 	@rm -rf runs/toy_public_demo_ci
-	@$(PYRUN) python/scripts/train.py --stack-config configs/presets/typed_thesis_locked.yaml --public-demo --run-label toy_public_demo_ci
-	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/typed_thesis_locked.yaml --public-demo --run-dir runs/toy_public_demo_ci
+	@$(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --public-demo --run-label toy_public_demo_ci
+	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --public-demo --run-dir runs/toy_public_demo_ci
 	@$(PYRUN) python/scripts/make_figures.py --public-demo --final-eval-dir runs/toy_public_demo_ci/eval/final_eval --out-dir runs/toy_public_demo_ci/figures
 
 artifact-hygiene:
@@ -103,7 +112,7 @@ artifact-hygiene:
 	@$(PYRUN) python/scripts/artifact_scan.py --artifact-root runs/toy_public_demo_ci
 
 eval-dev:
-	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/typed_thesis_locked.yaml
+	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
 
 figures:
 	@test -n "$(RUN_DIR)" || { echo "Usage: make figures RUN_DIR=runs/<run_dir> [FIG_ID=seat_bias] [FORMATS=\"pdf png\"]" >&2; exit 1; }

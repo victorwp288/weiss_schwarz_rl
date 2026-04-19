@@ -239,7 +239,9 @@ def test_inspect_replay_bundle_supports_heuristic_public_and_action_family_label
                 terminated=True,
                 truncated=False,
                 engine_status=0,
-                legal_fingerprint64=_fingerprint(decision_id=10, legal_ids=np.array([51, 472, 473, 474], dtype=np.uint16)),
+                legal_fingerprint64=_fingerprint(
+                    decision_id=10, legal_ids=np.array([51, 472, 473, 474], dtype=np.uint16)
+                ),
             ),
         ],
     )
@@ -415,7 +417,9 @@ def _write_policy_weights(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=GLOBAL_ACTION_SPACE_SIZE,
-        observation_spec=_typed_observation_spec(obs_len=observation_dim) if observation_spec is None else observation_spec,
+        observation_spec=_typed_observation_spec(obs_len=observation_dim)
+        if observation_spec is None
+        else observation_spec,
     )
     with torch.no_grad():
         for parameter in model.parameters():

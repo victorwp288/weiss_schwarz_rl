@@ -41,9 +41,7 @@ def main() -> None:
         seen.add(run_dir)
         unique_run_dirs.append(run_dir)
     out_dir = (
-        args.out_dir.resolve()
-        if args.out_dir is not None
-        else unique_run_dirs[0] / "figures" / "benchmark_compare"
+        args.out_dir.resolve() if args.out_dir is not None else unique_run_dirs[0] / "figures" / "benchmark_compare"
     )
     outputs = render_benchmark_figures(run_dirs=unique_run_dirs, out_dir=out_dir)
     print(f"Wrote {len(outputs)} comparison artifacts to {out_dir}")

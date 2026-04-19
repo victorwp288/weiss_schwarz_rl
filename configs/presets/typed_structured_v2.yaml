@@ -17,9 +17,11 @@ training:
     teacher_family_coef: 0.20
     teacher_slot_coef: 0.10
     teacher_attack_type_coef: 0.05
+    teacher_action_coef: 0.10
   structured_warmstart:
     enabled: true
     updates: 32
     teacher_family_coef: 0.75
     teacher_slot_coef: 0.35
     teacher_attack_type_coef: 0.20
+    teacher_action_coef: 0.50

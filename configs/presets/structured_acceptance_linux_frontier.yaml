@@ -1,0 +1,26 @@
+schema_version: 2
+description: structured_acceptance Linux/WSL frontier preset
+extends: structured_acceptance.yaml
+system:
+  actor_torch_threads: 1
+  actor_process_count: 32
+  collection_backend: process
+model:
+  gru_hidden_size: 32
+  encoder_mlp_width: 32
+  typed_feature_width: 8
+  public_heuristic_logit_bias_scale: 0.0
+  public_heuristic_actor_logit_bias_scale: 1.0
+training:
+  profile_timers: true
+  fixed_opponent_backend: simulator_native
+  actor_policy_backend: heuristic_public
+  actor_heuristic_fraction: 1.0
+  structured_warmstart:
+    updates: 1
+evaluation:
+  periodic_dev_eval_interval_updates: 5
+league:
+  sampling:
+    heuristic_public_start_updates: 0
+    heuristic_public_mix_fraction: 1.0

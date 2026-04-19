@@ -31,7 +31,11 @@ from weiss_rl.eval.harness import (
     sample_action_pinned,
 )
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
-from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, NO_LEAGUE_POLICY_ID, RANDOM_LEGAL_POLICY_ID
+from weiss_rl.eval.policy_set import (
+    NO_LEAGUE_POLICY_ID,
+    RANDOM_LEGAL_POLICY_ID,
+    heuristic_public_profile_name_for_policy_id,
+)
 from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
 from weiss_rl.league.registry import SnapshotMeta, SnapshotRegistry
 from weiss_rl.masking import assert_strictly_increasing_legal_ids
@@ -99,13 +103,17 @@ def resolve_eval_policies(
         if policy_id == RANDOM_LEGAL_POLICY_ID:
             resolved[policy_id] = ResolvedEvalPolicy(policy_id=policy_id, kind="random_legal")
             continue
-        if policy_id == HEURISTIC_PUBLIC_POLICY_ID:
+        heuristic_profile = heuristic_public_profile_name_for_policy_id(policy_id)
+        if heuristic_profile is not None:
             if spec_bundle is None:
-                raise RuntimeError("Resolving B2 HeuristicPublic requires the loaded simulator spec bundle")
+                raise RuntimeError(f"Resolving {policy_id} requires the loaded simulator spec bundle")
             resolved[policy_id] = ResolvedEvalPolicy(
                 policy_id=policy_id,
                 kind="heuristic_public",
-                heuristic_policy=HeuristicPublicPolicy.from_spec_bundle(spec_bundle),
+                heuristic_policy=HeuristicPublicPolicy.from_spec_bundle(
+                    spec_bundle,
+                    scoring_profile=heuristic_profile,
+                ),
             )
             continue
         if policy_id == NO_LEAGUE_POLICY_ID:
@@ -328,6 +336,7 @@ class SimulatorEvalRunner(EvalGameRunner):
                 torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
                 torch.as_tensor([current_seat], device=self._device, dtype=torch.long),
                 seat_hidden,
+                scoring_mode="learner",
             )
         logits = logits_tensor[0].detach().cpu().numpy().astype(np.float32, copy=False)
         action, _logp = sample_action_pinned(

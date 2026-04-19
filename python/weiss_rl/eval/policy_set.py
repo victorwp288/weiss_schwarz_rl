@@ -11,10 +11,77 @@ from weiss_rl.config.models import FinalPolicySetSelectionConfig
 
 RANDOM_LEGAL_POLICY_ID = "B0 RandomLegal"
 NO_LEAGUE_POLICY_ID = "B1 NoLeague baseline"
+LEGACY_NO_LEAGUE_POLICY_ID = "b1_noleague_baseline"
 HEURISTIC_PUBLIC_POLICY_ID = "B2 HeuristicPublic"
+HEURISTIC_PUBLIC_AGGRO_POLICY_ID = "B3 HeuristicPublicAggro"
+HEURISTIC_PUBLIC_CONTROL_POLICY_ID = "B4 HeuristicPublicControl"
+
+_HEURISTIC_PUBLIC_PROFILE_BY_POLICY_ID = {
+    HEURISTIC_PUBLIC_POLICY_ID: "base",
+    HEURISTIC_PUBLIC_AGGRO_POLICY_ID: "aggressive",
+    HEURISTIC_PUBLIC_CONTROL_POLICY_ID: "control",
+}
 
 _TRAINING_POLICY_ID_RE = re.compile(r"^train_u(?P<update>\d+)_p(?P<version>\d+)$")
 _POLICY_VERSION_ID_RE = re.compile(r"^policy_(?P<version>\d+)$")
+
+
+def heuristic_public_profile_name_for_policy_id(policy_id: str) -> str | None:
+    return _HEURISTIC_PUBLIC_PROFILE_BY_POLICY_ID.get(str(policy_id))
+
+
+def heuristic_public_policy_ids(*, include_base: bool = True) -> tuple[str, ...]:
+    policy_ids = tuple(_HEURISTIC_PUBLIC_PROFILE_BY_POLICY_ID)
+    if include_base:
+        return policy_ids
+    return tuple(policy_id for policy_id in policy_ids if policy_id != HEURISTIC_PUBLIC_POLICY_ID)
+
+
+def recommend_focal_policy_id(
+    *,
+    snapshot_registry: object,
+    dev_eval_summaries: Mapping[str, DevEvalSummaryLike],
+    candidate_policy_ids: Sequence[str],
+) -> str | None:
+    """Recommend a non-baseline focal policy for reporting from a resolved final policy set.
+
+    The recommendation prefers policies with canonicalized dev-eval summaries and falls back to
+    the newest training snapshot among the eligible candidates when summary coverage is missing.
+    """
+
+    snapshot_policies = _snapshot_training_policies(snapshot_registry)
+    normalized_summaries = _canonicalize_dev_eval_summaries(
+        _normalize_dev_eval_summaries(dev_eval_summaries),
+        snapshot_policies=snapshot_policies,
+    )
+    eligible_policy_ids = [str(policy_id) for policy_id in candidate_policy_ids if _is_focal_candidate(str(policy_id))]
+    if not eligible_policy_ids:
+        return None
+
+    summarized_candidates = [
+        normalized_summaries[policy_id] for policy_id in eligible_policy_ids if policy_id in normalized_summaries
+    ]
+    if summarized_candidates:
+        return max(
+            summarized_candidates,
+            key=lambda summary: (
+                float(summary.aggregate_score),
+                len(summary.anchor_scores),
+                *_training_policy_tie_break(summary.policy_id),
+                summary.policy_id,
+            ),
+        ).policy_id
+
+    parsed_candidates = [
+        parsed
+        for policy_id in eligible_policy_ids
+        for parsed in [_try_parse_training_policy(policy_id)]
+        if parsed is not None
+    ]
+    if parsed_candidates:
+        return max(parsed_candidates, key=_training_policy_sort_key).policy_id
+
+    return eligible_policy_ids[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +134,11 @@ def select_final_policy_set_deterministic_v1(
     if final_policy_set_size < 1:
         raise ValueError("final_policy_set_size must be at least 1")
 
-    normalized_summaries = _normalize_dev_eval_summaries(dev_eval_summaries)
     snapshot_policies = _snapshot_training_policies(snapshot_registry)
+    normalized_summaries = _canonicalize_dev_eval_summaries(
+        _normalize_dev_eval_summaries(dev_eval_summaries),
+        snapshot_policies=snapshot_policies,
+    )
     snapshot_policies_by_id = {policy.policy_id: policy for policy in snapshot_policies}
     selected: list[str] = []
 
@@ -124,6 +194,12 @@ def _append_unique(selected: list[str], policy_id: str) -> None:
         selected.append(policy_id)
 
 
+def _is_focal_candidate(policy_id: str) -> bool:
+    if policy_id in {RANDOM_LEGAL_POLICY_ID, NO_LEAGUE_POLICY_ID, LEGACY_NO_LEAGUE_POLICY_ID}:
+        return False
+    return policy_id not in _HEURISTIC_PUBLIC_PROFILE_BY_POLICY_ID
+
+
 def _configured_anchor_policy_ids(
     config: FinalPolicySetSelectionConfig,
     dev_eval_summaries: Mapping[str, DevEvalPolicySummary],
@@ -148,6 +224,13 @@ def _find_closest_snapshot(
             parsed.policy_id,
         ),
     )
+
+
+def _training_policy_tie_break(policy_id: str) -> tuple[int, int]:
+    parsed = _try_parse_training_policy(policy_id)
+    if parsed is None:
+        return (-1, -1)
+    return (parsed.update, parsed.version)
 
 
 def _latest_champion_policy(
@@ -186,6 +269,40 @@ def _normalize_dev_eval_summaries(
     return normalized
 
 
+def _canonicalize_dev_eval_summaries(
+    dev_eval_summaries: Mapping[str, DevEvalPolicySummary],
+    *,
+    snapshot_policies: Sequence[TrainingPolicyId],
+) -> dict[str, DevEvalPolicySummary]:
+    registry_policy_id_by_key = {(policy.update, policy.version): policy.policy_id for policy in snapshot_policies}
+    canonical: dict[str, DevEvalPolicySummary] = {}
+    for policy_id, summary in dev_eval_summaries.items():
+        canonical_policy_id = policy_id
+        parsed = _try_parse_training_policy(policy_id)
+        if parsed is not None:
+            canonical_policy_id = registry_policy_id_by_key.get((parsed.update, parsed.version), "")
+            if not canonical_policy_id:
+                continue
+        existing = canonical.get(canonical_policy_id)
+        candidate = DevEvalPolicySummary(
+            policy_id=canonical_policy_id,
+            aggregate_score=summary.aggregate_score,
+            anchor_scores=summary.anchor_scores,
+        )
+        if existing is None:
+            canonical[canonical_policy_id] = candidate
+            continue
+        if len(candidate.anchor_scores) > len(existing.anchor_scores):
+            canonical[canonical_policy_id] = candidate
+            continue
+        if (
+            len(candidate.anchor_scores) == len(existing.anchor_scores)
+            and candidate.aggregate_score > existing.aggregate_score
+        ):
+            canonical[canonical_policy_id] = candidate
+    return canonical
+
+
 def _snapshot_training_policies(snapshot_registry: object) -> list[TrainingPolicyId]:
     parsed: list[TrainingPolicyId] = []
     for snapshot in _snapshot_entries(snapshot_registry):
@@ -214,7 +331,7 @@ def _parse_registry_snapshot(snapshot: object) -> TrainingPolicyId | None:
         return _try_parse_training_policy(snapshot)
     if hasattr(snapshot, "policy_id") and hasattr(snapshot, "update"):
         snapshot_entry = cast(SnapshotEntryLike, snapshot)
-        return _parse_training_policy_like(
+        return _try_parse_training_policy_like(
             str(snapshot_entry.policy_id),
             update=int(snapshot_entry.update),
         )
@@ -240,6 +357,13 @@ def _parse_training_policy_like(policy_id: str, *, update: int | None = None) ->
 def _try_parse_training_policy(policy_id: str) -> TrainingPolicyId | None:
     try:
         return parse_training_policy_id(policy_id)
+    except ValueError:
+        return None
+
+
+def _try_parse_training_policy_like(policy_id: str, *, update: int | None = None) -> TrainingPolicyId | None:
+    try:
+        return _parse_training_policy_like(policy_id, update=update)
     except ValueError:
         return None
 
@@ -279,6 +403,7 @@ def _training_policy_sort_key(policy: TrainingPolicyId) -> tuple[int, int, str]:
 __all__ = [
     "DevEvalPolicySummary",
     "HEURISTIC_PUBLIC_POLICY_ID",
+    "LEGACY_NO_LEAGUE_POLICY_ID",
     "NO_LEAGUE_POLICY_ID",
     "RANDOM_LEGAL_POLICY_ID",
     "TrainingPolicyId",

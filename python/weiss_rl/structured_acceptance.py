@@ -45,10 +45,7 @@ def build_structured_baseline_contract(
     b2_anchor_name: str = _DEFAULT_B2_ANCHOR,
 ) -> StructuredBaselineContract:
     aggregate_score = float(dev_eval_summary.get("aggregate_score", 0.0))
-    anchor_scores = {
-        str(name): float(score)
-        for name, score in dict(dev_eval_summary.get("anchor_scores", {})).items()
-    }
+    anchor_scores = {str(name): float(score) for name, score in dict(dev_eval_summary.get("anchor_scores", {})).items()}
     if b2_anchor_name not in anchor_scores:
         raise ValueError(f"dev_eval summary is missing anchor score for {b2_anchor_name!r}")
 
@@ -91,9 +88,7 @@ def build_structured_baseline_contract(
             },
             "min_mean_anchor_score_delta": 0.10,
             "max_anchor_regressions": {
-                name: max(score - 0.05, 0.0)
-                for name, score in anchor_scores.items()
-                if name != b2_anchor_name
+                name: max(score - 0.05, 0.0) for name, score in anchor_scores.items() if name != b2_anchor_name
             },
             "min_b2_score_per_seed": 0.10,
         },

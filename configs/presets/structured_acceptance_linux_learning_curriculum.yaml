@@ -1,0 +1,6 @@
+schema_version: 2
+description: structured_acceptance Linux/WSL learning-frontier preset with early B1 curriculum
+extends: structured_acceptance_linux_learning_frontier.yaml
+league:
+  sampling:
+    noleague_baseline_mix_end_updates: 5

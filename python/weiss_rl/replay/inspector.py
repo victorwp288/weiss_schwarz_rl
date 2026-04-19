@@ -151,13 +151,17 @@ def inspect_replay_bundle(
                 "spec": policy_a_loaded.spec,
                 "label": policy_a_loaded.label,
                 "kind": policy_a_loaded.kind,
-                "weights_path": None if policy_a_loaded.weights_path is None else policy_a_loaded.weights_path.as_posix(),
+                "weights_path": None
+                if policy_a_loaded.weights_path is None
+                else policy_a_loaded.weights_path.as_posix(),
             },
             "policy_b": {
                 "spec": policy_b_loaded.spec,
                 "label": policy_b_loaded.label,
                 "kind": policy_b_loaded.kind,
-                "weights_path": None if policy_b_loaded.weights_path is None else policy_b_loaded.weights_path.as_posix(),
+                "weights_path": None
+                if policy_b_loaded.weights_path is None
+                else policy_b_loaded.weights_path.as_posix(),
             },
             "run_dir": None if resolved_run_dir is None else resolved_run_dir.as_posix(),
             "snapshot_registry_path": None if resolved_registry_path is None else resolved_registry_path.as_posix(),
@@ -295,7 +299,9 @@ def _load_policy(
     normalized_spec = str(spec).strip()
     if normalized_spec == HEURISTIC_PUBLIC_POLICY_ID:
         if run_spec_bundle is None:
-            raise RuntimeError("Resolving B2 HeuristicPublic for replay inspection requires spec_bundle.json in run_dir")
+            raise RuntimeError(
+                "Resolving B2 HeuristicPublic for replay inspection requires spec_bundle.json in run_dir"
+            )
         return LoadedReplayPolicy(
             spec=normalized_spec,
             label=normalized_spec,
@@ -609,7 +615,10 @@ def _top_action_payload(
     if legal_indices.size == 0:
         raise RuntimeError("Replay inspection requires at least one legal action per compared step")
     top_action = int(legal_indices[np.argmax(probabilities[legal_indices])])
-    return {**_action_descriptor(top_action, action_catalog=action_catalog), "probability": float(probabilities[top_action])}
+    return {
+        **_action_descriptor(top_action, action_catalog=action_catalog),
+        "probability": float(probabilities[top_action]),
+    }
 
 
 def _rank_of_action(*, probabilities: np.ndarray, legal_indices: np.ndarray, action_id: int) -> int:

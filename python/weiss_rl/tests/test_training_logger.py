@@ -340,6 +340,7 @@ def test_impala_learner_logs_masked_metrics_and_uses_update_count_checkpoint_met
     for _ in range(4):
         result = learner.update(_masked_batch())
         assert set(result) == {
+            "entropy_coef",
             "loss",
             "throughput_samples_per_sec",
             "throughput_updates_per_sec",
@@ -362,6 +363,7 @@ def test_impala_learner_logs_vtrace_metrics_for_object_batches(tmp_path: Path) -
     result = learner.update(SimpleNamespace(**_masked_batch(time_steps=1, batch_size=1, action_space=3)))
 
     assert set(result) == {
+        "entropy_coef",
         "loss",
         "throughput_samples_per_sec",
         "throughput_updates_per_sec",

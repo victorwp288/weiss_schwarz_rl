@@ -108,13 +108,61 @@ def _write_b1_baseline_run_fixture(
     }
     (run_dir / "manifest.json").write_text(
         json.dumps(
-            {
-                "config_canonical": config_canonical
-            },
+            {"config_canonical": config_canonical},
             indent=2,
             sort_keys=True,
         )
         + "\n",
+        encoding="utf-8",
+    )
+    return run_dir
+
+
+def _write_seed_snapshot_run_fixture(
+    tmp_path: Path,
+    *,
+    updates: tuple[int, ...] = (10, 20),
+    champion_updates: tuple[int, ...] = (20,),
+    config_hash256: str = "ab" * 32,
+    spec_hash256: str = "cd" * 32,
+) -> Path:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    run_dir = tmp_path / "seed_run"
+    training_paths = train_script._training_paths(run_dir)
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    for update in updates:
+        policy_id = f"policy_{update:06d}"
+        checkpoint_path = training_paths.checkpoints_dir / f"checkpoint_{update}.pt"
+        torch.save({"format": "checkpoint_stub"}, checkpoint_path)
+        weights_path, weights_sha256 = train_script._write_snapshot_artifact(
+            snapshots_dir=training_paths.snapshots_dir,
+            run_dir=run_dir,
+            checkpoint_path=checkpoint_path,
+            policy_id=policy_id,
+            update=update,
+            config_hash256=config_hash256,
+            device=torch.device("cpu"),
+            model_state_dict=_make_policy_value_model(stack).state_dict(),
+        )
+        registry.add_snapshot(
+            policy_id=policy_id,
+            update=update,
+            weights_sha256=weights_sha256,
+            path=weights_path.relative_to(run_dir).as_posix(),
+        )
+    for update in champion_updates:
+        registry.add_champion(f"policy_{update:06d}")
+    registry.save(training_paths.snapshots_dir / "registry.json")
+    (run_dir / "config_hash256.txt").write_text(f"{config_hash256}\n", encoding="utf-8")
+    (run_dir / "spec_hash256.txt").write_text(f"{spec_hash256}\n", encoding="utf-8")
+    config_canonical = canonical_config_dict(stack)
+    config_canonical["experiment"] = {
+        **dict(config_canonical.get("experiment", {})),
+        "role": "main",
+    }
+    (run_dir / "manifest.json").write_text(
+        json.dumps({"config_canonical": config_canonical}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     return run_dir
@@ -556,6 +604,50 @@ def test_ensure_noleague_baseline_anchor_rejects_non_b1_imported_run(tmp_path: P
         )
 
 
+def test_import_seed_snapshot_pool_imports_external_snapshots_and_champions(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    seed_run_dir = _write_seed_snapshot_run_fixture(tmp_path)
+    consumer_run_dir = tmp_path / "consumer_run"
+    training_paths = train_script._training_paths(consumer_run_dir)
+    bootstrap_learner = SimpleNamespace(
+        model=_make_policy_value_model(stack),
+        update_count=0,
+        optimizer=None,
+        get_policy_version=lambda: 0,
+    )
+
+    imported_policy_ids = train_script._import_seed_snapshot_pool(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=consumer_run_dir,
+        seed_snapshot_run_dir=seed_run_dir,
+        expected_model_state_dict=bootstrap_learner.model.state_dict(),
+        expected_config_canonical=canonical_config_dict(stack),
+        expected_spec_hash256="cd" * 32,
+    )
+
+    assert len(imported_policy_ids) == 2
+    expected_policy_ids = [
+        train_script._seed_snapshot_policy_id(source_run_dir=seed_run_dir.resolve(), source_policy_id="policy_000010"),
+        train_script._seed_snapshot_policy_id(source_run_dir=seed_run_dir.resolve(), source_policy_id="policy_000020"),
+    ]
+    assert imported_policy_ids == expected_policy_ids
+
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    assert [snapshot.policy_id for snapshot in registry.snapshots] == expected_policy_ids
+    assert registry.champion_snapshots == [expected_policy_ids[-1]]
+
+    weights_path = consumer_run_dir / snapshot_weights_relpath(expected_policy_ids[-1])
+    metadata_path = training_paths.snapshots_dir / expected_policy_ids[-1] / "policy_meta.json"
+    assert weights_path.is_file()
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["format"] == "seeded_train_snapshot_metadata_v1"
+    assert metadata["policy_id"] == expected_policy_ids[-1]
+    assert metadata["imported_from_run_dir"] == seed_run_dir.resolve().as_posix()
+    assert metadata["imported_from_policy_id"] == "policy_000020"
+
+
 def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_path: Path, monkeypatch) -> None:
     train_script = _load_train_script_module()
     stack = load_stack_config(canonical_stack_config_path())
@@ -576,9 +668,7 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
     try:
         train_script._run_minimal_training(
             stack=stack,
-            contract=SimpleNamespace(
-                spec_bundle=_heuristic_public_contract_bundle()
-            ),
+            contract=SimpleNamespace(spec_bundle=_heuristic_public_contract_bundle()),
             artifacts=SimpleNamespace(run_dir=run_dir),
             num_envs=1,
             unroll_length=1,
@@ -1152,6 +1242,109 @@ def test_periodic_dev_eval_runner_resets_env_with_scheduled_episode_seed(tmp_pat
     assert result.episode_seed == scheduled_game.episode_seed
 
 
+def test_periodic_dev_eval_runner_uses_learner_scoring_mode(tmp_path: Path, monkeypatch) -> None:
+    train_script = _load_train_script_module()
+
+    live_batch = train_script.DecisionBoundaryBatch(
+        obs=np.zeros((1, 1), dtype=np.float32),
+        reward=np.zeros((1,), dtype=np.float32),
+        terminated=np.array([False]),
+        truncated=np.array([False]),
+        to_play=np.array([0], dtype=np.int32),
+        actor=np.array([0], dtype=np.int32),
+        decision_id=np.array([0], dtype=np.int64),
+        engine_status=np.array([0], dtype=np.uint8),
+        decision_count=np.array([0], dtype=np.uint32),
+        tick_count=np.array([0], dtype=np.uint32),
+        episode_seed=np.array([579856027068064], dtype=np.uint64),
+        episode_key=np.array([1], dtype=np.uint64),
+        ids_offsets=(np.array([0], dtype=np.uint32), np.array([0, 1], dtype=np.int32)),
+    )
+    terminal_batch = train_script.DecisionBoundaryBatch(
+        obs=np.zeros((1, 1), dtype=np.float32),
+        reward=np.zeros((1,), dtype=np.float32),
+        terminated=np.array([True]),
+        truncated=np.array([False]),
+        to_play=np.array([-1], dtype=np.int32),
+        actor=np.array([-1], dtype=np.int32),
+        decision_id=np.array([1], dtype=np.int64),
+        engine_status=np.array([0], dtype=np.uint8),
+        decision_count=np.array([1], dtype=np.uint32),
+        tick_count=np.array([1], dtype=np.uint32),
+        episode_seed=np.array([579856027068064], dtype=np.uint64),
+        episode_key=np.array([1], dtype=np.uint64),
+        ids_offsets=(np.array([], dtype=np.uint32), np.array([0, 0], dtype=np.int32)),
+    )
+
+    class FakeEnv:
+        def __init__(self) -> None:
+            self.closed = False
+            self.reset_seed: int | None = None
+
+        def reset(self, seed: int | None = None):
+            self.reset_seed = seed
+            return live_batch
+
+        def step(self, actions: np.ndarray):
+            return terminal_batch
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeModel:
+        def __init__(self) -> None:
+            self.scoring_modes: list[str] = []
+
+        def initial_seat_hidden(self, batch_size: int, *, device: torch.device) -> torch.Tensor:
+            return torch.zeros((batch_size, 1), device=device)
+
+        def forward_seat_aware(
+            self,
+            obs: torch.Tensor,
+            acting_seat: torch.Tensor,
+            seat_hidden_state: torch.Tensor | None = None,
+            *,
+            scoring_mode: str = "auto",
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            self.scoring_modes.append(str(scoring_mode))
+            logits = torch.zeros((1, 1), dtype=torch.float32, device=obs.device)
+            values = torch.zeros((1,), dtype=torch.float32, device=obs.device)
+            next_hidden = torch.zeros((1, 1), dtype=torch.float32, device=obs.device)
+            return logits, values, next_hidden
+
+    env = FakeEnv()
+    model = FakeModel()
+    monkeypatch.setattr(train_script, "_build_ids_eval_env", lambda *args, **kwargs: env)
+
+    runner = train_script._PeriodicDevEvalRunner(
+        stack=SimpleNamespace(),
+        model=model,
+        opponent_policy_id="baseline",
+        observation_dim=1,
+        action_dim=1,
+        pass_action_id=0,
+        artifact_dir=tmp_path,
+        focal_policy_id="focal",
+        require_sorted_legal_ids=False,
+    )
+    scheduled_game = train_script.ScheduledGame(
+        pair_index=0,
+        swap_index=0,
+        episode_index=0,
+        episode_seed=579856027068064,
+        focal_policy_id="focal",
+        opponent_policy_id="baseline",
+        seat0_policy_id="focal",
+        seat1_policy_id="baseline",
+        focal_seat=0,
+    )
+
+    runner.run_game(scheduled_game)
+
+    assert model.scoring_modes == ["learner"]
+    assert env.closed is True
+
+
 def test_promotion_gate_runner_resets_env_with_scheduled_episode_seed(tmp_path: Path, monkeypatch) -> None:
     train_script = _load_train_script_module()
 
@@ -1220,3 +1413,105 @@ def test_promotion_gate_runner_resets_env_with_scheduled_episode_seed(tmp_path: 
     assert env.reset_seed == scheduled_game.episode_seed
     assert env.closed is True
     assert result.episode_seed == scheduled_game.episode_seed
+
+
+def test_promotion_gate_runner_uses_learner_scoring_mode(tmp_path: Path, monkeypatch) -> None:
+    train_script = _load_train_script_module()
+
+    live_batch = train_script.DecisionBoundaryBatch(
+        obs=np.zeros((1, 1), dtype=np.float32),
+        reward=np.zeros((1,), dtype=np.float32),
+        terminated=np.array([False]),
+        truncated=np.array([False]),
+        to_play=np.array([0], dtype=np.int32),
+        actor=np.array([0], dtype=np.int32),
+        decision_id=np.array([0], dtype=np.int64),
+        engine_status=np.array([0], dtype=np.uint8),
+        decision_count=np.array([0], dtype=np.uint32),
+        tick_count=np.array([0], dtype=np.uint32),
+        episode_seed=np.array([579856027068064], dtype=np.uint64),
+        episode_key=np.array([1], dtype=np.uint64),
+        ids_offsets=(np.array([0], dtype=np.uint32), np.array([0, 1], dtype=np.int32)),
+    )
+    terminal_batch = train_script.DecisionBoundaryBatch(
+        obs=np.zeros((1, 1), dtype=np.float32),
+        reward=np.zeros((1,), dtype=np.float32),
+        terminated=np.array([True]),
+        truncated=np.array([False]),
+        to_play=np.array([-1], dtype=np.int32),
+        actor=np.array([-1], dtype=np.int32),
+        decision_id=np.array([1], dtype=np.int64),
+        engine_status=np.array([0], dtype=np.uint8),
+        decision_count=np.array([1], dtype=np.uint32),
+        tick_count=np.array([1], dtype=np.uint32),
+        episode_seed=np.array([579856027068064], dtype=np.uint64),
+        episode_key=np.array([1], dtype=np.uint64),
+        ids_offsets=(np.array([], dtype=np.uint32), np.array([0, 0], dtype=np.int32)),
+    )
+
+    class FakeEnv:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def reset(self, seed: int | None = None):
+            return live_batch
+
+        def step(self, actions: np.ndarray):
+            return terminal_batch
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeModel:
+        def __init__(self) -> None:
+            self.scoring_modes: list[str] = []
+
+        def initial_seat_hidden(self, batch_size: int, *, device: torch.device) -> torch.Tensor:
+            return torch.zeros((batch_size, 1), device=device)
+
+        def forward_seat_aware(
+            self,
+            obs: torch.Tensor,
+            acting_seat: torch.Tensor,
+            seat_hidden_state: torch.Tensor | None = None,
+            *,
+            scoring_mode: str = "auto",
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            self.scoring_modes.append(str(scoring_mode))
+            logits = torch.zeros((1, 1), dtype=torch.float32, device=obs.device)
+            values = torch.zeros((1,), dtype=torch.float32, device=obs.device)
+            next_hidden = torch.zeros((1, 1), dtype=torch.float32, device=obs.device)
+            return logits, values, next_hidden
+
+    env = FakeEnv()
+    focal_model = FakeModel()
+    monkeypatch.setattr(train_script, "_build_ids_eval_env", lambda *args, **kwargs: env)
+
+    runner = train_script._PromotionGateRunner(
+        stack=SimpleNamespace(),
+        focal_policy_id="candidate",
+        focal_model=focal_model,
+        anchor_models={},
+        heuristic_policies={},
+        observation_dim=1,
+        action_dim=1,
+        pass_action_id=0,
+        artifact_dir=tmp_path,
+        require_sorted_legal_ids=False,
+    )
+    scheduled_game = train_script.ScheduledGame(
+        pair_index=0,
+        swap_index=0,
+        episode_index=0,
+        episode_seed=579856027068064,
+        focal_policy_id="candidate",
+        opponent_policy_id="baseline",
+        seat0_policy_id="candidate",
+        seat1_policy_id="baseline",
+        focal_seat=0,
+    )
+
+    runner.run_game(scheduled_game)
+
+    assert focal_model.scoring_modes == ["learner"]
+    assert env.closed is True

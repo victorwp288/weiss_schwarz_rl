@@ -49,15 +49,17 @@ export WEISS_SIM_PYTHON=/path/to/python3.12
 
 ## Verification issues
 
-### `make verify` fails on formatting
+### `python/scripts/verify_repo.py` fails on formatting
 
 Run the formatter first:
 
 ```bash
-make fmt
+uv run python -m ruff format python tests examples python/scripts
 ```
 
-### `scripts/run_local_ci_parity.sh` fails on missing tools
+`make verify` runs the same verification entrypoint when GNU Make is available, so the same fix applies there.
+
+### `python/scripts/verify_repo.py` or `scripts/run_local_ci_parity.sh` fails on missing tools
 
 Install the repo dev dependencies first:
 
@@ -74,6 +76,7 @@ python -m pip install -e ".[dev]"
 Then run the parity script through `bash`:
 
 ```bash
+uv run python python/scripts/verify_repo.py
 bash scripts/run_local_ci_parity.sh
 ```
 

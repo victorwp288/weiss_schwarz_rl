@@ -209,8 +209,10 @@ def _u120_acceptance_payload(
         <= int(targets.get("max_main_move_to_main_play_character", 0)),
         "top_exact_pair_changed": not (
             expected_top
-            and str(top_exact_pair.get("policy_a_action_label", "")) == str(expected_top.get("policy_a_action_label", ""))
-            and str(top_exact_pair.get("policy_b_action_label", "")) == str(expected_top.get("policy_b_action_label", ""))
+            and str(top_exact_pair.get("policy_a_action_label", ""))
+            == str(expected_top.get("policy_a_action_label", ""))
+            and str(top_exact_pair.get("policy_b_action_label", ""))
+            == str(expected_top.get("policy_b_action_label", ""))
         ),
     }
     return {
@@ -408,7 +410,9 @@ def main() -> int:
             )
             acceptance_path = canary_run_dir / "structured_v2" / "u120_acceptance.json"
             acceptance_path.parent.mkdir(parents=True, exist_ok=True)
-            acceptance_path.write_text(json.dumps(acceptance_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            acceptance_path.write_text(
+                json.dumps(acceptance_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
             steps.append(
                 {
                     "label": f"acceptance_seed_{seed}",

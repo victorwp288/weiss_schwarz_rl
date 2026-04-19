@@ -119,9 +119,7 @@ class DecisionBoundaryBatch:
             if self.mask is not None:
                 mask_action_space = int(self.mask.shape[-1])
                 if mask_action_space != action_space:
-                    raise ValueError(
-                        f"action_space mismatch: expected {action_space}, got {mask_action_space}"
-                    )
+                    raise ValueError(f"action_space mismatch: expected {action_space}, got {mask_action_space}")
             elif self.ids_offsets is not None:
                 legal_ids, _legal_offsets = self.ids_offsets
                 if legal_ids.size and np.any(np.asarray(legal_ids, dtype=np.int64) >= action_space):
@@ -160,9 +158,7 @@ class DecisionBoundaryEnv:
         self.copy_arrays = bool(copy_arrays)
         self.max_decisions = None if max_decisions is None else int(max_decisions)
         self.max_ticks = None if max_ticks is None else int(max_ticks)
-        self.max_no_progress_decisions = (
-            None if max_no_progress_decisions is None else int(max_no_progress_decisions)
-        )
+        self.max_no_progress_decisions = None if max_no_progress_decisions is None else int(max_no_progress_decisions)
         self._last_batch: DecisionBoundaryBatch | None = None
         self._step_out: Any | None = None
         self._reset_out: Any | None = None
@@ -351,11 +347,7 @@ class DecisionBoundaryEnv:
         if callable(getter):
             raw_snapshot = getter()
             snapshot.update(
-                {
-                    str(key): int(value)
-                    for key, value in dict(raw_snapshot).items()
-                    if str(key) != "timing_enabled"
-                }
+                {str(key): int(value) for key, value in dict(raw_snapshot).items() if str(key) != "timing_enabled"}
             )
         resetter = getattr(self.pool, "reset_timing_counters", None)
         if callable(resetter):
@@ -572,11 +564,7 @@ def _merge_packed_legality_rows(*, dst: Any, current: Any, replacement: Any, row
         if merged_ids_parts
         else np.zeros((0,), dtype=current_ids.dtype)
     )
-    merged_meta = (
-        np.concatenate(merged_meta_parts, axis=0)
-        if merged_meta_parts
-        else None
-    )
+    merged_meta = np.concatenate(merged_meta_parts, axis=0) if merged_meta_parts else None
     _write_packed_legality(
         dst=dst,
         legal_ids=merged_ids,
@@ -623,8 +611,7 @@ def _write_packed_legality(
                 )
             if int(meta.shape[1]) != int(dst_meta.shape[1]):
                 raise RuntimeError(
-                    "packed legal_action_meta width mismatch: "
-                    f"expected {dst_meta.shape[1]}, got {meta.shape[1]}"
+                    f"packed legal_action_meta width mismatch: expected {dst_meta.shape[1]}, got {meta.shape[1]}"
                 )
             if meta.size:
                 np.copyto(dst_meta[: meta.shape[0]], meta, casting="unsafe")
@@ -758,7 +745,11 @@ def _batch_episode_identity(
         return episode_seed_array, np.asarray(episode_key_array, dtype=np.uint64), "derived"
 
     if episode_key is not None:
-        return episode_seed_array, _array_view_or_copy(episode_key, dtype=np.uint64, copy_arrays=copy_arrays), "simulator"
+        return (
+            episode_seed_array,
+            _array_view_or_copy(episode_key, dtype=np.uint64, copy_arrays=copy_arrays),
+            "simulator",
+        )
 
     return episode_seed_array, np.zeros((num_envs,), dtype=np.uint64), "pool_seed_only"
 
@@ -880,7 +871,7 @@ def _pack_batch(
         episode_seed=episode_seed,
         episode_key=episode_key,
         episode_identity_source=episode_identity_source,
-        action_space=int(getattr(pool, "action_space")) if pool is not None and hasattr(pool, "action_space") else None,
+        action_space=int(pool.action_space) if pool is not None and hasattr(pool, "action_space") else None,
         no_progress_count=no_progress_count,
         ids_offsets=(
             _packed_legal_ids_prefix(legal_ids, legal_offsets, copy_arrays=copy_arrays),

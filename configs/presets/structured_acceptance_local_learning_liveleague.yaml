@@ -1,0 +1,14 @@
+schema_version: 2
+description: structured_acceptance local tiny64 learning frontier with early live PFSP
+extends: structured_acceptance_local_learning_frontier.yaml
+training:
+  checkpointing:
+    checkpoint_interval_updates: 10
+    snapshot_interval_updates: 5
+    actor_reload_interval_updates: 10
+league:
+  warmup:
+    first_updates: 5
+    initial_window_episodes: 512
+    ramp_target_updates: 20
+    ramp_target_window_episodes: 4096
