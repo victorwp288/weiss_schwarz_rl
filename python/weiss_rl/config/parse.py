@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
 import json
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +12,8 @@ import yaml
 from weiss_rl.spec import normalize_spec_mismatch_policy, require_fail_on_spec_mismatch
 
 from .models import (
-    CurriculumConfig,
     CurriculumCheckpointGuardConfig,
+    CurriculumConfig,
     CurriculumStallMonitorConfig,
     DecisionKindTaggingConfig,
     DeckSetSizeConfig,
@@ -23,13 +23,13 @@ from .models import (
     FinalPolicySetSelectionConfig,
     FixedAnchorSetConfig,
     IdsConfig,
-    LegalFingerprintChecksConfig,
-    LegalFingerprintConfig,
     LeagueConfig,
     LeaguePoolConfig,
     LeaguePromotionConfig,
     LeagueSamplingConfig,
     LeagueWarmupConfig,
+    LegalFingerprintChecksConfig,
+    LegalFingerprintConfig,
     LockedConfig,
     ModelConfig,
     ModelDropoutConfig,

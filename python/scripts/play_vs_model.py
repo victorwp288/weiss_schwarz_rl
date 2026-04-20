@@ -5,12 +5,11 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any, cast
 
 import numpy as np
 import torch
-import weiss_sim
-
 from weiss_rl.action_catalog import ActionCatalog, DecodedAction
 from weiss_rl.config import load_stack_config
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
@@ -22,6 +21,13 @@ from weiss_rl.eval.simulator_runner import ResolvedEvalPolicy, resolve_eval_poli
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.simulator_contract import load_verified_simulator_contract
 
+weiss_sim: ModuleType | None
+try:
+    import weiss_sim as _weiss_sim
+except ModuleNotFoundError:  # pragma: no cover - exercised indirectly in non-sim test environments
+    weiss_sim = None
+else:
+    weiss_sim = _weiss_sim
 
 _SLOT_NAMES = ("front_left", "front_center", "front_right", "back_left", "back_right")
 
@@ -32,6 +38,15 @@ class _ActionOption:
     action_id: int
     label: str
     probability: float | None = None
+
+
+def _require_weiss_sim() -> Any:
+    if weiss_sim is None:
+        raise RuntimeError(
+            "play_vs_model.py requires the optional weiss-sim dependency. Install with `uv sync --extra dev --extra sim` "
+            "or `python -m pip install -e '.[dev,sim]'`."
+        )
+    return weiss_sim
 
 
 def _repo_root_from_run_dir(run_dir: Path) -> Path:
@@ -132,7 +147,8 @@ def _format_decoded_action(action_id: int, catalog: ActionCatalog) -> str:
         decoded = catalog.decode(int(action_id))
         return _format_catalog_action(decoded)
     except Exception:
-        raw = weiss_sim.decode_action_id(int(action_id))
+        sim = _require_weiss_sim()
+        raw = sim.decode_action_id(int(action_id))
         if not isinstance(raw, dict):
             return str(raw)
         family = str(raw.get("family", "unknown"))
@@ -249,18 +265,19 @@ def _rank_policy_hint_options(
     seat_hidden: torch.Tensor | None,
     top_k: int,
     catalog: ActionCatalog,
-) -> list[_ActionOption]:
+) -> tuple[list[_ActionOption], torch.Tensor | None]:
     if policy.model is None:
-        return []
-    logits, _next_hidden = _model_logits_for_state(policy=policy, batch=batch, seat_hidden=seat_hidden)
-    return _rank_legal_actions(logits=logits, legal_ids=legal_ids, catalog=catalog, top_k=top_k)
+        return [], seat_hidden
+    logits, next_hidden = _model_logits_for_state(policy=policy, batch=batch, seat_hidden=seat_hidden)
+    return _rank_legal_actions(logits=logits, legal_ids=legal_ids, catalog=catalog, top_k=top_k), next_hidden
 
 
 def _print_deck_list() -> None:
-    names = weiss_sim.cards.presets()
+    sim = _require_weiss_sim()
+    names = sim.cards.presets()
     print("Available preset decks:")
     for name in names:
-        details = cast(dict[str, Any], weiss_sim.cards.describe_deck(name, rules_profile="approx", card_pool="all"))
+        details = cast(dict[str, Any], sim.cards.describe_deck(name, rules_profile="approx", card_pool="all"))
         cards = cast(list[dict[str, Any]], details.get("cards", []))
         counts = cast(list[dict[str, Any]], details.get("counts", []))
         unique_cards = len({int(card["id"]) for card in cards})
@@ -289,6 +306,13 @@ def _print_model_suggestions(options: list[_ActionOption], *, header: str) -> No
         print(f"  [{option.index}] {option.label}{prob}")
 
 
+def _read_console_input(*, prompt: str, eof_message: str) -> str:
+    try:
+        return input(prompt)
+    except EOFError as exc:
+        raise KeyboardInterrupt(eof_message) from exc
+
+
 def _prompt_human_action(
     *, batch: DecisionBoundaryBatch, catalog: ActionCatalog, top_k_hints: list[_ActionOption]
 ) -> int:
@@ -306,7 +330,14 @@ def _prompt_human_action(
             print(f"  [{option.index}] {option.label}")
         if top_k_hints:
             _print_model_suggestions(top_k_hints, header="Model hints for this state:")
-        raw = input("Choose action number, 'h' for hints, or 'q' to quit: ").strip().lower()
+        raw = (
+            _read_console_input(
+                prompt="Choose action number, 'h' for hints, or 'q' to quit: ",
+                eof_message="stdin closed while waiting for human input; launch play_vs_model.py in a TTY to play",
+            )
+            .strip()
+            .lower()
+        )
         if raw == "q":
             raise KeyboardInterrupt("user quit human-play session")
         if raw == "h":
@@ -321,7 +352,10 @@ def _prompt_human_action(
 
 def _advance_after_model_action(*, env: DecisionBoundaryEnv, action: int) -> DecisionBoundaryBatch:
     if sys.stdin.isatty():
-        input("Press Enter to continue...")
+        try:
+            input("Press Enter to continue...")
+        except EOFError:
+            pass
     return env.step(np.asarray([action], dtype=np.uint32))
 
 
@@ -398,7 +432,7 @@ def main() -> None:
         max_ticks=int(env_config["max_ticks"]),
     )
     rng = Pcg32XshRrV1(int(args.seed) ^ 0xD1CEFACE)
-    model_hidden = None
+    model_hidden: torch.Tensor | None = None
     if policy.model is not None:
         model_hidden = policy.model.initial_seat_hidden(1, device=torch.device("cpu"))
 
@@ -428,7 +462,7 @@ def main() -> None:
             legal_ids = _legal_ids_for_row(batch)
             hint_options: list[_ActionOption] = []
             if current_seat == int(args.human_seat) and policy.model is not None:
-                hint_options = _rank_policy_hint_options(
+                hint_options, next_hidden = _rank_policy_hint_options(
                     policy=policy,
                     batch=batch,
                     legal_ids=legal_ids,
@@ -436,6 +470,7 @@ def main() -> None:
                     top_k=int(args.top_k),
                     catalog=catalog,
                 )
+                model_hidden = next_hidden
 
             if current_seat == int(args.human_seat):
                 action = _prompt_human_action(batch=batch, catalog=catalog, top_k_hints=hint_options)

@@ -1,26 +1,35 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import numpy.testing as npt
+import pytest
 import torch
 
 from weiss_rl.action_catalog import ActionCatalog as SharedActionCatalog
-from weiss_rl.config import load_stack_config
+from weiss_rl.config import StackConfig, canonical_config_dict, load_stack_config
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
 from weiss_rl.envs.decision_env import DecisionBoundaryEnv
+from weiss_rl.eval import simulator_runner as simulator_runner_module
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policy_set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,
+    NO_LEAGUE_POLICY_ID,
     RANDOM_LEGAL_POLICY_ID,
 )
-from weiss_rl.eval.simulator_runner import resolve_eval_policies
-from weiss_rl.legal_actions import LegalActionBatch
+from weiss_rl.eval.simulator_runner import (
+    _is_recursive_registry_search_root,
+    _should_include_common_search_root,
+    resolve_eval_policies,
+)
 from weiss_rl.league.registry import SnapshotRegistry
+from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.model import (
     PolicyValueModel,
     StructuredLegalPolicyValueModel,
@@ -545,7 +554,10 @@ def test_heuristic_public_batch_meta_fast_path_falls_back_on_invalid_meta() -> N
 
 
 def test_simulator_native_heuristic_pool_matches_python_oracle_across_live_steps() -> None:
-    import weiss_sim
+    weiss_sim = pytest.importorskip(
+        "weiss_sim",
+        reason="native heuristic pool parity test requires the optional simulator package",
+    )
 
     env = DecisionBoundaryEnv.create(
         legality="ids_offsets",
@@ -673,3 +685,503 @@ def test_resolve_eval_policies_loads_snapshots_from_registry_run_root(tmp_path: 
     assert resolved["policy_000100"].source_run_dir == source_run_dir.resolve().as_posix()
     assert resolved["policy_000100"].snapshot_path == "training/snapshots/policy_000100/weights.pt"
     assert resolved["policy_000100"].model is not None
+
+
+def _write_eval_snapshot(
+    *,
+    stack: StackConfig,
+    run_dir: Path,
+    policy_id: str,
+    update: int,
+) -> Path:
+    model_config = stack.config.model
+    assert model_config is not None
+    weights_path = run_dir / "training" / "snapshots" / policy_id / "weights.pt"
+    weights_path.parent.mkdir(parents=True, exist_ok=True)
+    model = PolicyValueModel(
+        observation_dim=512,
+        config=model_config,
+        action_dim=9,
+        observation_spec=_heuristic_spec_bundle()["observation"],  # type: ignore[arg-type]
+    )
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "policy_id": policy_id,
+            "update": int(update),
+        },
+        weights_path,
+    )
+    return weights_path
+
+
+def _write_snapshot_registry(
+    *,
+    registry_path: Path,
+    snapshots: list[tuple[str, int, Path]],
+) -> None:
+    registry = SnapshotRegistry()
+    for policy_id, update, weights_path in snapshots:
+        registry.add_snapshot(
+            policy_id=policy_id,
+            update=update,
+            weights_sha256=hashlib.sha256(weights_path.read_bytes()).hexdigest(),
+            path=f"training/snapshots/{policy_id}/weights.pt",
+        )
+    registry.save(registry_path)
+
+
+def test_resolve_eval_policies_loads_snapshots_from_copied_registry_json(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    source_run_dir = tmp_path / "external_runs" / "source_run"
+    registry_path = source_run_dir / "training" / "snapshots" / "registry.json"
+    snapshot_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=source_run_dir,
+        policy_id="policy_000100",
+        update=100,
+    )
+    _write_snapshot_registry(
+        registry_path=registry_path,
+        snapshots=[("policy_000100", 100, snapshot_weights)],
+    )
+
+    copied_registry_path = tmp_path / "cache" / "policy_set_snapshot_registry.json"
+    copied_registry_path.parent.mkdir(parents=True, exist_ok=True)
+    copied_registry_path.write_text(registry_path.read_text(encoding="utf-8"), encoding="utf-8")
+    consumer_run_dir = tmp_path / "runs" / "consumer_run"
+    (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=["policy_000100"],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        snapshot_registry_path=copied_registry_path,
+    )
+
+    assert resolved["policy_000100"].source_run_dir == source_run_dir.resolve().as_posix()
+    assert resolved["policy_000100"].snapshot_path == "training/snapshots/policy_000100/weights.pt"
+    assert resolved["policy_000100"].model is not None
+
+
+def test_resolve_eval_policies_prefers_explicit_run_dir_for_ambiguous_copied_registry(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    source_run_dir = tmp_path / "runs" / "source_run"
+    registry_path = source_run_dir / "training" / "snapshots" / "registry.json"
+    snapshot_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=source_run_dir,
+        policy_id="policy_000100",
+        update=100,
+    )
+    _write_snapshot_registry(
+        registry_path=registry_path,
+        snapshots=[("policy_000100", 100, snapshot_weights)],
+    )
+
+    copied_run_dir = tmp_path / "runs" / "copied_run"
+    copied_weights_path = copied_run_dir / "training" / "snapshots" / "policy_000100" / "weights.pt"
+    copied_weights_path.parent.mkdir(parents=True, exist_ok=True)
+    copied_weights_path.write_bytes(snapshot_weights.read_bytes())
+
+    copied_registry_path = tmp_path / "cache" / "policy_set_snapshot_registry.json"
+    copied_registry_path.parent.mkdir(parents=True, exist_ok=True)
+    copied_registry_path.write_text(registry_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=["policy_000100"],
+        run_dir=copied_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        snapshot_registry_path=copied_registry_path,
+    )
+
+    assert resolved["policy_000100"].source_run_dir == copied_run_dir.resolve().as_posix()
+    assert resolved["policy_000100"].snapshot_path == "training/snapshots/policy_000100/weights.pt"
+    assert resolved["policy_000100"].model is not None
+
+
+def test_resolve_eval_policies_ignores_canonical_looking_copied_registry_without_weights(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    source_run_dir = tmp_path / "external_runs" / "source_run"
+    registry_path = source_run_dir / "training" / "snapshots" / "registry.json"
+    snapshot_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=source_run_dir,
+        policy_id="policy_000100",
+        update=100,
+    )
+    _write_snapshot_registry(
+        registry_path=registry_path,
+        snapshots=[("policy_000100", 100, snapshot_weights)],
+    )
+
+    copied_registry_path = tmp_path / "cache" / "training" / "snapshots" / "registry.json"
+    copied_registry_path.parent.mkdir(parents=True, exist_ok=True)
+    copied_registry_path.write_text(registry_path.read_text(encoding="utf-8"), encoding="utf-8")
+    consumer_run_dir = tmp_path / "runs" / "consumer_run_canonical_copy"
+    (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=["policy_000100"],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        snapshot_registry_path=copied_registry_path,
+    )
+
+    assert resolved["policy_000100"].source_run_dir == source_run_dir.resolve().as_posix()
+    assert resolved["policy_000100"].snapshot_path == "training/snapshots/policy_000100/weights.pt"
+    assert resolved["policy_000100"].model is not None
+
+
+def test_resolve_eval_policies_requires_full_requested_snapshot_set_for_copied_registry(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    source_run_dir = tmp_path / "external_runs" / "source_run"
+    registry_path = source_run_dir / "training" / "snapshots" / "registry.json"
+    snapshot_specs = [
+        ("policy_000100", 100),
+        ("policy_000200", 200),
+        ("policy_000300", 300),
+        ("policy_000400", 400),
+        ("policy_000500", 500),
+    ]
+    snapshots: list[tuple[str, int, Path]] = []
+    for policy_id, update in snapshot_specs:
+        snapshots.append(
+            (
+                policy_id,
+                update,
+                _write_eval_snapshot(
+                    stack=stack,
+                    run_dir=source_run_dir,
+                    policy_id=policy_id,
+                    update=update,
+                ),
+            )
+        )
+    _write_snapshot_registry(
+        registry_path=registry_path,
+        snapshots=snapshots,
+    )
+
+    copied_registry_path = tmp_path / "cache" / "policy_set_snapshot_registry.json"
+    copied_registry_path.parent.mkdir(parents=True, exist_ok=True)
+    copied_registry_path.write_text(registry_path.read_text(encoding="utf-8"), encoding="utf-8")
+    for policy_id in ("policy_000100", "policy_000300", "policy_000500"):
+        source_weights = next(
+            weights_path for snapshot_id, _update, weights_path in snapshots if snapshot_id == policy_id
+        )
+        copied_weights = tmp_path / "cache" / "training" / "snapshots" / policy_id / "weights.pt"
+        copied_weights.parent.mkdir(parents=True, exist_ok=True)
+        copied_weights.write_bytes(source_weights.read_bytes())
+    consumer_run_dir = tmp_path / "runs" / "consumer_run_full_request"
+    (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=[policy_id for policy_id, _update in snapshot_specs],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        snapshot_registry_path=copied_registry_path,
+    )
+
+    assert {resolved[policy_id].source_run_dir for policy_id, _update in snapshot_specs} == {
+        source_run_dir.resolve().as_posix()
+    }
+
+
+def test_resolve_eval_policies_loads_b1_from_registry_source_run(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    source_run_dir = tmp_path / "external_runs" / "source_run"
+    registry_path = source_run_dir / "training" / "snapshots" / "registry.json"
+    policy_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=source_run_dir,
+        policy_id="policy_000100",
+        update=100,
+    )
+    b1_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=source_run_dir,
+        policy_id="b1_noleague_baseline",
+        update=5,
+    )
+    _write_snapshot_registry(
+        registry_path=registry_path,
+        snapshots=[
+            ("b1_noleague_baseline", 5, b1_weights),
+            ("policy_000100", 100, policy_weights),
+        ],
+    )
+
+    copied_registry_path = tmp_path / "cache" / "policy_set_snapshot_registry.json"
+    copied_registry_path.parent.mkdir(parents=True, exist_ok=True)
+    copied_registry_path.write_text(registry_path.read_text(encoding="utf-8"), encoding="utf-8")
+    consumer_run_dir = tmp_path / "runs" / "consumer_run"
+    (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=[NO_LEAGUE_POLICY_ID, "policy_000100"],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        snapshot_registry_path=copied_registry_path,
+    )
+
+    assert resolved[NO_LEAGUE_POLICY_ID].source_run_dir == source_run_dir.resolve().as_posix()
+    assert resolved[NO_LEAGUE_POLICY_ID].snapshot_path == "training/snapshots/b1_noleague_baseline/weights.pt"
+    assert resolved[NO_LEAGUE_POLICY_ID].model is not None
+
+
+def test_resolve_eval_policies_requires_b1_snapshot_for_mixed_copied_registry_requests(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    source_run_dir = tmp_path / "external_runs" / "source_run"
+    registry_path = source_run_dir / "training" / "snapshots" / "registry.json"
+    policy_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=source_run_dir,
+        policy_id="policy_000100",
+        update=100,
+    )
+    b1_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=source_run_dir,
+        policy_id="b1_noleague_baseline",
+        update=5,
+    )
+    _write_snapshot_registry(
+        registry_path=registry_path,
+        snapshots=[
+            ("b1_noleague_baseline", 5, b1_weights),
+            ("policy_000100", 100, policy_weights),
+        ],
+    )
+
+    copied_registry_path = tmp_path / "cache" / "policy_set_snapshot_registry.json"
+    copied_registry_path.parent.mkdir(parents=True, exist_ok=True)
+    copied_registry_path.write_text(registry_path.read_text(encoding="utf-8"), encoding="utf-8")
+    copied_policy_weights = tmp_path / "cache" / "training" / "snapshots" / "policy_000100" / "weights.pt"
+    copied_policy_weights.parent.mkdir(parents=True, exist_ok=True)
+    copied_policy_weights.write_bytes(policy_weights.read_bytes())
+    consumer_run_dir = tmp_path / "runs" / "consumer_run_mixed_b1"
+    (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=[NO_LEAGUE_POLICY_ID, "policy_000100"],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        snapshot_registry_path=copied_registry_path,
+    )
+
+    assert resolved[NO_LEAGUE_POLICY_ID].source_run_dir == source_run_dir.resolve().as_posix()
+    assert resolved[NO_LEAGUE_POLICY_ID].snapshot_path == "training/snapshots/b1_noleague_baseline/weights.pt"
+    assert resolved["policy_000100"].source_run_dir == source_run_dir.resolve().as_posix()
+
+
+def test_resolve_eval_policies_skips_registry_resolution_for_explicit_b1_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    source_run_dir = tmp_path / "external_runs" / "source_run"
+    registry_path = source_run_dir / "training" / "snapshots" / "registry.json"
+    policy_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=source_run_dir,
+        policy_id="policy_000100",
+        update=100,
+    )
+    _write_snapshot_registry(
+        registry_path=registry_path,
+        snapshots=[("policy_000100", 100, policy_weights)],
+    )
+
+    copied_registry_path = tmp_path / "cache" / "policy_set_snapshot_registry.json"
+    copied_registry_path.parent.mkdir(parents=True, exist_ok=True)
+    copied_registry_path.write_text(registry_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    b1_run_dir = tmp_path / "baselines" / "b1_run"
+    b1_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=b1_run_dir,
+        policy_id="b1_noleague_baseline",
+        update=5,
+    )
+    _write_snapshot_registry(
+        registry_path=b1_run_dir / "training" / "snapshots" / "registry.json",
+        snapshots=[("b1_noleague_baseline", 5, b1_weights)],
+    )
+
+    consumer_run_dir = tmp_path / "runs" / "consumer_run"
+    (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    def _unexpected_registry_resolution(**kwargs):
+        raise AssertionError("registry source resolution should not be attempted")
+
+    monkeypatch.setattr(
+        simulator_runner_module,
+        "_resolve_snapshot_registry_run_dir",
+        _unexpected_registry_resolution,
+    )
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=[RANDOM_LEGAL_POLICY_ID, NO_LEAGUE_POLICY_ID],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        snapshot_registry_path=copied_registry_path,
+        b1_baseline_run_dir=b1_run_dir,
+    )
+
+    assert resolved[RANDOM_LEGAL_POLICY_ID].kind == "random_legal"
+    assert resolved[NO_LEAGUE_POLICY_ID].kind == "baseline_noleague"
+    assert resolved[NO_LEAGUE_POLICY_ID].source_run_dir == b1_run_dir.resolve().as_posix()
+
+
+def test_resolve_eval_policies_uses_nested_manifest_role_for_latest_b1_snapshot(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    b1_run_dir = tmp_path / "baselines" / "b1_run"
+    latest_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=b1_run_dir,
+        policy_id="policy_000005",
+        update=5,
+    )
+    _write_snapshot_registry(
+        registry_path=b1_run_dir / "training" / "snapshots" / "registry.json",
+        snapshots=[("policy_000005", 5, latest_weights)],
+    )
+    config_canonical = canonical_config_dict(stack)
+    config_canonical["config"]["experiment"] = {
+        **dict(config_canonical["config"].get("experiment", {})),
+        "role": "baseline_noleague",
+    }
+    (b1_run_dir / "manifest.json").write_text(
+        json.dumps({"config_canonical": config_canonical}, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    consumer_run_dir = tmp_path / "runs" / "consumer_run"
+    (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=[NO_LEAGUE_POLICY_ID],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        b1_baseline_run_dir=b1_run_dir,
+    )
+
+    assert resolved[NO_LEAGUE_POLICY_ID].kind == "baseline_noleague"
+    assert resolved[NO_LEAGUE_POLICY_ID].source_run_dir == b1_run_dir.resolve().as_posix()
+    assert resolved[NO_LEAGUE_POLICY_ID].snapshot_path == "training/snapshots/policy_000005/weights.pt"
+
+
+def test_resolve_eval_policies_uses_legacy_manifest_training_mode_for_latest_b1_snapshot(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    b1_run_dir = tmp_path / "baselines" / "b1_run_legacy"
+    latest_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=b1_run_dir,
+        policy_id="policy_000005",
+        update=5,
+    )
+    _write_snapshot_registry(
+        registry_path=b1_run_dir / "training" / "snapshots" / "registry.json",
+        snapshots=[("policy_000005", 5, latest_weights)],
+    )
+    config_sections = dict(cast(dict[str, Any], canonical_config_dict(stack).get("config", {})))
+    config_sections.pop("experiment", None)
+    config_sections["training_family_a"] = {"mode": "b1_no_league"}
+    (b1_run_dir / "manifest.json").write_text(
+        json.dumps({"config_canonical": config_sections}, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    consumer_run_dir = tmp_path / "runs" / "consumer_run_legacy"
+    (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=[NO_LEAGUE_POLICY_ID],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        b1_baseline_run_dir=b1_run_dir,
+    )
+
+    assert resolved[NO_LEAGUE_POLICY_ID].kind == "baseline_noleague"
+    assert resolved[NO_LEAGUE_POLICY_ID].source_run_dir == b1_run_dir.resolve().as_posix()
+    assert resolved[NO_LEAGUE_POLICY_ID].snapshot_path == "training/snapshots/policy_000005/weights.pt"
+
+
+def test_recursive_registry_search_root_rejects_filesystem_anchor() -> None:
+    anchor_root = Path(Path.cwd().anchor)
+
+    assert _is_recursive_registry_search_root(anchor_root) is False
+    assert _is_recursive_registry_search_root(anchor_root / "workspace") is True
+
+
+def test_common_search_root_is_only_used_for_sibling_search_trees(tmp_path: Path) -> None:
+    sibling_common_root = tmp_path / "staging"
+    sibling_search_roots = [
+        sibling_common_root / "runs",
+        sibling_common_root / "cache",
+    ]
+    broad_common_root = tmp_path / "home"
+    broad_search_roots = [
+        broad_common_root / "Desktop" / "repo" / "runs",
+        broad_common_root / "Downloads",
+    ]
+
+    assert (
+        _should_include_common_search_root(
+            search_roots=sibling_search_roots,
+            common_search_root=sibling_common_root,
+        )
+        is True
+    )
+    assert (
+        _should_include_common_search_root(
+            search_roots=broad_search_roots,
+            common_search_root=broad_common_root,
+        )
+        is False
+    )

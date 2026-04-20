@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 _DEFAULT_B2_ANCHOR = "B2 HeuristicPublic"
 
 

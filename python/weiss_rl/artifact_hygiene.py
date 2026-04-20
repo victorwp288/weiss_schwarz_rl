@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import csv
 import re
 import subprocess
 import zipfile
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 TEXT_FILE_SUFFIXES = frozenset({".json", ".jsonl", ".csv", ".txt", ".yaml", ".yml"})
 IMAGE_FILE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tif", ".tiff"})

@@ -54,6 +54,16 @@ def test_load_stack_config_reads_typed_thesis_preset() -> None:
     assert stack.seed_sets["dev_eval"] == repo_root / "configs/seeds/dev_eval_seeds.txt"
 
 
+def test_canonical_config_dict_normalizes_yaml_sequences_to_json_lists() -> None:
+    repo_root = _repo_root()
+    stack = load_stack_config(repo_root / "configs/presets/typed_thesis_locked.yaml")
+
+    payload = canonical_config_dict(stack)
+
+    assert json.loads(json.dumps(payload)) == payload
+    assert isinstance(payload["config"]["model"]["public_heuristic_logit_bias_families"], list)
+
+
 def test_load_stack_config_applies_extends_for_typed_local() -> None:
     repo_root = _repo_root()
     stack = load_stack_config(repo_root / "configs/presets/typed_local.yaml")

@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 _PRESET_PATHS = {
     "standard": Path("configs/presets/structured_acceptance_standard.yaml"),
     "standard-auto-gpu": Path("configs/presets/structured_acceptance_standard_auto_gpu.yaml"),
@@ -18,6 +17,10 @@ _PRESET_PATHS = {
     "ablate-multideck": Path("configs/presets/ablations/standard_multideck_generalization.yaml"),
 }
 _DEFAULT_EVAL_PRESET = "standard-thesis-eval"
+_DEFAULT_EVAL_PRESET_OVERRIDES = {
+    "standard-multideck": "standard-multideck",
+    "ablate-multideck": "ablate-multideck",
+}
 
 
 def _command_display(command: list[str]) -> str:
@@ -50,9 +53,16 @@ def _run_step(*, command: list[str], cwd: Path, dry_run: bool) -> dict[str, Any]
     return payload
 
 
+def _resolve_cli_path(*, repo_root: Path, path: Path) -> Path:
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = repo_root / candidate
+    return candidate.resolve()
+
+
 def _resolve_stack_config(*, repo_root: Path, stack_config: Path | None, preset: str) -> Path:
     if stack_config is not None:
-        return Path(stack_config).resolve()
+        return _resolve_cli_path(repo_root=repo_root, path=stack_config)
     return (repo_root / _PRESET_PATHS[preset]).resolve()
 
 
@@ -64,10 +74,14 @@ def _resolve_eval_stack_config(
     eval_preset: str,
 ) -> Path:
     if eval_stack_config is not None:
-        return Path(eval_stack_config).resolve()
+        return _resolve_cli_path(repo_root=repo_root, path=eval_stack_config)
     if train_stack_config is not None and not eval_preset:
-        return Path(train_stack_config).resolve()
+        return _resolve_cli_path(repo_root=repo_root, path=train_stack_config)
     return (repo_root / _PRESET_PATHS[eval_preset]).resolve()
+
+
+def _default_eval_preset_for_preset(preset: str) -> str:
+    return _DEFAULT_EVAL_PRESET_OVERRIDES.get(preset, _DEFAULT_EVAL_PRESET)
 
 
 def main() -> None:
@@ -87,6 +101,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--resume-run-dir", type=Path, default=None)
     parser.add_argument("--resume-from", type=str, default="")
+    parser.add_argument("--b1-baseline-run-dir", type=Path, default=None)
     parser.add_argument("--compare-run-dir", action="append", default=None)
     parser.add_argument("--compare-launch-group-summary", type=Path, default=None)
     parser.add_argument("--compare-out-dir", type=Path, default=None)
@@ -111,7 +126,7 @@ def main() -> None:
     stack_config = _resolve_stack_config(repo_root=repo_root, stack_config=args.stack_config, preset=str(args.preset))
     eval_preset = str(args.eval_preset).strip()
     if not eval_preset and args.stack_config is None:
-        eval_preset = _DEFAULT_EVAL_PRESET
+        eval_preset = _default_eval_preset_for_preset(str(args.preset))
     eval_stack_config = _resolve_eval_stack_config(
         repo_root=repo_root,
         eval_stack_config=args.eval_stack_config,
@@ -146,6 +161,8 @@ def main() -> None:
         train_command.extend(["--resume-run-dir", str(args.resume_run_dir)])
     if args.resume_from:
         train_command.extend(["--resume-from", str(args.resume_from)])
+    if args.b1_baseline_run_dir is not None:
+        train_command.extend(["--b1-baseline-run-dir", str(args.b1_baseline_run_dir)])
     for extra in args.train_arg or []:
         train_command.append(str(extra))
     failed = False
@@ -161,6 +178,8 @@ def main() -> None:
                 "--run-dir",
                 str(run_dir),
             ]
+            if args.b1_baseline_run_dir is not None:
+                eval_command.extend(["--b1-baseline-run-dir", str(args.b1_baseline_run_dir)])
             for extra in args.eval_arg or []:
                 eval_command.append(str(extra))
             steps.append(_run_step(command=eval_command, cwd=repo_root, dry_run=bool(args.dry_run)))
@@ -191,6 +210,9 @@ def main() -> None:
         "eval_stack_config": eval_stack_config.as_posix(),
         "preset": str(args.preset),
         "eval_preset": eval_preset,
+        "b1_baseline_run_dir": (
+            None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve().as_posix()
+        ),
         "dry_run": bool(args.dry_run),
         "status": "failed" if failed else ("planned" if args.dry_run else "completed"),
         "steps": steps,

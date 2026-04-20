@@ -16,7 +16,6 @@ matplotlib.use("Agg")
 
 from matplotlib import pyplot as plt
 
-
 _BASELINE_POLICY_IDS = frozenset(
     {
         "B0 RandomLegal",

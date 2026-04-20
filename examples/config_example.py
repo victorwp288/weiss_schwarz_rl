@@ -15,7 +15,8 @@ class ExampleRunConfig:
     """Runtime config used by the loop example.
 
     Values come from:
-    1) `configs/presets/typed_local.yaml` or `configs/presets/typed_thesis_locked.yaml`
+    1) `configs/presets/structured_acceptance_standard.yaml` by default
+       or a legacy typed preset if you pass one explicitly
     2) parent preset files via `extends`
     3) `configs/minimal_loop.yaml` (loop-specific overrides)
     """
@@ -105,7 +106,7 @@ def load_example_config(
     """Resolve example config from the grouped preset workflow."""
 
     root = repo_root()
-    preset_path = preset_config_path or (root / "configs" / "presets" / "typed_local.yaml")
+    preset_path = preset_config_path or (root / "configs" / "presets" / "structured_acceptance_standard.yaml")
     loop_path = loop_config_path or (root / "configs" / "minimal_loop.yaml")
 
     preset_doc = _load_preset_document(preset_path)

@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from weiss_rl.repro import (
-    compute_run_id256,
     compute_run_id64,
+    compute_run_id256,
     derive_actor_seed,
     derive_episode_key256,
     derive_episode_seed,

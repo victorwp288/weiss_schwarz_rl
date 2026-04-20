@@ -125,6 +125,20 @@ def test_verify_repo_entrypoint_runs_release_verification_steps(monkeypatch) -> 
             REPO_ROOT,
             True,
         ),
+        (
+            [
+                "C:/Python/python.exe",
+                "python/scripts/thesis_run.py",
+                "--preset",
+                "standard-multideck",
+                "--run-label",
+                "standard_multideck_surface_ci",
+                "--dry-run",
+                "--skip-compare",
+            ],
+            REPO_ROOT,
+            True,
+        ),
     ]
 
 
@@ -141,6 +155,23 @@ def test_train_entrypoint_helper_resolves_central_actor_torch_threads(monkeypatc
 
     assert module._central_runtime_actor_torch_threads(stack, central_runtime) == 16
     assert module._central_runtime_actor_torch_threads(stack, process_runtime) is None
+
+
+def test_train_entrypoint_applies_profile_flags_before_hashing() -> None:
+    module = _load_script_module("train.py")
+    stack = module.load_stack_config(REPO_ROOT / "configs" / "presets" / "typed_thesis_locked.yaml")
+
+    base_hash = module.compute_config_hash256(stack)
+    updated = module._apply_training_flag_overrides(
+        stack,
+        enable_profile_timers=True,
+        enable_torch_profiler=True,
+    )
+
+    assert updated.config.training is not None
+    assert updated.config.training.profile_timers is True
+    assert updated.config.training.torch_profiler is True
+    assert module.compute_config_hash256(updated) != base_hash
 
 
 def test_train_entrypoint_resolves_cuda_auto_to_first_visible_gpu(monkeypatch) -> None:

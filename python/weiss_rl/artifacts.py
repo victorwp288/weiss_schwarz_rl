@@ -41,7 +41,7 @@ class ArtifactLayout:
     performance_log_path: Path
 
     @classmethod
-    def from_run_dir(cls, run_dir: Path) -> "ArtifactLayout":
+    def from_run_dir(cls, run_dir: Path) -> ArtifactLayout:
         run_dir = Path(run_dir)
         training_dir = run_dir / "training"
         eval_dir = run_dir / "eval"
@@ -80,7 +80,7 @@ class ArtifactLayout:
         )
 
     @classmethod
-    def from_final_eval_dir(cls, final_eval_dir: Path) -> "ArtifactLayout":
+    def from_final_eval_dir(cls, final_eval_dir: Path) -> ArtifactLayout:
         final_eval_dir = Path(final_eval_dir)
         if final_eval_dir.name != "final_eval" or final_eval_dir.parent.name != "eval":
             raise ValueError("final_eval_dir must resolve to <run_dir>/eval/final_eval for canonical artifact layout")

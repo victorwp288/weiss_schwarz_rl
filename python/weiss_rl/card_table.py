@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 import importlib
-from typing import Any, Mapping
+from collections.abc import Mapping
+from functools import lru_cache
+from typing import Any
 
 import numpy as np
 

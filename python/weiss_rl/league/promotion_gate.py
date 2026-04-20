@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
-import json
-import re
 
 import numpy as np
 
@@ -72,7 +72,7 @@ class PromotionGatePosterior:
         *,
         sample_count: int,
         seed: int | None,
-    ) -> "PromotionGatePosterior":
+    ) -> PromotionGatePosterior:
         summary = bayesian_bootstrap_summary(scores, sample_count=sample_count, seed=seed)
         posterior_samples = _posterior_means(scores, sample_count=sample_count, seed=seed)
         return cls(

@@ -12,10 +12,14 @@ import numpy as np
 import pytest
 import torch
 
+from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import canonical_config_dict, load_stack_config
-from weiss_rl.learners.impala_learner import ImpalaLearner
+from weiss_rl.envs.decision_env import DecisionBoundaryBatch
+from weiss_rl.eval.harness import ScheduledGame
+from weiss_rl.eval.simulator_runner import ResolvedEvalPolicy, SimulatorEvalRunner
 from weiss_rl.league import PromotionGatePosterior, PromotionGateRate, PromotionGateResult
 from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
+from weiss_rl.learners.impala_learner import ImpalaLearner
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
@@ -64,6 +68,22 @@ def _make_policy_value_model(stack: Any) -> PolicyValueModel:
     )
 
 
+def _canonical_config_with_role(stack: Any, *, experiment_role: str) -> dict[str, Any]:
+    config_canonical = canonical_config_dict(stack)
+    config_sections = cast(dict[str, Any], config_canonical.setdefault("config", {}))
+    experiment = dict(cast(dict[str, Any], config_sections.get("experiment", {})))
+    experiment["role"] = experiment_role
+    config_sections["experiment"] = experiment
+    return config_canonical
+
+
+def _legacy_config_with_training_mode(stack: Any, *, training_mode: str) -> dict[str, Any]:
+    config_sections = dict(cast(dict[str, Any], canonical_config_dict(stack).get("config", {})))
+    config_sections.pop("experiment", None)
+    config_sections["training_family_a"] = {"mode": training_mode}
+    return config_sections
+
+
 def _write_b1_baseline_run_fixture(
     tmp_path: Path,
     *,
@@ -72,6 +92,7 @@ def _write_b1_baseline_run_fixture(
     config_hash256: str = "ab" * 32,
     spec_hash256: str = "cd" * 32,
     experiment_role: str = "baseline_noleague",
+    legacy_training_mode: str | None = None,
 ) -> Path:
     train_script = _load_train_script_module()
     stack = load_stack_config(canonical_stack_config_path())
@@ -101,11 +122,11 @@ def _write_b1_baseline_run_fixture(
     registry.save(training_paths.snapshots_dir / "registry.json")
     (run_dir / "config_hash256.txt").write_text(f"{config_hash256}\n", encoding="utf-8")
     (run_dir / "spec_hash256.txt").write_text(f"{spec_hash256}\n", encoding="utf-8")
-    config_canonical = canonical_config_dict(stack)
-    config_canonical["experiment"] = {
-        **dict(config_canonical.get("experiment", {})),
-        "role": experiment_role,
-    }
+    config_canonical = (
+        _legacy_config_with_training_mode(stack, training_mode=legacy_training_mode)
+        if legacy_training_mode is not None
+        else _canonical_config_with_role(stack, experiment_role=experiment_role)
+    )
     (run_dir / "manifest.json").write_text(
         json.dumps(
             {"config_canonical": config_canonical},
@@ -156,11 +177,7 @@ def _write_seed_snapshot_run_fixture(
     registry.save(training_paths.snapshots_dir / "registry.json")
     (run_dir / "config_hash256.txt").write_text(f"{config_hash256}\n", encoding="utf-8")
     (run_dir / "spec_hash256.txt").write_text(f"{spec_hash256}\n", encoding="utf-8")
-    config_canonical = canonical_config_dict(stack)
-    config_canonical["experiment"] = {
-        **dict(config_canonical.get("experiment", {})),
-        "role": "main",
-    }
+    config_canonical = _canonical_config_with_role(stack, experiment_role="main")
     (run_dir / "manifest.json").write_text(
         json.dumps({"config_canonical": config_canonical}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -604,6 +621,60 @@ def test_ensure_noleague_baseline_anchor_rejects_non_b1_imported_run(tmp_path: P
         )
 
 
+def test_ensure_noleague_baseline_anchor_rejects_legacy_non_b1_imported_run(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path, legacy_training_mode="main")
+
+    with pytest.raises(RuntimeError, match=r"training_family_a\.mode='main'"):
+        train_script._ensure_noleague_baseline_anchor(
+            stack=stack,
+            training_paths=train_script._training_paths(tmp_path / "consumer_run_legacy"),
+            run_dir=tmp_path / "consumer_run_legacy",
+            learner=SimpleNamespace(
+                model=_make_policy_value_model(stack),
+                update_count=0,
+                optimizer=None,
+                get_policy_version=lambda: 0,
+            ),
+            device=torch.device("cpu"),
+            config_hash256="11" * 32,
+            spec_hash256="cd" * 32,
+            baseline_run_dir=baseline_run_dir,
+        )
+
+
+def test_ensure_noleague_baseline_anchor_rejects_imported_environment_mismatch(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    baseline_run_dir = _write_b1_baseline_run_fixture(tmp_path)
+    manifest_path = baseline_run_dir / "manifest.json"
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    config_sections = manifest_payload["config_canonical"]["config"]
+    config_sections["environment"] = {
+        **dict(config_sections["environment"]),
+        "best_of": 99,
+    }
+    manifest_path.write_text(json.dumps(manifest_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="config does not match the current run for section='environment'"):
+        train_script._ensure_noleague_baseline_anchor(
+            stack=stack,
+            training_paths=train_script._training_paths(tmp_path / "consumer_run_env_mismatch"),
+            run_dir=tmp_path / "consumer_run_env_mismatch",
+            learner=SimpleNamespace(
+                model=_make_policy_value_model(stack),
+                update_count=0,
+                optimizer=None,
+                get_policy_version=lambda: 0,
+            ),
+            device=torch.device("cpu"),
+            config_hash256="11" * 32,
+            spec_hash256="cd" * 32,
+            baseline_run_dir=baseline_run_dir,
+        )
+
+
 def test_import_seed_snapshot_pool_imports_external_snapshots_and_champions(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
     stack = load_stack_config(canonical_stack_config_path())
@@ -646,6 +717,31 @@ def test_import_seed_snapshot_pool_imports_external_snapshots_and_champions(tmp_
     assert metadata["policy_id"] == expected_policy_ids[-1]
     assert metadata["imported_from_run_dir"] == seed_run_dir.resolve().as_posix()
     assert metadata["imported_from_policy_id"] == "policy_000020"
+
+
+def test_import_seed_snapshot_pool_rejects_environment_mismatch(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    seed_run_dir = _write_seed_snapshot_run_fixture(tmp_path)
+    manifest_path = seed_run_dir / "manifest.json"
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    config_sections = manifest_payload["config_canonical"]["config"]
+    config_sections["environment"] = {
+        **dict(config_sections["environment"]),
+        "best_of": 99,
+    }
+    manifest_path.write_text(json.dumps(manifest_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="config does not match the current run for section='environment'"):
+        train_script._import_seed_snapshot_pool(
+            stack=stack,
+            training_paths=train_script._training_paths(tmp_path / "consumer_run_seed_env_mismatch"),
+            run_dir=tmp_path / "consumer_run_seed_env_mismatch",
+            seed_snapshot_run_dir=seed_run_dir,
+            expected_model_state_dict=_make_policy_value_model(stack).state_dict(),
+            expected_config_canonical=canonical_config_dict(stack),
+            expected_spec_hash256="cd" * 32,
+        )
 
 
 def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_path: Path, monkeypatch) -> None:
@@ -1514,4 +1610,116 @@ def test_promotion_gate_runner_uses_learner_scoring_mode(tmp_path: Path, monkeyp
     runner.run_game(scheduled_game)
 
     assert focal_model.scoring_modes == ["learner"]
+    assert env.closed is True
+
+
+def test_simulator_eval_runner_uses_learner_scoring_mode(tmp_path: Path, monkeypatch) -> None:
+    live_batch = DecisionBoundaryBatch(
+        obs=np.zeros((1, 1), dtype=np.float32),
+        reward=np.zeros((1,), dtype=np.float32),
+        terminated=np.array([False]),
+        truncated=np.array([False]),
+        to_play=np.array([0], dtype=np.int32),
+        actor=np.array([0], dtype=np.int32),
+        decision_id=np.array([0], dtype=np.int64),
+        engine_status=np.array([0], dtype=np.uint8),
+        decision_count=np.array([0], dtype=np.uint32),
+        tick_count=np.array([0], dtype=np.uint32),
+        episode_seed=np.array([579856027068064], dtype=np.uint64),
+        episode_key=np.array([1], dtype=np.uint64),
+        ids_offsets=(np.array([0], dtype=np.uint32), np.array([0, 1], dtype=np.int32)),
+    )
+    terminal_batch = DecisionBoundaryBatch(
+        obs=np.zeros((1, 1), dtype=np.float32),
+        reward=np.zeros((1,), dtype=np.float32),
+        terminated=np.array([True]),
+        truncated=np.array([False]),
+        to_play=np.array([-1], dtype=np.int32),
+        actor=np.array([-1], dtype=np.int32),
+        decision_id=np.array([1], dtype=np.int64),
+        engine_status=np.array([0], dtype=np.uint8),
+        decision_count=np.array([1], dtype=np.uint32),
+        tick_count=np.array([1], dtype=np.uint32),
+        episode_seed=np.array([579856027068064], dtype=np.uint64),
+        episode_key=np.array([1], dtype=np.uint64),
+        ids_offsets=(np.array([], dtype=np.uint32), np.array([0, 0], dtype=np.int32)),
+    )
+
+    class FakeEnv:
+        def __init__(self) -> None:
+            self.closed = False
+            self.reset_seed: int | None = None
+
+        def reset(self, seed: int | None = None):
+            self.reset_seed = seed
+            return live_batch
+
+        def step(self, actions: np.ndarray):
+            return terminal_batch
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeModel:
+        def __init__(self) -> None:
+            self.scoring_modes: list[str] = []
+
+        def initial_seat_hidden(self, batch_size: int, *, device: torch.device) -> torch.Tensor:
+            return torch.zeros((batch_size, 1), device=device)
+
+        def forward_seat_aware(
+            self,
+            obs: torch.Tensor,
+            acting_seat: torch.Tensor,
+            seat_hidden_state: torch.Tensor | None = None,
+            *,
+            scoring_mode: str = "auto",
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            self.scoring_modes.append(str(scoring_mode))
+            logits = torch.zeros((1, 1), dtype=torch.float32, device=obs.device)
+            values = torch.zeros((1,), dtype=torch.float32, device=obs.device)
+            next_hidden = torch.zeros((1, 1), dtype=torch.float32, device=obs.device)
+            return logits, values, next_hidden
+
+    env = FakeEnv()
+    model = FakeModel()
+    layout = ArtifactLayout.from_run_dir(tmp_path)
+    layout.ensure_directories()
+    runner = SimulatorEvalRunner(
+        stack=SimpleNamespace(config=SimpleNamespace(curriculum=None)),
+        policies={
+            "candidate": ResolvedEvalPolicy(
+                policy_id="candidate",
+                kind="snapshot_registry",
+                model=model,
+            )
+        },
+        artifact_layout=layout,
+        run_id256="ab" * 32,
+        spec_hash256="cd" * 32,
+        action_dim=1,
+        pass_action_id=0,
+        require_sorted_legal_ids=False,
+        replay_capture_rate=0.0,
+        regression_capture_count=0,
+    )
+    monkeypatch.setattr(runner, "_build_ids_eval_env", lambda *, seed: env)
+
+    scheduled_game = ScheduledGame(
+        pair_index=0,
+        swap_index=0,
+        episode_index=0,
+        episode_seed=579856027068064,
+        focal_policy_id="candidate",
+        opponent_policy_id="baseline",
+        seat0_policy_id="candidate",
+        seat1_policy_id="candidate",
+        focal_seat=0,
+    )
+
+    result = runner.run_game(scheduled_game)
+
+    assert result.episode_seed == scheduled_game.episode_seed
+    assert env.reset_seed == scheduled_game.episode_seed
+    assert model.scoring_modes == ["learner"]
     assert env.closed is True

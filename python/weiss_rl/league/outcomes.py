@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque
-
 
 OutcomeToken = str
 
 
 @dataclass(slots=True)
 class _WindowCounts:
-    outcomes: Deque[OutcomeToken]
+    outcomes: deque[OutcomeToken]
     wins: int = 0
     losses: int = 0
     draws: int = 0

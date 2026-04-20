@@ -10,7 +10,11 @@ import torch
 
 from weiss_rl.config import StackConfig, compute_config_hash256, load_stack_config
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
+from weiss_rl.eval.policy_set import (
+    HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
+    HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
+    HEURISTIC_PUBLIC_POLICY_ID,
+)
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, PolicyValueModel
 from weiss_rl.replay.bundles import (
@@ -26,7 +30,6 @@ from weiss_rl.replay.inspector import (
     inspect_replay_bundle,
 )
 from weiss_rl.tests._config_paths import canonical_stack_config_path
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -313,6 +316,111 @@ def test_inspect_replay_bundle_supports_heuristic_public_and_action_family_label
     assert "attack->pass x1" in text_report
     assert "a474[attack, slot=0, attack_type=direct]" in text_report
     assert "family_match=False" in text_report
+
+
+def test_inspect_replay_bundle_supports_all_heuristic_public_policy_ids(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "spec_bundle.json").write_text(
+        json.dumps(_heuristic_spec_bundle(), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    registry_path = run_dir / "training" / "snapshots" / "registry.json"
+
+    policy_a_path = _write_policy_weights(
+        run_dir=run_dir,
+        stack=stack,
+        policy_id="policy_a",
+        observation_dim=512,
+        logits={51: 1.0, 472: 0.5, 473: 0.2, 474: 0.0},
+        observation_spec=_heuristic_spec_bundle()["observation"],  # type: ignore[arg-type]
+    )
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="policy_a",
+        update=1,
+        weights_sha256="sha-a",
+        path=policy_a_path.relative_to(run_dir).as_posix(),
+    )
+    registry.save(registry_path)
+
+    contract = ReplayRerunContract(version=2, observation_visibility="public", max_decisions=200, max_ticks=10_000)
+    bundle_path = _write_bundle(
+        tmp_path,
+        contract=contract,
+        steps=[
+            ReplayStep(
+                t=0,
+                decision_id=10,
+                actor=0,
+                action=474,
+                reward=1.0,
+                terminated=True,
+                truncated=False,
+                engine_status=0,
+                legal_fingerprint64=_fingerprint(
+                    decision_id=10, legal_ids=np.array([51, 472, 473, 474], dtype=np.uint16)
+                ),
+            ),
+        ],
+    )
+
+    obs = _heuristic_obs()
+    _set_stage(obs, player_index=0, slot=0, occupied=True, power=5000, effective_soul=1)
+    heuristic_policy_ids = (
+        HEURISTIC_PUBLIC_POLICY_ID,
+        HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
+        HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
+    )
+
+    for policy_id in heuristic_policy_ids:
+        env = FakeReplayEnv(
+            _ids_batch(
+                decision_id=10,
+                actor=0,
+                reward=0.0,
+                terminated=False,
+                truncated=False,
+                engine_status=0,
+                legal_ids=np.array([51, 472, 473, 474], dtype=np.uint16),
+                episode_seed=44,
+                episode_key=555,
+                obs=obs,
+            ),
+            transitions=[
+                (
+                    474,
+                    _ids_batch(
+                        decision_id=10,
+                        actor=0,
+                        reward=1.0,
+                        terminated=True,
+                        truncated=False,
+                        engine_status=0,
+                        legal_ids=np.array([], dtype=np.uint16),
+                        episode_seed=44,
+                        episode_key=555,
+                        obs=obs,
+                    ),
+                ),
+            ],
+        )
+
+        report = inspect_replay_bundle(
+            bundle_path=bundle_path,
+            stack=stack,
+            run_dir=run_dir,
+            snapshot_registry_path=registry_path,
+            policy_a="policy_a",
+            policy_b=policy_id,
+            top_k=1,
+            top_actions=2,
+            env_factory=lambda observed_contract, env=env: _return_fake_env(observed_contract, contract, env),
+        )
+
+        assert report["policy_b"]["kind"] == "heuristic_public"
+        assert report["policy_b"]["spec"] == policy_id
 
 
 def test_resolve_policy_weights_path_prefers_run_dir_for_relative_specs(

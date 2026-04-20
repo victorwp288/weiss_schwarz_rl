@@ -76,7 +76,7 @@ class LegalActionBatch:
             object.__setattr__(self, "action_space", action_space)
 
     @classmethod
-    def from_mask(cls, mask: np.ndarray | Any, *, action_space: int | None = None) -> "LegalActionBatch":
+    def from_mask(cls, mask: np.ndarray | Any, *, action_space: int | None = None) -> LegalActionBatch:
         return cls(mask=np.asarray(mask, dtype=np.bool_), action_space=action_space)
 
     @classmethod
@@ -87,7 +87,7 @@ class LegalActionBatch:
         *,
         meta: np.ndarray | Any | None = None,
         action_space: int | None = None,
-    ) -> "LegalActionBatch":
+    ) -> LegalActionBatch:
         return cls(
             ids=np.asarray(ids, dtype=np.uint32),
             meta=None if meta is None else np.asarray(meta, dtype=np.uint16),

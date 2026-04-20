@@ -4,13 +4,13 @@ from typing import cast
 
 import pytest
 
+from weiss_rl.observation_layout import parse_observation_layout_from_spec_bundle
 from weiss_rl.spec import (
     SpecBundle,
     canonical_spec_bundle_json,
     compute_spec_hash256,
     parse_spec_bundle,
 )
-from weiss_rl.observation_layout import parse_observation_layout_from_spec_bundle
 
 
 def _nested_spec_bundle(*, spec_hash: int | str = 8590000130) -> dict[str, object]:

@@ -6,7 +6,6 @@ M3-04: replace list-backed storage with array-backed T x N unroll buffers.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
@@ -77,13 +76,13 @@ class UnrollBatch:
     behavior_logp: np.ndarray  # (T, N) float32
 
     # Optional time-scale disambiguation (M1-11 / M2-12)
-    k_raw_decisions: Optional[np.ndarray] = None  # (T, N) int16/int32
+    k_raw_decisions: np.ndarray | None = None  # (T, N) int16/int32
 
     # Legality storage (one of these, depending on meta.legal_repr)
-    legal_mask: Optional[np.ndarray] = None  # (T, N, A) uint8/bool
-    legal_ids: Optional[np.ndarray] = None  # (L,) uint16/uint32 packed
-    legal_action_meta: Optional[np.ndarray] = None  # (L, M) uint16 packed, aligned with legal_ids
-    legal_offsets: Optional[np.ndarray] = None  # (T, N+1) uint32 offsets per (t,row)
+    legal_mask: np.ndarray | None = None  # (T, N, A) uint8/bool
+    legal_ids: np.ndarray | None = None  # (L,) uint16/uint32 packed
+    legal_action_meta: np.ndarray | None = None  # (L, M) uint16 packed, aligned with legal_ids
+    legal_offsets: np.ndarray | None = None  # (T, N+1) uint32 offsets per (t,row)
 
     _write_t: int = 0  # internal cursor
     _packed_legal_write: int = 0  # next free index in legal_ids

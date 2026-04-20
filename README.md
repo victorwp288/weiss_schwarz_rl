@@ -74,7 +74,7 @@ Legacy typed presets remain available for older experiments and lower-level dire
 
 For tuning, the repo also ships compact sweep presets for the grouped typed and baseline flows. Those sweeps use deterministic config overrides, so each candidate still lands in its own canonical run with a distinct config hash instead of being a one-off shell mutation.
 
-For operator safety, canonical runs now keep both `training/checkpoints/latest.pt` and `training/checkpoints/best.pt` plus a `checkpoint_tracker.json` manifest, and `train.py` can resume either in-place or from a direct checkpoint path. If you want one command that chains the release-facing thesis flow, use `python/scripts/thesis_run.py --preset standard`.
+For operator safety, canonical runs now keep both `training/checkpoints/latest.pt` and `training/checkpoints/best.pt` plus a `checkpoint_tracker.json` manifest, and `train.py` can resume either in-place or from a direct checkpoint path. The wrapper remains the release-facing thesis entrypoint, but the current `standard` family requires a completed dedicated `baseline_noleague` run. Use `python/scripts/thesis_run.py --preset standard --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` once that baseline artifact exists.
 
 Canonical runs also write TensorBoard event files under `runs/<run>/tensorboard/`. Those events include run metadata, training/runtime scalars, checkpoint alias updates, periodic dev-eval summaries, and the post-run final-eval/metagame/readiness summaries. Inspect them with:
 

@@ -24,13 +24,14 @@ The wrapper exposes them as named presets, so the shortest standard commands are
 
 ```bash
 uv run python python/scripts/thesis_run.py --list-presets
-uv run python python/scripts/thesis_run.py --preset standard --run-label thesis_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset standard-auto-gpu --run-label thesis_server_seed1 --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_tiny32_fast_noleague.yaml --run-label b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset standard --run-label thesis_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset standard-auto-gpu --run-label thesis_server_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
 uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --run-dir runs/<run_dir>
 uv run python python/scripts/play_vs_model.py --run-dir runs/<run_dir>
 ```
 
-`thesis_run.py --preset standard` now trains with `structured_acceptance_standard.yaml` and, by default, evaluates with `structured_acceptance_standard_thesis_eval.yaml`.
+`thesis_run.py --preset standard` now trains with `structured_acceptance_standard.yaml`, requires `--run-label`, imports the canonical `B1 NoLeague baseline` from `--b1-baseline-run-dir`, and by default evaluates with `structured_acceptance_standard_thesis_eval.yaml`.
 
 For the current recommended ablations and what they answer, see `docs/standard_recipe.md`.
 
@@ -172,6 +173,7 @@ Thin orchestration wrapper for the canonical thesis flow: `train.py -> eval.py -
 uv run python python/scripts/thesis_run.py \
   --preset standard \
   --run-label thesis_seed1 \
+  --b1-baseline-run-dir runs/b1_anchor_seed1 \
   --device cuda:0 \
   --max-updates 200
 ```

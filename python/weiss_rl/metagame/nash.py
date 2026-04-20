@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import csv
 import json
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from scipy.optimize import linprog
+from scipy.optimize import OptimizeWarning, linprog
 
 _DEFAULT_LP_BACKEND = "scipy_linprog_highs"
 
@@ -24,6 +25,19 @@ __all__ = [
     "write_nash_artifacts",
     "write_solver_report_json",
 ]
+
+
+def _run_highs_linprog(*args: Any, threads: int | None = None, **kwargs: Any):
+    options = dict(kwargs.pop("options", {}))
+    if threads is not None:
+        options["threads"] = int(threads)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Unrecognized options detected: \{'threads': .*",
+            category=OptimizeWarning,
+        )
+        return linprog(*args, method="highs", options=options, **kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,15 +203,14 @@ def solve_nash_mixture(
     b_eq = np.array([1.0], dtype=np.float64)
     bounds = [(0.0, None)] * policy_count + [(None, None)]
 
-    primary_result = linprog(
+    primary_result = _run_highs_linprog(
         c_primary,
         A_ub=a_ub,
         b_ub=b_ub,
         A_eq=a_eq,
         b_eq=b_eq,
         bounds=bounds,
-        method="highs",
-        options={"threads": normalized_threads},
+        threads=normalized_threads,
     )
     if not primary_result.success or primary_result.x is None:
         raise ValueError(
@@ -215,15 +228,14 @@ def solve_nash_mixture(
     a_eq_secondary = np.ones((1, policy_count), dtype=np.float64)
     b_eq_secondary = np.array([1.0], dtype=np.float64)
     bounds_secondary = [(0.0, None)] * policy_count
-    secondary_result = linprog(
+    secondary_result = _run_highs_linprog(
         c_secondary,
         A_ub=a_ub_secondary,
         b_ub=b_ub_secondary,
         A_eq=a_eq_secondary,
         b_eq=b_eq_secondary,
         bounds=bounds_secondary,
-        method="highs",
-        options={"threads": normalized_threads},
+        threads=normalized_threads,
     )
     if not secondary_result.success or secondary_result.x is None:
         raise ValueError(

@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-
 from weiss_rl.learners.impala_learner import ImpalaLearner
 from weiss_rl.training_logger import TrainingLogger
 

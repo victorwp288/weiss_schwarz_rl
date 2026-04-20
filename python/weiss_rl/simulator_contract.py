@@ -16,11 +16,13 @@ from weiss_rl.spec import assert_spec_bundle_contract, parse_spec_bundle
 
 _COLLECTION_SCRIPT = """
 import json
+import sys
 import weiss_sim
 
 payload = {
     "simulator": {
         "version": getattr(weiss_sim, "__version__", ""),
+        "module_file": getattr(weiss_sim, "__file__", ""),
         "build_info": weiss_sim.build_info(),
         "db_info": weiss_sim.db_info(),
     },
@@ -121,7 +123,7 @@ def _run_probe(target: _ProbeTarget) -> dict[str, Any]:
     if target.pythonpath is not None:
         extra_path = str(target.pythonpath)
         existing_pythonpath = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = extra_path if not existing_pythonpath else f"{extra_path}:{existing_pythonpath}"
+        env["PYTHONPATH"] = extra_path if not existing_pythonpath else f"{extra_path}{os.pathsep}{existing_pythonpath}"
     result = subprocess.run(
         [target.python, "-c", _COLLECTION_SCRIPT],
         check=True,
@@ -160,6 +162,10 @@ def load_simulator_contract(repo_root: Path) -> SimulatorContract:
 
         spec_bundle = parsed_spec_bundle.to_dict()
         simulator["compatibility_hash"] = parsed_spec_bundle.compatibility_hash
+        simulator["probe_python"] = target.python
+        simulator["probe_pythonpath"] = None if target.pythonpath is None else target.pythonpath.as_posix()
+        simulator["probe_target"] = _target_label(target)
+        simulator["probe_source"] = "active_interpreter" if target.pythonpath is None else "pythonpath"
         return SimulatorContract(
             simulator=simulator,
             spec_bundle=spec_bundle,

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import csv
 import json
+import warnings
 from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
 import pytest
+from scipy.optimize import OptimizeWarning
 
 from weiss_rl.metagame import NashSolverReport, solve_nash_mixture, write_nash_artifacts
 
@@ -29,13 +31,15 @@ def test_solve_nash_mixture_returns_uniform_rps_equilibrium() -> None:
     )
     policy_ids = ["rock", "paper", "scissors"]
 
-    mixture, report = solve_nash_mixture(
-        p_mean,
-        policy_ids=policy_ids,
-        value_tolerance=1e-9,
-        tie_break="lowest_policy_id",
-        threads=1,
-    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        mixture, report = solve_nash_mixture(
+            p_mean,
+            policy_ids=policy_ids,
+            value_tolerance=1e-9,
+            tie_break="lowest_policy_id",
+            threads=1,
+        )
 
     assert report.success is True
     assert report.solver == "linprog"
@@ -48,6 +52,7 @@ def test_solve_nash_mixture_returns_uniform_rps_equilibrium() -> None:
 
     assert mixture.shape == (3,)
     assert mixture.tolist() == pytest.approx([1 / 3, 1 / 3, 1 / 3], abs=1e-8)
+    assert not [warning for warning in caught if issubclass(warning.category, OptimizeWarning)]
 
 
 def test_solve_nash_mixture_deterministic_tie_break_by_policy_id() -> None:

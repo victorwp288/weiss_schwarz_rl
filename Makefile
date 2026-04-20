@@ -20,6 +20,10 @@ endif
 
 FIGURE_FORMAT_ARGS = $(foreach fmt,$(FORMATS),--format $(fmt))
 FIGURE_ID_ARG = $(if $(FIG_ID),--fig-id "$(FIG_ID)")
+SIMULATOR_CHECK_TESTS = \
+	python/weiss_rl/tests/test_simulator_contract.py \
+	python/weiss_rl/tests/test_rl_step_layout_contract_smoke.py \
+	python/weiss_rl/tests/test_heuristic_public.py -k simulator_native_heuristic_pool_matches_python_oracle_across_live_steps
 
 sync:
 	@echo $(SYNC_MSG)
@@ -84,9 +88,9 @@ package-smoke: sync
 
 simulator-check: sync-sim
 ifeq ($(UV),)
-	@$(PYRUN) -m pytest -q python/weiss_rl/tests/test_simulator_contract.py python/weiss_rl/tests/test_rl_step_layout_contract_smoke.py
+	@$(PYRUN) -m pytest -q $(SIMULATOR_CHECK_TESTS)
 else
-	@uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_simulator_contract.py python/weiss_rl/tests/test_rl_step_layout_contract_smoke.py
+	@uv run --extra dev --extra sim python -m pytest -q $(SIMULATOR_CHECK_TESTS)
 endif
 
 artifact-contract: sync

@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import math
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 import torch
@@ -18,12 +19,11 @@ from torch.nn.utils import clip_grad_norm_
 from torch.optim import Optimizer
 
 from weiss_rl.action_catalog import ActionCatalog
+from weiss_rl.learners.vtrace import VtraceMetrics, VTraceTargets, compute_vtrace_metrics
 from weiss_rl.legal_actions import LegalActionBatch
-from weiss_rl.learners.vtrace import VTraceTargets, VtraceMetrics, compute_vtrace_metrics
 from weiss_rl.masking import masked_logp_from_legal_ids, masked_logp_from_mask
 from weiss_rl.replay.bundles import write_fault_bundle
 from weiss_rl.training_logger import TrainingLogger, TrainingMetrics
-
 
 VTRACE_RHO_PERCENTILES = (50, 90, 95, 99)
 _MAX_LOG_RHO_TORCH = float(np.log(np.finfo(np.float32).max))

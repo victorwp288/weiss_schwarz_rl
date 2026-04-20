@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-import re
 from typing import Protocol, cast
 
 from weiss_rl.config.models import FinalPolicySetSelectionConfig
@@ -72,12 +72,17 @@ def recommend_focal_policy_id(
             ),
         ).policy_id
 
-    parsed_candidates = [
-        parsed
-        for policy_id in eligible_policy_ids
-        for parsed in [_try_parse_training_policy(policy_id)]
-        if parsed is not None
-    ]
+    snapshot_policies_by_id = {policy.policy_id: policy for policy in snapshot_policies}
+    parsed_candidates: list[TrainingPolicyId] = []
+    seen_policy_ids: set[str] = set()
+    for policy_id in eligible_policy_ids:
+        parsed_policy = snapshot_policies_by_id.get(policy_id)
+        if parsed_policy is None:
+            parsed_policy = _try_parse_training_policy(policy_id)
+        if parsed_policy is None or parsed_policy.policy_id in seen_policy_ids:
+            continue
+        parsed_candidates.append(parsed_policy)
+        seen_policy_ids.add(parsed_policy.policy_id)
     if parsed_candidates:
         return max(parsed_candidates, key=_training_policy_sort_key).policy_id
 

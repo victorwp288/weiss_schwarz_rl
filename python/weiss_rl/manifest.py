@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version as package_version
-from pathlib import Path
-from typing import Any
 import json
 import platform
 import sys
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
+from pathlib import Path
+from typing import Any
 
 from weiss_rl.artifacts import ArtifactLayout, default_run_dir_name
 from weiss_rl.repro import hash_seed_file
-
 
 ARTIFACT_SCHEMA_VERSION = "run_artifacts_v2"
 

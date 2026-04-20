@@ -119,6 +119,7 @@ class TensorBoardLogger:
         self.enabled = SummaryWriter is not None
         self._writer = None if SummaryWriter is None else SummaryWriter(log_dir=str(self.log_dir), flush_secs=10)
         self._logged_text_tags: set[str] = set()
+        self._logged_checkpoint_tracker_payloads: set[str] = set()
 
     def close(self) -> None:
         if self._writer is not None:
@@ -184,6 +185,9 @@ class TensorBoardLogger:
     def log_checkpoint_tracker(self, tracker: Mapping[str, Any], *, step: int) -> None:
         if not self.enabled:
             return
+        dedupe_key = f"{int(step)}:{json.dumps(tracker, sort_keys=True, default=str)}"
+        if dedupe_key in self._logged_checkpoint_tracker_payloads:
+            return
         self.log_text("checkpoint/tracker", tracker, step=step)
         for alias in ("latest", "best"):
             record = tracker.get(alias)
@@ -200,6 +204,7 @@ class TensorBoardLogger:
             if metric_value is not None:
                 self._log_scalar(f"{prefix}/metric_value", metric_value, step)
             self.log_text(f"{prefix}/record", dict(record), step=step)
+        self._logged_checkpoint_tracker_payloads.add(dedupe_key)
 
     def log_periodic_dev_eval(self, summary_payload: Mapping[str, Any], *, step: int) -> None:
         if not self.enabled:

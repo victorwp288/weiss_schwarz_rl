@@ -14,7 +14,6 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-
 from config_example import load_example_config, repo_root
 from policy_example import sample_actions_for_policy
 
@@ -106,7 +105,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--preset-config",
         type=Path,
-        default=root / "configs" / "presets" / "typed_local.yaml",
+        default=root / "configs" / "presets" / "structured_acceptance_standard.yaml",
         help="Path to the grouped preset config",
     )
     parser.add_argument(

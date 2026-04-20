@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import threading
 import queue
+import threading
 from collections import deque
 from dataclasses import replace
 from pathlib import Path
@@ -9,39 +9,40 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import numpy as np
+import numpy.testing as npt
 import pytest
 import torch
-import numpy.testing as npt
 
 import weiss_rl.model as model_module
 from weiss_rl.action_catalog import ActionCatalog
-from weiss_rl.league.registry import SnapshotRegistry
-from weiss_rl.league.outcomes import OnlineOutcomeTracker
-from weiss_rl.legal_actions import LegalActionBatch
-from weiss_rl.runtime import (
-    QueueRuntime,
-    QueueRuntimeConfig,
-    RuntimeUnroll,
-    _SharedPendingUnroll,
-    _MIRROR_OPPONENT_POLICY_ID,
-    _NOLEAGUE_BASELINE_POLICY_ID,
-    _handle_collector_commands,
-    _create_shared_collector_slot_config,
-    _concatenate_legal_actions,
-    _gae_advantages,
-    _maybe_compile_runtime_actor_model,
-    _open_shared_collector_slot,
-    _read_unroll_from_shared_slot,
-    _resolve_actor_topology,
-    resolve_actor_device_layout,
-    _shared_unroll_metadata,
-    _write_unroll_to_shared_slot,
-    build_runtime_config,
-)
 from weiss_rl.eval.policy_set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,
+)
+from weiss_rl.league.outcomes import OnlineOutcomeTracker
+from weiss_rl.league.registry import SnapshotRegistry
+from weiss_rl.legal_actions import LegalActionBatch
+from weiss_rl.runtime import (
+    _MIRROR_OPPONENT_POLICY_ID,
+    _NOLEAGUE_BASELINE_POLICY_ID,
+    QueueRuntime,
+    QueueRuntimeConfig,
+    RuntimeUnroll,
+    _concat_optional_time_major_field,
+    _concatenate_legal_actions,
+    _create_shared_collector_slot_config,
+    _gae_advantages,
+    _handle_collector_commands,
+    _maybe_compile_runtime_actor_model,
+    _open_shared_collector_slot,
+    _read_unroll_from_shared_slot,
+    _resolve_actor_topology,
+    _shared_unroll_metadata,
+    _SharedPendingUnroll,
+    _write_unroll_to_shared_slot,
+    build_runtime_config,
+    resolve_actor_device_layout,
 )
 
 
@@ -523,6 +524,9 @@ def test_collect_all_heuristic_ids_fast_requires_all_heuristic_linux_frontier_co
         Any,
         SimpleNamespace(
             layout_name="i16_legal_ids",
+            env=SimpleNamespace(
+                pool=SimpleNamespace(choose_heuristic_public_actions_into=lambda *args, **kwargs: None)
+            ),
             opponent_policy_id_by_env=np.array(
                 [HEURISTIC_PUBLIC_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID],
                 dtype=object,
@@ -548,6 +552,9 @@ def test_collect_all_heuristic_ids_fast_rejects_nonheuristic_opponent_assignment
         Any,
         SimpleNamespace(
             layout_name="i16_legal_ids",
+            env=SimpleNamespace(
+                pool=SimpleNamespace(choose_heuristic_public_actions_into=lambda *args, **kwargs: None)
+            ),
             opponent_policy_id_by_env=np.array(
                 [HEURISTIC_PUBLIC_POLICY_ID, "latest_policy_mirror"],
                 dtype=object,
@@ -578,6 +585,7 @@ def test_collect_all_heuristic_ids_native_rollout_requires_stateless_heuristic_a
             layout_name="i16_legal_ids",
             env=SimpleNamespace(
                 pool=SimpleNamespace(
+                    choose_heuristic_public_actions_into=lambda *args, **kwargs: None,
                     rollout_heuristic_public_into_i16_legal_ids=lambda *args, **kwargs: None,
                     reset_done_into_i16_legal_ids=lambda *args, **kwargs: None,
                 )
@@ -612,6 +620,7 @@ def test_collect_all_heuristic_ids_native_rollout_rejects_hidden_tracking() -> N
             layout_name="i16_legal_ids",
             env=SimpleNamespace(
                 pool=SimpleNamespace(
+                    choose_heuristic_public_actions_into=lambda *args, **kwargs: None,
                     rollout_heuristic_public_into_i16_legal_ids=lambda *args, **kwargs: None,
                     reset_done_into_i16_legal_ids=lambda *args, **kwargs: None,
                 )
@@ -1099,7 +1108,7 @@ def test_handle_collector_commands_tracks_update_and_refreshes_pool() -> None:
         def load_state_dict(self, state_dict: dict[str, Any]) -> None:
             self.loaded += len(state_dict)
 
-        def eval(self) -> "_FakeModel":
+        def eval(self) -> _FakeModel:
             self.evaluated += 1
             return self
 
@@ -2694,6 +2703,109 @@ def test_apply_opponent_rows_ids_uses_simulator_native_backend_for_heuristic_pub
     assert logp_out.tolist() == [0.0, 0.0, -1.0]
 
 
+def test_apply_opponent_rows_ids_falls_back_when_simulator_native_pool_hook_is_unavailable() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._actor_amp_enabled = False
+    runtime_any._fixed_opponent_backend = "simulator_native"
+    runtime_any.action_dim = 32
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_model_locks = {}
+
+    class _AdvanceOnlyModel:
+        def advance_seat_hidden(self, obs_tensor, actor_tensor, hidden_tensor):
+            return hidden_tensor + 1.0
+
+    class _RecordingHeuristicPolicy:
+        def __init__(self) -> None:
+            self.calls: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]] = []
+
+        def choose_actions_from_meta_batch(self, obs_rows, legal_ids, legal_offsets, legal_action_meta):
+            obs_array = np.asarray(obs_rows, dtype=np.int32)
+            ids_array = np.asarray(legal_ids, dtype=np.uint32)
+            offsets_array = np.asarray(legal_offsets, dtype=np.uint32)
+            meta_array = None if legal_action_meta is None else np.asarray(legal_action_meta, dtype=np.uint16)
+            self.calls.append(
+                (
+                    obs_array.copy(),
+                    ids_array.copy(),
+                    offsets_array.copy(),
+                    None if meta_array is None else meta_array.copy(),
+                )
+            )
+            return np.asarray(
+                [int(ids_array[int(offsets_array[row_index])]) for row_index in range(offsets_array.shape[0] - 1)],
+                dtype=np.int64,
+            )
+
+    heuristic_policy = _RecordingHeuristicPolicy()
+    runtime_any._opponent_heuristic_policies = {HEURISTIC_PUBLIC_POLICY_ID: heuristic_policy}
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            model=_AdvanceOnlyModel(),
+            compiled_model=None,
+            env=SimpleNamespace(pool=SimpleNamespace()),
+            opponent_policy_id_by_env=np.asarray(
+                [HEURISTIC_PUBLIC_POLICY_ID, HEURISTIC_PUBLIC_POLICY_ID, _MIRROR_OPPONENT_POLICY_ID],
+                dtype=object,
+            ),
+            seat_hidden=torch.zeros((3, 2)),
+            opponent_hidden=torch.zeros((3, 2)),
+        ),
+    )
+    row_indices = np.asarray([0, 1], dtype=np.int64)
+    obs_step = np.asarray([[1, 0], [2, 0], [3, 0]], dtype=np.float32)
+    actor_step = np.asarray([1, 1, 0], dtype=np.int64)
+    legal_ids = np.asarray([10, 11, 12, 20, 21], dtype=np.uint32)
+    legal_offsets = np.asarray([0, 3, 5, 5], dtype=np.uint32)
+    legal_action_meta = np.asarray(
+        [
+            [0, 0, 0, 0],
+            [1, 0, 0, 0],
+            [2, 0, 0, 0],
+            [3, 0, 0, 0],
+            [4, 0, 0, 0],
+        ],
+        dtype=np.uint16,
+    )
+    values_out = np.ones((3,), dtype=np.float32)
+    actions_out = np.full((3,), 99, dtype=np.int64)
+    logp_out = np.full((3,), -1.0, dtype=np.float32)
+
+    QueueRuntime._apply_opponent_rows_ids(
+        runtime,
+        actor=actor,
+        row_indices=row_indices,
+        obs_step=obs_step,
+        actor_step=actor_step,
+        legal_ids=legal_ids,
+        legal_offsets=legal_offsets,
+        legal_action_meta=legal_action_meta,
+        logits_out=None,
+        values_out=values_out,
+        actions_out=actions_out,
+        logp_out=logp_out,
+        rng=np.random.default_rng(7),
+        sample_actions=True,
+    )
+
+    assert len(heuristic_policy.calls) == 1
+    call_obs, call_ids, call_offsets, call_meta = heuristic_policy.calls[0]
+    assert np.array_equal(call_obs, np.asarray([[1, 0], [2, 0]], dtype=np.int32))
+    assert np.array_equal(call_ids, np.asarray([10, 11, 12, 20, 21], dtype=np.uint32))
+    assert np.array_equal(call_offsets, np.asarray([0, 3, 5], dtype=np.uint32))
+    assert call_meta is not None
+    assert np.array_equal(call_meta, legal_action_meta)
+    assert actor.seat_hidden[0].tolist() == [1.0, 1.0]
+    assert actor.seat_hidden[1].tolist() == [1.0, 1.0]
+    assert values_out.tolist() == [0.0, 0.0, 1.0]
+    assert actions_out.tolist() == [10, 20, 99]
+    assert logp_out.tolist() == [0.0, 0.0, -1.0]
+
+
 def test_build_runtime_config_minimal_batch_uses_one_unroll_per_actor() -> None:
     stack = SimpleNamespace(
         config=SimpleNamespace(
@@ -2981,6 +3093,36 @@ def test_build_ppo_batch_does_not_double_apply_truncation_reward() -> None:
     assert batch["discounts"][:, 0].tolist() == pytest.approx([0.99, 0.0])
 
 
+def test_build_ppo_batch_uses_stored_behavior_bootstrap_values() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any.action_dim = 2
+    runtime_any._bootstrap_values = lambda unroll: np.array([9.0], dtype=np.float32)
+    unroll = replace(
+        _make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=3),
+        rewards=np.zeros((1, 1), dtype=np.float32),
+        terminated=np.zeros((1, 1), dtype=np.bool_),
+        truncated=np.zeros((1, 1), dtype=np.bool_),
+        behavior_logp=np.zeros((1, 1), dtype=np.float32),
+        values=np.zeros((1, 1), dtype=np.float32),
+        legal_actions=LegalActionBatch.from_mask(np.ones((1, 1, 2), dtype=np.bool_)),
+        bootstrap_value=np.array([0.25], dtype=np.float32),
+        initial_hidden_state=np.zeros((1, 1), dtype=np.float32),
+    )
+
+    batch = QueueRuntime._build_ppo_batch(
+        runtime,
+        [unroll],
+        gamma=1.0,
+        gae_lambda=1.0,
+        truncation_reward=0.0,
+        truncation_bootstrap_value=True,
+    )
+
+    assert batch["advantages"][:, 0].tolist() == pytest.approx([0.25])
+    assert batch["returns"][:, 0].tolist() == pytest.approx([0.25])
+
+
 def test_runtime_metrics_report_window_and_cumulative_env_step_rates(monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
@@ -3188,7 +3330,7 @@ def test_runtime_can_force_process_collectors_for_structured_cuda_auto_async_lea
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     class _DummyProcessModel:
-        def to(self, device: torch.device) -> "_DummyProcessModel":
+        def to(self, device: torch.device) -> _DummyProcessModel:
             return self
 
     started_with: list[Any] = []
@@ -3395,10 +3537,10 @@ def test_runtime_uses_central_batched_collection_for_structured_cuda_async(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _DummyCentralModel:
-        def to(self, device: torch.device) -> "_DummyCentralModel":
+        def to(self, device: torch.device) -> _DummyCentralModel:
             return self
 
-        def eval(self) -> "_DummyCentralModel":
+        def eval(self) -> _DummyCentralModel:
             return self
 
     monkeypatch.setattr("weiss_rl.runtime.torch.cuda.is_available", lambda: True)
@@ -4031,6 +4173,39 @@ def test_teacher_labels_from_actions_skip_after_warmstart_only_phase() -> None:
     assert teacher_move_source.tolist() == [-1]
     assert teacher_attack_type.tolist() == [-1]
     assert teacher_action.tolist() == [-1]
+
+
+def test_concat_optional_time_major_field_fills_unlabeled_rows_with_sentinels() -> None:
+    labeled = SimpleNamespace(
+        obs=np.zeros((2, 2, 1), dtype=np.float32),
+        teacher_family=np.asarray([[7, 8], [9, 10]], dtype=np.int32),
+        teacher_valid=np.asarray([[True, False], [False, True]], dtype=np.bool_),
+    )
+    unlabeled = SimpleNamespace(
+        obs=np.zeros((2, 3, 1), dtype=np.float32),
+        teacher_family=None,
+        teacher_valid=None,
+    )
+
+    teacher_family = _concat_optional_time_major_field(
+        [labeled, unlabeled],
+        "teacher_family",
+        missing_fill_value=-1,
+    )
+    teacher_valid = _concat_optional_time_major_field(
+        [labeled, unlabeled],
+        "teacher_valid",
+        missing_fill_value=False,
+    )
+
+    assert teacher_family is not None
+    assert teacher_valid is not None
+    assert teacher_family.shape == (2, 5)
+    assert teacher_valid.shape == (2, 5)
+    npt.assert_array_equal(teacher_family[:, :2], labeled.teacher_family)
+    npt.assert_array_equal(teacher_family[:, 2:], np.full((2, 3), -1, dtype=np.int32))
+    npt.assert_array_equal(teacher_valid[:, :2], labeled.teacher_valid)
+    npt.assert_array_equal(teacher_valid[:, 2:], np.zeros((2, 3), dtype=np.bool_))
 
 
 def test_teacher_labels_from_ids_cover_public_decision_kinds_beyond_tactical_subset() -> None:

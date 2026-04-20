@@ -346,6 +346,42 @@ def test_recommend_focal_policy_id_prefers_best_canonicalized_non_baseline_polic
     assert recommended == "policy_000003"
 
 
+def test_recommend_focal_policy_id_falls_back_to_newest_durable_snapshot_when_summaries_are_missing() -> None:
+    registry = _build_registry(
+        [
+            ("policy_000100", 100),
+            ("policy_000200", 200),
+        ]
+    )
+
+    recommended = recommend_focal_policy_id(
+        snapshot_registry=registry,
+        dev_eval_summaries={},
+        candidate_policy_ids=[
+            "B0 RandomLegal",
+            "B1 NoLeague baseline",
+            "policy_000100",
+            "policy_000200",
+        ],
+    )
+
+    assert recommended == "policy_000200"
+
+
+def test_recommend_focal_policy_id_falls_back_to_newest_legacy_snapshot_when_summaries_are_missing() -> None:
+    recommended = recommend_focal_policy_id(
+        snapshot_registry=SnapshotRegistry(),
+        dev_eval_summaries={},
+        candidate_policy_ids=[
+            "B0 RandomLegal",
+            "train_u40_p2",
+            "train_u60_p3",
+        ],
+    )
+
+    assert recommended == "train_u60_p3"
+
+
 def test_selector_requires_required_anchor_scores_for_anchor_strategy() -> None:
     config = _selection_config(
         include_random_legal_baseline_b0=False,

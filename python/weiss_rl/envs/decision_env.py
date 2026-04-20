@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass, field
 import importlib
 import time
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
 import numpy as np
@@ -177,7 +177,7 @@ class DecisionBoundaryEnv:
         counters: EngineStatusCounters | None = None,
         profile_timers: bool = False,
         **kwargs: Any,
-    ) -> "DecisionBoundaryEnv":
+    ) -> DecisionBoundaryEnv:
         if "layout" in kwargs:
             raise TypeError("DecisionBoundaryEnv.create() does not accept layout=; use legality= instead")
 

@@ -133,6 +133,10 @@ def _persist_policy_selection_in_manifest(
     _write_json(layout.manifest_path, manifest)
 
 
+def _policy_selection_mode(selection_details: dict[str, Any]) -> str:
+    return str(selection_details.get("mode", "")).strip().lower()
+
+
 def _resolve_selection_inputs_from_manifest(
     *,
     stack_root: Path,
@@ -194,20 +198,20 @@ def _authoritative_manifest_policy_selection(
         return None
 
     details = manifest.get("policy_set_selection_details")
-    resolved_by = ""
     status = ""
     selection_details: dict[str, Any] = {}
     if isinstance(details, dict):
         selection_details = dict(details)
-        resolved_by = str(details.get("resolved_by", "")).strip()
         status = str(details.get("status", "")).strip().lower()
     if status == "unresolved":
         return None
+    if _policy_selection_mode(selection_details) == "explicit_cli":
+        return None
 
-    has_completed_eval_artifacts = (
+    has_completed_eval_artifacts = bool(
         layout.final_eval_summary_json().is_file() or _run_summary_marks_canonical_eval_completed(layout)
     )
-    if not has_completed_eval_artifacts and resolved_by != "canonical_eval_pipeline_v1":
+    if not has_completed_eval_artifacts:
         return None
 
     selection_details.setdefault("mode", "manifest_policy_set_selection")

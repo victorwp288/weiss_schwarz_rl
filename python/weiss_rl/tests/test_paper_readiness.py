@@ -7,7 +7,6 @@ from typing import Any, cast
 from weiss_rl.eval import build_paper_readiness_summary
 from weiss_rl.eval.policy_set import RANDOM_LEGAL_POLICY_ID
 
-
 SeatResultInput = tuple[int, int] | dict[str, int]
 
 

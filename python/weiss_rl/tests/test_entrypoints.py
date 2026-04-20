@@ -742,6 +742,249 @@ def test_eval_entrypoint_honors_completed_manifest_policy_selection(tmp_path: Pa
     assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
 
 
+def test_eval_entrypoint_ignores_incomplete_manifest_selection_from_canonical_eval_pipeline(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_policy_selection_incomplete"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+    manifest = {
+        "policy_set_selection": ["B0 RandomLegal", "policy_stale_only"],
+        "policy_set_selection_details": {
+            "mode": "deterministic_v1",
+            "status": "resolved",
+            "resolved_by": "canonical_eval_pipeline_v1",
+        },
+    }
+
+    policy_ids, details, resolved_snapshot_registry, resolved_dev_eval = eval_script._resolve_policy_ids_for_run(
+        policy_ids=[],
+        stack=stack,
+        manifest=manifest,
+        layout=layout,
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+    )
+
+    assert policy_ids == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "policy_000400",
+        "policy_000100",
+        "policy_000200",
+        "policy_000300",
+        "policy_000150",
+        "policy_000250",
+        "policy_000350",
+    ]
+    assert details["mode"] == "deterministic_v1"
+    assert resolved_snapshot_registry == layout.training_snapshots_dir / "registry.json"
+    assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
+
+
+def test_eval_entrypoint_ignores_completed_explicit_cli_manifest_selection(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_policy_selection_explicit_cli"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+    layout.final_eval_summary_json().parent.mkdir(parents=True, exist_ok=True)
+    layout.final_eval_summary_json().write_text("{}\n", encoding="utf-8")
+    manifest = {
+        "policy_set_selection": ["policy_custom_only"],
+        "policy_set_selection_details": {
+            "mode": "explicit_cli",
+            "status": "resolved",
+        },
+    }
+
+    policy_ids, details, resolved_snapshot_registry, resolved_dev_eval = eval_script._resolve_policy_ids_for_run(
+        policy_ids=[],
+        stack=stack,
+        manifest=manifest,
+        layout=layout,
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+    )
+
+    assert policy_ids == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "policy_000400",
+        "policy_000100",
+        "policy_000200",
+        "policy_000300",
+        "policy_000150",
+        "policy_000250",
+        "policy_000350",
+    ]
+    assert details["mode"] == "deterministic_v1"
+    assert resolved_snapshot_registry == layout.training_snapshots_dir / "registry.json"
+    assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
+
+
+def test_eval_manifest_persistence_records_explicit_cli_policy_selection(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    run_dir = tmp_path / "runs" / "eval_manifest_persistence"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.run_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "policy_set_selection": ["policy_original"],
+        "policy_set_selection_details": {
+            "mode": "deterministic_v1",
+            "status": "resolved",
+        },
+    }
+    layout.manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    eval_script._persist_policy_selection_in_manifest(
+        layout=layout,
+        manifest=dict(manifest),
+        policy_ids=["policy_explicit"],
+        selection_details={"mode": "explicit_cli", "policy_count": 1},
+    )
+
+    persisted = json.loads(layout.manifest_path.read_text(encoding="utf-8"))
+    assert persisted["policy_set_selection"] == ["policy_explicit"]
+    assert persisted["policy_set_selection_details"] == {
+        "mode": "explicit_cli",
+        "policy_count": 1,
+        "resolved_by": "canonical_eval_pipeline_v1",
+        "status": "resolved",
+    }
+
+
+def test_eval_pipeline_persists_policy_selection_before_run_final_eval(tmp_path: Path, monkeypatch) -> None:
+    import scripts.eval as eval_script
+
+    expected_policy_ids = [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "policy_000400",
+        "policy_000100",
+        "policy_000200",
+        "policy_000300",
+        "policy_000150",
+        "policy_000250",
+        "policy_000350",
+    ]
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_pipeline_persist_before_final_eval"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+    layout.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id256": "ab" * 32,
+                "config_hash256": "cd" * 32,
+                "spec_hash256": "ef" * 32,
+                "policy_set_selection": [],
+                "policy_set_selection_details": {
+                    "status": "unresolved",
+                    "reason": "selection_pending",
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class _FakeTensorBoardLogger:
+        enabled = False
+
+        def __init__(self, _log_dir: Path) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class _FakeContract:
+        spec_bundle = {
+            "observation": {"obs_len": 512},
+            "action": {"action_space_size": 9, "pass_action_id": 8},
+        }
+
+    observed: dict[str, dict[str, object]] = {}
+
+    def _fake_run_final_eval(**_kwargs: object) -> dict[str, object]:
+        observed["manifest"] = json.loads(layout.manifest_path.read_text(encoding="utf-8"))
+        raise RuntimeError("stop after manifest check")
+
+    monkeypatch.setattr(eval_script, "TensorBoardLogger", _FakeTensorBoardLogger)
+    monkeypatch.setattr(
+        eval_script,
+        "load_verified_simulator_contract",
+        lambda *_args, **_kwargs: _FakeContract(),
+    )
+    monkeypatch.setattr(eval_script, "resolve_eval_policies", lambda **_kwargs: [])
+    monkeypatch.setattr(eval_script, "SimulatorEvalRunner", lambda **_kwargs: object())
+    monkeypatch.setattr(eval_script, "run_final_eval", _fake_run_final_eval)
+
+    try:
+        eval_script._run_canonical_eval_pipeline(
+            parser=eval_script.argparse.ArgumentParser(),
+            stack=stack,
+            run_dir=run_dir,
+            final_eval_dir=None,
+            policy_ids=[],
+            snapshot_registry_path=None,
+            dev_eval_summaries_path=None,
+            b1_baseline_run_dir=None,
+            bootstrap_samples=8,
+            paired_seed_limit=1,
+            stage1_paired_seeds=1,
+            max_paired_seeds=1,
+            skip_metagame=True,
+            study_config_path=None,
+            skip_figures=True,
+            skip_readiness=True,
+            git_commit_override="",
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "stop after manifest check"
+    else:
+        raise AssertionError("expected fake run_final_eval to stop the pipeline")
+
+    persisted = observed["manifest"]
+    assert persisted["policy_set_selection"] == expected_policy_ids
+    assert persisted["policy_set_selection_details"] == {
+        "mode": "deterministic_v1",
+        "policy_count": len(expected_policy_ids),
+        "resolved_by": "canonical_eval_pipeline_v1",
+        "snapshot_registry_path": (layout.training_snapshots_dir / "registry.json").as_posix(),
+        "dev_eval_summaries_path": (layout.training_logs_dir / "periodic_dev_eval_summaries.json").as_posix(),
+        "final_policy_set_size": 10,
+        "status": "resolved",
+    }
+
+
 def test_eval_git_commit_override_does_not_mutate_manifest_payload() -> None:
     import scripts.eval as eval_script
 

@@ -14,7 +14,6 @@ from weiss_rl.masking import (
     masked_logp_from_mask,
 )
 
-
 _MAX_LOG_RHO = float(np.log(np.finfo(np.float32).max))
 _UNAVAILABLE_METRIC = float("nan")
 

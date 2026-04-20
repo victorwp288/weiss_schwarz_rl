@@ -7,7 +7,6 @@ import pytest
 
 from weiss_rl.plotting.paper_figures import PAPER_FIGURE_IDS, PAPER_FIGURE_STEMS, render_paper_figures
 
-
 POLICIES = ("alpha", "beta", "gamma")
 
 

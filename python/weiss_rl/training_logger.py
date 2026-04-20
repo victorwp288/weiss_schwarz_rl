@@ -157,7 +157,7 @@ class TrainingLogger:
             List of parsed JSON objects.
         """
         records = []
-        with open(log_path, "r", encoding="utf-8") as f:
+        with open(log_path, encoding="utf-8") as f:
             for line_number, raw_line in enumerate(f, start=1):
                 line = raw_line.strip()
                 if line:
@@ -179,7 +179,7 @@ class TrainingLogger:
 
         try:
             record_count = 0
-            with open(log_path, "r", encoding="utf-8") as f:
+            with open(log_path, encoding="utf-8") as f:
                 for line_number, raw_line in enumerate(f, start=1):
                     line = raw_line.strip()
                     if not line:

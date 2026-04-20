@@ -10,7 +10,6 @@ import pytest
 from weiss_rl.eval.harness import EvalGameRecord
 from weiss_rl.eval.heuristic_public import ActionCatalog
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "python" / "scripts" / "b2_disagreement_audit.py"
 

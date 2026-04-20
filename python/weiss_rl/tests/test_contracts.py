@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import pytest
 import numpy as np
+import pytest
 import torch
 
 from weiss_rl.action_catalog import ActionCatalog

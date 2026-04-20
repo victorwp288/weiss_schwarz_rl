@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 from weiss_rl.config import load_stack_config
 from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config

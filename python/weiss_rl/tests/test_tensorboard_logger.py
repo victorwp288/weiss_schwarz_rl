@@ -65,6 +65,23 @@ def test_tensorboard_logger_records_training_checkpoint_and_dev_eval_metrics(tmp
         },
         step=3,
     )
+    logger.log_checkpoint_tracker(
+        {
+            "latest": {
+                "update_count": 3,
+                "policy_version": 1,
+                "metric_kind": "training_loss",
+                "metric_value": 0.25,
+            },
+            "best": {
+                "update_count": 3,
+                "policy_version": 1,
+                "metric_kind": "dev_eval_mean",
+                "metric_value": 0.61,
+            },
+        },
+        step=3,
+    )
     logger.log_periodic_dev_eval(
         {
             "summary": {"games": 8, "wins": 5, "losses": 3},
@@ -90,6 +107,8 @@ def test_tensorboard_logger_records_training_checkpoint_and_dev_eval_metrics(tmp
     assert "checkpoint/latest/update_count" in scalar_tags
     assert "checkpoint/best/metric_value" in scalar_tags
     assert "dev_eval/uncertainty/mean" in scalar_tags
+    assert len(accumulator.Scalars("checkpoint/latest/update_count")) == 1
+    assert len(accumulator.Scalars("checkpoint/best/metric_value")) == 1
     assert "run/manifest/text_summary" in tensor_tags
     assert "checkpoint/tracker/text_summary" in tensor_tags
     assert "dev_eval/summary/text_summary" in tensor_tags

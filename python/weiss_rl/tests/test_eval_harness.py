@@ -413,7 +413,7 @@ def test_episode_key_prefers_simulator_value_and_falls_back_deterministically() 
             simulator_episode_key=777,
             run_id256=bytes.fromhex(_RUN_ID256),
             actor_id=stable_hash64(b"champion") & ((1 << 32) - 1),
-            env_id=stable_hash64("champion\0baseline".encode("utf-8")) & ((1 << 32) - 1),
+            env_id=stable_hash64(b"champion\0baseline") & ((1 << 32) - 1),
             episode_index=3,
             episode_seed64=123,
         )

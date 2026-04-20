@@ -4,20 +4,21 @@ import argparse
 import shutil
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.eval.export import load_eval_game_records, write_matchup_summary_json
-from weiss_rl.eval.heuristic_public import ActionCatalog, DecodedAction
 from weiss_rl.eval.harness import (
     EvalGameRecord,
     build_seat_swapped_schedule,
     record_completed_game,
     write_episodes_jsonl,
 )
+from weiss_rl.eval.heuristic_public import ActionCatalog, DecodedAction
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
 from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
 from weiss_rl.replay.inspector import inspect_replay_bundle, write_replay_inspection_report

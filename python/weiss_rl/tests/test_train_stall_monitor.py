@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import numpy as np
-import pytest
-import torch
 from pathlib import Path
 from types import SimpleNamespace
 
-from weiss_rl.config import load_stack_config
-from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
+import numpy as np
+import pytest
 import scripts.train as train_script
+import torch
 from scripts.train import (
     MinimalRollout,
     TrainingPaths,
@@ -22,6 +20,9 @@ from scripts.train import (
     _should_promote_best_checkpoint,
     _update_stall_monitor,
 )
+
+from weiss_rl.config import load_stack_config
+from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
 
 
 def _repo_root():

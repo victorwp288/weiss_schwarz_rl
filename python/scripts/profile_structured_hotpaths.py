@@ -6,7 +6,6 @@ import time
 
 import numpy as np
 import torch
-
 from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.legal_actions import LegalActionBatch

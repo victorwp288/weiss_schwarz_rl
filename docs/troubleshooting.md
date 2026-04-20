@@ -23,7 +23,7 @@ Fix:
 
 - switch to Python 3.10-3.12
 - re-run `uv sync --extra dev`
-- if you need the published simulator package too, use `uv sync --extra dev --extra sim`
+- if you need `weiss-sim 0.8.1` too, use `uv sync --extra dev --extra sim`
 
 ## Simulator import issues
 
@@ -39,12 +39,16 @@ or point at a sibling checkout:
 
 ```bash
 export WEISS_SIM_PYTHONPATH=/Users/vwp/code/thesis/weiss-schwarz-simulator/python
+# PowerShell
+$env:WEISS_SIM_PYTHONPATH="C:\\Users\\Bruger\\Desktop\\thesis-repo\\weiss-schwarz-simulator\\python"
 ```
 
 If the simulator needs a different interpreter, also set:
 
 ```bash
 export WEISS_SIM_PYTHON=/path/to/python3.12
+# PowerShell
+$env:WEISS_SIM_PYTHON="C:\\Path\\To\\python.exe"
 ```
 
 ## Verification issues

@@ -14,6 +14,23 @@ This is the current ship-ready training and evaluation surface for the thesis ru
 - `configs/presets/structured_acceptance_standard_multideck.yaml`
   - same recipe, but with actor-cycled bundled Quintuplets deck diversity
 
+## Baseline prerequisite
+
+`standard`, `standard-auto-gpu`, `standard-multideck`, and the named ablations all require a completed dedicated `baseline_noleague` run so the canonical `B1 NoLeague baseline` anchor can be imported into the training league.
+
+Bootstrap that baseline once with the matching model/environment surface:
+
+```bash
+uv run python python/scripts/train.py \
+  --stack-config configs/presets/baselines/structured_acceptance_tiny32_fast_noleague.yaml \
+  --run-label b1_anchor_seed1 \
+  --device cuda \
+  --num-envs 4096 \
+  --unroll-length 64 \
+  --runtime-mode train_async_fast \
+  --max-updates 200
+```
+
 ## Fastest commands
 
 List the named presets exposed by the wrapper:
@@ -28,6 +45,7 @@ Launch the canonical training recipe:
 uv run python python/scripts/thesis_run.py \
   --preset standard \
   --run-label thesis_seed1 \
+  --b1-baseline-run-dir runs/b1_anchor_seed1 \
   --device cuda \
   --num-envs 4096 \
   --unroll-length 64 \
@@ -43,6 +61,7 @@ Launch the recommended Linux server variant on a multi-GPU node:
 uv run python python/scripts/thesis_run.py \
   --preset standard-auto-gpu \
   --run-label thesis_server_seed1 \
+  --b1-baseline-run-dir runs/b1_anchor_seed1 \
   --num-envs 4096 \
   --unroll-length 64 \
   --runtime-mode train_async_fast \
@@ -72,12 +91,15 @@ Try the multideck generalization variant:
 uv run python python/scripts/thesis_run.py \
   --preset standard-multideck \
   --run-label thesis_multideck_seed1 \
+  --b1-baseline-run-dir runs/b1_anchor_seed1 \
   --device cuda \
   --num-envs 4096 \
   --unroll-length 64 \
   --runtime-mode train_async_fast \
   --max-updates 200
 ```
+
+`standard-multideck` defaults its companion eval stack to `structured_acceptance_standard_multideck.yaml`, not `standard-thesis-eval`, so the wrapper keeps the multideck surface aligned unless you override it explicitly.
 
 ## Thesis ablations
 
@@ -96,9 +118,9 @@ These are the most defensible next ablations around the current best recipe.
 Suggested wrapper invocations:
 
 ```bash
-uv run python python/scripts/thesis_run.py --preset ablate-no-tactical-bias --run-label ablate_no_tactical_bias_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset ablate-no-b1-cutoff --run-label ablate_no_b1_cutoff_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset standard-multideck --run-label ablate_multideck_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset ablate-no-tactical-bias --run-label ablate_no_tactical_bias_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset ablate-no-b1-cutoff --run-label ablate_no_b1_cutoff_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset standard-multideck --run-label ablate_multideck_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
 ```
 
 ## What Still Matters

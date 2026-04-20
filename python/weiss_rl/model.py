@@ -363,7 +363,7 @@ class _PackedScoringPlan:
     def candidate_count(self) -> int:
         return int(self.family_ids.shape[0])
 
-    def slice(self, start: int, end: int) -> "_PackedScoringPlan":
+    def slice(self, start: int, end: int) -> _PackedScoringPlan:
         return _PackedScoringPlan(
             row_indices=self.row_indices[start:end],
             family_ids=self.family_ids[start:end],

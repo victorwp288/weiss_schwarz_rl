@@ -11,7 +11,6 @@ import torch
 from torch import nn
 
 from weiss_rl.action_catalog import ActionCatalog
-from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.learners.impala_learner import (
     ImpalaLearner,
     _masked_action_logp_and_entropy,
@@ -20,6 +19,7 @@ from weiss_rl.learners.impala_learner import (
     summarize_structured_policy_metrics,
 )
 from weiss_rl.learners.vtrace import VTraceTargets
+from weiss_rl.legal_actions import LegalActionBatch
 
 
 class NaNLogitModel(nn.Module):

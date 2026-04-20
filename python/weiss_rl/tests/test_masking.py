@@ -14,6 +14,8 @@ from weiss_rl.eval.harness import eval_sampler_logp_from_mask
 from weiss_rl.learners.impala_learner import learner_logp_from_mask
 from weiss_rl.masking import (
     PASS_ACTION_ID as CONTRACT_PASS_ACTION_ID,
+)
+from weiss_rl.masking import (
     MaskingAnomalyCounters,
     apply_empty_legal_action_fallback,
     assert_strictly_increasing_legal_ids,

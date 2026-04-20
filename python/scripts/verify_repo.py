@@ -63,6 +63,19 @@ def main() -> None:
                 "--skip-compare",
             ],
         ),
+        (
+            "Standard multideck wrapper dry-run",
+            [
+                python_exe,
+                "python/scripts/thesis_run.py",
+                "--preset",
+                "standard-multideck",
+                "--run-label",
+                "standard_multideck_surface_ci",
+                "--dry-run",
+                "--skip-compare",
+            ],
+        ),
     ]
     for label, command in commands:
         _run_step(label=label, command=command, cwd=repo_root)

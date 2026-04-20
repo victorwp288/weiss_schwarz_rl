@@ -7747,3 +7747,158 @@ This file is the continuation point for the April 16, 2026 rescue pass.
 - what remains:
   - no functional release blockers were found in this pass
   - repo-wide `mypy` is still broader legacy debt and is not the enforced release gate; the enforced typed surface is now the canonical wrapper/eval/human-play entrypoints listed above
+
+## Attempt 217: Final Cleanup Pass Tightened The Enforced Lint Surface And Polished The Last Release-Facing Edges
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - not applicable
+  - this was a cleanup / release-hardening pass only
+- exact learner timing breakdown:
+  - not applicable
+  - no learner recipe or optimization behavior changed
+- exact actor timing breakdown:
+  - not applicable
+  - no actor/runtime throughput tuning was introduced here
+- what changed:
+  - strengthened the enforced Ruff baseline from the narrow `E/F/B` set to `E/F/B/I/UP`, then normalized the repo to match:
+    - import ordering is now enforced across `python/`, `python/scripts/`, `examples/`, and tests
+    - safe Python-modernization fixes now land cleanly under the supported `>=3.10` target
+  - extended `python/scripts/verify_repo.py` and its smoke-test coverage so release verification now also dry-runs the canonical `standard-multideck` wrapper surface instead of only `standard` and `standard-auto-gpu`
+  - cleaned the last stale example defaults:
+    - `examples/config_example.py`
+    - `examples/run_loop_example.py`
+    now default to `structured_acceptance_standard.yaml` rather than the old `typed_local.yaml` path
+  - removed verified dead private code paths:
+    - deleted the unused `_collect_rollout(...)` helper from `python/scripts/train.py`
+    - deleted the unused `_sample_actions_from_packed_scores(...)` helper from `python/weiss_rl/runtime.py`
+  - simplified a few small readability-only control-flow paths in `train.py`, `runtime.py`, and `actor_worker.py` without changing behavior
+  - hardened the Nash solver path so the repo no longer emits the previous SciPy `OptimizeWarning` noise for the optional `threads` setting during tests, and added regression coverage for that quiet path
+- what dead code was removed:
+  - `python/scripts/train.py:_collect_rollout`
+  - `python/weiss_rl/runtime.py:_sample_actions_from_packed_scores`
+- what major refactors were done:
+  - no architectural refactor
+  - repo-wide lint modernization / import normalization under the stronger Ruff policy
+  - release verification now covers the canonical multideck wrapper surface
+  - examples now track the canonical standard preset family by default
+- whether learning improved:
+  - not applicable
+  - this pass intentionally preserved training/eval semantics and only changed code quality, verification coverage, and stale surface defaults
+- checks run:
+  - `python -m ruff check --select I,UP,SIM python tests examples python/scripts`
+  - `python -m ruff check python tests examples python/scripts`
+  - `python -m ruff format --check python tests examples python/scripts`
+  - `python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`
+  - `python -m pytest -q python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_metagame_nash.py python/weiss_rl/tests/test_script_entrypoint_smokes.py python/weiss_rl/tests/test_thesis_run_wrapper.py`
+  - `python -m pytest -q python/weiss_rl/tests` -> `724 passed, 2 skipped`
+  - `python python/scripts/verify_repo.py`
+- what remains:
+  - no repo-local release blockers were found after this pass
+  - the only remaining gate noise is third-party Matplotlib/PyParsing deprecation warnings during tests; repo code now runs clean under the enforced checks
+
+## Attempt 218: Cross-Repo Audit Confirmed The RL Release Surface And Fixed The Last Diff-Hygiene Leak
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - not applicable
+  - this was an audit / release verification pass only
+- exact learner timing breakdown:
+  - not applicable
+  - no learner behavior changed
+- exact actor timing breakdown:
+  - not applicable
+  - no runtime tuning changed
+- what changed:
+  - reran the full local RL verification surface after the cleanup branch edits:
+    - Ruff
+    - format check
+    - Vulture
+    - full pytest
+    - `python/scripts/verify_repo.py`
+  - manually audited the highest-risk cleanup diffs in:
+    - `python/scripts/thesis_run.py`
+    - `python/scripts/play_vs_model.py`
+    - `python/weiss_rl/eval/simulator_runner.py`
+    - `python/weiss_rl/runtime.py`
+  - fixed the last repo-hygiene issue left behind by the cleanup pass:
+    - normalized the touched lines in a small set of Python files to LF so `git diff --check` no longer reports false trailing-whitespace failures on Windows worktrees
+- whether learning improved:
+  - not applicable
+  - this pass intentionally preserved the established recipe and only verified release quality / cleanliness
+- checks run:
+  - `python -m ruff check python tests examples python/scripts`
+  - `python -m ruff format --check python tests examples python/scripts`
+  - `python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`
+  - `python -m pytest -q python/weiss_rl/tests` -> `735 passed, 2 skipped`
+  - `python python/scripts/verify_repo.py`
+  - `git diff --check`
+- what remains:
+  - no RL functional blockers were found in this audit pass
+  - remaining test noise is still third-party Matplotlib/PyParsing deprecation warnings only
+
+## Attempt 219: PyPI `weiss-sim` Audit Pass Hardened The Real Release Surface
+
+- audit scope:
+  - adversarial RL-vs-simulator audit with the finalized published simulator package as the integration target
+  - checked packaging/import-path behavior, canonical wrapper/docs reality, focal-policy selection, eval/human-play surfaces, and clean-environment verification
+- what bugs and mismatches were found:
+  - `play_vs_model.py` still crashed with `EOFError` on non-interactive stdin during the model-turn pause path instead of exiting cleanly
+  - `thesis_run.py` did not expose `--b1-baseline-run-dir`, even though the advertised `standard` family requires a completed dedicated `baseline_noleague` run to import the canonical B1 anchor
+  - release-facing docs/readmes still presented `thesis_run.py --preset standard` / `standard-auto-gpu` as if that was a direct runnable path from a fresh checkout, without the mandatory B1 baseline artifact
+  - simulator provenance probing on Windows appended `PYTHONPATH` with `:`, not `os.pathsep`, which is incorrect on this machine and could mis-resolve probe targets
+  - simulator provenance artifacts did not record which interpreter / module path actually supplied `weiss_sim`
+  - `recommend_focal_policy_id()` fell back to the oldest eligible durable `policy_*` snapshot when dev-eval summaries were missing, despite intending to choose the newest training snapshot
+  - the repo had drifted off its own enforced formatting gate; `python/scripts/verify_repo.py` failed in the clean PyPI venv until the touched Python files were reformatted
+- what was fixed:
+  - `python/scripts/play_vs_model.py`
+    - converts EOF during human input into a clean `KeyboardInterrupt` message
+    - no longer crashes when the model-turn pause prompt encounters closed stdin
+  - `python/scripts/thesis_run.py`
+    - added `--b1-baseline-run-dir`
+    - passes that flag through to `train.py` and `eval.py`
+    - records the baseline run dir in the wrapper summary JSON
+  - `python/weiss_rl/simulator_contract.py`
+    - now extends `PYTHONPATH` with `os.pathsep`
+    - now records probe provenance in the manifest simulator block:
+      - `module_file`
+      - `probe_python`
+      - `probe_pythonpath`
+      - `probe_target`
+      - `probe_source`
+  - `python/weiss_rl/eval/policy_set.py`
+    - fixed durable-snapshot fallback so missing-summary focal selection now uses the newest `policy_*` snapshot from the registry instead of the first eligible ID
+  - release-facing docs updated to match reality:
+    - `README.md`
+    - `docs/getting_started.md`
+    - `docs/standard_recipe.md`
+    - `python/scripts/README.md`
+    - `docs/troubleshooting.md`
+  - reformatted the touched Python files so the advertised release gate now passes again
+- what was verified against PyPI `weiss-sim`:
+  - created a clean local venv and installed RL editable plus `weiss-sim==0.8.1`
+  - verified import resolution came from the installed wheel under `site-packages`, not the sibling simulator checkout
+  - confirmed manifest simulator provenance now records the real PyPI-backed module path and interpreter
+  - ran a dedicated baseline smoke against PyPI `weiss-sim`:
+    - `python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_tiny32_fast_noleague.yaml --run-label audit_pypi_b1_baseline_smoke_async96 --device cpu --num-envs 96 --unroll-length 2 --max-updates 1 --runtime-mode train_async_fast`
+  - ran a canonical standard smoke against PyPI `weiss-sim` with imported B1 anchor:
+    - `python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --run-label audit_pypi_standard_smoke_async96 --device cpu --num-envs 96 --unroll-length 2 --max-updates 1 --runtime-mode train_async_fast --b1-baseline-run-dir runs/audit_pypi_b1_baseline_smoke_async96`
+  - ran canonical eval against the PyPI-backed standard smoke:
+    - `python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --run-dir runs/audit_pypi_standard_smoke_async96 --policy-id "B0 RandomLegal" --policy-id "B1 NoLeague baseline" --paired-seed-limit 1 --stage1-paired-seeds 1 --max-paired-seeds 1 --bootstrap-samples 10 --skip-metagame --skip-figures --skip-readiness`
+  - ran the wrapper end to end with the new baseline flag:
+    - `python/scripts/thesis_run.py --preset standard --run-label audit_pypi_wrapper_train_only --b1-baseline-run-dir runs/audit_pypi_b1_baseline_smoke_async96 --device cpu --num-envs 96 --unroll-length 2 --max-updates 1 --runtime-mode train_async_fast --skip-eval --skip-compare`
+  - reran non-interactive human-play against the PyPI-backed run and confirmed it now ends cleanly with a readable message instead of crashing
+- checks run:
+  - `python -m ruff check python tests examples python/scripts`
+  - `python -m ruff format --check python tests examples python/scripts`
+  - `python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`
+  - `python -m pytest -q python/weiss_rl/tests` -> `743 passed, 2 skipped`
+  - `python -m pytest -q python/weiss_rl/tests/test_play_vs_model.py python/weiss_rl/tests/test_thesis_run_wrapper.py python/weiss_rl/tests/test_simulator_contract.py python/weiss_rl/tests/test_policy_set.py`
+  - `python python/scripts/verify_repo.py`
+- remaining risks / open questions:
+  - `simulator_contract.py` still has automatic sibling-checkout fallback behavior; the new provenance fields make it auditable, but release-facing flows can still use a local checkout when the active interpreter is not the real target
+  - old run artifacts created against earlier simulator builds (for example local `0.7.0` runs with older `spec_hash256`) are not cleanly forward-compatible with the finalized `0.8.1` strict spec-hash path
+  - deeper audit findings still remain for a later pass:
+    - replay rerun contracts appear to under-record simulator inputs for non-default deck / pass-action surfaces
+    - final-eval selection metadata can still drift between deterministic pipeline provenance and explicit per-call metadata
+    - `DecisionBoundaryEnv` still does not surface every stable simulator field called out in the finalized low-level contract

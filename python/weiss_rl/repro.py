@@ -113,12 +113,12 @@ def compute_run_id64(
 
 
 def derive_actor_seed(base_seed64: int, actor_id: int) -> int:
-    payload = f"actor|{base_seed64}|{actor_id}".encode("utf-8")
+    payload = f"actor|{base_seed64}|{actor_id}".encode()
     return stable_hash64(payload) & _U64_MASK
 
 
 def derive_episode_seed(actor_seed64: int, env_id: int, episode_index: int) -> int:
-    payload = f"episode|{actor_seed64}|{env_id}|{episode_index}".encode("utf-8")
+    payload = f"episode|{actor_seed64}|{env_id}|{episode_index}".encode()
     return stable_hash64(payload) & _U64_MASK
 
 

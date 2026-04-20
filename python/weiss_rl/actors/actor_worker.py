@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
+from contextlib import suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal
@@ -16,6 +17,7 @@ from weiss_rl.action_diagnostics import (
     update_action_summary_from_ids,
     update_action_summary_from_mask,
 )
+from weiss_rl.league.outcomes import OnlineOutcomeTracker
 from weiss_rl.masking import (
     MaskingAnomalyCounters,
     masked_logp_from_legal_ids,
@@ -23,9 +25,6 @@ from weiss_rl.masking import (
     sample_actions_from_legal_ids,
     sample_actions_from_mask,
 )
-from weiss_rl.league.outcomes import OnlineOutcomeTracker
-from weiss_rl.termination_reason import classify_episode_end_reason
-
 from weiss_rl.replay.bundles import (
     ReplayRerunContract,
     ReplayStep,
@@ -34,6 +33,7 @@ from weiss_rl.replay.bundles import (
     write_fault_bundle,
     write_replay_bundle,
 )
+from weiss_rl.termination_reason import classify_episode_end_reason
 
 torch: ModuleType | None
 try:
@@ -69,10 +69,8 @@ def _configure_actor_torch_threads(actor_torch_threads: int) -> None:
     if threads < 1:
         raise ValueError("actor_torch_threads must be >= 1")
     torch.set_num_threads(threads)
-    try:
+    with suppress(Exception):
         torch.set_num_interop_threads(1)
-    except Exception:
-        pass
 
 
 @dataclass(slots=True)

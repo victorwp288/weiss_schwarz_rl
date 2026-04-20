@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
-import json
 
 _REGISTRY_SCHEMA_VERSION = 1
 REGISTRY_FILENAME = "registry.json"
@@ -335,7 +335,7 @@ class SnapshotRegistry:
         return {snapshot.policy_id: int(snapshot.update) for snapshot in self.snapshots}
 
     @classmethod
-    def load(cls, path: Path) -> "SnapshotRegistry":
+    def load(cls, path: Path) -> SnapshotRegistry:
         if not path.exists():
             return cls()
 

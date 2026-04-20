@@ -14,10 +14,6 @@ from weiss_rl.eval.export import (
     write_matchup_summary_json,
 )
 from weiss_rl.eval.final_eval import load_dev_eval_summaries, resolve_final_policy_set, run_final_eval
-from weiss_rl.eval.paper_readiness import (
-    build_paper_readiness_summary,
-    write_paper_readiness_json,
-)
 from weiss_rl.eval.harness import (
     EvalGameRecord,
     EvalRunResult,
@@ -35,6 +31,10 @@ from weiss_rl.eval.harness import (
     summarize_pair_outcomes,
     write_episodes_jsonl,
 )
+from weiss_rl.eval.paper_readiness import (
+    build_paper_readiness_summary,
+    write_paper_readiness_json,
+)
 from weiss_rl.eval.payoff_folding import (
     PayoffFoldScheme,
     fold_game_payoff,
@@ -42,13 +42,13 @@ from weiss_rl.eval.payoff_folding import (
     paired_seed_score,
     paired_seed_scores,
 )
-from weiss_rl.eval.rng_pcg32 import NEXT_U64_ORDER, PCG32_XSH_RR_V1, Pcg32XshRrV1
 from weiss_rl.eval.policy_set import (
     DevEvalPolicySummary,
     parse_training_policy_id,
     recommend_focal_policy_id,
     select_final_policy_set_deterministic_v1,
 )
+from weiss_rl.eval.rng_pcg32 import NEXT_U64_ORDER, PCG32_XSH_RR_V1, Pcg32XshRrV1
 from weiss_rl.eval.stage2 import Stage2Decision, Stage2StopReason, summarize_stage2_records
 from weiss_rl.eval.uncertainty import (
     EvalUncertaintySummary,

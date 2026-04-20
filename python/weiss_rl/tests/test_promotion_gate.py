@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Literal
 
 import pytest
 

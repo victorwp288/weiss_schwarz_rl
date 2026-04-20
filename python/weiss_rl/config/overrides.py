@@ -36,7 +36,9 @@ def apply_stack_overrides(stack: StackConfig, overrides: dict[str, Any]) -> Stac
     config = stack.config
     for path, value in overrides.items():
         config = _apply_locked_config_override(config, path=path, value=value)
-    return replace(stack, config=config)
+    lock_intent = dict(stack.lock_intent)
+    lock_intent.pop("canonical_config_payload", None)
+    return replace(stack, config=config, lock_intent=lock_intent)
 
 
 def _apply_locked_config_override(config: LockedConfig, *, path: str, value: Any) -> LockedConfig:

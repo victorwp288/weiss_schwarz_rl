@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from weiss_rl.artifact_hygiene import default_artifact_roots, format_findings, run_artifact_hygiene_scan
 

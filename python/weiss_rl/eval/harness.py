@@ -26,7 +26,7 @@ class _FloatRng(Protocol):
 
 
 class EvalGameRunner(Protocol):
-    def run_game(self, scheduled_game: "ScheduledGame") -> "GameResult": ...
+    def run_game(self, scheduled_game: ScheduledGame) -> GameResult: ...
 
 
 @dataclass(slots=True)
@@ -64,7 +64,7 @@ class GameResult:
     pass_with_nonpass_available: int = 0
     max_consecutive_main_moves: int = 0
     simulator_episode_key: int | bytes | None = None
-    replay_sample: "ReplaySampleResult | None" = None
+    replay_sample: ReplaySampleResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +151,7 @@ class EvalGameRecord:
 class EvalRunResult:
     episodes_path: Path
     records: tuple[EvalGameRecord, ...]
-    summary: "MatchupSummary"
+    summary: MatchupSummary
 
 
 @dataclass(slots=True)

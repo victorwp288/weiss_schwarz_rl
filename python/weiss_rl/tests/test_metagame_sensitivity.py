@@ -15,7 +15,7 @@ from weiss_rl.config import load_study_config
 from weiss_rl.config.models import StopRulesConfig
 from weiss_rl.eval import run_final_eval
 from weiss_rl.metagame import build_sensitivity_report
-from weiss_rl.tests.test_final_eval import _CONFIG_HASH256, _FakeMatrixRunner, _RUN_ID256, _SPEC_HASH256
+from weiss_rl.tests.test_final_eval import _CONFIG_HASH256, _RUN_ID256, _SPEC_HASH256, _FakeMatrixRunner
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDY_CONFIG_PATH = REPO_ROOT / "configs" / "study" / "metagame_sensitivity.yaml"

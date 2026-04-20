@@ -29,7 +29,7 @@ dev = [
     "vulture>=2.16,<3",
 ]
 sim = [
-    "weiss-sim==0.7.0",
+    "weiss-sim==0.8.1",
 ]
 
 [tool.setuptools]
@@ -47,12 +47,12 @@ target-version = "py310"
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "B"]
+select = ["E", "F", "B", "I", "UP"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
 markers = [
-    "simulator: tests that require the published weiss-sim package or sibling checkout",
+    "simulator: tests that require weiss-sim 0.8.1 or a compatible sibling checkout",
     "artifact: tests that exercise artifact and docs contracts",
     "slow: longer-running smoke or integration tests",
 ]

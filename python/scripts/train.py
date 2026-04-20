@@ -11,8 +11,8 @@ import shutil
 import subprocess
 import sys
 import time
-from contextlib import contextmanager, nullcontext
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -20,7 +20,6 @@ from typing import Any, cast
 import numpy as np
 import torch
 from torch import nn
-
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import (
@@ -35,8 +34,8 @@ from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEn
 from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
 from weiss_rl.eval import (
     DevEvalPolicySummary,
-    Pcg32XshRrV1,
     PayoffFoldScheme,
+    Pcg32XshRrV1,
     build_matchup_export,
     build_seat_advantage_diagnostics,
     game_result_from_step,
@@ -46,16 +45,24 @@ from weiss_rl.eval import (
     write_matchup_summary_csv,
     write_matchup_summary_json,
 )
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
+from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policy_set import (
     heuristic_public_profile_name_for_policy_id,
     select_final_policy_set_deterministic_v1,
 )
+from weiss_rl.league import run_promotion_gate
+from weiss_rl.league.registry import (
+    REGISTRY_FILENAME,
+    SNAPSHOT_METADATA_FILENAME,
+    SNAPSHOT_WEIGHTS_FILENAME,
+    SnapshotMeta,
+    SnapshotRegistry,
+    snapshot_weights_relpath,
+)
 from weiss_rl.learners.impala_learner import ImpalaLearner
 from weiss_rl.learners.ppo_lite_learner import PpoLiteLearner
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
-from weiss_rl.league import run_promotion_gate
 from weiss_rl.manifest import (
     RunArtifacts,
     RunManifest,
@@ -63,9 +70,8 @@ from weiss_rl.manifest import (
     default_run_dir_name,
     write_run_artifacts,
 )
-from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_mask, sample_actions_from_mask
+from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_mask
 from weiss_rl.model import PolicyValueModel, build_policy_value_model
-from weiss_rl.runtime import QueueRuntime, QueueRuntimeMode, build_runtime_config, resolve_actor_device_layout
 from weiss_rl.repro import (
     canonical_json_bytes,
     compute_run_id64,
@@ -74,6 +80,7 @@ from weiss_rl.repro import (
     parse_seed_file,
     stable_hash64,
 )
+from weiss_rl.runtime import QueueRuntime, QueueRuntimeMode, build_runtime_config, resolve_actor_device_layout
 from weiss_rl.simulator_contract import SimulatorContract, load_verified_simulator_contract
 from weiss_rl.spec import assert_spec_bundle_contract
 from weiss_rl.tensorboard_logger import TensorBoardLogger, tensorboard_unavailable_reason
@@ -83,14 +90,6 @@ from weiss_rl.toy_public_demo import (
     public_demo_spec_bundle,
     public_demo_spec_hash256,
     stage_public_demo_run,
-)
-from weiss_rl.league.registry import (
-    REGISTRY_FILENAME,
-    SNAPSHOT_METADATA_FILENAME,
-    SNAPSHOT_WEIGHTS_FILENAME,
-    SnapshotMeta,
-    SnapshotRegistry,
-    snapshot_weights_relpath,
 )
 
 _SHA256_HEX_LENGTH = 64
@@ -618,6 +617,23 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
+def _apply_training_flag_overrides(
+    stack: StackConfig,
+    *,
+    enable_profile_timers: bool,
+    enable_torch_profiler: bool,
+) -> StackConfig:
+    training_config = stack.config.training
+    if training_config is None:
+        return stack
+    overrides: dict[str, Any] = {}
+    if enable_profile_timers and not bool(training_config.profile_timers):
+        overrides["training.profile_timers"] = True
+    if enable_torch_profiler and not bool(training_config.torch_profiler):
+        overrides["training.torch_profiler"] = True
+    return apply_stack_overrides(stack, overrides)
+
+
 def _experiment_role(stack: StackConfig) -> str:
     experiment = stack.config.experiment
     return "" if experiment is None else str(experiment.role).strip()
@@ -627,13 +643,51 @@ def _is_noleague_baseline_role(role: str) -> bool:
     return str(role).strip() == "baseline_noleague"
 
 
+def _canonical_config_sections(config_canonical: Mapping[str, Any]) -> Mapping[str, Any]:
+    config = config_canonical.get("config")
+    return config if isinstance(config, Mapping) else config_canonical
+
+
 def _role_from_config_canonical(config_canonical: Mapping[str, Any]) -> str:
-    experiment = config_canonical.get("experiment", {})
+    experiment = _canonical_config_sections(config_canonical).get("experiment", {})
     if isinstance(experiment, Mapping):
         role = str(experiment.get("role", "")).strip()
         if role:
             return role
     return ""
+
+
+def _legacy_noleague_baseline_mode(config_canonical: Mapping[str, Any]) -> str:
+    training_family = _canonical_config_sections(config_canonical).get("training_family_a", {})
+    if isinstance(training_family, Mapping):
+        return str(training_family.get("mode", "")).strip()
+    return ""
+
+
+def _config_marks_noleague_baseline(config_canonical: Mapping[str, Any]) -> bool:
+    role = _role_from_config_canonical(config_canonical)
+    if role:
+        return _is_noleague_baseline_role(role)
+    legacy_mode = _legacy_noleague_baseline_mode(config_canonical)
+    if legacy_mode:
+        return legacy_mode == "b1_no_league"
+    return False
+
+
+def _assert_noleague_baseline_config(config_canonical: Mapping[str, Any]) -> None:
+    role = _role_from_config_canonical(config_canonical)
+    if role:
+        if not _is_noleague_baseline_role(role):
+            raise RuntimeError(
+                f"Imported B1 baseline must come from a dedicated baseline_noleague run, got experiment.role={role!r}"
+            )
+        return
+    legacy_mode = _legacy_noleague_baseline_mode(config_canonical)
+    if legacy_mode and legacy_mode != "b1_no_league":
+        raise RuntimeError(
+            "Imported B1 baseline must come from a dedicated baseline_noleague run, "
+            f"got training_family_a.mode={legacy_mode!r}"
+        )
 
 
 def _read_optional_hash_file(path: Path) -> str | None:
@@ -658,16 +712,13 @@ def _validate_imported_snapshot_contract(
     )
     source_config_canonical = source_manifest.get("config_canonical") if isinstance(source_manifest, dict) else None
     if isinstance(source_config_canonical, dict):
-        source_role = _role_from_config_canonical(source_config_canonical)
-        if source_role and not _is_noleague_baseline_role(source_role):
-            raise RuntimeError(
-                "Imported B1 baseline must come from a dedicated baseline_noleague run, "
-                f"got experiment.role={source_role!r}"
-            )
+        source_config_sections = _canonical_config_sections(source_config_canonical)
+        _assert_noleague_baseline_config(source_config_canonical)
         if isinstance(expected_config_canonical, dict):
+            expected_config_sections = _canonical_config_sections(expected_config_canonical)
             for section_name in ("model", "environment"):
-                source_section = source_config_canonical.get(section_name)
-                expected_section = expected_config_canonical.get(section_name)
+                source_section = source_config_sections.get(section_name)
+                expected_section = expected_config_sections.get(section_name)
                 if source_section is None or expected_section is None:
                     continue
                 if source_section != expected_section:
@@ -871,10 +922,7 @@ def _resolve_device(stack: StackConfig, device_override: str) -> torch.device:
         requested = "cpu" if system_config is None else getattr(system_config, "learner_device", "cpu")
     normalized = str(requested).strip().lower()
     if normalized in {"auto", "cuda:auto"}:
-        if torch.cuda.is_available() and int(torch.cuda.device_count()) > 0:
-            requested = "cuda:0"
-        else:
-            requested = "cpu"
+        requested = "cuda:0" if torch.cuda.is_available() and int(torch.cuda.device_count()) > 0 else "cpu"
     if requested.startswith("cuda") and not torch.cuda.is_available():
         print(
             "Requested CUDA device is unavailable; falling back to cpu for the canonical single-node run.",
@@ -988,10 +1036,8 @@ def _configure_torch_threads(stack: StackConfig) -> None:
     if system_config is None:
         return
     torch.set_num_threads(int(system_config.learner_torch_threads))
-    try:
+    with suppress(RuntimeError):
         torch.set_num_interop_threads(1)
-    except RuntimeError:
-        pass
 
 
 @contextmanager
@@ -1101,111 +1147,6 @@ def _build_ids_eval_env(
         max_decisions=int(env_config["max_decisions"]),
         max_ticks=int(env_config["max_ticks"]),
         max_no_progress_decisions=max_no_progress_decisions,
-    )
-
-
-def _collect_rollout(
-    env: DecisionBoundaryEnv,
-    model: PolicyValueModel,
-    *,
-    unroll_length: int,
-    num_envs: int,
-    observation_dim: int,
-    action_dim: int,
-    device: torch.device,
-    rng: np.random.Generator,
-    pass_action_id: int,
-) -> tuple[MinimalRollout, torch.Tensor, torch.Tensor]:
-    batch = env.reset()
-    seat_hidden = model.initial_seat_hidden(num_envs, device=device)
-    initial_hidden_state = seat_hidden.detach().clone()
-
-    obs = np.zeros((unroll_length, num_envs, observation_dim), dtype=np.float32)
-    legal_mask = np.zeros((unroll_length, num_envs, action_dim), dtype=bool)
-    actions = np.zeros((unroll_length, num_envs), dtype=np.int64)
-    rewards = np.zeros((unroll_length, num_envs), dtype=np.float32)
-    terminated = np.zeros((unroll_length, num_envs), dtype=bool)
-    truncated = np.zeros((unroll_length, num_envs), dtype=bool)
-    to_play_seat = np.zeros((unroll_length, num_envs), dtype=np.int64)
-    behavior_logp = np.zeros((unroll_length, num_envs), dtype=np.float32)
-    logits = np.zeros((unroll_length, num_envs, action_dim), dtype=np.float32)
-    values = np.zeros((unroll_length, num_envs), dtype=np.float32)
-
-    final_batch = None
-
-    model.eval()
-    with torch.inference_mode():
-        for step_index in range(unroll_length):
-            obs_step = np.asarray(batch.obs, dtype=np.float32)
-            actor_step = np.asarray(batch.actor, dtype=np.int64)
-            mask_step = np.asarray(batch.mask, dtype=bool)
-
-            if obs_step.shape != (num_envs, observation_dim):
-                raise RuntimeError(f"Expected obs shape {(num_envs, observation_dim)}, got {tuple(obs_step.shape)}")
-            if mask_step.shape != (num_envs, action_dim):
-                raise RuntimeError(f"Expected legal mask shape {(num_envs, action_dim)}, got {tuple(mask_step.shape)}")
-            if np.any((actor_step != 0) & (actor_step != 1)):
-                raise RuntimeError(
-                    "The collector only supports live decision-boundary rows during the rollout window. "
-                    f"Received actor rows {actor_step.tolist()} at step {step_index}."
-                )
-
-            logits_tensor, value_tensor, seat_hidden = model.forward_seat_aware(
-                torch.as_tensor(obs_step, device=device),
-                torch.as_tensor(actor_step, device=device, dtype=torch.long),
-                seat_hidden,
-            )
-            logits_step = logits_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
-            value_step = value_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
-            action_step, logp_step, _entropy = sample_actions_from_mask(
-                logits_step,
-                mask_step,
-                rng=rng,
-                pass_action_id=pass_action_id,
-            )
-
-            next_batch = env.step(action_step.astype(np.uint32, copy=False))
-            done = np.logical_or(next_batch.terminated, next_batch.truncated)
-            if np.any(done) and step_index != unroll_length - 1:
-                raise RuntimeError(
-                    "A row terminated/truncated inside the tiny smoke rollout before the final bootstrap step. "
-                    "Reduce --unroll-length or revisit the collector before using longer runs."
-                )
-
-            obs[step_index] = obs_step
-            legal_mask[step_index] = mask_step
-            actions[step_index] = action_step
-            rewards[step_index] = np.asarray(next_batch.reward, dtype=np.float32)
-            terminated[step_index] = np.asarray(next_batch.terminated, dtype=bool)
-            truncated[step_index] = np.asarray(next_batch.truncated, dtype=bool)
-            to_play_seat[step_index] = actor_step
-            behavior_logp[step_index] = logp_step
-            logits[step_index] = logits_step
-            values[step_index] = value_step
-
-            final_batch = next_batch
-            batch = next_batch
-
-    if final_batch is None:
-        raise RuntimeError("Failed to collect the final bootstrap batch")
-
-    return (
-        MinimalRollout(
-            obs=obs,
-            legal_mask=legal_mask,
-            actions=actions,
-            rewards=rewards,
-            terminated=terminated,
-            truncated=truncated,
-            to_play_seat=to_play_seat,
-            behavior_logp=behavior_logp,
-            logits=logits,
-            values=values,
-            bootstrap_obs=np.asarray(final_batch.obs, dtype=np.float32),
-            bootstrap_actor=np.asarray(final_batch.actor, dtype=np.int64),
-        ),
-        initial_hidden_state,
-        seat_hidden.detach().clone(),
     )
 
 
@@ -1773,22 +1714,12 @@ def _publish_checkpoint_aliases(
     best_record = tracker.get("best")
     if not isinstance(best_record, Mapping):
         best_record = None
-    if best_record is None:
-        shutil.copy2(checkpoint_path, training_paths.best_checkpoint_path)
-        tracker["best"] = _build_checkpoint_record(
-            alias_name="best",
-            alias_path=training_paths.best_checkpoint_path,
-            source_checkpoint_path=checkpoint_path,
-            artifacts=artifacts,
-            learner=learner,
-            metric_kind=latest_kind,
-            metric_value=latest_value,
-        )
-    elif _should_promote_best_checkpoint(
-        existing_record=cast(Mapping[str, Any] | None, best_record),
+    should_update_best = best_record is None or _should_promote_best_checkpoint(
+        existing_record=cast(Mapping[str, Any], best_record),
         candidate_kind=latest_kind,
         candidate_value=latest_value,
-    ):
+    )
+    if should_update_best:
         shutil.copy2(checkpoint_path, training_paths.best_checkpoint_path)
         tracker["best"] = _build_checkpoint_record(
             alias_name="best",
@@ -2170,17 +2101,21 @@ def _run_structured_warmstart(
             runtime.disable_mirror_policy_fusion(),
         ):
             for warmstart_step in range(updates):
-                with _profile_block(profile_timers, "collect_training_batch"):
-                    with _torch_num_threads_scope(actor_torch_threads):
-                        runtime_batch = _collect_training_batch(
-                            runtime=runtime,
-                            algorithm=algorithm,
-                            training_config=training_config,
-                            rewards_config=rewards_config,
-                        )
-                with _profile_block(profile_timers, "learner_auxiliary_update"):
-                    with _torch_num_threads_scope(learner_torch_threads):
-                        latest_metrics = learner.auxiliary_update(runtime_batch.learner_batch)
+                with (
+                    _profile_block(profile_timers, "collect_training_batch"),
+                    _torch_num_threads_scope(actor_torch_threads),
+                ):
+                    runtime_batch = _collect_training_batch(
+                        runtime=runtime,
+                        algorithm=algorithm,
+                        training_config=training_config,
+                        rewards_config=rewards_config,
+                    )
+                with (
+                    _profile_block(profile_timers, "learner_auxiliary_update"),
+                    _torch_num_threads_scope(learner_torch_threads),
+                ):
+                    latest_metrics = learner.auxiliary_update(runtime_batch.learner_batch)
                 latest_metrics.update(runtime_batch.runtime_metrics)
                 latest_metrics.update(warmstart_source_metrics)
                 latest_metrics["warmstart_phase"] = 1.0
@@ -2317,7 +2252,7 @@ def _find_noleague_baseline_snapshot(run_dir: Path) -> SnapshotMeta | None:
     config_canonical = manifest.get("config_canonical", {})
     if not isinstance(config_canonical, dict):
         return None
-    if not _is_noleague_baseline_role(_role_from_config_canonical(config_canonical)):
+    if not _config_marks_noleague_baseline(config_canonical):
         return None
     if not registry.snapshots:
         return None
@@ -2397,9 +2332,11 @@ def _validate_seed_snapshot_import_contract(
     )
     source_config_canonical = source_manifest.get("config_canonical") if isinstance(source_manifest, dict) else None
     if isinstance(source_config_canonical, dict) and isinstance(expected_config_canonical, dict):
+        source_config_sections = _canonical_config_sections(source_config_canonical)
+        expected_config_sections = _canonical_config_sections(expected_config_canonical)
         for section_name in ("model", "environment"):
-            source_section = source_config_canonical.get(section_name)
-            expected_section = expected_config_canonical.get(section_name)
+            source_section = source_config_sections.get(section_name)
+            expected_section = expected_config_sections.get(section_name)
             if source_section is None or expected_section is None:
                 continue
             if source_section != expected_section:
@@ -4009,17 +3946,18 @@ def _run_minimal_training(
                 learner.set_entropy_coef(
                     _entropy_coef_for_next_update(training_config, update_count=int(learner.update_count) + 1)
                 )
-                with _profile_block(profile_timers, "collect_update_batch"):
-                    with _torch_num_threads_scope(actor_torch_threads):
-                        runtime_batch = _collect_training_batch(
-                            runtime=runtime,
-                            algorithm=algorithm,
-                            training_config=training_config,
-                            rewards_config=rewards_config,
-                        )
-                with _profile_block(profile_timers, "learner_update"):
-                    with _torch_num_threads_scope(learner_torch_threads):
-                        latest_metrics = learner.update(runtime_batch.learner_batch)
+                with (
+                    _profile_block(profile_timers, "collect_update_batch"),
+                    _torch_num_threads_scope(actor_torch_threads),
+                ):
+                    runtime_batch = _collect_training_batch(
+                        runtime=runtime,
+                        algorithm=algorithm,
+                        training_config=training_config,
+                        rewards_config=rewards_config,
+                    )
+                with _profile_block(profile_timers, "learner_update"), _torch_num_threads_scope(learner_torch_threads):
+                    latest_metrics = learner.update(runtime_batch.learner_batch)
                 with _profile_block(profile_timers, "runtime_snapshot_publish"):
                     latest_metrics.update(
                         runtime.maybe_publish_snapshot(
@@ -4395,6 +4333,11 @@ def main() -> None:
     max_updates = _require_positive_int("--max-updates", args.max_updates)
     stack = load_stack_config(args.stack_config)
     stack = apply_stack_overrides(stack, parse_override_tokens(args.config_override))
+    stack = _apply_training_flag_overrides(
+        stack,
+        enable_profile_timers=bool(args.profile_timers),
+        enable_torch_profiler=bool(args.torch_profiler),
+    )
     training_config = stack.config.training
     manifest_only_reason = _manifest_scaffold_only_reason(stack)
     if training_config is None and manifest_only_reason is None:
@@ -4517,8 +4460,8 @@ def main() -> None:
     run_summary_payload["policy_set_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
     if training_config is not None:
         run_summary_payload["training_controls"] = {
-            "profile_timers": bool(training_config.profile_timers or bool(args.profile_timers)),
-            "torch_profiler": bool(training_config.torch_profiler or bool(args.torch_profiler)),
+            "profile_timers": bool(training_config.profile_timers),
+            "torch_profiler": bool(training_config.torch_profiler),
             "structured_metrics_mode": str(training_config.structured_metrics_mode),
             "teacher_aux_mode": str(training_config.teacher_aux_mode),
             "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
@@ -4540,8 +4483,8 @@ def main() -> None:
     determinism_payload["policy_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
     if training_config is not None:
         determinism_payload["training_controls"] = {
-            "profile_timers": bool(training_config.profile_timers or bool(args.profile_timers)),
-            "torch_profiler": bool(training_config.torch_profiler or bool(args.torch_profiler)),
+            "profile_timers": bool(training_config.profile_timers),
+            "torch_profiler": bool(training_config.torch_profiler),
             "structured_metrics_mode": str(training_config.structured_metrics_mode),
             "teacher_aux_mode": str(training_config.teacher_aux_mode),
             "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
@@ -4611,10 +4554,8 @@ def main() -> None:
             else int(training_config.checkpoint_interval_updates),
         )
 
-        profile_timers = bool(training_config.profile_timers or bool(args.profile_timers))
-        torch_profiler = bool(training_config.torch_profiler or bool(args.torch_profiler))
-        object.__setattr__(training_config, "profile_timers", bool(profile_timers))
-        object.__setattr__(training_config, "torch_profiler", bool(torch_profiler))
+        profile_timers = bool(training_config.profile_timers)
+        torch_profiler = bool(training_config.torch_profiler)
         if profile_timers or torch_profiler:
             print(
                 "Structured profiling enabled: "

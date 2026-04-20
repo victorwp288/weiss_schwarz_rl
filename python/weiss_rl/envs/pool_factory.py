@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from inspect import signature
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping
+from inspect import signature
+from typing import Any, Literal
 
 from weiss_rl.config import StackConfig
 

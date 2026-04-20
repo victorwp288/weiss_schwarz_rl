@@ -5,19 +5,20 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import numpy as np
 import torch
 
-from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.action_catalog import ActionCatalog
+from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import StackConfig, compute_config_hash256, load_stack_config
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
-from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
+from weiss_rl.eval.policy_set import heuristic_public_profile_name_for_policy_id
 from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotRegistry
 from weiss_rl.masking import masked_log_softmax
 from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, PolicyValueModel, build_policy_value_model
@@ -218,34 +219,26 @@ def format_replay_inspection_report(report: dict[str, Any]) -> str:
 
     for index, diff in enumerate(report["top_differences"], start=1):
         lines.append(
-            (
-                f"{index}. step={diff['step_index']} decision_id={diff['decision_id']} actor={diff['actor']} "
-                f"recorded_action={_format_action_descriptor(diff['recorded_action_detail'])} "
-                f"tv={diff['total_variation']:.6f} "
-                f"max_abs_prob_delta={diff['max_abs_probability_delta']:.6f}"
-            )
+            f"{index}. step={diff['step_index']} decision_id={diff['decision_id']} actor={diff['actor']} "
+            f"recorded_action={_format_action_descriptor(diff['recorded_action_detail'])} "
+            f"tv={diff['total_variation']:.6f} "
+            f"max_abs_prob_delta={diff['max_abs_probability_delta']:.6f}"
         )
         lines.append(
-            (
-                f"   {report['policy_a']['label']}: top_action={_format_action_descriptor(diff['policy_a_top_action'])} "
-                f"p={diff['policy_a_top_action']['probability']:.6f} "
-                f"recorded_p={diff['policy_a_recorded_action_probability']:.6f}"
-            )
+            f"   {report['policy_a']['label']}: top_action={_format_action_descriptor(diff['policy_a_top_action'])} "
+            f"p={diff['policy_a_top_action']['probability']:.6f} "
+            f"recorded_p={diff['policy_a_recorded_action_probability']:.6f}"
         )
         lines.append(
-            (
-                f"   {report['policy_b']['label']}: top_action={_format_action_descriptor(diff['policy_b_top_action'])} "
-                f"p={diff['policy_b_top_action']['probability']:.6f} "
-                f"recorded_p={diff['policy_b_recorded_action_probability']:.6f}"
-            )
+            f"   {report['policy_b']['label']}: top_action={_format_action_descriptor(diff['policy_b_top_action'])} "
+            f"p={diff['policy_b_top_action']['probability']:.6f} "
+            f"recorded_p={diff['policy_b_recorded_action_probability']:.6f}"
         )
         lines.append(
-            (
-                f"   learner_on_b2: p={diff['policy_a_probability_on_policy_b_top_action']:.6f} "
-                f"rank={diff['policy_a_rank_of_policy_b_top_action']} "
-                f"action_match={diff['policy_a_matches_policy_b_top_action']} "
-                f"family_match={diff['policy_a_matches_policy_b_top_action_family']}"
-            )
+            f"   learner_on_b2: p={diff['policy_a_probability_on_policy_b_top_action']:.6f} "
+            f"rank={diff['policy_a_rank_of_policy_b_top_action']} "
+            f"action_match={diff['policy_a_matches_policy_b_top_action']} "
+            f"family_match={diff['policy_a_matches_policy_b_top_action_family']}"
         )
         action_delta_text = ", ".join(
             (
@@ -297,17 +290,19 @@ def _load_policy(
     run_spec_bundle: dict[str, Any] | None,
 ) -> LoadedReplayPolicy:
     normalized_spec = str(spec).strip()
-    if normalized_spec == HEURISTIC_PUBLIC_POLICY_ID:
+    heuristic_profile = heuristic_public_profile_name_for_policy_id(normalized_spec)
+    if heuristic_profile is not None:
         if run_spec_bundle is None:
-            raise RuntimeError(
-                "Resolving B2 HeuristicPublic for replay inspection requires spec_bundle.json in run_dir"
-            )
+            raise RuntimeError("Resolving heuristic-public replay policies requires spec_bundle.json in run_dir")
         return LoadedReplayPolicy(
             spec=normalized_spec,
             label=normalized_spec,
             kind="heuristic_public",
             weights_path=None,
-            heuristic_policy=HeuristicPublicPolicy.from_spec_bundle(run_spec_bundle),
+            heuristic_policy=HeuristicPublicPolicy.from_spec_bundle(
+                run_spec_bundle,
+                scoring_profile=heuristic_profile,
+            ),
         )
 
     weights_path, label = _resolve_policy_weights_path(spec=spec, run_dir=run_dir, registry=registry)
