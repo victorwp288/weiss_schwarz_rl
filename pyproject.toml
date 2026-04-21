@@ -32,6 +32,16 @@ sim = [
     "weiss-sim==0.8.1",
 ]
 
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
 [tool.setuptools]
 package-dir = {"" = "python"}
 include-package-data = true

@@ -2233,6 +2233,7 @@ def test_active_actor_heuristic_fraction_linearly_anneals_with_update() -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
     runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._actor_heuristic_start_updates = 0
     runtime_any._actor_heuristic_end_updates = 5
     runtime_any._actor_heuristic_final_fraction = 0.25
     runtime_any._current_learner_update = 0
@@ -2245,6 +2246,27 @@ def test_active_actor_heuristic_fraction_linearly_anneals_with_update() -> None:
     assert QueueRuntime._active_actor_heuristic_fraction(runtime) == pytest.approx(0.55)
 
     runtime_any._effective_learner_update = 5
+
+    assert QueueRuntime._active_actor_heuristic_fraction(runtime) == pytest.approx(0.25)
+
+
+def test_active_actor_heuristic_fraction_respects_delayed_anneal_start() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._actor_heuristic_start_updates = 4
+    runtime_any._actor_heuristic_end_updates = 8
+    runtime_any._actor_heuristic_final_fraction = 0.25
+    runtime_any._current_learner_update = 0
+    runtime_any._effective_learner_update = 0
+
+    assert QueueRuntime._active_actor_heuristic_fraction(runtime) == pytest.approx(1.0)
+
+    runtime_any._effective_learner_update = 6
+
+    assert QueueRuntime._active_actor_heuristic_fraction(runtime) == pytest.approx(0.625)
+
+    runtime_any._effective_learner_update = 8
 
     assert QueueRuntime._active_actor_heuristic_fraction(runtime) == pytest.approx(0.25)
 

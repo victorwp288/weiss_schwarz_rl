@@ -56,6 +56,9 @@ class ModelConfig:
     cuda_learner_candidate_scoring_chunk_size: int = 262144
     public_heuristic_logit_bias_scale: float = 0.0
     public_heuristic_actor_logit_bias_scale: float = -1.0
+    public_heuristic_logit_bias_start_updates: int = 0
+    public_heuristic_logit_bias_end_updates: int = -1
+    public_heuristic_logit_bias_final_scale: float = 0.0
     public_heuristic_logit_bias_families: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -131,6 +134,9 @@ class TrainingStructuredAuxConfig:
     teacher_action_coef: float = 0.0
     teacher_same_family_action_coef: float = 0.0
     teacher_public_heuristic_coef: float = 0.0
+    teacher_public_heuristic_start_updates: int = 0
+    teacher_public_heuristic_end_updates: int = -1
+    teacher_public_heuristic_final_coef: float = 0.0
     teacher_public_heuristic_temperature: float = 32.0
     teacher_public_heuristic_families: tuple[str, ...] = field(default_factory=tuple)
     teacher_public_heuristic_profiles: tuple[str, ...] = field(default_factory=tuple)
@@ -173,6 +179,7 @@ class TrainingConfig:
     fixed_opponent_backend: str = "python_scalar"
     actor_policy_backend: str = "model"
     actor_heuristic_fraction: float = 1.0
+    actor_heuristic_start_updates: int = 0
     actor_heuristic_end_updates: int = -1
     actor_heuristic_final_fraction: float = 1.0
     train_on_heuristic_actor_rows: bool = True
@@ -315,6 +322,18 @@ class TrainingConfig:
     @property
     def teacher_public_heuristic_coef(self) -> float:
         return float(self.structured_aux.teacher_public_heuristic_coef)
+
+    @property
+    def teacher_public_heuristic_start_updates(self) -> int:
+        return int(self.structured_aux.teacher_public_heuristic_start_updates)
+
+    @property
+    def teacher_public_heuristic_end_updates(self) -> int:
+        return int(self.structured_aux.teacher_public_heuristic_end_updates)
+
+    @property
+    def teacher_public_heuristic_final_coef(self) -> float:
+        return float(self.structured_aux.teacher_public_heuristic_final_coef)
 
     @property
     def teacher_public_heuristic_temperature(self) -> float:

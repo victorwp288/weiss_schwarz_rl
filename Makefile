@@ -30,7 +30,7 @@ sync:
 ifeq ($(UV),)
 	@$(PY_SYS) -m venv $(VENV) || (echo "Failed to create venv. On Debian/Ubuntu install python3-venv." && exit 1)
 	@$(PY_VENV) -m pip install -q --upgrade pip
-	@$(PY_VENV) -m pip install -q -e ".[dev]"
+	@$(PY_VENV) -m pip install -q --extra-index-url https://download.pytorch.org/whl/cu124 -e ".[dev]"
 else
 	@uv sync --extra dev
 endif
@@ -40,7 +40,7 @@ sync-sim:
 ifeq ($(UV),)
 	@$(PY_SYS) -m venv $(VENV) || (echo "Failed to create venv. On Debian/Ubuntu install python3-venv." && exit 1)
 	@$(PY_VENV) -m pip install -q --upgrade pip
-	@$(PY_VENV) -m pip install -q -e ".[dev,sim]"
+	@$(PY_VENV) -m pip install -q --extra-index-url https://download.pytorch.org/whl/cu124 -e ".[dev,sim]"
 else
 	@uv sync --extra dev --extra sim
 endif

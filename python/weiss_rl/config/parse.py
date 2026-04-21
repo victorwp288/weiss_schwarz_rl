@@ -320,6 +320,9 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
             "cuda_learner_candidate_scoring_chunk_size",
             "public_heuristic_logit_bias_scale",
             "public_heuristic_actor_logit_bias_scale",
+            "public_heuristic_logit_bias_start_updates",
+            "public_heuristic_logit_bias_end_updates",
+            "public_heuristic_logit_bias_final_scale",
             "public_heuristic_logit_bias_families",
             "layer_norm",
             "dropout",
@@ -328,6 +331,32 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
     )
     dropout = _require_mapping(body["dropout"], context="model.dropout")
     _reject_unknown_keys(dropout, allowed={"family_a", "ablation"}, context="model.dropout")
+    public_heuristic_logit_bias_start_updates = _require_int(
+        body.get("public_heuristic_logit_bias_start_updates", 0),
+        field_name="model.public_heuristic_logit_bias_start_updates",
+        minimum=0,
+    )
+    public_heuristic_logit_bias_end_updates = _require_int(
+        body.get("public_heuristic_logit_bias_end_updates", -1),
+        field_name="model.public_heuristic_logit_bias_end_updates",
+        minimum=-1,
+    )
+    if (
+        public_heuristic_logit_bias_end_updates >= 0
+        and public_heuristic_logit_bias_end_updates < public_heuristic_logit_bias_start_updates
+    ):
+        raise ValueError(
+            "model.public_heuristic_logit_bias_end_updates must be >= model.public_heuristic_logit_bias_start_updates"
+        )
+    public_heuristic_logit_bias_final_scale = _require_float(
+        body.get(
+            "public_heuristic_logit_bias_final_scale",
+            body.get("public_heuristic_logit_bias_scale", 0.0),
+        ),
+        field_name="model.public_heuristic_logit_bias_final_scale",
+    )
+    if public_heuristic_logit_bias_final_scale < 0.0:
+        raise ValueError("model.public_heuristic_logit_bias_final_scale must be >= 0.0")
     return ModelConfig(
         gru_hidden_size=_require_int(body["gru_hidden_size"], field_name="model.gru_hidden_size", minimum=1),
         encoder_mlp_width=_require_int(body["encoder_mlp_width"], field_name="model.encoder_mlp_width", minimum=1),
@@ -370,6 +399,12 @@ def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
             body.get("public_heuristic_actor_logit_bias_scale", -1.0),
             field_name="model.public_heuristic_actor_logit_bias_scale",
         ),
+        public_heuristic_logit_bias_start_updates=public_heuristic_logit_bias_start_updates,
+        public_heuristic_logit_bias_end_updates=public_heuristic_logit_bias_end_updates,
+        public_heuristic_logit_bias_final_scale=_require_float(
+            public_heuristic_logit_bias_final_scale,
+            field_name="model.public_heuristic_logit_bias_final_scale",
+        ),
         public_heuristic_logit_bias_families=_require_str_list(
             body.get("public_heuristic_logit_bias_families", []),
             field_name="model.public_heuristic_logit_bias_families",
@@ -403,6 +438,7 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             "fixed_opponent_backend",
             "actor_policy_backend",
             "actor_heuristic_fraction",
+            "actor_heuristic_start_updates",
             "actor_heuristic_end_updates",
             "actor_heuristic_final_fraction",
             "train_on_heuristic_actor_rows",
@@ -470,6 +506,9 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             "teacher_action_coef",
             "teacher_same_family_action_coef",
             "teacher_public_heuristic_coef",
+            "teacher_public_heuristic_start_updates",
+            "teacher_public_heuristic_end_updates",
+            "teacher_public_heuristic_final_coef",
             "teacher_public_heuristic_temperature",
             "teacher_public_heuristic_families",
             "teacher_public_heuristic_profiles",
@@ -521,11 +560,18 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         raise ValueError(
             f"training.actor_heuristic_fraction must be between 0.0 and 1.0 inclusive, got {actor_heuristic_fraction}"
         )
+    actor_heuristic_start_updates = _require_int(
+        body.get("actor_heuristic_start_updates", 0),
+        field_name="training.actor_heuristic_start_updates",
+        minimum=0,
+    )
     actor_heuristic_end_updates = _require_int(
         body.get("actor_heuristic_end_updates", -1),
         field_name="training.actor_heuristic_end_updates",
         minimum=-1,
     )
+    if actor_heuristic_end_updates >= 0 and actor_heuristic_end_updates < actor_heuristic_start_updates:
+        raise ValueError("training.actor_heuristic_end_updates must be >= training.actor_heuristic_start_updates")
     actor_heuristic_final_fraction = _require_float(
         body.get("actor_heuristic_final_fraction", actor_heuristic_fraction),
         field_name="training.actor_heuristic_final_fraction",
@@ -614,6 +660,33 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         field_name="training.structured_aux.teacher_public_heuristic_profile_mode",
         allowed=_TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES,
     )
+    structured_aux_public_start_updates = _require_int(
+        structured_aux.get("teacher_public_heuristic_start_updates", 0),
+        field_name="training.structured_aux.teacher_public_heuristic_start_updates",
+        minimum=0,
+    )
+    structured_aux_public_end_updates = _require_int(
+        structured_aux.get("teacher_public_heuristic_end_updates", -1),
+        field_name="training.structured_aux.teacher_public_heuristic_end_updates",
+        minimum=-1,
+    )
+    if (
+        structured_aux_public_end_updates >= 0
+        and structured_aux_public_end_updates < structured_aux_public_start_updates
+    ):
+        raise ValueError(
+            "training.structured_aux.teacher_public_heuristic_end_updates must be >= "
+            "training.structured_aux.teacher_public_heuristic_start_updates"
+        )
+    structured_aux_public_final_coef = _require_float(
+        structured_aux.get(
+            "teacher_public_heuristic_final_coef",
+            structured_aux.get("teacher_public_heuristic_coef", 0.0),
+        ),
+        field_name="training.structured_aux.teacher_public_heuristic_final_coef",
+    )
+    if structured_aux_public_final_coef < 0.0:
+        raise ValueError("training.structured_aux.teacher_public_heuristic_final_coef must be >= 0.0")
     structured_aux_public_profiles_end_updates = _require_int(
         structured_aux.get("teacher_public_heuristic_profiles_end_updates", -1),
         field_name="training.structured_aux.teacher_public_heuristic_profiles_end_updates",
@@ -747,6 +820,12 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
                 structured_aux.get("teacher_public_heuristic_coef", 0.0),
                 field_name="training.structured_aux.teacher_public_heuristic_coef",
             ),
+            teacher_public_heuristic_start_updates=structured_aux_public_start_updates,
+            teacher_public_heuristic_end_updates=structured_aux_public_end_updates,
+            teacher_public_heuristic_final_coef=_require_float(
+                structured_aux_public_final_coef,
+                field_name="training.structured_aux.teacher_public_heuristic_final_coef",
+            ),
             teacher_public_heuristic_temperature=structured_aux_public_temperature,
             teacher_public_heuristic_families=_require_str_list(
                 structured_aux.get("teacher_public_heuristic_families", []),
@@ -820,6 +899,7 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         fixed_opponent_backend=fixed_opponent_backend,
         actor_policy_backend=actor_policy_backend,
         actor_heuristic_fraction=actor_heuristic_fraction,
+        actor_heuristic_start_updates=actor_heuristic_start_updates,
         actor_heuristic_end_updates=actor_heuristic_end_updates,
         actor_heuristic_final_fraction=actor_heuristic_final_fraction,
         train_on_heuristic_actor_rows=train_on_heuristic_actor_rows,

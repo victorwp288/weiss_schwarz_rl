@@ -20,6 +20,8 @@ Read these first:
 uv sync --extra dev
 ```
 
+On Windows and Linux, the managed `uv` path now resolves `torch` from PyTorch's CUDA 12.4 wheel index by default. On platforms without CUDA wheels, it falls back to the platform-default PyTorch build.
+
 Optional simulator package extra:
 
 ```bash
@@ -29,7 +31,7 @@ uv sync --extra dev --extra sim
 If you are not using `uv`, install the editable package with dev extras:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install --extra-index-url https://download.pytorch.org/whl/cu124 -e ".[dev]"
 ```
 
 ## Fast verification

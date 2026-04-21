@@ -33,9 +33,9 @@ else
 
   log_step "Install local editable dependencies"
   if [[ "$USE_SIM_EXTRA" == "1" ]]; then
-    "${RUN[@]}" -m pip install -e ".[dev,sim]"
+    "${RUN[@]}" -m pip install --extra-index-url https://download.pytorch.org/whl/cu124 -e ".[dev,sim]"
   else
-    "${RUN[@]}" -m pip install -e ".[dev]"
+    "${RUN[@]}" -m pip install --extra-index-url https://download.pytorch.org/whl/cu124 -e ".[dev]"
   fi
 fi
 

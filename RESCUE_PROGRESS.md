@@ -7837,6 +7837,50 @@ This file is the continuation point for the April 16, 2026 rescue pass.
   - no RL functional blockers were found in this audit pass
   - remaining test noise is still third-party Matplotlib/PyParsing deprecation warnings only
 
+## Attempt 219: Server Preflight Audit Revalidated Main Against PyPI `weiss-sim`
+
+- current best run label: `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop_u60_dev5_wsl_process_ring_v1`
+- exact throughput numbers:
+  - not applicable
+  - this was a release/server preflight audit only
+- exact learner timing breakdown:
+  - not applicable
+  - no learner/runtime behavior changed
+- exact actor timing breakdown:
+  - not applicable
+  - no throughput path was retuned
+- what changed:
+  - verified `main` is clean and tracking `origin/main`
+  - revalidated the release-facing command surface against the published simulator package:
+    - local environment imports `weiss_sim 0.8.1` from site-packages, not a sibling checkout
+    - `uv run python python/scripts/thesis_run.py --list-presets`
+    - `uv run python python/scripts/play_vs_model.py --help`
+    - `uv run python python/scripts/play_vs_model.py --list-decks`
+    - `uv run python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label audit_stack_smoke`
+    - `uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml`
+    - `uv run python examples/run_loop_example.py --steps 10`
+    - `uv sync --extra dev --extra sim`
+    - `python/scripts/verify_repo.py`
+  - explicitly checked the documented simulator-backed thesis path assumptions:
+    - the canonical presets require `train_async_fast`
+    - the current workstation has no CUDA device, so the exact server GPU/process-collector path could only be dry-run validated locally, not executed end-to-end here
+  - no RL code changes were required in this pass
+- whether learning improved:
+  - not applicable
+  - audit only
+- checks run:
+  - `python python/scripts/verify_repo.py` -> `760 passed, 2 skipped`
+  - `uv sync --extra dev --extra sim`
+  - `uv run --extra dev --extra sim python python/scripts/thesis_run.py --list-presets`
+  - `uv run --extra dev --extra sim python python/scripts/play_vs_model.py --help`
+  - `uv run --extra dev --extra sim python python/scripts/play_vs_model.py --list-decks`
+  - `uv run --extra dev --extra sim python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label audit_stack_smoke`
+  - `uv run --extra dev --extra sim python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml`
+  - `uv run --extra dev --extra sim python examples/run_loop_example.py --steps 10`
+- what remains:
+  - no RL release blockers were found for the documented server path
+  - the exact `standard` / `standard-auto-gpu` training commands still need to be executed on a CUDA-equipped Linux node, because this local workstation has `torch.cuda.is_available() == False`
+
 ## Attempt 219: PyPI `weiss-sim` Audit Pass Hardened The Real Release Surface
 
 - audit scope:
@@ -7902,3 +7946,101 @@ This file is the continuation point for the April 16, 2026 rescue pass.
     - replay rerun contracts appear to under-record simulator inputs for non-default deck / pass-action surfaces
     - final-eval selection metadata can still drift between deterministic pipeline provenance and explicit per-call metadata
     - `DecisionBoundaryEnv` still does not surface every stable simulator field called out in the finalized low-level contract
+
+## Attempt 216: Late-Fade Guidance Schedule Support
+
+- current best run label:
+  - `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop`
+- exact throughput numbers:
+  - unchanged in this attempt
+  - previous best long-run throughput at update `60`: `50721.985445474165` samples/sec
+- exact learner timing breakdown:
+  - unchanged in this attempt
+  - previous best long-run learner total at update `60`: `1819.4880509981886` ms
+  - previous best long-run public-target time at update `60`: `425.10494100133656` ms
+  - previous best long-run packed scorer time at update `60`: `275.4127560001507` ms
+  - previous best long-run trunk time at update `60`: `183.73141099800705` ms
+- exact actor timing breakdown:
+  - unchanged in this attempt
+  - previous best long-run first runtime actor env-steps/sec: `10868.588410237495`
+  - previous best long-run late runtime actor env-steps/sec: `263444.3875919605`
+- what changed:
+  - added first-class late-anneal config support for:
+    - `training.actor_heuristic_start_updates`
+    - `training.structured_aux.teacher_public_heuristic_start_updates`
+    - `training.structured_aux.teacher_public_heuristic_end_updates`
+    - `training.structured_aux.teacher_public_heuristic_final_coef`
+    - `model.public_heuristic_logit_bias_start_updates`
+    - `model.public_heuristic_logit_bias_end_updates`
+    - `model.public_heuristic_logit_bias_final_scale`
+  - runtime actor heuristic routing now respects a delayed fade window instead of only a fade-from-update-zero path
+  - learner training now applies scheduled public-teacher coef updates each update
+  - structured models can now update public-heuristic bias scales at runtime
+  - checkpoint and snapshot payloads now persist active learner/actor public-bias scales so eval and resume do not silently snap back to config defaults
+  - added named ablation presets:
+    - `ablations/standard_teacher_fade.yaml`
+    - `ablations/standard_teacher_fade_auto_gpu.yaml`
+  - exposed new wrapper presets:
+    - `ablate-teacher-fade`
+    - `ablate-teacher-fade-auto-gpu`
+  - updated `docs/standard_recipe.md` with the new teacher-fade ablation and command surface
+- whether learning improved:
+  - not measured yet
+  - this attempt was infrastructure/preset work so the fade schedule can be run cleanly on the Linux server
+- next hypotheses:
+  - benchmark `ablate-teacher-fade-auto-gpu` against `standard-auto-gpu` on the university server
+  - check whether late removal of teacher/tactical guidance improves asymptotic B1/B2/generalization without collapsing throughput
+  - if the fade variant helps learning but hurts stability, test a softer terminal bias floor rather than fading all the way to zero
+- checks run:
+  - `python -m ruff check` on the touched config/runtime/model/train/test files
+  - `python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_thesis_run_wrapper.py python/weiss_rl/tests/test_script_entrypoint_smokes.py python/weiss_rl/tests/test_schedules.py` -> `143 passed`
+  - `python python/scripts/thesis_run.py --list-presets`
+  - `python python/scripts/thesis_run.py --preset ablate-teacher-fade-auto-gpu --run-label fade_dry_run --b1-baseline-run-dir runs\\b1_anchor_seed1 --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200 --dry-run --skip-compare`
+
+## Attempt 220: CUDA Torch Became The Default Release Install Surface
+
+- current best run label:
+  - unchanged
+  - `structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop`
+- exact throughput numbers:
+  - unchanged in this attempt
+  - release/install hardening only
+- exact learner timing breakdown:
+  - unchanged in this attempt
+- exact actor timing breakdown:
+  - unchanged in this attempt
+- what changed:
+  - made `uv` resolve `torch` from the CUDA 12.4 wheel index on Windows and Linux by default via `pyproject.toml`
+  - updated the non-`uv` fallback install surfaces to use the CUDA wheel index too:
+    - `Makefile`
+    - `scripts/run_local_ci_parity.sh`
+    - `README.md`
+    - `docs/getting_started.md`
+  - refreshed the lockfile so the managed environment now installs `torch==2.5.1+cu124`
+  - hardened `init.sh` so it:
+    - reuses an existing `uv` if present
+    - otherwise bootstraps `uv` in a local `.uv-bootstrap` venv instead of trying to mutate an externally-managed system Python
+    - forces `UV_TORCH_BACKEND=cu124`
+    - fails fast if Linux/Windows ended up with a CPU-only torch build
+- whether learning improved:
+  - not applicable
+  - packaging/bootstrap/release-prep only
+- checks run:
+  - `uv lock`
+  - `uv sync --extra dev --extra sim`
+  - `uv run --extra dev --extra sim python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"` -> confirmed `torch 2.5.1+cu124`
+  - `uv run --extra dev --extra sim python python/scripts/verify_repo.py` -> `764 passed, 2 skipped`
+  - `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_simulator_contract.py python/weiss_rl/tests/test_rl_step_layout_contract_smoke.py python/weiss_rl/tests/test_heuristic_public.py -k simulator_native_heuristic_pool_matches_python_oracle_across_live_steps` -> `1 passed`
+  - `uv run --extra dev python python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --public-demo --run-label toy_public_demo_ci`
+  - `uv run --extra dev python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --public-demo --run-dir runs/toy_public_demo_ci`
+  - `uv run --extra dev python python/scripts/make_figures.py --public-demo --final-eval-dir runs/toy_public_demo_ci/eval/final_eval --out-dir runs/toy_public_demo_ci/figures`
+  - `uv run --extra dev python python/scripts/artifact_scan.py --artifact-root runs/toy_public_demo_ci`
+  - `uv run --extra dev python python/scripts/write_paper_readiness_fixture.py --run-dir runs/paper_readiness_fixture_ci`
+  - `uv run --extra dev python python/scripts/paper_readiness_check.py --run-dir runs/paper_readiness_fixture_ci`
+  - `uv run --extra dev python -m build`
+  - isolated wheel install smoke in a temporary venv -> import succeeded
+  - `bash -n init.sh`
+  - `bash init.sh` under WSL -> succeeded with `torch_version=2.5.1+cu124`
+- what remains:
+  - no local release blockers found for the RL repo
+  - next real validation step is still the first tiny CUDA smoke on the university Linux node

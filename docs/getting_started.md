@@ -42,6 +42,8 @@ From the repo root:
 uv sync --extra dev
 ```
 
+That managed install now resolves the CUDA 12.4 PyTorch wheels on Windows and Linux by default. macOS and other non-CUDA platforms continue to use the platform-default PyTorch build.
+
 If you want the released simulator dependency instead of relying on a sibling checkout, use:
 
 ```bash

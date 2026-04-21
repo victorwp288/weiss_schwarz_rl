@@ -12,6 +12,8 @@ _PRESET_PATHS = {
     "standard-auto-gpu": Path("configs/presets/structured_acceptance_standard_auto_gpu.yaml"),
     "standard-thesis-eval": Path("configs/presets/structured_acceptance_standard_thesis_eval.yaml"),
     "standard-multideck": Path("configs/presets/structured_acceptance_standard_multideck.yaml"),
+    "ablate-teacher-fade": Path("configs/presets/ablations/standard_teacher_fade.yaml"),
+    "ablate-teacher-fade-auto-gpu": Path("configs/presets/ablations/standard_teacher_fade_auto_gpu.yaml"),
     "ablate-no-tactical-bias": Path("configs/presets/ablations/standard_no_tactical_bias.yaml"),
     "ablate-no-b1-cutoff": Path("configs/presets/ablations/standard_no_b1_cutoff.yaml"),
     "ablate-multideck": Path("configs/presets/ablations/standard_multideck_generalization.yaml"),

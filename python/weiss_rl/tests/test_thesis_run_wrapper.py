@@ -198,6 +198,7 @@ def test_thesis_run_wrapper_lists_named_presets_without_run_label(tmp_path: Path
     assert result.returncode == 0, result.stderr
     assert "standard:" in result.stdout
     assert "standard-auto-gpu:" in result.stdout
+    assert "ablate-teacher-fade:" in result.stdout
     assert "ablate-no-tactical-bias:" in result.stdout
 
 

@@ -407,6 +407,27 @@ def test_load_stack_config_supports_structured_dev_fast_and_acceptance_presets()
     assert standard_multideck.config.environment is not None
     assert "preset:quints_balanced_v2" in standard_multideck.config.environment.deck_pool
 
+    teacher_fade = load_stack_config(repo_root / "configs/presets/ablations/standard_teacher_fade.yaml")
+    assert teacher_fade.config.training is not None
+    assert teacher_fade.config.training.actor_heuristic_start_updates == 40
+    assert teacher_fade.config.training.actor_heuristic_end_updates == 140
+    assert teacher_fade.config.training.actor_heuristic_final_fraction == pytest.approx(0.25)
+    assert teacher_fade.config.training.teacher_public_heuristic_start_updates == 40
+    assert teacher_fade.config.training.teacher_public_heuristic_end_updates == 140
+    assert teacher_fade.config.training.teacher_public_heuristic_final_coef == pytest.approx(0.0)
+    assert teacher_fade.config.model is not None
+    assert teacher_fade.config.model.public_heuristic_logit_bias_start_updates == 40
+    assert teacher_fade.config.model.public_heuristic_logit_bias_end_updates == 140
+    assert teacher_fade.config.model.public_heuristic_logit_bias_final_scale == pytest.approx(0.5)
+
+    teacher_fade_auto_gpu = load_stack_config(
+        repo_root / "configs/presets/ablations/standard_teacher_fade_auto_gpu.yaml"
+    )
+    assert teacher_fade_auto_gpu.config.system is not None
+    assert teacher_fade_auto_gpu.config.system.learner_device == "cuda:auto"
+    assert teacher_fade_auto_gpu.config.system.actor_device == "cuda:auto"
+    assert teacher_fade_auto_gpu.config.system.collection_backend == "process"
+
     ablate_no_tactical_bias = load_stack_config(repo_root / "configs/presets/ablations/standard_no_tactical_bias.yaml")
     assert ablate_no_tactical_bias.config.model is not None
     assert (
@@ -707,6 +728,61 @@ def test_load_stack_config_supports_public_actor_heuristic_bias_override(tmp_pat
     assert stack.config.model is not None
     assert stack.config.model.public_heuristic_logit_bias_scale == pytest.approx(0.75)
     assert stack.config.model.public_heuristic_actor_logit_bias_scale == pytest.approx(0.25)
+
+
+def test_load_stack_config_supports_guidance_anneal_overrides(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    fake_repo = _temp_repo(tmp_path)
+    for preset_name in [
+        "structured_acceptance_standard.yaml",
+        "structured_acceptance.yaml",
+        "structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop.yaml",
+        "structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall.yaml",
+        "structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias.yaml",
+        "structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10.yaml",
+        "structured_acceptance_tiny32_fast_pubcycle3_b1mix015.yaml",
+        "structured_acceptance_tiny32_fast_pubcycle3.yaml",
+        "structured_acceptance_tiny32_fast_packed.yaml",
+        "structured_acceptance_linux_frontier.yaml",
+        "typed_structured_v2.yaml",
+        "typed_local.yaml",
+        "typed_thesis_locked.yaml",
+    ]:
+        (fake_repo / "configs" / preset_name).write_text(
+            (repo_root / f"configs/presets/{preset_name}").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+    config_path = fake_repo / "configs" / "structured_acceptance_standard.yaml"
+    config_path.write_text(
+        (config_path.read_text(encoding="utf-8"))
+        + "\nmodel:\n"
+        + "  public_heuristic_logit_bias_start_updates: 12\n"
+        + "  public_heuristic_logit_bias_end_updates: 48\n"
+        + "  public_heuristic_logit_bias_final_scale: 0.25\n"
+        + "training:\n"
+        + "  actor_heuristic_start_updates: 8\n"
+        + "  actor_heuristic_end_updates: 40\n"
+        + "  actor_heuristic_final_fraction: 0.5\n"
+        + "  structured_aux:\n"
+        + "    teacher_public_heuristic_start_updates: 10\n"
+        + "    teacher_public_heuristic_end_updates: 60\n"
+        + "    teacher_public_heuristic_final_coef: 0.01\n",
+        encoding="utf-8",
+    )
+
+    stack = load_stack_config(config_path)
+
+    assert stack.config.model is not None
+    assert stack.config.model.public_heuristic_logit_bias_start_updates == 12
+    assert stack.config.model.public_heuristic_logit_bias_end_updates == 48
+    assert stack.config.model.public_heuristic_logit_bias_final_scale == pytest.approx(0.25)
+    assert stack.config.training is not None
+    assert stack.config.training.actor_heuristic_start_updates == 8
+    assert stack.config.training.actor_heuristic_end_updates == 40
+    assert stack.config.training.actor_heuristic_final_fraction == pytest.approx(0.5)
+    assert stack.config.training.teacher_public_heuristic_start_updates == 10
+    assert stack.config.training.teacher_public_heuristic_end_updates == 60
+    assert stack.config.training.teacher_public_heuristic_final_coef == pytest.approx(0.01)
 
 
 def test_load_stack_config_supports_actor_policy_backend_override(tmp_path: Path) -> None:

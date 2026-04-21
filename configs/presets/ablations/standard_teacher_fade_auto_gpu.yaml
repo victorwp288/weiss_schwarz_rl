@@ -1,0 +1,7 @@
+schema_version: 2
+description: standard teacher-fade ablation with automatic multi-GPU actor sharding for Linux servers
+extends: standard_teacher_fade.yaml
+system:
+  learner_device: cuda:auto
+  actor_device: cuda:auto
+  collection_backend: process

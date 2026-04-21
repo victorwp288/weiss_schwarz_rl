@@ -889,6 +889,18 @@ class PolicyValueModel(nn.Module):
     def enable_trunk_compile(self, *, mode: str = "reduce-overhead") -> PolicyValueModel:
         return self
 
+    def set_public_heuristic_logit_bias_scale(
+        self,
+        value: float,
+        *,
+        actor_value: float | None = None,
+    ) -> None:
+        del value, actor_value
+
+    def get_public_heuristic_logit_bias_scale(self, *, scoring_mode: str = "learner") -> float:
+        del scoring_mode
+        return 0.0
+
     def _build_observation_encoder(
         self,
         *,
@@ -1244,6 +1256,7 @@ class _StructuredLegalActionHead(nn.Module):
         self.register_buffer("_attack_slots", torch.as_tensor(attack_slots, dtype=torch.long))
         self.register_buffer("_attack_types", torch.as_tensor(attack_types, dtype=torch.long))
         self.register_buffer("_generic_indices", torch.as_tensor(generic_indices, dtype=torch.long))
+
         family_count = max(len(family_names), 1)
         family_arg_kind = np.zeros((family_count,), dtype=np.int64)
         hand_family_names = {
@@ -1367,6 +1380,23 @@ class _StructuredLegalActionHead(nn.Module):
         )
         self._factorized_learner_row_chunk_size = 8192
         self._factorized_actor_row_chunk_size = 32768
+
+    def set_public_heuristic_logit_bias_scales(
+        self,
+        *,
+        learner_scale: float | None = None,
+        actor_scale: float | None = None,
+    ) -> None:
+        if learner_scale is not None:
+            resolved = float(learner_scale)
+            if resolved < 0.0:
+                raise ValueError(f"public_heuristic_logit_bias_scale must be >= 0.0, got {resolved}")
+            self._public_heuristic_logit_bias_scale = resolved
+        if actor_scale is not None:
+            resolved = float(actor_scale)
+            if resolved < 0.0:
+                raise ValueError(f"public_heuristic_actor_logit_bias_scale must be >= 0.0, got {resolved}")
+            self._public_heuristic_actor_logit_bias_scale = resolved
 
     def _build_state_representation(
         self,
@@ -4602,6 +4632,20 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
         self._compiled_trunk_packed_core = compiled_packed
         self._compiled_trunk_sequence_core = compiled_sequence
         return self
+
+    def set_public_heuristic_logit_bias_scale(
+        self,
+        value: float,
+        *,
+        actor_value: float | None = None,
+    ) -> None:
+        self.policy_head.set_public_heuristic_logit_bias_scales(
+            learner_scale=float(value),
+            actor_scale=None if actor_value is None else float(actor_value),
+        )
+
+    def get_public_heuristic_logit_bias_scale(self, *, scoring_mode: str = "learner") -> float:
+        return float(self.policy_head._public_heuristic_logit_bias_scale_for(scoring_mode))
 
     def advance_seat_hidden(
         self,

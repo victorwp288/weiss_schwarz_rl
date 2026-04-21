@@ -50,6 +50,7 @@ from weiss_rl.masking import (
     sample_actions_from_mask,
 )
 from weiss_rl.model import PolicyValueModel, build_policy_value_model
+from weiss_rl.schedules import linear_anneal_value
 from weiss_rl.termination_reason import classify_episode_end_reason
 
 QueueRuntimeMode = Literal["train_ordered", "train_async_fast"]
@@ -1466,6 +1467,11 @@ class QueueRuntime:
         )
         if self._actor_heuristic_fraction < 0.0 or self._actor_heuristic_fraction > 1.0:
             raise ValueError("training.actor_heuristic_fraction must be between 0.0 and 1.0 inclusive")
+        self._actor_heuristic_start_updates = (
+            0 if training_config is None else int(getattr(training_config, "actor_heuristic_start_updates", 0))
+        )
+        if self._actor_heuristic_start_updates < 0:
+            raise ValueError("training.actor_heuristic_start_updates must be >= 0")
         self._actor_heuristic_end_updates = (
             -1 if training_config is None else int(getattr(training_config, "actor_heuristic_end_updates", -1))
         )
@@ -1478,6 +1484,11 @@ class QueueRuntime:
         )
         if self._actor_heuristic_final_fraction < 0.0 or self._actor_heuristic_final_fraction > 1.0:
             raise ValueError("training.actor_heuristic_final_fraction must be between 0.0 and 1.0 inclusive")
+        if (
+            self._actor_heuristic_end_updates >= 0
+            and self._actor_heuristic_end_updates < self._actor_heuristic_start_updates
+        ):
+            raise ValueError("training.actor_heuristic_end_updates must be >= training.actor_heuristic_start_updates")
         self._train_on_heuristic_actor_rows = (
             True if training_config is None else bool(getattr(training_config, "train_on_heuristic_actor_rows", True))
         )
@@ -2307,16 +2318,18 @@ class QueueRuntime:
     def _active_actor_heuristic_fraction(self) -> float:
         initial_fraction = max(0.0, min(1.0, float(getattr(self, "_actor_heuristic_fraction", 1.0))))
         final_fraction = max(0.0, min(1.0, float(getattr(self, "_actor_heuristic_final_fraction", initial_fraction))))
+        start_updates = max(0, int(getattr(self, "_actor_heuristic_start_updates", 0)))
         end_updates = int(getattr(self, "_actor_heuristic_end_updates", -1))
-        if end_updates < 0 or initial_fraction == final_fraction:
-            return initial_fraction
         current_update = max(0, int(self._league_reference_update()))
-        if end_updates == 0:
-            return final_fraction
-        if current_update >= end_updates:
-            return final_fraction
-        progress = float(current_update) / float(end_updates)
-        return initial_fraction + (final_fraction - initial_fraction) * progress
+        return float(
+            linear_anneal_value(
+                initial_value=initial_fraction,
+                final_value=final_fraction,
+                start_update=start_updates,
+                end_update=end_updates,
+                update_count=current_update,
+            )
+        )
 
     def _fixed_opponent_policy_slots(self) -> np.ndarray | None:
         envs_per_actor = int(self.config.envs_per_actor)

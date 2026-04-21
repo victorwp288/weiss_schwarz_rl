@@ -55,6 +55,26 @@ _LEGACY_B1_POLICY_ID = "b1_noleague_baseline"
 _U64_DENOMINATOR = float(1 << 64)
 
 
+def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload: Mapping[str, object]) -> None:
+    if model is None:
+        return
+    set_bias_scale = getattr(model, "set_public_heuristic_logit_bias_scale", None)
+    if not callable(set_bias_scale):
+        return
+    learner_scale = payload.get("public_heuristic_logit_bias_scale")
+    actor_scale = payload.get("public_heuristic_actor_logit_bias_scale")
+    if learner_scale is None and actor_scale is None:
+        return
+    resolved_learner_scale = None if learner_scale is None else float(learner_scale)
+    resolved_actor_scale = None if actor_scale is None else float(actor_scale)
+    if resolved_learner_scale is None:
+        get_bias_scale = getattr(model, "get_public_heuristic_logit_bias_scale", None)
+        if not callable(get_bias_scale):
+            return
+        resolved_learner_scale = float(get_bias_scale(scoring_mode="learner"))
+    set_bias_scale(resolved_learner_scale, actor_value=resolved_actor_scale)
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedEvalPolicy:
     policy_id: str
@@ -869,6 +889,7 @@ def _load_snapshot_eval_model(
         spec_bundle=spec_bundle,
     ).to(torch.device("cpu"))
     eval_model.load_state_dict(model_state_dict)
+    _restore_model_guidance_from_payload(eval_model, payload)
     eval_model.eval()
     return eval_model
 

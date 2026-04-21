@@ -108,10 +108,13 @@ These are the most defensible next ablations around the current best recipe.
 1. `ablate-no-tactical-bias`
    - removes the tactical public-bias shaping while keeping the rest of the curriculum close.
    - answers whether the tactical bias is genuinely responsible for the stronger B1/B2 learning curve.
-2. `ablate-no-b1-cutoff`
+2. `ablate-teacher-fade`
+   - keeps the current guided recipe early, then fades the public teacher loss, heuristic actor fraction, and tactical learner-side public bias later in training.
+   - answers whether persistent heuristic guidance is helping asymptotically or holding the policy too close to the teacher.
+3. `ablate-no-b1-cutoff`
    - keeps persistent B1 exposure instead of annealing it away after update 10.
    - answers whether the early-B1 curriculum matters more than persistent baseline pressure.
-3. `standard-multideck`
+4. `standard-multideck`
    - introduces actor-level deck diversity.
    - answers whether the standard recipe is over-specializing to a single deck and whether diversity helps robustness enough to justify any throughput loss.
 
@@ -119,6 +122,7 @@ Suggested wrapper invocations:
 
 ```bash
 uv run python python/scripts/thesis_run.py --preset ablate-no-tactical-bias --run-label ablate_no_tactical_bias_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset ablate-teacher-fade-auto-gpu --run-label ablate_teacher_fade_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
 uv run python python/scripts/thesis_run.py --preset ablate-no-b1-cutoff --run-label ablate_no_b1_cutoff_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
 uv run python python/scripts/thesis_run.py --preset standard-multideck --run-label ablate_multideck_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
 ```
