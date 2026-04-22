@@ -31,9 +31,12 @@ from weiss_rl.eval.uncertainty import bayesian_bootstrap_posterior_samples
 from weiss_rl.repro import canonical_json_bytes, hash_seed_file, stable_hash64
 
 __all__ = [
+    "build_final_eval_matchups",
+    "finalize_final_eval",
     "load_dev_eval_summaries",
     "resolve_final_policy_set",
     "run_final_eval",
+    "run_final_eval_matchup",
 ]
 
 
@@ -144,30 +147,25 @@ def run_final_eval(
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    matchup_results: list[dict[str, Any]] = []
-    for focal_index, focal_policy_id in enumerate(resolved_policy_ids):
-        for opponent_index, opponent_policy_id in enumerate(resolved_policy_ids[focal_index:], start=focal_index):
-            matchup_results.append(
-                _run_matchup(
-                    output_dir=output_dir,
-                    focal_index=focal_index,
-                    opponent_index=opponent_index,
-                    focal_policy_id=focal_policy_id,
-                    opponent_policy_id=opponent_policy_id,
-                    paired_seeds=paired_seeds,
-                    stage1_paired_seeds=stage1_paired_seeds,
-                    max_paired_seeds=max_paired_seeds,
-                    stop_rules=stop_rules,
-                    runner=runner,
-                    run_id256=run_id256,
-                    config_hash256=config_hash256,
-                    spec_hash256=spec_hash256,
-                    scheme=scheme,
-                    sample_count=sample_count,
-                )
-            )
+    matchup_results = [
+        run_final_eval_matchup(
+            output_dir=output_dir,
+            matchup_spec=matchup_spec,
+            paired_seeds=paired_seeds,
+            stage1_paired_seeds=stage1_paired_seeds,
+            max_paired_seeds=max_paired_seeds,
+            stop_rules=stop_rules,
+            runner=runner,
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+            scheme=scheme,
+            sample_count=sample_count,
+        )
+        for matchup_spec in build_final_eval_matchups(policy_ids=resolved_policy_ids)
+    ]
 
-    payload = _build_final_eval_payload(
+    return finalize_final_eval(
         output_dir=output_dir,
         policy_ids=resolved_policy_ids,
         matchup_results=matchup_results,
@@ -181,7 +179,98 @@ def run_final_eval(
         metadata=metadata,
         seed_file_path=seed_file_path,
     )
-    _write_final_eval_artifacts(output_dir=output_dir, payload=payload, matchup_results=matchup_results)
+
+
+def build_final_eval_matchups(*, policy_ids: Sequence[str]) -> list[dict[str, Any]]:
+    _validate_policy_ids(policy_ids, context="policy_ids")
+    matchups: list[dict[str, Any]] = []
+    for focal_index, focal_policy_id in enumerate(policy_ids):
+        for opponent_index, opponent_policy_id in enumerate(policy_ids[focal_index:], start=focal_index):
+            matchups.append(
+                {
+                    "focal_index": int(focal_index),
+                    "opponent_index": int(opponent_index),
+                    "focal_policy_id": str(focal_policy_id),
+                    "opponent_policy_id": str(opponent_policy_id),
+                }
+            )
+    return matchups
+
+
+def run_final_eval_matchup(
+    *,
+    output_dir: Path,
+    matchup_spec: Mapping[str, Any],
+    paired_seeds: Sequence[int],
+    stage1_paired_seeds: int,
+    max_paired_seeds: int,
+    stop_rules: StopRulesConfig,
+    runner: EvalGameRunner,
+    run_id256: str | bytes,
+    config_hash256: str,
+    spec_hash256: str,
+    scheme: PayoffFoldScheme,
+    sample_count: int,
+) -> dict[str, Any]:
+    return _run_matchup(
+        output_dir=output_dir,
+        focal_index=int(matchup_spec["focal_index"]),
+        opponent_index=int(matchup_spec["opponent_index"]),
+        focal_policy_id=str(matchup_spec["focal_policy_id"]),
+        opponent_policy_id=str(matchup_spec["opponent_policy_id"]),
+        paired_seeds=paired_seeds,
+        stage1_paired_seeds=stage1_paired_seeds,
+        max_paired_seeds=max_paired_seeds,
+        stop_rules=stop_rules,
+        runner=runner,
+        run_id256=run_id256,
+        config_hash256=config_hash256,
+        spec_hash256=spec_hash256,
+        scheme=scheme,
+        sample_count=sample_count,
+    )
+
+
+def finalize_final_eval(
+    *,
+    output_dir: Path,
+    policy_ids: Sequence[str],
+    matchup_results: Sequence[dict[str, Any]],
+    stage1_paired_seeds: int,
+    max_paired_seeds: int,
+    paired_seeds: Sequence[int],
+    stop_rules: StopRulesConfig,
+    scheme: PayoffFoldScheme,
+    sample_count: int,
+    selection_payload: Mapping[str, Any],
+    metadata: Mapping[str, Any] | None,
+    seed_file_path: Path | None,
+) -> dict[str, Any]:
+    payload = _build_final_eval_payload(
+        output_dir=output_dir,
+        policy_ids=policy_ids,
+        matchup_results=sorted(
+            matchup_results,
+            key=lambda result: (int(result["focal_index"]), int(result["opponent_index"])),
+        ),
+        stage1_paired_seeds=stage1_paired_seeds,
+        max_paired_seeds=max_paired_seeds,
+        paired_seeds=paired_seeds,
+        stop_rules=stop_rules,
+        scheme=scheme,
+        sample_count=sample_count,
+        selection_payload=selection_payload,
+        metadata=metadata,
+        seed_file_path=seed_file_path,
+    )
+    _write_final_eval_artifacts(
+        output_dir=output_dir,
+        payload=payload,
+        matchup_results=sorted(
+            matchup_results,
+            key=lambda result: (int(result["focal_index"]), int(result["opponent_index"])),
+        ),
+    )
     return payload
 
 
@@ -223,18 +312,24 @@ def _resolve_policy_ids(
         final_policy_set_size=final_policy_set_size,
     )
     _validate_policy_ids(resolved, context="resolved final policy set")
-    if len(resolved) < int(final_policy_set_size):
-        raise ValueError(
-            "resolved final policy set is underfilled: "
-            f"expected {int(final_policy_set_size)} policies, found {len(resolved)}"
-        )
-    return resolved, {
+    selection_payload: dict[str, Any] = {
         "mode": "deterministic_v1",
         "policy_count": len(resolved),
         "snapshot_registry_path": snapshot_registry_path.as_posix(),
         "dev_eval_summaries_path": dev_eval_summaries_path.as_posix(),
         "final_policy_set_size": int(final_policy_set_size),
     }
+    if len(resolved) < int(final_policy_set_size):
+        selection_payload.update(
+            {
+                "underfilled": True,
+                "degraded": True,
+                "degraded_reason": "underfilled_policy_set",
+                "requested_policy_count": int(final_policy_set_size),
+                "resolved_policy_count": len(resolved),
+            }
+        )
+    return resolved, selection_payload
 
 
 def _validate_policy_ids(policy_ids: Sequence[str], *, context: str) -> None:
@@ -483,6 +578,10 @@ def _build_final_eval_payload(
         for focal_index, _focal_policy_id in enumerate(policy_ids)
     ]
     top_level_metadata = dict(metadata or {})
+    explicit_selection_metadata = top_level_metadata.pop("selection", None)
+    merged_selection = dict(selection_payload)
+    if isinstance(explicit_selection_metadata, Mapping):
+        merged_selection.update(dict(explicit_selection_metadata))
     top_level_metadata.update(
         {
             "policy_count": len(policy_ids),
@@ -501,9 +600,13 @@ def _build_final_eval_payload(
             },
             "scheme": scheme,
             "sample_count": sample_count,
-            "selection": dict(selection_payload),
+            "selection": merged_selection,
         }
     )
+    if bool(merged_selection.get("degraded", False)):
+        top_level_metadata["degraded"] = True
+        if "degraded_reason" in merged_selection:
+            top_level_metadata["degraded_reason"] = merged_selection["degraded_reason"]
     if seed_file_path is not None:
         top_level_metadata["seed_file"] = {
             "path": seed_file_path.as_posix(),

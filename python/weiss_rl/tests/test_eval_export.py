@@ -91,6 +91,16 @@ def test_load_eval_game_records_round_trips_jsonl(tmp_path: Path) -> None:
     assert loaded == tuple(records)
 
 
+def test_load_eval_game_records_rejects_missing_required_summary_fields(tmp_path: Path) -> None:
+    path = tmp_path / "episodes.jsonl"
+    record = _record(0, 0, "W", episode_seed=100).to_dict()
+    record.pop("termination_reason")
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="missing required field 'termination_reason'"):
+        load_eval_game_records(path)
+
+
 def test_build_matchup_export_and_write_outputs(tmp_path: Path) -> None:
     payload = build_matchup_export(
         [*_pair(0, "W", "W"), *_pair(1, "W", "W")],

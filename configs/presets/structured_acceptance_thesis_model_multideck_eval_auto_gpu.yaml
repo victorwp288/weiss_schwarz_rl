@@ -1,0 +1,12 @@
+schema_version: 2
+description: frozen thesis-model multideck eval preset for Linux servers with GPU eval inference
+extends: structured_acceptance_thesis_model_multideck_auto_gpu.yaml
+evaluation:
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+        - Previous champion snapshot
+        - Previous recent snapshot

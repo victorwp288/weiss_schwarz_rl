@@ -2,21 +2,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
 import sys
+from collections.abc import Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, cast
 
+import torch
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import compute_config_hash256, load_stack_config, load_study_config
 from weiss_rl.eval import (
+    build_final_eval_matchups,
     build_matchup_export,
     build_paper_readiness_summary,
     build_seat_advantage_diagnostics,
+    finalize_final_eval,
     load_dev_eval_summaries,
     load_eval_game_records,
     resolve_final_policy_set,
     run_final_eval,
+    run_final_eval_matchup,
+    validate_eval_game_records_contract,
     write_matchup_diagnostics_json,
     write_matchup_summary_csv,
     write_matchup_summary_json,
@@ -186,7 +194,10 @@ def _authoritative_manifest_policy_selection(
     layout: ArtifactLayout,
     snapshot_registry_path: Path | None,
     dev_eval_summaries_path: Path | None,
+    allow_completed_manifest_policy_selection: bool,
 ) -> tuple[list[str], dict[str, Any]] | None:
+    if not allow_completed_manifest_policy_selection:
+        return None
     if snapshot_registry_path is not None or dev_eval_summaries_path is not None:
         return None
 
@@ -228,6 +239,7 @@ def _resolve_policy_ids_for_run(
     layout: ArtifactLayout,
     snapshot_registry_path: Path | None,
     dev_eval_summaries_path: Path | None,
+    allow_completed_manifest_policy_selection: bool = True,
 ) -> tuple[list[str], dict[str, Any], Path | None, Path | None]:
     manifest_snapshot_registry, manifest_dev_eval = _resolve_selection_inputs_from_manifest(
         stack_root=stack.root,
@@ -256,6 +268,7 @@ def _resolve_policy_ids_for_run(
         layout=layout,
         snapshot_registry_path=snapshot_registry_path,
         dev_eval_summaries_path=dev_eval_summaries_path,
+        allow_completed_manifest_policy_selection=allow_completed_manifest_policy_selection,
     )
     if authoritative_manifest_selection is not None:
         resolved_from_manifest, selection_details = authoritative_manifest_selection
@@ -292,7 +305,7 @@ def _resolve_policy_ids_for_run(
             resolved_dev_eval,
         )
 
-    if resolved_from_manifest:
+    if resolved_from_manifest and allow_completed_manifest_policy_selection:
         return (
             resolved_from_manifest,
             {
@@ -301,6 +314,12 @@ def _resolve_policy_ids_for_run(
             },
             resolved_snapshot_registry,
             resolved_dev_eval,
+        )
+
+    if resolved_from_manifest and not allow_completed_manifest_policy_selection:
+        raise FileNotFoundError(
+            "current final policy-set inputs could not be resolved from run artifacts, and completed manifest reuse "
+            "is disabled. Provide current snapshot/dev-eval inputs or pass --reuse-manifest-policy-selection."
         )
 
     if resolved_snapshot_registry is None:
@@ -378,9 +397,229 @@ def _update_run_level_reports(
     _write_json(layout.determinism_report_path, determinism_report)
 
 
+def _resolved_parallel_worker_devices(
+    *,
+    parallel_workers: int,
+    explicit_worker_devices: Sequence[str],
+    eval_device: str,
+) -> tuple[str, ...]:
+    if parallel_workers < 1:
+        raise ValueError("parallel_workers must be >= 1")
+
+    normalized_explicit = tuple(device.strip() for device in explicit_worker_devices if device.strip())
+    if normalized_explicit:
+        device_pool = normalized_explicit
+    else:
+        normalized_eval_device = str(eval_device).strip().lower()
+        if normalized_eval_device == "cuda:auto" and torch.cuda.is_available():
+            device_count = torch.cuda.device_count()
+            device_pool = tuple(f"cuda:{index}" for index in range(device_count)) or ("cuda:auto",)
+        elif normalized_eval_device.startswith("cuda:"):
+            device_pool = (str(eval_device).strip(),)
+        else:
+            device_pool = (str(eval_device).strip() or "cpu",)
+    return tuple(device_pool[index % len(device_pool)] for index in range(parallel_workers))
+
+
+def _shard_matchup_specs(
+    *,
+    matchup_specs: Sequence[Mapping[str, Any]],
+    shard_count: int,
+) -> list[list[dict[str, Any]]]:
+    if shard_count < 1:
+        raise ValueError("shard_count must be >= 1")
+    shards: list[list[dict[str, Any]]] = [[] for _ in range(shard_count)]
+    for index, matchup_spec in enumerate(matchup_specs):
+        shards[index % shard_count].append(dict(matchup_spec))
+    return [shard for shard in shards if shard]
+
+
+def _policy_ids_for_matchup_shard(matchup_specs: Sequence[Mapping[str, Any]]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for matchup_spec in matchup_specs:
+        for key in ("focal_policy_id", "opponent_policy_id"):
+            policy_id = str(matchup_spec[key])
+            if policy_id not in seen:
+                seen.add(policy_id)
+                ordered.append(policy_id)
+    return ordered
+
+
+def _run_final_eval_matchup_worker(
+    *,
+    stack_config_path: Path,
+    run_dir: Path,
+    output_dir: Path,
+    policy_ids: Sequence[str],
+    matchup_specs: Sequence[Mapping[str, Any]],
+    paired_seeds: Sequence[int],
+    stage1_paired_seeds: int,
+    max_paired_seeds: int,
+    stop_rules: Any,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+    scheme: PayoffFoldScheme,
+    sample_count: int,
+    snapshot_registry_path: Path | None,
+    b1_baseline_run_dir: Path | None,
+    eval_device: str,
+    replay_capture_rate: float,
+    regression_capture_count: int,
+) -> list[dict[str, Any]]:
+    stack = load_stack_config(stack_config_path)
+    evaluation = stack.config.evaluation
+    if evaluation is None:
+        raise ValueError("stack config is missing evaluation settings")
+    contract = load_verified_simulator_contract(stack.root, expected_spec_hash=spec_hash256)
+    observation_dim = int(contract.spec_bundle["observation"]["obs_len"])
+    action_dim = int(contract.spec_bundle["action"]["action_space_size"])
+    pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
+    resolved_policies = resolve_eval_policies(
+        stack=stack,
+        policy_ids=list(policy_ids),
+        run_dir=run_dir,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        spec_bundle=contract.spec_bundle,
+        snapshot_registry_path=snapshot_registry_path,
+        b1_baseline_run_dir=b1_baseline_run_dir,
+        eval_device=eval_device,
+    )
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    runner = SimulatorEvalRunner(
+        stack=stack,
+        policies=resolved_policies,
+        artifact_layout=layout,
+        run_id256=run_id256,
+        spec_hash256=spec_hash256,
+        action_dim=action_dim,
+        pass_action_id=pass_action_id,
+        require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+        replay_capture_rate=float(replay_capture_rate),
+        regression_capture_count=int(regression_capture_count),
+        eval_device=eval_device,
+    )
+    return [
+        run_final_eval_matchup(
+            output_dir=output_dir,
+            matchup_spec=matchup_spec,
+            paired_seeds=paired_seeds,
+            stage1_paired_seeds=stage1_paired_seeds,
+            max_paired_seeds=max_paired_seeds,
+            stop_rules=stop_rules,
+            runner=runner,
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+            scheme=scheme,
+            sample_count=sample_count,
+        )
+        for matchup_spec in matchup_specs
+    ]
+
+
+def _run_parallel_final_eval(
+    *,
+    stack_config_path: Path,
+    stack: Any,
+    run_dir: Path,
+    layout: ArtifactLayout,
+    policy_ids: Sequence[str],
+    paired_seeds: Sequence[int],
+    stage1_paired_seeds: int,
+    max_paired_seeds: int,
+    stop_rules: Any,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+    scheme: PayoffFoldScheme,
+    sample_count: int,
+    snapshot_registry_path: Path | None,
+    b1_baseline_run_dir: Path | None,
+    metadata: Mapping[str, Any],
+    seed_file_path: Path | None,
+    parallel_workers: int,
+    parallel_worker_devices: Sequence[str],
+) -> dict[str, Any]:
+    evaluation = stack.config.evaluation
+    if evaluation is None:
+        raise ValueError("stack config is missing evaluation settings")
+
+    matchup_specs = build_final_eval_matchups(policy_ids=policy_ids)
+    worker_count = min(int(parallel_workers), len(matchup_specs))
+    if worker_count < 2:
+        raise ValueError("parallel final eval requires at least two workers and at least two matchups")
+    worker_devices = _resolved_parallel_worker_devices(
+        parallel_workers=worker_count,
+        explicit_worker_devices=parallel_worker_devices,
+        eval_device=str(evaluation.eval_device),
+    )
+    matchup_shards = _shard_matchup_specs(matchup_specs=matchup_specs, shard_count=worker_count)
+    metadata_payload = dict(metadata)
+    pipeline_metadata = dict(cast(dict[str, Any], metadata_payload.get("pipeline", {})))
+    pipeline_metadata["parallel_eval"] = {
+        "enabled": True,
+        "worker_count": len(matchup_shards),
+        "worker_devices": list(worker_devices[: len(matchup_shards)]),
+        "matchup_shard_sizes": [len(shard) for shard in matchup_shards],
+        "replay_capture_mode": "disabled_parallel_v1",
+    }
+    metadata_payload["pipeline"] = pipeline_metadata
+
+    futures = []
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=len(matchup_shards), mp_context=ctx) as executor:
+        for shard_index, matchup_shard in enumerate(matchup_shards):
+            futures.append(
+                executor.submit(
+                    _run_final_eval_matchup_worker,
+                    stack_config_path=stack_config_path,
+                    run_dir=run_dir,
+                    output_dir=layout.final_eval_dir,
+                    policy_ids=_policy_ids_for_matchup_shard(matchup_shard),
+                    matchup_specs=matchup_shard,
+                    paired_seeds=list(paired_seeds),
+                    stage1_paired_seeds=int(stage1_paired_seeds),
+                    max_paired_seeds=int(max_paired_seeds),
+                    stop_rules=stop_rules,
+                    run_id256=run_id256,
+                    config_hash256=config_hash256,
+                    spec_hash256=spec_hash256,
+                    scheme=scheme,
+                    sample_count=int(sample_count),
+                    snapshot_registry_path=snapshot_registry_path,
+                    b1_baseline_run_dir=b1_baseline_run_dir,
+                    eval_device=worker_devices[shard_index],
+                    replay_capture_rate=0.0,
+                    regression_capture_count=0,
+                )
+            )
+        matchup_results: list[dict[str, Any]] = []
+        for future in as_completed(futures):
+            matchup_results.extend(future.result())
+
+    return finalize_final_eval(
+        output_dir=layout.final_eval_dir,
+        policy_ids=policy_ids,
+        matchup_results=matchup_results,
+        stage1_paired_seeds=stage1_paired_seeds,
+        max_paired_seeds=max_paired_seeds,
+        paired_seeds=paired_seeds,
+        stop_rules=stop_rules,
+        scheme=scheme,
+        sample_count=sample_count,
+        selection_payload={"mode": "explicit", "policy_count": len(policy_ids)},
+        metadata=metadata_payload,
+        seed_file_path=seed_file_path,
+    )
+
+
 def _run_canonical_eval_pipeline(
     *,
     parser: argparse.ArgumentParser,
+    stack_config_path: Path,
     stack: Any,
     run_dir: Path,
     final_eval_dir: Path | None,
@@ -397,6 +636,9 @@ def _run_canonical_eval_pipeline(
     skip_figures: bool,
     skip_readiness: bool,
     git_commit_override: str,
+    parallel_workers: int,
+    parallel_worker_devices: Sequence[str],
+    reuse_manifest_policy_selection: bool,
 ) -> int:
     layout = ArtifactLayout.from_run_dir(run_dir)
     layout.ensure_directories()
@@ -445,6 +687,7 @@ def _run_canonical_eval_pipeline(
         layout=layout,
         snapshot_registry_path=snapshot_registry_path,
         dev_eval_summaries_path=dev_eval_summaries_path,
+        allow_completed_manifest_policy_selection=reuse_manifest_policy_selection,
     )
     _persist_policy_selection_in_manifest(
         layout=layout,
@@ -460,29 +703,6 @@ def _run_canonical_eval_pipeline(
     observation_dim = int(contract.spec_bundle["observation"]["obs_len"])
     action_dim = int(contract.spec_bundle["action"]["action_space_size"])
     pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
-    resolved_policies = resolve_eval_policies(
-        stack=stack,
-        policy_ids=resolved_policy_ids,
-        run_dir=run_dir,
-        observation_dim=observation_dim,
-        action_dim=action_dim,
-        spec_bundle=contract.spec_bundle,
-        snapshot_registry_path=resolved_registry_path,
-        b1_baseline_run_dir=b1_baseline_run_dir,
-    )
-    runner = SimulatorEvalRunner(
-        stack=stack,
-        policies=resolved_policies,
-        artifact_layout=layout,
-        run_id256=run_id256,
-        spec_hash256=str(manifest["spec_hash256"]),
-        action_dim=action_dim,
-        pass_action_id=pass_action_id,
-        require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
-        replay_capture_rate=float(evaluation.replay_capture_rate_eval),
-        regression_capture_count=int(evaluation.regression_capture_count),
-    )
-
     seed_file_path = stack.seed_sets["report_eval"]
     all_paired_seeds = parse_seed_file(seed_file_path)
     if paired_seed_limit is not None:
@@ -523,34 +743,83 @@ def _run_canonical_eval_pipeline(
         else:
             tensorboard_logger.log_text("eval/run/manifest", manifest)
 
-        final_eval_payload = run_final_eval(
-            output_dir=layout.final_eval_dir,
-            runner=runner,
-            paired_seeds=all_paired_seeds,
-            stage1_paired_seeds=resolved_stage1,
-            max_paired_seeds=resolved_max,
-            stop_rules=evaluation.stop_rules,
-            run_id256=run_id256,
-            config_hash256=str(manifest["config_hash256"]),
-            spec_hash256=str(manifest["spec_hash256"]),
-            scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
-            sample_count=int(bootstrap_samples),
-            policy_ids=resolved_policy_ids,
-            snapshot_registry_path=resolved_registry_path,
-            dev_eval_summaries_path=resolved_dev_eval_path,
-            selection_config=evaluation.final_policy_set_selection,
-            final_policy_set_size=int(evaluation.final_policy_set_size),
-            metadata={
-                "pipeline": {
-                    "kind": "canonical_eval_pipeline_v1",
-                    "selection": dict(selection_details),
-                    "seed_file": seed_file_path.as_posix(),
-                    "paired_seed_limit": None if paired_seed_limit is None else int(paired_seed_limit),
-                },
-                "recommended_focal_policy_id": recommended_focal_policy_id,
+        final_eval_metadata = {
+            "selection": dict(selection_details),
+            "pipeline": {
+                "kind": "canonical_eval_pipeline_v1",
+                "selection": dict(selection_details),
+                "seed_file": seed_file_path.as_posix(),
+                "paired_seed_limit": None if paired_seed_limit is None else int(paired_seed_limit),
             },
-            seed_file_path=seed_file_path,
-        )
+            "recommended_focal_policy_id": recommended_focal_policy_id,
+        }
+        if int(parallel_workers) > 1:
+            final_eval_payload = _run_parallel_final_eval(
+                stack_config_path=stack_config_path,
+                stack=stack,
+                run_dir=run_dir,
+                layout=layout,
+                policy_ids=resolved_policy_ids,
+                paired_seeds=all_paired_seeds,
+                stage1_paired_seeds=resolved_stage1,
+                max_paired_seeds=resolved_max,
+                stop_rules=evaluation.stop_rules,
+                run_id256=run_id256,
+                config_hash256=str(manifest["config_hash256"]),
+                spec_hash256=str(manifest["spec_hash256"]),
+                scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
+                sample_count=int(bootstrap_samples),
+                snapshot_registry_path=resolved_registry_path,
+                b1_baseline_run_dir=b1_baseline_run_dir,
+                metadata=final_eval_metadata,
+                seed_file_path=seed_file_path,
+                parallel_workers=int(parallel_workers),
+                parallel_worker_devices=parallel_worker_devices,
+            )
+        else:
+            resolved_policies = resolve_eval_policies(
+                stack=stack,
+                policy_ids=resolved_policy_ids,
+                run_dir=run_dir,
+                observation_dim=observation_dim,
+                action_dim=action_dim,
+                spec_bundle=contract.spec_bundle,
+                snapshot_registry_path=resolved_registry_path,
+                b1_baseline_run_dir=b1_baseline_run_dir,
+            )
+            runner = SimulatorEvalRunner(
+                stack=stack,
+                policies=resolved_policies,
+                artifact_layout=layout,
+                run_id256=run_id256,
+                spec_hash256=str(manifest["spec_hash256"]),
+                action_dim=action_dim,
+                pass_action_id=pass_action_id,
+                require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+                replay_capture_rate=float(evaluation.replay_capture_rate_eval),
+                regression_capture_count=int(evaluation.regression_capture_count),
+                eval_device=evaluation.eval_device,
+            )
+            final_eval_payload = run_final_eval(
+                output_dir=layout.final_eval_dir,
+                runner=runner,
+                paired_seeds=all_paired_seeds,
+                stage1_paired_seeds=resolved_stage1,
+                max_paired_seeds=resolved_max,
+                stop_rules=evaluation.stop_rules,
+                run_id256=run_id256,
+                config_hash256=str(manifest["config_hash256"]),
+                spec_hash256=str(manifest["spec_hash256"]),
+                scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
+                sample_count=int(bootstrap_samples),
+                policy_ids=resolved_policy_ids,
+                snapshot_registry_path=resolved_registry_path,
+                dev_eval_summaries_path=resolved_dev_eval_path,
+                selection_config=evaluation.final_policy_set_selection,
+                final_policy_set_size=int(evaluation.final_policy_set_size),
+                metadata=final_eval_metadata,
+                seed_file_path=seed_file_path,
+            )
 
         metagame_payload: dict[str, Any] | None = None
         if not skip_metagame:
@@ -678,6 +947,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--reuse-manifest-policy-selection",
+        action="store_true",
+        help=(
+            "Reuse a completed manifest policy-set selection instead of resolving the current policy set from "
+            "snapshot/dev-eval artifacts."
+        ),
+    )
+    parser.add_argument(
         "--paired-seed-limit",
         type=int,
         default=None,
@@ -694,6 +971,18 @@ def main() -> None:
         type=int,
         default=None,
         help="Optional override for stage-2 max paired seeds in canonical non-demo mode",
+    )
+    parser.add_argument(
+        "--parallel-workers",
+        type=int,
+        default=1,
+        help="Optional matchup-sharded worker count for canonical non-demo final eval",
+    )
+    parser.add_argument(
+        "--parallel-worker-device",
+        action="append",
+        default=None,
+        help="Optional eval device assignment for parallel workers (repeatable, round-robined)",
     )
     parser.add_argument(
         "--skip-metagame",
@@ -774,6 +1063,7 @@ def main() -> None:
     paired_seed_limit = _require_positive_int(parser, "--paired-seed-limit", args.paired_seed_limit)
     stage1_paired_seeds = _require_positive_int(parser, "--stage1-paired-seeds", args.stage1_paired_seeds)
     max_paired_seeds = _require_positive_int(parser, "--max-paired-seeds", args.max_paired_seeds)
+    parallel_workers = int(_require_positive_int(parser, "--parallel-workers", args.parallel_workers) or 1)
 
     if args.public_demo:
         if args.run_dir is None:
@@ -857,6 +1147,7 @@ def main() -> None:
         raise SystemExit(
             _run_canonical_eval_pipeline(
                 parser=parser,
+                stack_config_path=args.stack_config.resolve(),
                 stack=stack,
                 run_dir=args.run_dir.resolve(),
                 final_eval_dir=None if args.final_eval_dir is None else args.final_eval_dir.resolve(),
@@ -877,6 +1168,9 @@ def main() -> None:
                 skip_figures=bool(args.skip_figures),
                 skip_readiness=bool(args.skip_readiness),
                 git_commit_override=str(args.git_commit_override),
+                parallel_workers=parallel_workers,
+                parallel_worker_devices=tuple(args.parallel_worker_device or ()),
+                reuse_manifest_policy_selection=bool(args.reuse_manifest_policy_selection),
             )
         )
 
@@ -889,6 +1183,11 @@ def main() -> None:
         raise ValueError("stack config is missing evaluation settings")
 
     records = load_eval_game_records(args.episodes_jsonl)
+    validate_eval_game_records_contract(
+        records,
+        config_hash256=config_hash256,
+        spec_hash256=reported_spec_hash,
+    )
     payload = build_matchup_export(
         records,
         stop_rules=evaluation.stop_rules,

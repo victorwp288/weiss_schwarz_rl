@@ -1,7 +1,0 @@
-schema_version: 2
-extends: typed_local.yaml
-description: "Local typed preset with fixed late anchor lanes for B1/B2 curriculum pressure"
-league:
-  sampling:
-    heuristic_public_reserved_envs_per_actor: 1
-    noleague_baseline_reserved_envs_per_actor: 1

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import torch
@@ -29,7 +30,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Write the sweep plan without spawning training runs")
     args = parser.parse_args()
 
-    repo_root = Path(__file__).resolve().parents[2].parent
+    repo_root = Path(__file__).resolve().parents[2]
     devices = resolve_devices(
         requested_devices=args.device,
         cuda_available=torch.cuda.is_available(),
@@ -43,7 +44,11 @@ def main() -> None:
         devices=devices,
         train_args=args.train_arg,
     )
-    summary = execute_launch_plan(repo_root=repo_root, plan=plan, dry_run=bool(args.dry_run))
+    try:
+        summary = execute_launch_plan(repo_root=repo_root, plan=plan, dry_run=bool(args.dry_run))
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
     group_dir = repo_root / "runs" / "launch_groups" / args.group_label
     plan_path = group_dir / "sweep_plan.json"
     plan_path.parent.mkdir(parents=True, exist_ok=True)

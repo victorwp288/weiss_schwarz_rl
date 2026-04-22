@@ -20,7 +20,7 @@ Read these first:
 uv sync --extra dev
 ```
 
-On Windows and Linux, the managed `uv` path now resolves `torch` from PyTorch's CUDA 12.4 wheel index by default. On platforms without CUDA wheels, it falls back to the platform-default PyTorch build.
+The managed `uv` path prefers the CUDA 12.4 PyTorch index on supported CPython Linux/Windows targets and otherwise falls back to the default PyPI `torch` build.
 
 Optional simulator package extra:
 
@@ -31,7 +31,7 @@ uv sync --extra dev --extra sim
 If you are not using `uv`, install the editable package with dev extras:
 
 ```bash
-python -m pip install --extra-index-url https://download.pytorch.org/whl/cu124 -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 ## Fast verification
@@ -58,12 +58,11 @@ make artifact-hygiene
 
 `make train-min` is the scaffold-only path. The canonical thesis-oriented run paths are described in `docs/runtime_modes.md` and `docs/artifact_contract.md`, and they use the `DecisionBoundaryEnv` contract on top of `weiss-sim`. By default, the training hot path now runs on the simulator `fast` profile with packed legal IDs, while evaluation keeps the deterministic pinned protocol and only densifies legality where the analysis layer benefits from it.
 
-The release-facing experiment surface is the `structured_acceptance_standard` family:
+The release-facing experiment surface is the `thesis-model-*` family:
 
-- `configs/presets/structured_acceptance_standard.yaml` is the canonical current training recipe.
-- `configs/presets/structured_acceptance_standard_auto_gpu.yaml` is the canonical Linux server variant with automatic multi-GPU actor sharding.
-- `configs/presets/structured_acceptance_standard_thesis_eval.yaml` is the canonical richer final-eval companion.
-- `configs/presets/structured_acceptance_standard_multideck.yaml` is the canonical deck-diversity/generalization variant.
+- `thesis-model-auto-gpu` is the canonical current training preset, backed by `configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml`.
+- `thesis-model-eval-auto-gpu` is the canonical richer final-eval companion, backed by `configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml`.
+- `thesis-model-multideck` is the canonical deck-diversity/generalization variant, backed by `configs/presets/structured_acceptance_thesis_model_multideck_auto_gpu.yaml`.
 - `configs/presets/baselines/*.yaml` contains the comparison baselines.
 - `configs/study/metagame_sensitivity.yaml` holds the study-only metagame/sensitivity settings.
 
@@ -76,7 +75,7 @@ Legacy typed presets remain available for older experiments and lower-level dire
 
 For tuning, the repo also ships compact sweep presets for the grouped typed and baseline flows. Those sweeps use deterministic config overrides, so each candidate still lands in its own canonical run with a distinct config hash instead of being a one-off shell mutation.
 
-For operator safety, canonical runs now keep both `training/checkpoints/latest.pt` and `training/checkpoints/best.pt` plus a `checkpoint_tracker.json` manifest, and `train.py` can resume either in-place or from a direct checkpoint path. The wrapper remains the release-facing thesis entrypoint, but the current `standard` family requires a completed dedicated `baseline_noleague` run. Use `python/scripts/thesis_run.py --preset standard --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` once that baseline artifact exists.
+For operator safety, canonical runs now keep both `training/checkpoints/latest.pt` and `training/checkpoints/best.pt` plus a `checkpoint_tracker.json` manifest, and `train.py` can resume either in-place or from a direct checkpoint path. The wrapper remains the release-facing thesis entrypoint, but the current `thesis-model-auto-gpu` surface requires a completed dedicated `baseline_noleague` run. Use `python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` once that baseline artifact exists.
 
 Canonical runs also write TensorBoard event files under `runs/<run>/tensorboard/`. Those events include run metadata, training/runtime scalars, checkpoint alias updates, periodic dev-eval summaries, and the post-run final-eval/metagame/readiness summaries. Inspect them with:
 

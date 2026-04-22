@@ -7,7 +7,7 @@ The canonical simulator-backed path uses the published `weiss-sim` package, the 
 ## Start here
 
 - [Getting started](getting_started.md)
-- [Standard recipe](standard_recipe.md)
+- [Thesis Model Recipe](standard_recipe.md)
 - [Runtime modes](runtime_modes.md)
 - [Artifact contract](artifact_contract.md)
 - [Troubleshooting](troubleshooting.md)

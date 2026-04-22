@@ -14,8 +14,7 @@ Goal: get a fresh clone to a successful verification run without needing a 1:1 w
 The repo now supports three useful lanes:
 
 - `configs/stack_smoke.yaml` with `make train-min` is the explicit scaffold-only path. It proves config loading, simulator provenance capture, and run-manifest writing, but it does not claim thesis-grade training.
-- `python/scripts/thesis_run.py --preset standard --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` is the canonical simulator-backed thesis path for local train/eval once the dedicated B1 anchor exists.
-- `python/scripts/thesis_run.py --preset standard-auto-gpu --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` is the canonical Linux server variant when you want automatic multi-GPU actor sharding.
+- `python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` is the frozen simulator-backed thesis path once the dedicated B1 anchor exists.
 - `configs/presets/typed_thesis_locked.yaml` and `configs/presets/typed_local.yaml` remain available as lower-level legacy/compatibility stack surfaces.
 - `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline.
 
@@ -42,7 +41,7 @@ From the repo root:
 uv sync --extra dev
 ```
 
-That managed install now resolves the CUDA 12.4 PyTorch wheels on Windows and Linux by default. macOS and other non-CUDA platforms continue to use the platform-default PyTorch build.
+That managed install prefers the CUDA 12.4 PyTorch index on supported CPython Linux/Windows targets and otherwise falls back to the default PyPI `torch` build.
 
 If you want the released simulator dependency instead of relying on a sibling checkout, use:
 
@@ -103,7 +102,7 @@ Use this for the real thesis-oriented train/eval path. It exercises the single-n
 
 Requirements:
 
-- use `python/scripts/thesis_run.py --preset standard` for the local single-GPU path, or `--preset standard-auto-gpu` on a multi-GPU Linux node
+- use `python/scripts/thesis_run.py --preset thesis-model-auto-gpu` for the frozen multi-GPU thesis path
 - install `weiss-sim 0.8.1` with `uv sync --extra dev --extra sim`, or otherwise ensure the active interpreter can import the same validated `weiss_sim`
 - keep the run on a single machine for the canonical path
 - prepare a dedicated `baseline_noleague` run first and pass it through `--b1-baseline-run-dir`
@@ -111,24 +110,24 @@ Requirements:
 Run:
 
 ```bash
-uv run python python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_tiny32_fast_noleague.yaml --run-label b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset standard --run-label thesis_local --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200 --skip-compare
-uv run python python/scripts/make_figures.py --run-dir runs/thesis_local
+uv run python python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml --run-label b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label thesis_model_seed1 --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 400 --skip-compare
+uv run python python/scripts/make_figures.py --run-dir runs/thesis_model_seed1
 ```
 
-That wrapper call trains with `structured_acceptance_standard.yaml`, imports the canonical B1 anchor from the dedicated baseline run, and by default evaluates with `structured_acceptance_standard_thesis_eval.yaml`.
+That wrapper call trains with the frozen tiny248 thesis model preset, imports the canonical B1 anchor from the dedicated baseline run, and by default evaluates with `structured_acceptance_thesis_model_eval_auto_gpu.yaml`.
 
 Expected training artifacts when the runtime is available:
 
-- `runs/thesis_local/training/logs/scalars.jsonl`
-- `runs/thesis_local/training/logs/training_metrics.jsonl`
-- `runs/thesis_local/training/checkpoints/checkpoint_1.pt`
-- `runs/thesis_local/training/checkpoints/checkpoint_metadata_1.json`
+- `runs/thesis_model_seed1/training/logs/scalars.jsonl`
+- `runs/thesis_model_seed1/training/logs/training_metrics.jsonl`
+- `runs/thesis_model_seed1/training/checkpoints/checkpoint_1.pt`
+- `runs/thesis_model_seed1/training/checkpoints/checkpoint_metadata_1.json`
 
 Inspection after either path:
 
 ```bash
-cat runs/thesis_local/manifest.json
+cat runs/thesis_model_seed1/manifest.json
 ```
 
 You should see fields like `run_id256`, `spec_hash256`, `config_hash256`, `simulator`, and `spec_bundle`.
@@ -138,7 +137,7 @@ You should see fields like `run_id256`, `spec_hash256`, `config_hash256`, `simul
 These are the follow-up checks for the other top-level entrypoints:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
+uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
 uv run python python/scripts/verify_repo.py
@@ -156,12 +155,12 @@ This path is intentionally synthetic. It exists so CI and public readers can exe
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/structured_acceptance_standard.yaml \
+  --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml \
   --public-demo \
   --run-label toy_public_demo
 
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml \
+  --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml \
   --public-demo \
   --run-dir runs/toy_public_demo
 

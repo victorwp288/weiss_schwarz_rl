@@ -45,7 +45,7 @@ def _derive_stream(seed64: int) -> tuple[int, int]:
 class Pcg32XshRrV1:
     """Versioned, seeded PCG32 XSH RR generator.
 
-    Seeding is pinned to the master plan:
+    Seeding is pinned to the evaluation RNG contract:
     - initstate = stable_hash64(b"pcg32_state_v1" + rng_seed64_le)
     - initseq = stable_hash64(b"pcg32_seq_v1" + rng_seed64_le)
     - recommended PCG two-step scramble

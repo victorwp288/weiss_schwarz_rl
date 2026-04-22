@@ -187,6 +187,8 @@ class TrainingConfig:
     diverse_model_actor_count: int = 0
     diverse_opponent_batch_fraction: float = 0.0
     diverse_opponent_batch_wait_ms: int = 0
+    collect_batch_prefetch_enabled: bool = False
+    heuristic_native_rollout_enabled: bool = False
     heuristic_actor_hidden_state_tracking: bool = True
     profile_timers: bool = False
     torch_profiler: bool = False
@@ -422,6 +424,16 @@ class CurriculumStallMonitorConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CurriculumEarlyCutoffConfig:
+    enabled: bool
+    warmup_updates: int
+    patience_updates: int
+    min_improvement: float
+    stall_patience_evals: int
+    stall_rate_threshold: float
+
+
+@dataclass(frozen=True, slots=True)
 class CurriculumCheckpointGuardConfig:
     enabled: bool
     rollback_score_margin: float
@@ -441,6 +453,16 @@ class CurriculumConfig:
             enabled=False,
             truncation_rate_threshold=1.0,
             consecutive_evals=2,
+        )
+    )
+    early_cutoff: CurriculumEarlyCutoffConfig = field(
+        default_factory=lambda: CurriculumEarlyCutoffConfig(
+            enabled=False,
+            warmup_updates=0,
+            patience_updates=0,
+            min_improvement=0.0,
+            stall_patience_evals=0,
+            stall_rate_threshold=1.0,
         )
     )
     checkpoint_guard: CurriculumCheckpointGuardConfig = field(
@@ -492,6 +514,9 @@ class PromotionGateConfig:
     folding: str
     guardrails: PromotionGateGuardrailsConfig
     record_file: str
+    async_enabled: bool = False
+    parallel_workers: int = 1
+    parallel_worker_devices: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -651,6 +676,9 @@ class EvaluationConfig:
     legal_fingerprint_checks: LegalFingerprintChecksConfig
     decision_kind_tagging: DecisionKindTaggingConfig
     final_policy_set_selection: FinalPolicySetSelectionConfig
+    async_periodic_dev_eval_enabled: bool = False
+    periodic_dev_eval_parallel_workers: int = 1
+    periodic_dev_eval_parallel_worker_devices: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,7 +1,11 @@
 schema_version: 2
-extends: ../typed_thesis_locked.yaml
-description: "Baseline no-league IMPALA preset"
-experiment:
-  role: baseline_noleague
-league:
-  enabled: false
+extends: structured_acceptance_thesis_model_auto_gpu_noleague.yaml
+description: "Baseline no-league IMPALA preset aligned to the frozen thesis-model surface"
+curriculum:
+  early_cutoff:
+    enabled: true
+    warmup_updates: 120
+    patience_updates: 120
+    min_improvement: 0.01
+    stall_patience_evals: 4
+    stall_rate_threshold: 0.25

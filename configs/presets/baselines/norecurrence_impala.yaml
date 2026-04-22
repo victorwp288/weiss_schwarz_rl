@@ -1,10 +1,17 @@
 schema_version: 2
-extends: ../typed_thesis_locked.yaml
-description: "Baseline non-recurrent IMPALA preset"
+extends: ../structured_acceptance_thesis_model_auto_gpu.yaml
+description: "Baseline non-recurrent IMPALA preset aligned to the frozen thesis-model surface"
 experiment:
   role: baseline_norecurrence
+curriculum:
+  early_cutoff:
+    enabled: true
+    warmup_updates: 120
+    patience_updates: 120
+    min_improvement: 0.01
+    stall_patience_evals: 4
+    stall_rate_threshold: 0.25
 model:
-  encoder_kind: mlp
   recurrent_core: none
 training:
   algorithm: impala_vtrace_ff

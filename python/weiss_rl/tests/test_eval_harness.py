@@ -502,6 +502,28 @@ def test_game_result_from_step_prefers_explicit_winner_seat_metadata() -> None:
     )
 
 
+def test_game_result_from_step_prefers_explicit_winner_seat_metadata_on_truncation() -> None:
+    step = SimpleNamespace(
+        reward=np.array([0.0], dtype=np.float32),
+        winner_seat=np.array([1], dtype=np.int8),
+        terminated=np.array([True]),
+        truncated=np.array([True]),
+        engine_status=np.array([0], dtype=np.uint8),
+        episode_seed=np.array([10], dtype=np.uint64),
+        episode_key=np.array([778], dtype=np.uint64),
+    )
+
+    assert game_result_from_step(step) == GameResult(
+        episode_seed=10,
+        terminated=True,
+        truncated=True,
+        winner_seat=1,
+        engine_status=0,
+        termination_reason="timeout_unknown",
+        simulator_episode_key=778,
+    )
+
+
 def test_game_result_from_step_treats_zero_terminal_reward_as_draw_fallback() -> None:
     step = SimpleNamespace(
         reward=np.array([0.0], dtype=np.float32),

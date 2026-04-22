@@ -1,10 +1,16 @@
 schema_version: 2
-extends: ../typed_thesis_locked.yaml
-description: "Baseline PPO-lite preset"
+extends: ../structured_acceptance_thesis_model_auto_gpu.yaml
+description: "Baseline PPO-lite preset aligned to the frozen thesis-model surface"
 experiment:
   role: baseline_ppo_lite
-model:
-  encoder_kind: mlp
+curriculum:
+  early_cutoff:
+    enabled: true
+    warmup_updates: 120
+    patience_updates: 120
+    min_improvement: 0.01
+    stall_patience_evals: 4
+    stall_rate_threshold: 0.25
 training:
   algorithm: ppo_lite_masked_v1
   optimizer:

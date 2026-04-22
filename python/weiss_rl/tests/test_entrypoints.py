@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import torch
 
@@ -34,6 +35,8 @@ def _typed_observation_spec() -> dict[str, object]:
             {"name": "active_player", "index": 0},
             {"name": "phase", "index": 1},
             {"name": "decision_kind", "index": 2},
+            {"name": "choice_page_start", "index": 3},
+            {"name": "choice_total", "index": 4},
         ],
         "player_blocks": [
             {
@@ -78,6 +81,17 @@ def _write_stub_weiss_sim(
             "action_encoding_version": 1,
             "action_space_size": 9,
             "pass_action_id": pass_action_id,
+            "constants": [
+                ["MAX_HAND", 5],
+                ["MAX_STAGE", 5],
+                ["ATTACK_SLOT_COUNT", 3],
+            ],
+            "families": [
+                {"name": "pass", "base": pass_action_id, "count": 1},
+            ],
+            "attack_type_encoding": [
+                ["direct", 0],
+            ],
         },
     }
     (tmp_path / "weiss_sim.py").write_text(
@@ -221,7 +235,7 @@ def _write_runtime_weiss_sim(
                 "    out.legal_offsets[:] = 0",
                 "    if EMPTY_EVAL_LEGAL_ROW:",
                 "        return",
-                "    out.legal_ids[0] = 0",
+                "    out.legal_ids[0] = PASS_ACTION_ID",
                 "    out.legal_offsets[1:] = 1",
                 "",
                 "def _fill_step(out, *, layout: str, seed: int) -> None:",
@@ -742,6 +756,58 @@ def test_eval_entrypoint_honors_completed_manifest_policy_selection(tmp_path: Pa
     assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
 
 
+def test_eval_entrypoint_requires_explicit_opt_in_to_reuse_completed_manifest_policy_selection(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_policy_selection_locked_no_reuse"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+    layout.run_summary_path.write_text(
+        json.dumps({"kind": "run_summary_v1", "canonical_eval_completed": True}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "policy_set_selection": ["B0 RandomLegal", "policy_locked"],
+        "policy_set_selection_details": {
+            "mode": "deterministic_v1",
+            "status": "resolved",
+        },
+    }
+
+    policy_ids, details, resolved_snapshot_registry, resolved_dev_eval = eval_script._resolve_policy_ids_for_run(
+        policy_ids=[],
+        stack=stack,
+        manifest=manifest,
+        layout=layout,
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+        allow_completed_manifest_policy_selection=False,
+    )
+
+    assert policy_ids == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "policy_000400",
+        "policy_000100",
+        "policy_000200",
+        "policy_000300",
+        "policy_000150",
+        "policy_000250",
+        "policy_000350",
+    ]
+    assert details["mode"] == "deterministic_v1"
+    assert resolved_snapshot_registry == layout.training_snapshots_dir / "registry.json"
+    assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
+
+
 def test_eval_entrypoint_ignores_incomplete_manifest_selection_from_canonical_eval_pipeline(tmp_path: Path) -> None:
     import scripts.eval as eval_script
 
@@ -935,6 +1001,7 @@ def test_eval_pipeline_persists_policy_selection_before_run_final_eval(tmp_path:
 
     def _fake_run_final_eval(**_kwargs: object) -> dict[str, object]:
         observed["manifest"] = json.loads(layout.manifest_path.read_text(encoding="utf-8"))
+        observed["metadata"] = cast(dict[str, object], _kwargs["metadata"])
         raise RuntimeError("stop after manifest check")
 
     monkeypatch.setattr(eval_script, "TensorBoardLogger", _FakeTensorBoardLogger)
@@ -950,6 +1017,7 @@ def test_eval_pipeline_persists_policy_selection_before_run_final_eval(tmp_path:
     try:
         eval_script._run_canonical_eval_pipeline(
             parser=eval_script.argparse.ArgumentParser(),
+            stack_config_path=stack_config.resolve(),
             stack=stack,
             run_dir=run_dir,
             final_eval_dir=None,
@@ -966,6 +1034,9 @@ def test_eval_pipeline_persists_policy_selection_before_run_final_eval(tmp_path:
             skip_figures=True,
             skip_readiness=True,
             git_commit_override="",
+            parallel_workers=1,
+            parallel_worker_devices=(),
+            reuse_manifest_policy_selection=False,
         )
     except RuntimeError as exc:
         assert str(exc) == "stop after manifest check"
@@ -983,6 +1054,126 @@ def test_eval_pipeline_persists_policy_selection_before_run_final_eval(tmp_path:
         "final_policy_set_size": 10,
         "status": "resolved",
     }
+    assert observed["metadata"]["selection"] == {
+        "mode": "deterministic_v1",
+        "policy_count": len(expected_policy_ids),
+        "snapshot_registry_path": (layout.training_snapshots_dir / "registry.json").as_posix(),
+        "dev_eval_summaries_path": (layout.training_logs_dir / "periodic_dev_eval_summaries.json").as_posix(),
+        "final_policy_set_size": 10,
+    }
+
+
+def test_eval_pipeline_uses_parallel_helper_when_requested(tmp_path: Path, monkeypatch) -> None:
+    import scripts.eval as eval_script
+
+    expected_policy_ids = [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "policy_000400",
+        "policy_000100",
+        "policy_000200",
+        "policy_000300",
+        "policy_000150",
+        "policy_000250",
+        "policy_000350",
+    ]
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_pipeline_parallel"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+    layout.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id256": "ab" * 32,
+                "config_hash256": "cd" * 32,
+                "spec_hash256": "ef" * 32,
+                "policy_set_selection": [],
+                "policy_set_selection_details": {
+                    "status": "unresolved",
+                    "reason": "selection_pending",
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class _FakeTensorBoardLogger:
+        enabled = False
+
+        def __init__(self, _log_dir: Path) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class _FakeContract:
+        spec_bundle = {
+            "observation": {"obs_len": 512},
+            "action": {"action_space_size": 9, "pass_action_id": 8},
+        }
+
+    observed: dict[str, object] = {}
+
+    def _fake_parallel_final_eval(**kwargs: object) -> dict[str, object]:
+        observed["policy_ids"] = kwargs["policy_ids"]
+        observed["parallel_workers"] = kwargs["parallel_workers"]
+        observed["parallel_worker_devices"] = kwargs["parallel_worker_devices"]
+        observed["manifest"] = json.loads(layout.manifest_path.read_text(encoding="utf-8"))
+        raise RuntimeError("stop after parallel helper check")
+
+    monkeypatch.setattr(eval_script, "TensorBoardLogger", _FakeTensorBoardLogger)
+    monkeypatch.setattr(
+        eval_script,
+        "load_verified_simulator_contract",
+        lambda *_args, **_kwargs: _FakeContract(),
+    )
+    monkeypatch.setattr(eval_script, "_run_parallel_final_eval", _fake_parallel_final_eval)
+
+    try:
+        eval_script._run_canonical_eval_pipeline(
+            parser=eval_script.argparse.ArgumentParser(),
+            stack_config_path=stack_config.resolve(),
+            stack=stack,
+            run_dir=run_dir,
+            final_eval_dir=None,
+            policy_ids=[],
+            snapshot_registry_path=None,
+            dev_eval_summaries_path=None,
+            b1_baseline_run_dir=None,
+            bootstrap_samples=8,
+            paired_seed_limit=1,
+            stage1_paired_seeds=1,
+            max_paired_seeds=1,
+            skip_metagame=True,
+            study_config_path=None,
+            skip_figures=True,
+            skip_readiness=True,
+            git_commit_override="",
+            parallel_workers=2,
+            parallel_worker_devices=("cuda:1", "cuda:2"),
+            reuse_manifest_policy_selection=False,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "stop after parallel helper check"
+    else:
+        raise AssertionError("expected fake parallel helper to stop the pipeline")
+
+    assert observed["policy_ids"] == expected_policy_ids
+    assert observed["parallel_workers"] == 2
+    assert observed["parallel_worker_devices"] == ("cuda:1", "cuda:2")
+    persisted = cast(dict[str, object], observed["manifest"])
+    assert persisted["policy_set_selection"] == expected_policy_ids
 
 
 def test_eval_git_commit_override_does_not_mutate_manifest_payload() -> None:
@@ -1108,8 +1299,10 @@ def test_eval_entrypoint_fails_fast_on_config_hash_mismatch(tmp_path: Path) -> N
 
 
 def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
-    _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    bundle = _write_stub_weiss_sim(tmp_path, spec_hash=123)
     stack_config = _copy_repo_configs(tmp_path)
+    config_hash256 = compute_config_hash256(load_stack_config(stack_config))
+    spec_hash256 = spec_bundle_hash(bundle)
     episodes_path = tmp_path / "episodes.jsonl"
     summary_json = tmp_path / "summary.json"
     summary_csv = tmp_path / "summary.csv"
@@ -1119,14 +1312,14 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
             (
                 json.dumps(
                     {
-                        "pair_index": 0,
-                        "swap_index": 0,
-                        "episode_index": 0,
-                        "episode_seed": 7,
-                        "episode_key": "01" * 32,
-                        "episode_key64": 1,
-                        "config_hash256": "ab" * 32,
-                        "spec_hash256": "cd" * 32,
+                            "pair_index": 0,
+                            "swap_index": 0,
+                            "episode_index": 0,
+                            "episode_seed": 7,
+                            "episode_key": "01" * 32,
+                            "episode_key64": 1,
+                            "config_hash256": config_hash256,
+                            "spec_hash256": spec_hash256,
                         "focal_policy_id": "champion",
                         "opponent_policy_id": "baseline",
                         "seat0_policy_id": "champion",
@@ -1136,19 +1329,28 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
                         "terminated": True,
                         "truncated": False,
                         "engine_status": 0,
+                        "decision_count": 5,
+                        "tick_count": 5,
+                        "no_progress_count": 0,
+                        "termination_reason": "terminated",
+                        "total_actions": 5,
+                        "pass_actions": 0,
+                        "main_move_actions": 5,
+                        "pass_with_nonpass_available": 0,
+                        "max_consecutive_main_moves": 3,
                     },
                     sort_keys=True,
                 ),
                 json.dumps(
                     {
-                        "pair_index": 0,
-                        "swap_index": 1,
-                        "episode_index": 1,
-                        "episode_seed": 7,
-                        "episode_key": "02" * 32,
-                        "episode_key64": 2,
-                        "config_hash256": "ab" * 32,
-                        "spec_hash256": "cd" * 32,
+                            "pair_index": 0,
+                            "swap_index": 1,
+                            "episode_index": 1,
+                            "episode_seed": 7,
+                            "episode_key": "02" * 32,
+                            "episode_key64": 2,
+                            "config_hash256": config_hash256,
+                            "spec_hash256": spec_hash256,
                         "focal_policy_id": "champion",
                         "opponent_policy_id": "baseline",
                         "seat0_policy_id": "baseline",
@@ -1158,6 +1360,15 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
                         "terminated": True,
                         "truncated": False,
                         "engine_status": 0,
+                        "decision_count": 4,
+                        "tick_count": 4,
+                        "no_progress_count": 0,
+                        "termination_reason": "terminated",
+                        "total_actions": 4,
+                        "pass_actions": 0,
+                        "main_move_actions": 4,
+                        "pass_with_nonpass_available": 0,
+                        "max_consecutive_main_moves": 2,
                     },
                     sort_keys=True,
                 ),
@@ -1196,6 +1407,63 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
     assert diagnostics["seat_results"]["seat0_wins"] == 1
     assert diagnostics["seat_results"]["seat1_wins"] == 1
     assert summary_csv.read_text(encoding="utf-8").splitlines()[0].startswith("focal_policy_id,")
+
+
+def test_eval_entrypoint_rejects_summary_only_export_when_episode_contract_hashes_do_not_match(tmp_path: Path) -> None:
+    _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+    episodes_path = tmp_path / "episodes.jsonl"
+    episodes_path.write_text(
+        json.dumps(
+            {
+                "pair_index": 0,
+                "swap_index": 0,
+                "episode_index": 0,
+                "episode_seed": 7,
+                "episode_key": "01" * 32,
+                "episode_key64": 1,
+                "config_hash256": "ab" * 32,
+                "spec_hash256": "cd" * 32,
+                "focal_policy_id": "champion",
+                "opponent_policy_id": "baseline",
+                "seat0_policy_id": "champion",
+                "seat1_policy_id": "baseline",
+                "focal_seat": 0,
+                "outcome": "W",
+                "terminated": True,
+                "truncated": False,
+                "engine_status": 0,
+                "decision_count": 5,
+                "tick_count": 5,
+                "no_progress_count": 0,
+                "termination_reason": "terminated",
+                "total_actions": 5,
+                "pass_actions": 0,
+                "main_move_actions": 5,
+                "pass_with_nonpass_available": 0,
+                "max_consecutive_main_moves": 3,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="eval.py",
+        stack_config=stack_config,
+        spec_hash="",
+        extra_args=[
+            "--episodes-jsonl",
+            str(episodes_path),
+            "--summary-json",
+            str(tmp_path / "summary.json"),
+        ],
+    )
+
+    assert result.returncode != 0
+    assert "config_hash256 does not match" in result.stderr
 
 
 def test_paper_readiness_entrypoint_writes_summary_json(tmp_path: Path) -> None:

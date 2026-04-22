@@ -5,6 +5,7 @@ import hashlib
 import importlib
 import inspect
 import json
+import multiprocessing as mp
 import os
 import platform
 import shutil
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +41,7 @@ from weiss_rl.eval import (
     build_matchup_export,
     build_seat_advantage_diagnostics,
     game_result_from_step,
+    paired_seed_scores,
     run_seat_swapped_matchup,
     sample_action_pinned,
     write_matchup_diagnostics_json,
@@ -51,7 +54,18 @@ from weiss_rl.eval.policy_set import (
     heuristic_public_profile_name_for_policy_id,
     select_final_policy_set_deterministic_v1,
 )
-from weiss_rl.league import run_promotion_gate
+from weiss_rl.eval.simulator_runner import _resolve_eval_device
+from weiss_rl.league import (
+    PromotionGateAnchor,
+    PromotionGateAnchorResult,
+    PromotionGatePosterior,
+    PromotionGateRate,
+    PromotionGateResult,
+    build_promotion_gate_result,
+    resolve_promotion_gate_anchors,
+    resolve_promotion_gate_seed_file,
+    run_promotion_gate,
+)
 from weiss_rl.league.registry import (
     REGISTRY_FILENAME,
     SNAPSHOT_METADATA_FILENAME,
@@ -150,6 +164,66 @@ class ResumeCheckpoint:
     total_samples_processed: int
 
 
+@dataclass(frozen=True, slots=True)
+class PeriodicDevEvalOpponentSpec:
+    policy_id: str
+    display_name: str
+    kind: str
+    snapshot_path: str | None = None
+    heuristic_profile: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AsyncPeriodicDevEvalRequest:
+    stack: StackConfig
+    checkpoint_path: Path
+    focal_policy_id: str
+    update_count: int
+    policy_version: int
+    run_dir: Path
+    run_id256: str
+    config_hash256: str
+    spec_hash256: str
+    artifact_dir_name: str
+    artifact_scope: str
+    paired_seeds: tuple[int, ...]
+    opponents: tuple[PeriodicDevEvalOpponentSpec, ...]
+    eval_device_override: str | None
+    parallel_workers: int
+    parallel_worker_devices: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class PendingPeriodicDevEval:
+    future: Future[dict[str, Any]]
+    request: AsyncPeriodicDevEvalRequest
+    pinned_snapshot_ids: tuple[str, ...]
+    latest_metrics: dict[str, float]
+
+
+@dataclass(frozen=True, slots=True)
+class AsyncPromotionGateRequest:
+    stack: StackConfig
+    run_dir: Path
+    candidate_policy_id: str
+    candidate_snapshot_path: str
+    update_count: int
+    policy_version: int
+    run_id256: str
+    config_hash256: str
+    spec_hash256: str
+    anchor_policy_ids: dict[str, str]
+    anchor_specs: tuple[PeriodicDevEvalOpponentSpec, ...]
+    eval_device_override: str | None
+
+
+@dataclass(slots=True)
+class PendingPromotionGate:
+    future: Future[dict[str, Any]]
+    request: AsyncPromotionGateRequest
+    pinned_snapshot_ids: tuple[str, ...]
+
+
 class _PeriodicDevEvalRunner:
     def __init__(
         self,
@@ -163,6 +237,7 @@ class _PeriodicDevEvalRunner:
         artifact_dir: Path,
         focal_policy_id: str,
         require_sorted_legal_ids: bool,
+        eval_device: torch.device | str | None = None,
         opponent_model: PolicyValueModel | None = None,
         heuristic_policy: HeuristicPublicPolicy | None = None,
     ) -> None:
@@ -178,7 +253,7 @@ class _PeriodicDevEvalRunner:
         self.focal_policy_id = focal_policy_id
         self.require_sorted_legal_ids = require_sorted_legal_ids
         self._baseline_logits = np.zeros((action_dim,), dtype=np.float32)
-        self._device = torch.device("cpu")
+        self._device = _resolve_eval_device(stack, eval_device=eval_device)
 
     def run_game(self, scheduled_game: ScheduledGame):
         env = _build_ids_eval_env(
@@ -450,6 +525,61 @@ def _save_snapshot_registry_with_retention(
         training_paths=training_paths,
         run_dir=run_dir,
         pruned_snapshots=pruned_snapshots,
+    )
+
+
+def _pin_snapshot_ids(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    snapshot_ids: Sequence[str],
+) -> tuple[str, ...]:
+    requested_ids = tuple(dict.fromkeys(str(snapshot_id).strip() for snapshot_id in snapshot_ids if str(snapshot_id).strip()))
+    if not requested_ids:
+        return ()
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    registry = SnapshotRegistry.load(registry_path)
+    _sync_snapshot_registry_retention(stack, registry)
+    existing_pins = set(registry.pinned_snapshots)
+    newly_pinned: list[str] = []
+    for snapshot_id in requested_ids:
+        registry.pin_snapshot(snapshot_id)
+        if snapshot_id not in existing_pins:
+            newly_pinned.append(snapshot_id)
+    _save_snapshot_registry_with_retention(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        registry=registry,
+    )
+    return tuple(newly_pinned)
+
+
+def _unpin_snapshot_ids(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    snapshot_ids: Sequence[str],
+) -> None:
+    removable_ids = {str(snapshot_id).strip() for snapshot_id in snapshot_ids if str(snapshot_id).strip()}
+    if not removable_ids:
+        return
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    if not registry_path.is_file():
+        return
+    registry = SnapshotRegistry.load(registry_path)
+    _sync_snapshot_registry_retention(stack, registry)
+    registry.pinned_snapshots = [
+        snapshot_id for snapshot_id in registry.pinned_snapshots if snapshot_id not in removable_ids
+    ]
+    registry.normalize()
+    _save_snapshot_registry_with_retention(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        registry=registry,
     )
 
 
@@ -1498,20 +1628,26 @@ def _dev_eval_ineligibility_reasons(
     if current_score is None:
         return ("missing_score",)
     curriculum = stack.config.curriculum
-    if curriculum is None or not curriculum.stall_monitor.enabled:
+    if curriculum is None:
         return ()
     reasons: list[str] = []
-    worst_rate = _dev_eval_worst_stall_rate(dev_eval_summary)
-    if worst_rate is not None and worst_rate >= float(curriculum.stall_monitor.truncation_rate_threshold):
-        reasons.append("truncation")
+    if curriculum.stall_monitor.enabled:
+        worst_rate = _dev_eval_worst_stall_rate(dev_eval_summary)
+        if worst_rate is not None and worst_rate >= float(curriculum.stall_monitor.truncation_rate_threshold):
+            reasons.append("truncation")
     checkpoint_guard = curriculum.checkpoint_guard
-    confidence = _dev_eval_confidence_stats(dev_eval_summary)
-    min_prob_gt_half = confidence["min_prob_gt_half"]
-    max_ci_half_width = confidence["max_ci_half_width"]
-    if min_prob_gt_half is not None and (float(min_prob_gt_half) < float(checkpoint_guard.promote_min_prob_gt_half)):
-        reasons.append("confidence_prob")
-    if max_ci_half_width is not None and (float(max_ci_half_width) > float(checkpoint_guard.promote_max_ci_half_width)):
-        reasons.append("confidence_ci")
+    if checkpoint_guard.enabled:
+        confidence = _dev_eval_confidence_stats(dev_eval_summary)
+        min_prob_gt_half = confidence["min_prob_gt_half"]
+        max_ci_half_width = confidence["max_ci_half_width"]
+        if min_prob_gt_half is not None and (
+            float(min_prob_gt_half) < float(checkpoint_guard.promote_min_prob_gt_half)
+        ):
+            reasons.append("confidence_prob")
+        if max_ci_half_width is not None and (
+            float(max_ci_half_width) > float(checkpoint_guard.promote_max_ci_half_width)
+        ):
+            reasons.append("confidence_ci")
     return tuple(reasons)
 
 
@@ -1821,6 +1957,29 @@ def _best_checkpoint_record(training_paths: TrainingPaths) -> Mapping[str, Any] 
     tracker = _load_checkpoint_tracker(training_paths)
     best_record = tracker.get("best")
     return best_record if isinstance(best_record, Mapping) else None
+
+
+def _restore_checkpoint_to_latest_alias(
+    *,
+    checkpoint_path: Path,
+    training_paths: TrainingPaths,
+    learner: ImpalaLearner,
+    stack: StackConfig,
+    device: torch.device,
+    expected_spec_hash256: str,
+    algorithm: str,
+) -> ResumeCheckpoint:
+    resume_state = _restore_learner_from_checkpoint(
+        checkpoint_path=checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=device,
+        expected_spec_hash256=expected_spec_hash256,
+        algorithm=algorithm,
+        restore_counters=True,
+    )
+    shutil.copy2(checkpoint_path, training_paths.latest_checkpoint_path)
+    return resume_state
 
 
 def _resolve_resume_checkpoint_path(
@@ -2152,6 +2311,23 @@ def _collect_training_batch(
             truncation_bootstrap_value=bool(rewards_config.truncation.bootstrap_value),
         )
     raise RuntimeError(f"Unsupported training.algorithm: {algorithm}")
+
+
+def _collect_training_batch_prefetch(
+    *,
+    runtime: QueueRuntime,
+    algorithm: str,
+    training_config: Any,
+    rewards_config: Any,
+    actor_torch_threads: int | None,
+) -> Any:
+    with _torch_num_threads_scope(actor_torch_threads):
+        return _collect_training_batch(
+            runtime=runtime,
+            algorithm=algorithm,
+            training_config=training_config,
+            rewards_config=rewards_config,
+        )
 
 
 def _run_structured_warmstart(
@@ -2789,6 +2965,7 @@ def _load_snapshot_eval_model(
     observation_dim: int,
     action_dim: int,
     stack: StackConfig,
+    eval_device: torch.device | str | None = None,
     observation_spec: dict[str, Any] | None = None,
     spec_bundle: dict[str, Any] | None = None,
 ) -> PolicyValueModel:
@@ -2801,14 +2978,52 @@ def _load_snapshot_eval_model(
     if model_config is None:
         raise RuntimeError("The locked stack is missing the model config block")
 
+    resolved_eval_device = _resolve_eval_device(stack, eval_device=eval_device)
     eval_model = build_policy_value_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
         observation_spec=observation_spec,
         spec_bundle=spec_bundle,
-    ).to(torch.device("cpu"))
-    eval_model.load_state_dict(model_state_dict)
+    ).to(resolved_eval_device)
+    eval_model.load_state_dict(
+        {name: value.detach().to(device=resolved_eval_device).clone() for name, value in model_state_dict.items()}
+    )
+    _restore_model_guidance_from_payload(eval_model, payload)
+    eval_model.eval()
+    return eval_model
+
+
+def _load_checkpoint_eval_model(
+    *,
+    checkpoint_path: Path,
+    observation_dim: int,
+    action_dim: int,
+    stack: StackConfig,
+    eval_device: torch.device | str | None = None,
+    observation_spec: dict[str, Any] | None = None,
+    spec_bundle: dict[str, Any] | None = None,
+) -> PolicyValueModel:
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    model_state_dict = payload.get("model_state_dict")
+    if not isinstance(model_state_dict, dict):
+        raise RuntimeError(f"Checkpoint payload missing model_state_dict: {checkpoint_path}")
+
+    model_config = stack.config.model
+    if model_config is None:
+        raise RuntimeError("The locked stack is missing the model config block")
+
+    resolved_eval_device = _resolve_eval_device(stack, eval_device=eval_device)
+    eval_model = build_policy_value_model(
+        observation_dim=observation_dim,
+        config=model_config,
+        action_dim=action_dim,
+        observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
+    ).to(resolved_eval_device)
+    eval_model.load_state_dict(
+        {name: value.detach().to(device=resolved_eval_device).clone() for name, value in model_state_dict.items()}
+    )
     _restore_model_guidance_from_payload(eval_model, payload)
     eval_model.eval()
     return eval_model
@@ -2828,6 +3043,7 @@ class _PromotionGateRunner:
         pass_action_id: int,
         artifact_dir: Path,
         require_sorted_legal_ids: bool,
+        eval_device: torch.device | str | None = None,
     ) -> None:
         self.stack = stack
         self.focal_policy_id = focal_policy_id
@@ -2839,7 +3055,7 @@ class _PromotionGateRunner:
         self._policy_models = {focal_policy_id: focal_model, **anchor_models}
         self._heuristic_policies = dict(heuristic_policies)
         self._baseline_logits = np.zeros((action_dim,), dtype=np.float32)
-        self._device = torch.device("cpu")
+        self._device = _resolve_eval_device(stack, eval_device=eval_device)
 
     def run_game(self, scheduled_game: ScheduledGame):
         env = _build_ids_eval_env(
@@ -2965,8 +3181,6 @@ def _validate_periodic_dev_eval_contract(stack: StackConfig) -> Any:
     evaluation = _evaluation_config_or_raise(stack)
     if not evaluation.seat_swap:
         raise RuntimeError("Periodic dev eval requires evaluation.seat_swap=true")
-    if evaluation.eval_device != "cpu":
-        raise RuntimeError(f"Periodic dev eval requires evaluation.eval_device='cpu', got {evaluation.eval_device!r}")
     if not evaluation.eval_inference_mode:
         raise RuntimeError("Periodic dev eval requires evaluation.eval_inference_mode=true")
     if evaluation.eval_sampling_algorithm != "pinned_cdf_pcg_v1":
@@ -3091,27 +3305,31 @@ def _promotion_gate_bootstrap_seed(*, update_count: int, policy_version: int) ->
     )
 
 
-def _clone_cpu_eval_model(
+def _clone_eval_model(
     *,
     learner_model: PolicyValueModel,
     observation_dim: int,
     action_dim: int,
     stack: StackConfig,
+    eval_device: torch.device | str | None = None,
     observation_spec: dict[str, Any] | None = None,
     spec_bundle: dict[str, Any] | None = None,
 ) -> PolicyValueModel:
     model_config = stack.config.model
     if model_config is None:
         raise RuntimeError("The locked stack is missing the model config block")
+    resolved_eval_device = _resolve_eval_device(stack, eval_device=eval_device)
     eval_model = build_policy_value_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
         observation_spec=observation_spec,
         spec_bundle=spec_bundle,
-    ).to(torch.device("cpu"))
-    cpu_state_dict = {name: value.detach().cpu().clone() for name, value in learner_model.state_dict().items()}
-    eval_model.load_state_dict(cpu_state_dict)
+    ).to(resolved_eval_device)
+    eval_state_dict = {
+        name: value.detach().to(device=resolved_eval_device).clone() for name, value in learner_model.state_dict().items()
+    }
+    eval_model.load_state_dict(eval_state_dict)
     _restore_model_guidance_from_payload(eval_model, _model_guidance_payload(learner_model))
     eval_model.eval()
     return eval_model
@@ -3168,6 +3386,21 @@ def _stall_monitor_state_path(training_paths: TrainingPaths) -> Path:
     return training_paths.logs_dir / "stall_monitor.json"
 
 
+def _early_cutoff_state_path(training_paths: TrainingPaths) -> Path:
+    return training_paths.logs_dir / "early_cutoff.json"
+
+
+def _early_cutoff_events_path(training_paths: TrainingPaths) -> Path:
+    return training_paths.logs_dir / "early_cutoff_events.jsonl"
+
+
+def _append_early_cutoff_event(training_paths: TrainingPaths, payload: Mapping[str, Any]) -> None:
+    path = _early_cutoff_events_path(training_paths)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(payload), sort_keys=True) + "\n")
+
+
 def _periodic_dev_eval_opponents(
     *,
     stack: StackConfig,
@@ -3176,6 +3409,7 @@ def _periodic_dev_eval_opponents(
     observation_dim: int,
     action_dim: int,
 ) -> list[tuple[str, str, PolicyValueModel | None, HeuristicPublicPolicy | None]]:
+    evaluation = _evaluation_config_or_raise(stack)
     registry_path = ArtifactLayout.from_run_dir(run_dir).training_snapshots_dir / REGISTRY_FILENAME
     registry = SnapshotRegistry.load(registry_path) if registry_path.is_file() else SnapshotRegistry()
     anchor_policy_ids, missing_required = _resolve_promotion_anchor_policy_ids(
@@ -3237,6 +3471,126 @@ def _periodic_dev_eval_opponents(
                     stack=stack,
                     observation_dim=observation_dim,
                     action_dim=action_dim,
+                    eval_device=evaluation.eval_device,
+                    observation_spec=observation_spec,
+                    spec_bundle=spec_bundle,
+                ),
+                None,
+            )
+        )
+    return opponents
+
+
+def _resolve_periodic_dev_eval_opponent_specs(
+    *,
+    stack: StackConfig,
+    run_dir: Path,
+) -> tuple[tuple[PeriodicDevEvalOpponentSpec, ...], tuple[str, ...]]:
+    registry_path = ArtifactLayout.from_run_dir(run_dir).training_snapshots_dir / REGISTRY_FILENAME
+    registry = SnapshotRegistry.load(registry_path) if registry_path.is_file() else SnapshotRegistry()
+    anchor_policy_ids, missing_required = _resolve_promotion_anchor_policy_ids(
+        stack=stack,
+        registry=registry,
+    )
+    if missing_required:
+        missing_text = ",".join(missing_required)
+        raise RuntimeError(f"Periodic dev eval is missing required anchors: {missing_text}")
+
+    league = stack.config.league
+    anchor_names: list[str]
+    if league is None:
+        anchor_names = [_PROMOTION_GATE_RANDOMLEGAL_NAME, _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME]
+    else:
+        anchor_names = [
+            *league.promotion_anchor_set_v1.required,
+            *league.promotion_anchor_set_v1.optional_if_available,
+        ]
+
+    snapshot_index = _snapshot_meta_by_policy_id(registry)
+    specs: list[PeriodicDevEvalOpponentSpec] = []
+    pinned_snapshot_ids: list[str] = []
+    for anchor_name in anchor_names:
+        policy_id = anchor_policy_ids.get(anchor_name)
+        if policy_id is None:
+            continue
+        if policy_id == _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID:
+            specs.append(
+                PeriodicDevEvalOpponentSpec(
+                    policy_id=policy_id,
+                    display_name=anchor_name,
+                    kind="random_legal",
+                )
+            )
+            continue
+        heuristic_profile = heuristic_public_profile_name_for_policy_id(policy_id)
+        if heuristic_profile is not None:
+            specs.append(
+                PeriodicDevEvalOpponentSpec(
+                    policy_id=policy_id,
+                    display_name=anchor_name,
+                    kind="heuristic_public",
+                    heuristic_profile=heuristic_profile,
+                )
+            )
+            continue
+        snapshot = snapshot_index.get(policy_id)
+        if snapshot is None:
+            if league is not None and anchor_name in league.promotion_anchor_set_v1.required:
+                raise RuntimeError(f"Periodic dev eval could not resolve required snapshot anchor {anchor_name!r}")
+            continue
+        specs.append(
+            PeriodicDevEvalOpponentSpec(
+                policy_id=policy_id,
+                display_name=anchor_name,
+                kind="snapshot",
+                snapshot_path=snapshot.path,
+            )
+        )
+        pinned_snapshot_ids.append(policy_id)
+    return tuple(specs), tuple(dict.fromkeys(pinned_snapshot_ids))
+
+
+def _materialize_periodic_dev_eval_opponents(
+    *,
+    stack: StackConfig,
+    contract: SimulatorContract,
+    run_dir: Path,
+    observation_dim: int,
+    action_dim: int,
+    opponent_specs: Sequence[PeriodicDevEvalOpponentSpec],
+    eval_device_override: torch.device | str | None = None,
+) -> list[tuple[str, str, PolicyValueModel | None, HeuristicPublicPolicy | None]]:
+    observation_spec = cast(dict[str, Any] | None, contract.spec_bundle.get("observation"))
+    spec_bundle = cast(dict[str, Any] | None, contract.spec_bundle)
+    evaluation = _evaluation_config_or_raise(stack)
+    opponents: list[tuple[str, str, PolicyValueModel | None, HeuristicPublicPolicy | None]] = []
+    for spec in opponent_specs:
+        if spec.kind == "random_legal":
+            opponents.append((spec.policy_id, spec.display_name, None, None))
+            continue
+        if spec.kind == "heuristic_public":
+            heuristic_profile = str(spec.heuristic_profile or "").strip()
+            if not heuristic_profile:
+                raise RuntimeError(f"Periodic dev eval heuristic opponent is missing a profile: {spec.policy_id}")
+            heuristic_policy = _build_heuristic_public_policy(
+                contract.spec_bundle,
+                scoring_profile=heuristic_profile,
+            )
+            opponents.append((spec.policy_id, spec.display_name, None, heuristic_policy))
+            continue
+        if spec.kind != "snapshot" or spec.snapshot_path is None:
+            raise RuntimeError(f"Unsupported periodic dev eval opponent kind: {spec.kind!r}")
+        opponents.append(
+            (
+                spec.policy_id,
+                spec.display_name,
+                _load_snapshot_eval_model(
+                    run_dir=run_dir,
+                    snapshot_path=spec.snapshot_path,
+                    stack=stack,
+                    observation_dim=observation_dim,
+                    action_dim=action_dim,
+                    eval_device=(evaluation.eval_device if eval_device_override is None else eval_device_override),
                     observation_spec=observation_spec,
                     spec_bundle=spec_bundle,
                 ),
@@ -3263,6 +3617,68 @@ def _persist_periodic_dev_eval_summary(
         "policy_version": int(payload.get("policy_version", 0)),
     }
     _write_json(path, summaries)
+
+
+def _build_checkpoint_record_for_update(
+    *,
+    alias_name: str,
+    alias_path: Path,
+    source_checkpoint_path: Path,
+    artifacts: RunArtifacts,
+    update_count: int,
+    policy_version: int,
+    metric_kind: str | None = None,
+    metric_value: float | None = None,
+) -> dict[str, Any]:
+    return {
+        "alias": alias_name,
+        "alias_path": _relative_path_text(alias_path, root=artifacts.run_dir),
+        "source_checkpoint_path": _relative_path_text(source_checkpoint_path, root=artifacts.run_dir),
+        "update_count": int(update_count),
+        "policy_version": int(policy_version),
+        "metric_kind": metric_kind,
+        "metric_value": metric_value,
+    }
+
+
+def _publish_best_checkpoint_from_dev_eval(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    artifacts: RunArtifacts,
+    checkpoint_path: Path,
+    update_count: int,
+    policy_version: int,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    tracker = _load_checkpoint_tracker(training_paths)
+    candidate_kind, candidate_value = _checkpoint_candidate_metric(
+        stack=stack,
+        latest_metrics=None,
+        dev_eval_summary=dev_eval_summary,
+    )
+    best_record = tracker.get("best")
+    if not isinstance(best_record, Mapping):
+        best_record = None
+    should_update_best = best_record is None or _should_promote_best_checkpoint(
+        existing_record=cast(Mapping[str, Any], best_record),
+        candidate_kind=candidate_kind,
+        candidate_value=candidate_value,
+    )
+    if should_update_best:
+        shutil.copy2(checkpoint_path, training_paths.best_checkpoint_path)
+        tracker["best"] = _build_checkpoint_record_for_update(
+            alias_name="best",
+            alias_path=training_paths.best_checkpoint_path,
+            source_checkpoint_path=checkpoint_path,
+            artifacts=artifacts,
+            update_count=update_count,
+            policy_version=policy_version,
+            metric_kind=candidate_kind,
+            metric_value=candidate_value,
+        )
+        _write_checkpoint_tracker(training_paths, tracker)
+    return tracker
 
 
 def _update_stall_monitor(
@@ -3337,6 +3753,96 @@ def _update_stall_monitor(
     return payload
 
 
+def _update_early_cutoff(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    update_count: int,
+    summary_payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    curriculum = stack.config.curriculum
+    if curriculum is None or not curriculum.early_cutoff.enabled:
+        return None
+    current_score = _dev_eval_aggregate_score(summary_payload)
+    if current_score is None:
+        return None
+
+    early_cutoff = curriculum.early_cutoff
+    state_path = _early_cutoff_state_path(training_paths)
+    state = _load_json_object(state_path, label="early cutoff state") if state_path.is_file() else {}
+    previous_best_score = state.get("best_score")
+    previous_best_update = state.get("best_update_count")
+    previous_consecutive_stall = int(state.get("consecutive_stall_evals", 0))
+
+    improved = False
+    if isinstance(previous_best_score, (int, float)) and np.isfinite(float(previous_best_score)):
+        best_score = float(previous_best_score)
+        best_update_count = (
+            int(previous_best_update) if isinstance(previous_best_update, int) else int(update_count)
+        )
+        if float(current_score) > best_score + float(early_cutoff.min_improvement):
+            best_score = float(current_score)
+            best_update_count = int(update_count)
+            improved = True
+    else:
+        best_score = float(current_score)
+        best_update_count = int(update_count)
+        improved = True
+
+    patience_reference_update = max(int(best_update_count), int(early_cutoff.warmup_updates))
+    no_improvement_updates = max(0, int(update_count) - patience_reference_update)
+    worst_stall_rate = _dev_eval_worst_stall_rate(summary_payload)
+    if (
+        worst_stall_rate is not None
+        and worst_stall_rate >= float(early_cutoff.stall_rate_threshold)
+    ):
+        consecutive_stall_evals = previous_consecutive_stall + 1
+    else:
+        consecutive_stall_evals = 0
+
+    reasons: list[str] = []
+    if (
+        int(early_cutoff.patience_updates) > 0
+        and int(update_count) >= int(early_cutoff.warmup_updates)
+        and no_improvement_updates >= int(early_cutoff.patience_updates)
+    ):
+        reasons.append("no_improvement")
+    if (
+        int(early_cutoff.stall_patience_evals) > 0
+        and consecutive_stall_evals >= int(early_cutoff.stall_patience_evals)
+    ):
+        reasons.append("stall")
+
+    payload = {
+        "enabled": True,
+        "update_count": int(update_count),
+        "current_score": float(current_score),
+        "best_score": float(best_score),
+        "best_update_count": int(best_update_count),
+        "improved": bool(improved),
+        "min_improvement": float(early_cutoff.min_improvement),
+        "warmup_updates": int(early_cutoff.warmup_updates),
+        "patience_updates": int(early_cutoff.patience_updates),
+        "no_improvement_updates": int(no_improvement_updates),
+        "stall_patience_evals": int(early_cutoff.stall_patience_evals),
+        "stall_rate_threshold": float(early_cutoff.stall_rate_threshold),
+        "worst_stall_rate": None if worst_stall_rate is None else float(worst_stall_rate),
+        "consecutive_stall_evals": int(consecutive_stall_evals),
+        "should_stop": bool(reasons),
+        "reasons": reasons,
+    }
+    _write_json(state_path, payload)
+    if reasons:
+        _append_early_cutoff_event(
+            training_paths,
+            {
+                "format": "early_cutoff_event_v1",
+                **payload,
+            },
+        )
+    return payload
+
+
 def _maybe_rollback_to_best_checkpoint(
     *,
     stack: StackConfig,
@@ -3402,14 +3908,14 @@ def _maybe_rollback_to_best_checkpoint(
         return None
 
     best_checkpoint_path = training_paths.best_checkpoint_path
-    _restore_learner_from_checkpoint(
+    _restore_checkpoint_to_latest_alias(
         checkpoint_path=best_checkpoint_path,
+        training_paths=training_paths,
         learner=learner,
         stack=stack,
         device=device,
         expected_spec_hash256=spec_hash256,
         algorithm=algorithm,
-        restore_counters=False,
     )
     demoted_champions = _demote_registry_champions_newer_than(
         training_paths,
@@ -3422,14 +3928,6 @@ def _maybe_rollback_to_best_checkpoint(
     )
     runtime.reset_outcome_tracker()
     runtime.refresh_opponent_pool()
-    _write_checkpoint(
-        checkpoint_path=training_paths.latest_checkpoint_path,
-        learner=learner,
-        stack=stack,
-        device=device,
-        spec_hash256=spec_hash256,
-        algorithm=algorithm,
-    )
     tracker["latest"] = _build_checkpoint_record(
         alias_name="latest",
         alias_path=training_paths.latest_checkpoint_path,
@@ -3502,14 +4000,14 @@ def _maybe_finalize_from_best_checkpoint(
         return None
     confidence = _dev_eval_confidence_stats(dev_eval_summary)
     best_checkpoint_path = training_paths.best_checkpoint_path
-    _restore_learner_from_checkpoint(
+    _restore_checkpoint_to_latest_alias(
         checkpoint_path=best_checkpoint_path,
+        training_paths=training_paths,
         learner=learner,
         stack=stack,
         device=device,
         expected_spec_hash256=spec_hash256,
         algorithm=algorithm,
-        restore_counters=False,
     )
     demoted_champions = _demote_registry_champions_newer_than(
         training_paths,
@@ -3517,14 +4015,6 @@ def _maybe_finalize_from_best_checkpoint(
     )
     runtime.reset_outcome_tracker()
     runtime.refresh_opponent_pool()
-    final_checkpoint_path = _ensure_current_checkpoint(
-        training_paths=training_paths,
-        learner=learner,
-        stack=stack,
-        device=device,
-        spec_hash256=spec_hash256,
-        algorithm=algorithm,
-    )
     tracker = _load_checkpoint_tracker(training_paths)
     tracker["latest"] = _build_checkpoint_record(
         alias_name="latest",
@@ -3535,7 +4025,6 @@ def _maybe_finalize_from_best_checkpoint(
         metric_kind="dev_eval_mean",
         metric_value=best_score,
     )
-    shutil.copy2(final_checkpoint_path, training_paths.latest_checkpoint_path)
     _write_checkpoint_tracker(training_paths, tracker)
     payload = {
         "format": "checkpoint_guard_event_v1",
@@ -3557,70 +4046,253 @@ def _maybe_finalize_from_best_checkpoint(
     return payload
 
 
-def _run_periodic_dev_eval(
+def _resolved_periodic_dev_eval_worker_devices(
+    *,
+    stack: StackConfig,
+    parallel_workers: int,
+    explicit_worker_devices: Sequence[str],
+    eval_device: str,
+    learner_device: torch.device | None = None,
+) -> tuple[str, ...]:
+    if parallel_workers < 1:
+        raise ValueError("periodic dev eval parallel_workers must be >= 1")
+
+    normalized_explicit = tuple(device.strip() for device in explicit_worker_devices if str(device).strip())
+    if normalized_explicit:
+        device_pool = normalized_explicit
+    else:
+        normalized_eval_device = str(eval_device).strip().lower()
+        if normalized_eval_device in {"auto", "cuda:auto"} and torch.cuda.is_available():
+            if learner_device is not None:
+                actor_count = 1 if stack.config.system is None else int(stack.config.system.actor_process_count)
+                actor_layout = resolve_actor_device_layout(
+                    stack,
+                    actor_count=actor_count,
+                    learner_device=learner_device,
+                    prefer_process_collectors=True,
+                )
+                actor_pool = tuple(
+                    device_name for device_name in dict.fromkeys(actor_layout) if torch.device(device_name).type == "cuda"
+                )
+                if actor_pool:
+                    device_pool = actor_pool
+                else:
+                    device_pool = tuple(f"cuda:{index}" for index in range(torch.cuda.device_count())) or ("cpu",)
+            else:
+                device_pool = tuple(f"cuda:{index}" for index in range(torch.cuda.device_count())) or ("cpu",)
+        elif normalized_eval_device.startswith("cuda:"):
+            device_pool = (str(eval_device).strip(),)
+        else:
+            device_pool = (str(eval_device).strip() or "cpu",)
+    return tuple(device_pool[index % len(device_pool)] for index in range(parallel_workers))
+
+
+def _shard_periodic_dev_eval_opponents(
+    *,
+    opponent_specs: Sequence[PeriodicDevEvalOpponentSpec],
+    shard_count: int,
+) -> list[list[PeriodicDevEvalOpponentSpec]]:
+    if shard_count < 1:
+        raise ValueError("periodic dev eval shard_count must be >= 1")
+    shards: list[list[PeriodicDevEvalOpponentSpec]] = [[] for _ in range(shard_count)]
+    for index, opponent_spec in enumerate(opponent_specs):
+        shards[index % shard_count].append(opponent_spec)
+    return [shard for shard in shards if shard]
+
+
+def _resolve_async_periodic_dev_eval_device(
+    *,
+    stack: StackConfig,
+    learner_device: torch.device,
+) -> str | None:
+    evaluation = _evaluation_config_or_raise(stack)
+    requested = str(evaluation.eval_device).strip()
+    if not requested:
+        return None
+    normalized = requested.lower()
+    if normalized not in {"auto", "cuda:auto"}:
+        return requested
+    actor_count = 1 if stack.config.system is None else int(stack.config.system.actor_process_count)
+    actor_layout = resolve_actor_device_layout(
+        stack,
+        actor_count=actor_count,
+        learner_device=learner_device,
+        prefer_process_collectors=True,
+    )
+    unique_cuda_devices = [
+        device_name
+        for device_name in dict.fromkeys(actor_layout)
+        if torch.device(device_name).type == "cuda" and str(device_name) != str(learner_device)
+    ]
+    if unique_cuda_devices:
+        return str(unique_cuda_devices[-1])
+    return requested
+
+
+def _resolve_async_promotion_gate_device(
+    *,
+    stack: StackConfig,
+    learner_device: torch.device,
+) -> str | None:
+    evaluation = _evaluation_config_or_raise(stack)
+    requested = str(evaluation.eval_device).strip()
+    if not requested:
+        return None
+    normalized = requested.lower()
+    if normalized not in {"auto", "cuda:auto"}:
+        return requested
+    actor_count = 1 if stack.config.system is None else int(stack.config.system.actor_process_count)
+    actor_layout = resolve_actor_device_layout(
+        stack,
+        actor_count=actor_count,
+        learner_device=learner_device,
+        prefer_process_collectors=True,
+    )
+    unique_cuda_devices = [
+        device_name
+        for device_name in dict.fromkeys(actor_layout)
+        if torch.device(device_name).type == "cuda" and str(device_name) != str(learner_device)
+    ]
+    if unique_cuda_devices:
+        return str(unique_cuda_devices[0])
+    return requested
+
+
+def _resolve_promotion_gate_anchor_specs(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+) -> tuple[dict[str, str], tuple[PeriodicDevEvalOpponentSpec, ...], tuple[str, ...]]:
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    registry = SnapshotRegistry.load(registry_path)
+    anchor_policy_ids, missing_required = _resolve_promotion_anchor_policy_ids(
+        stack=stack,
+        registry=registry,
+    )
+    if missing_required:
+        missing_text = ",".join(missing_required)
+        raise RuntimeError(f"Promotion gate is missing required anchors: {missing_text}")
+
+    snapshot_index = _snapshot_meta_by_policy_id(registry)
+    specs: list[PeriodicDevEvalOpponentSpec] = []
+    pinned_snapshot_ids: list[str] = []
+    for anchor_name, policy_id in anchor_policy_ids.items():
+        if policy_id == _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID:
+            specs.append(
+                PeriodicDevEvalOpponentSpec(
+                    policy_id=policy_id,
+                    display_name=anchor_name,
+                    kind="random_legal",
+                )
+            )
+            continue
+        heuristic_profile = heuristic_public_profile_name_for_policy_id(policy_id)
+        if heuristic_profile is not None:
+            specs.append(
+                PeriodicDevEvalOpponentSpec(
+                    policy_id=policy_id,
+                    display_name=anchor_name,
+                    kind="heuristic_public",
+                    heuristic_profile=heuristic_profile,
+                )
+            )
+            continue
+        snapshot = snapshot_index.get(policy_id)
+        if snapshot is None:
+            raise RuntimeError(f"Promotion gate could not resolve snapshot anchor for policy_id={policy_id}")
+        specs.append(
+            PeriodicDevEvalOpponentSpec(
+                policy_id=policy_id,
+                display_name=anchor_name,
+                kind="snapshot",
+                snapshot_path=snapshot.path,
+            )
+        )
+        pinned_snapshot_ids.append(policy_id)
+    return dict(anchor_policy_ids), tuple(specs), tuple(dict.fromkeys(pinned_snapshot_ids))
+
+
+def _resolved_promotion_gate_worker_devices(
+    *,
+    stack: StackConfig,
+    parallel_workers: int,
+    explicit_worker_devices: Sequence[str],
+    eval_device: str,
+) -> tuple[str, ...]:
+    if parallel_workers < 1:
+        raise ValueError("promotion gate parallel_workers must be >= 1")
+    normalized_explicit = tuple(device.strip() for device in explicit_worker_devices if str(device).strip())
+    if normalized_explicit:
+        device_pool = normalized_explicit
+    else:
+        normalized_eval_device = str(eval_device).strip().lower()
+        if normalized_eval_device in {"auto", "cuda:auto"} and torch.cuda.is_available():
+            device_pool = tuple(f"cuda:{index}" for index in range(torch.cuda.device_count())) or ("cpu",)
+        elif normalized_eval_device.startswith("cuda:"):
+            device_pool = (str(eval_device).strip(),)
+        else:
+            device_pool = (str(eval_device).strip() or "cpu",)
+    return tuple(device_pool[index % len(device_pool)] for index in range(parallel_workers))
+
+
+def _shard_promotion_gate_anchor_specs(
+    *,
+    anchor_specs: Sequence[PeriodicDevEvalOpponentSpec],
+    shard_count: int,
+) -> list[list[tuple[int, PeriodicDevEvalOpponentSpec]]]:
+    if shard_count < 1:
+        raise ValueError("promotion gate shard_count must be >= 1")
+    shards: list[list[tuple[int, PeriodicDevEvalOpponentSpec]]] = [[] for _ in range(shard_count)]
+    for index, anchor_spec in enumerate(anchor_specs):
+        shards[index % shard_count].append((index, anchor_spec))
+    return [shard for shard in shards if shard]
+
+
+def _run_periodic_dev_eval_matchups_for_opponents(
     *,
     stack: StackConfig,
     contract: SimulatorContract,
-    artifacts: Any,
-    training_paths: TrainingPaths,
-    learner: ImpalaLearner,
-    device: torch.device,
+    run_dir: Path,
+    checkpoint_path: Path,
+    focal_policy_id: str,
+    update_count: int,
+    policy_version: int,
     run_id256: str,
     config_hash256: str,
     spec_hash256: str,
-    artifact_dir_name: str = "dev_eval",
-    artifact_scope: str = "periodic_dev_eval",
-    paired_seeds_override: Sequence[int] | None = None,
-    persist_summary: bool = True,
-    update_stall_monitor: bool = True,
-) -> dict[str, Any]:
-    if learner.model is None:
-        raise RuntimeError("Periodic dev eval requires an attached learner model")
-
+    artifact_dir_name: str,
+    artifact_scope: str,
+    paired_seeds: Sequence[int],
+    scheduled_paired_seed_count: int,
+    validated_sources: Mapping[str, str],
+    seed_file: Path,
+    seed_file_sha256: str,
+    opponent_specs: Sequence[PeriodicDevEvalOpponentSpec],
+    eval_device_override: torch.device | str | None,
+) -> list[dict[str, Any]]:
     evaluation = _validate_periodic_dev_eval_contract(stack)
-    seed_file, validated_sources, scheduled_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
-    paired_seeds = (
-        [int(seed) for seed in paired_seeds_override]
-        if paired_seeds_override is not None
-        else [int(seed) for seed in scheduled_paired_seeds]
-    )
-    if not paired_seeds:
-        raise RuntimeError("Periodic dev eval requires at least one paired seed")
     observation_dim, action_dim = _spec_dimensions(contract)
     pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
-    update_count = int(learner.update_count)
-    policy_version = int(learner.get_policy_version())
-    focal_policy_id = _current_focal_policy_id(learner=learner)
-    checkpoint_path = _ensure_current_checkpoint(
-        training_paths=training_paths,
-        learner=learner,
-        stack=stack,
-        device=device,
-        spec_hash256=spec_hash256,
-        algorithm=str(stack.config.training.algorithm).strip() if stack.config.training is not None else None,
-    )
-
-    update_dir = artifacts.run_dir / "eval" / artifact_dir_name / f"update_{update_count}"
-    matchup_dir = update_dir / "b0_randomlegal"
-    eval_model = _clone_cpu_eval_model(
-        learner_model=cast(PolicyValueModel, learner.model),
+    update_dir = run_dir / "eval" / artifact_dir_name / f"update_{update_count}"
+    eval_model = _load_checkpoint_eval_model(
+        checkpoint_path=checkpoint_path,
         observation_dim=observation_dim,
         action_dim=action_dim,
         stack=stack,
+        eval_device=(evaluation.eval_device if eval_device_override is None else eval_device_override),
         observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
         spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
     )
-    opponents = _periodic_dev_eval_opponents(
+    opponents = _materialize_periodic_dev_eval_opponents(
         stack=stack,
         contract=contract,
-        run_dir=artifacts.run_dir,
+        run_dir=run_dir,
         observation_dim=observation_dim,
         action_dim=action_dim,
+        opponent_specs=opponent_specs,
+        eval_device_override=eval_device_override,
     )
-
-    anchor_payloads: dict[str, dict[str, Any]] = {}
-    anchor_scores: dict[str, float] = {}
-    primary_summary: dict[str, Any] | None = None
+    matchup_results: list[dict[str, Any]] = []
     for opponent_policy_id, display_name, opponent_model, heuristic_policy in opponents:
         matchup_dir = update_dir / opponent_policy_id
         runner = _PeriodicDevEvalRunner(
@@ -3635,6 +4307,7 @@ def _run_periodic_dev_eval(
             artifact_dir=matchup_dir,
             focal_policy_id=focal_policy_id,
             require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+            eval_device=(evaluation.eval_device if eval_device_override is None else eval_device_override),
         )
 
         seed_usage_payload = {
@@ -3642,19 +4315,19 @@ def _run_periodic_dev_eval(
             "seed_file": {
                 "path": _json_relative_path(seed_file, root=stack.root),
                 "sha256": seed_file_sha256,
-                "validated_sources": validated_sources,
+                "validated_sources": dict(validated_sources),
             },
             "artifact_scope": artifact_scope,
             "seed_schedule": {
-                "configured_paired_seed_count": len(scheduled_paired_seeds),
+                "configured_paired_seed_count": int(scheduled_paired_seed_count),
                 "requested_paired_seed_count": len(paired_seeds),
-                "expanded_beyond_seed_file": len(paired_seeds) > len(scheduled_paired_seeds),
+                "expanded_beyond_seed_file": len(paired_seeds) > int(scheduled_paired_seed_count),
             },
             "paired_seed_count": len(paired_seeds),
             "paired_seeds": list(paired_seeds),
             "protocol": {
                 "seat_swap": bool(evaluation.seat_swap),
-                "eval_device": evaluation.eval_device,
+                "eval_device": str(evaluation.eval_device if eval_device_override is None else eval_device_override),
                 "eval_inference_mode": bool(evaluation.eval_inference_mode),
                 "eval_sampling_algorithm": evaluation.eval_sampling_algorithm,
                 "eval_assert_sorted_legal_ids": bool(evaluation.eval_assert_sorted_legal_ids),
@@ -3663,9 +4336,7 @@ def _run_periodic_dev_eval(
                 "policy_id": focal_policy_id,
                 "update_count": update_count,
                 "policy_version": policy_version,
-                "checkpoint_path": (
-                    None if checkpoint_path is None else _json_relative_path(checkpoint_path, root=artifacts.run_dir)
-                ),
+                "checkpoint_path": _json_relative_path(checkpoint_path, root=run_dir),
             },
             "opponent_policy": {
                 "policy_id": opponent_policy_id,
@@ -3697,10 +4368,8 @@ def _run_periodic_dev_eval(
             "artifact_scope": artifact_scope,
             "update_count": update_count,
             "policy_version": policy_version,
-            "checkpoint_path": (
-                None if checkpoint_path is None else _json_relative_path(checkpoint_path, root=artifacts.run_dir)
-            ),
-            "seed_usage_path": _json_relative_path(matchup_dir / "seed_usage.json", root=artifacts.run_dir),
+            "checkpoint_path": _json_relative_path(checkpoint_path, root=run_dir),
+            "seed_usage_path": _json_relative_path(matchup_dir / "seed_usage.json", root=run_dir),
             "anchor_display_name": display_name,
         }
         write_matchup_summary_json(matchup_dir / "matchup_summary.json", matchup_payload)
@@ -3709,6 +4378,190 @@ def _run_periodic_dev_eval(
             matchup_dir / "diagnostics.json",
             build_seat_advantage_diagnostics(matchup.records),
         )
+        matchup_results.append(
+            {
+                "policy_id": opponent_policy_id,
+                "display_name": display_name,
+                "matchup_payload": matchup_payload,
+            }
+        )
+    return matchup_results
+
+
+def _run_periodic_dev_eval_matchup_worker(
+    *,
+    stack: StackConfig,
+    contract: SimulatorContract,
+    run_dir: Path,
+    checkpoint_path: Path,
+    focal_policy_id: str,
+    update_count: int,
+    policy_version: int,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+    artifact_dir_name: str,
+    artifact_scope: str,
+    paired_seeds: Sequence[int],
+    scheduled_paired_seed_count: int,
+    validated_sources: Mapping[str, str],
+    seed_file: Path,
+    seed_file_sha256: str,
+    opponent_specs: Sequence[PeriodicDevEvalOpponentSpec],
+    eval_device_override: str,
+) -> list[dict[str, Any]]:
+    return _run_periodic_dev_eval_matchups_for_opponents(
+        stack=stack,
+        contract=contract,
+        run_dir=run_dir,
+        checkpoint_path=checkpoint_path,
+        focal_policy_id=focal_policy_id,
+        update_count=update_count,
+        policy_version=policy_version,
+        run_id256=run_id256,
+        config_hash256=config_hash256,
+        spec_hash256=spec_hash256,
+        artifact_dir_name=artifact_dir_name,
+        artifact_scope=artifact_scope,
+        paired_seeds=paired_seeds,
+        scheduled_paired_seed_count=scheduled_paired_seed_count,
+        validated_sources=validated_sources,
+        seed_file=seed_file,
+        seed_file_sha256=seed_file_sha256,
+        opponent_specs=opponent_specs,
+        eval_device_override=eval_device_override,
+    )
+
+
+def _run_periodic_dev_eval_for_checkpoint(
+    *,
+    stack: StackConfig,
+    contract: SimulatorContract,
+    run_dir: Path,
+    checkpoint_path: Path,
+    focal_policy_id: str,
+    update_count: int,
+    policy_version: int,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+    opponent_specs: Sequence[PeriodicDevEvalOpponentSpec] | None = None,
+    eval_device_override: torch.device | str | None = None,
+    parallel_workers_override: int | None = None,
+    parallel_worker_devices_override: Sequence[str] | None = None,
+    artifact_dir_name: str = "dev_eval",
+    artifact_scope: str = "periodic_dev_eval",
+    paired_seeds_override: Sequence[int] | None = None,
+) -> dict[str, Any]:
+    evaluation = _validate_periodic_dev_eval_contract(stack)
+    seed_file, validated_sources, scheduled_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
+    paired_seeds = (
+        [int(seed) for seed in paired_seeds_override]
+        if paired_seeds_override is not None
+        else [int(seed) for seed in scheduled_paired_seeds]
+    )
+    if not paired_seeds:
+        raise RuntimeError("Periodic dev eval requires at least one paired seed")
+    observation_dim, action_dim = _spec_dimensions(contract)
+    update_dir = run_dir / "eval" / artifact_dir_name / f"update_{update_count}"
+    resolved_opponent_specs = opponent_specs
+    if resolved_opponent_specs is None:
+        resolved_opponent_specs, _ignored_pinned_ids = _resolve_periodic_dev_eval_opponent_specs(
+            stack=stack,
+            run_dir=run_dir,
+        )
+    requested_eval_device = evaluation.eval_device if eval_device_override is None else str(eval_device_override)
+    configured_parallel_workers = max(
+        1,
+        int(
+            getattr(evaluation, "periodic_dev_eval_parallel_workers", 1)
+            if parallel_workers_override is None
+            else parallel_workers_override
+        ),
+    )
+    explicit_parallel_devices = tuple(
+        getattr(evaluation, "periodic_dev_eval_parallel_worker_devices", ())
+        if parallel_worker_devices_override is None
+        else parallel_worker_devices_override
+    )
+    effective_parallel_workers = min(configured_parallel_workers, len(resolved_opponent_specs))
+    matchup_results: list[dict[str, Any]]
+    worker_devices: tuple[str, ...]
+    if effective_parallel_workers > 1:
+        worker_devices = _resolved_periodic_dev_eval_worker_devices(
+            stack=stack,
+            parallel_workers=effective_parallel_workers,
+            explicit_worker_devices=explicit_parallel_devices,
+            eval_device=requested_eval_device,
+            learner_device=None,
+        )
+        opponent_shards = _shard_periodic_dev_eval_opponents(
+            opponent_specs=resolved_opponent_specs,
+            shard_count=effective_parallel_workers,
+        )
+        ctx = mp.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=len(opponent_shards), mp_context=ctx) as executor:
+            futures = [
+                executor.submit(
+                    _run_periodic_dev_eval_matchup_worker,
+                    stack=stack,
+                    contract=contract,
+                    run_dir=run_dir,
+                    checkpoint_path=checkpoint_path,
+                    focal_policy_id=focal_policy_id,
+                    update_count=update_count,
+                    policy_version=policy_version,
+                    run_id256=run_id256,
+                    config_hash256=config_hash256,
+                    spec_hash256=spec_hash256,
+                    artifact_dir_name=artifact_dir_name,
+                    artifact_scope=artifact_scope,
+                    paired_seeds=tuple(paired_seeds),
+                    scheduled_paired_seed_count=len(scheduled_paired_seeds),
+                    validated_sources=validated_sources,
+                    seed_file=seed_file,
+                    seed_file_sha256=seed_file_sha256,
+                    opponent_specs=tuple(shard),
+                    eval_device_override=worker_devices[shard_index],
+                )
+                for shard_index, shard in enumerate(opponent_shards)
+            ]
+            matchup_results = []
+            for future in futures:
+                matchup_results.extend(future.result())
+    else:
+        worker_devices = (requested_eval_device,)
+        matchup_results = _run_periodic_dev_eval_matchups_for_opponents(
+            stack=stack,
+            contract=contract,
+            run_dir=run_dir,
+            checkpoint_path=checkpoint_path,
+            focal_policy_id=focal_policy_id,
+            update_count=update_count,
+            policy_version=policy_version,
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+            artifact_dir_name=artifact_dir_name,
+            artifact_scope=artifact_scope,
+            paired_seeds=tuple(paired_seeds),
+            scheduled_paired_seed_count=len(scheduled_paired_seeds),
+            validated_sources=validated_sources,
+            seed_file=seed_file,
+            seed_file_sha256=seed_file_sha256,
+            opponent_specs=resolved_opponent_specs,
+            eval_device_override=requested_eval_device,
+        )
+
+    spec_order = {spec.display_name: index for index, spec in enumerate(resolved_opponent_specs)}
+    matchup_results.sort(key=lambda item: spec_order.get(str(item["display_name"]), 10**9))
+    anchor_payloads: dict[str, dict[str, Any]] = {}
+    anchor_scores: dict[str, float] = {}
+    primary_summary: dict[str, Any] | None = None
+    for result in matchup_results:
+        display_name = str(result["display_name"])
+        opponent_policy_id = str(result["policy_id"])
+        matchup_payload = dict(cast(dict[str, Any], result["matchup_payload"]))
         anchor_payloads[display_name] = matchup_payload
         anchor_scores[display_name] = float(matchup_payload["uncertainty"]["mean"])
         if primary_summary is None or opponent_policy_id == "b0_randomlegal":
@@ -3727,7 +4580,94 @@ def _run_periodic_dev_eval(
             "aggregate_score": aggregate_score,
             "anchor_scores": anchor_scores,
             "anchors": anchor_payloads,
+            "periodic_dev_eval_parallel": {
+                "enabled": effective_parallel_workers > 1,
+                "worker_count": int(max(1, effective_parallel_workers)),
+                "worker_devices": list(worker_devices[: max(1, effective_parallel_workers)]),
+            },
         }
+    )
+    _write_json(update_dir / "summary.json", summary_payload)
+    return summary_payload
+
+
+def _run_async_periodic_dev_eval_worker(request: AsyncPeriodicDevEvalRequest) -> dict[str, Any]:
+    contract = load_verified_simulator_contract(request.stack.root, expected_spec_hash=request.spec_hash256)
+    effective_eval_device = request.eval_device_override
+    effective_worker_devices = (
+        request.parallel_worker_devices
+        if request.parallel_worker_devices
+        else _resolved_periodic_dev_eval_worker_devices(
+            stack=request.stack,
+            parallel_workers=max(1, int(request.parallel_workers)),
+            explicit_worker_devices=(),
+            eval_device=str(effective_eval_device or _evaluation_config_or_raise(request.stack).eval_device),
+            learner_device=None,
+        )
+    )
+    return _run_periodic_dev_eval_for_checkpoint(
+        stack=request.stack,
+        contract=contract,
+        run_dir=request.run_dir,
+        checkpoint_path=request.checkpoint_path,
+        focal_policy_id=request.focal_policy_id,
+        update_count=request.update_count,
+        policy_version=request.policy_version,
+        run_id256=request.run_id256,
+        config_hash256=request.config_hash256,
+        spec_hash256=request.spec_hash256,
+        opponent_specs=request.opponents,
+        eval_device_override=effective_eval_device,
+        parallel_workers_override=int(request.parallel_workers),
+        parallel_worker_devices_override=tuple(effective_worker_devices),
+        artifact_dir_name=request.artifact_dir_name,
+        artifact_scope=request.artifact_scope,
+        paired_seeds_override=request.paired_seeds,
+    )
+
+
+def _run_periodic_dev_eval(
+    *,
+    stack: StackConfig,
+    contract: SimulatorContract,
+    artifacts: Any,
+    training_paths: TrainingPaths,
+    learner: ImpalaLearner,
+    device: torch.device,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+    artifact_dir_name: str = "dev_eval",
+    artifact_scope: str = "periodic_dev_eval",
+    paired_seeds_override: Sequence[int] | None = None,
+    persist_summary: bool = True,
+    update_stall_monitor: bool = True,
+) -> dict[str, Any]:
+    if learner.model is None:
+        raise RuntimeError("Periodic dev eval requires an attached learner model")
+
+    checkpoint_path = _ensure_current_checkpoint(
+        training_paths=training_paths,
+        learner=learner,
+        stack=stack,
+        device=device,
+        spec_hash256=spec_hash256,
+        algorithm=str(stack.config.training.algorithm).strip() if stack.config.training is not None else None,
+    )
+    summary_payload = _run_periodic_dev_eval_for_checkpoint(
+        stack=stack,
+        contract=contract,
+        run_dir=artifacts.run_dir,
+        checkpoint_path=checkpoint_path,
+        focal_policy_id=_current_focal_policy_id(learner=learner),
+        update_count=int(learner.update_count),
+        policy_version=int(learner.get_policy_version()),
+        run_id256=run_id256,
+        config_hash256=config_hash256,
+        spec_hash256=spec_hash256,
+        artifact_dir_name=artifact_dir_name,
+        artifact_scope=artifact_scope,
+        paired_seeds_override=paired_seeds_override,
     )
     if persist_summary:
         _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=summary_payload)
@@ -3735,22 +4675,491 @@ def _run_periodic_dev_eval(
         stall_monitor = _update_stall_monitor(
             stack=stack,
             training_paths=training_paths,
-            update_count=update_count,
+            update_count=int(summary_payload["update_count"]),
             summary_payload=summary_payload,
         )
         if stall_monitor is not None:
             summary_payload["stall_monitor"] = stall_monitor
+            _write_json(
+                artifacts.run_dir / "eval" / artifact_dir_name / f"update_{int(summary_payload['update_count'])}" / "summary.json",
+                summary_payload,
+            )
             if bool(stall_monitor.get("stall_risk", False)):
                 print(
                     "Stall monitor warning: "
-                    f"update={update_count} worst_anchor={stall_monitor['worst_anchor']} "
+                    f"update={int(summary_payload['update_count'])} worst_anchor={stall_monitor['worst_anchor']} "
                     f"stall_rate={float(stall_monitor['worst_stall_rate']):.3f} "
                     f"no_progress_rate={float(stall_monitor['worst_no_progress_timeout_rate']):.3f} "
                     f"truncation_rate={float(stall_monitor['worst_truncation_rate']):.3f} "
                     f"consecutive={int(stall_monitor['consecutive_trigger_count'])}"
                 )
-    _write_json(update_dir / "summary.json", summary_payload)
     return summary_payload
+
+
+def _process_completed_periodic_dev_eval(
+    *,
+    pending_eval: PendingPeriodicDevEval,
+    stack: StackConfig,
+    contract: SimulatorContract,
+    artifacts: RunArtifacts,
+    training_paths: TrainingPaths,
+    runtime: QueueRuntime,
+    learner: ImpalaLearner,
+    device: torch.device,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+    last_rollback_update: int | None,
+    tensorboard_logger: TensorBoardLogger | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    summary_payload = pending_eval.future.result()
+    try:
+        _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=summary_payload)
+        stall_monitor = _update_stall_monitor(
+            stack=stack,
+            training_paths=training_paths,
+            update_count=int(summary_payload["update_count"]),
+            summary_payload=summary_payload,
+        )
+        if stall_monitor is not None:
+            summary_payload["stall_monitor"] = stall_monitor
+            _write_json(
+                artifacts.run_dir / "eval" / "dev_eval" / f"update_{int(summary_payload['update_count'])}" / "summary.json",
+                summary_payload,
+            )
+            if bool(stall_monitor.get("stall_risk", False)):
+                print(
+                    "Stall monitor warning: "
+                    f"update={int(summary_payload['update_count'])} worst_anchor={stall_monitor['worst_anchor']} "
+                    f"stall_rate={float(stall_monitor['worst_stall_rate']):.3f} "
+                    f"no_progress_rate={float(stall_monitor['worst_no_progress_timeout_rate']):.3f} "
+                    f"truncation_rate={float(stall_monitor['worst_truncation_rate']):.3f} "
+                    f"consecutive={int(stall_monitor['consecutive_trigger_count'])}"
+                )
+        effective_summary = summary_payload
+        tracker_before_dev_eval = _load_checkpoint_tracker(training_paths)
+        existing_best_record = tracker_before_dev_eval.get("best")
+        if not isinstance(existing_best_record, Mapping):
+            existing_best_record = None
+        confirmatory_request = _confirmatory_dev_eval_request(
+            stack=stack,
+            existing_best_record=cast(Mapping[str, Any] | None, existing_best_record),
+            dev_eval_summary=summary_payload,
+        )
+        if confirmatory_request is not None:
+            seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
+            confirmatory_pairs = _expand_periodic_dev_eval_paired_seeds(
+                base_paired_seeds,
+                requested_pairs=int(confirmatory_request["target_pairs"]),
+                seed_file_sha256=seed_file_sha256,
+                update_count=int(summary_payload["update_count"]),
+                policy_version=int(summary_payload["policy_version"]),
+                scope="periodic_dev_eval_confirmatory",
+            )
+            effective_summary = _run_periodic_dev_eval_for_checkpoint(
+                stack=stack,
+                contract=contract,
+                run_dir=artifacts.run_dir,
+                checkpoint_path=pending_eval.request.checkpoint_path,
+                focal_policy_id=str(summary_payload["policy_id"]),
+                update_count=int(summary_payload["update_count"]),
+                policy_version=int(summary_payload["policy_version"]),
+                run_id256=run_id256,
+                config_hash256=config_hash256,
+                spec_hash256=spec_hash256,
+                opponent_specs=pending_eval.request.opponents,
+                eval_device_override=pending_eval.request.eval_device_override,
+                artifact_dir_name="dev_eval_confirmatory",
+                artifact_scope="periodic_dev_eval_confirmatory",
+                paired_seeds_override=confirmatory_pairs,
+            )
+            print(
+                "Confirmatory dev eval: "
+                f"update={int(summary_payload['update_count'])} paired_seeds={len(confirmatory_pairs)} "
+                f"aggregate={effective_summary['aggregate_score']:.4f} "
+                f"reasons={','.join(cast(list[str], confirmatory_request['reasons']))} "
+                f"seed_file={seed_file.name}"
+            )
+            _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=effective_summary)
+
+        tracker_payload = _publish_best_checkpoint_from_dev_eval(
+            stack=stack,
+            training_paths=training_paths,
+            artifacts=artifacts,
+            checkpoint_path=pending_eval.request.checkpoint_path,
+            update_count=int(effective_summary["update_count"]),
+            policy_version=int(effective_summary["policy_version"]),
+            dev_eval_summary=effective_summary,
+        )
+        _maybe_log_structured_mainmove_guard(
+            training_paths=training_paths,
+            learner=learner,
+            latest_metrics=pending_eval.latest_metrics,
+            dev_eval_summary=effective_summary,
+        )
+        guard_event = None
+        if int(effective_summary["update_count"]) == int(learner.update_count):
+            guard_event = _maybe_rollback_to_best_checkpoint(
+                stack=stack,
+                training_paths=training_paths,
+                artifacts=artifacts,
+                runtime=runtime,
+                learner=learner,
+                model=cast(PolicyValueModel, learner.model),
+                device=device,
+                spec_hash256=spec_hash256,
+                algorithm=str(stack.config.training.algorithm).strip() if stack.config.training is not None else None,
+                latest_metrics=pending_eval.latest_metrics,
+                dev_eval_summary=effective_summary,
+                last_rollback_update=last_rollback_update,
+            )
+        if tensorboard_logger is not None:
+            tensorboard_logger.log_periodic_dev_eval(effective_summary, step=int(effective_summary["update_count"]))
+            tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(effective_summary["update_count"]))
+        return effective_summary, guard_event
+    finally:
+        _unpin_snapshot_ids(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=artifacts.run_dir,
+            snapshot_ids=pending_eval.pinned_snapshot_ids,
+        )
+
+
+def _run_async_promotion_gate_worker(request: AsyncPromotionGateRequest) -> dict[str, Any]:
+    contract = load_verified_simulator_contract(request.stack.root, expected_spec_hash=request.spec_hash256)
+    evaluation = _validate_periodic_dev_eval_contract(request.stack)
+    observation_dim, action_dim = _spec_dimensions(contract)
+    observation_spec = cast(dict[str, Any] | None, contract.spec_bundle.get("observation"))
+    spec_bundle = cast(dict[str, Any] | None, contract.spec_bundle)
+    focal_model = _load_snapshot_eval_model(
+        run_dir=request.run_dir,
+        snapshot_path=request.candidate_snapshot_path,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        stack=request.stack,
+        eval_device=(evaluation.eval_device if request.eval_device_override is None else request.eval_device_override),
+        observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
+    )
+    opponents = _materialize_periodic_dev_eval_opponents(
+        stack=request.stack,
+        contract=contract,
+        run_dir=request.run_dir,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        opponent_specs=request.anchor_specs,
+        eval_device_override=request.eval_device_override,
+    )
+    anchor_models = {
+        policy_id: opponent_model
+        for policy_id, _display_name, opponent_model, _heuristic_policy in opponents
+        if opponent_model is not None
+    }
+    heuristic_policies = {
+        policy_id: heuristic_policy
+        for policy_id, _display_name, _opponent_model, heuristic_policy in opponents
+        if heuristic_policy is not None
+    }
+    result = run_promotion_gate(
+        stack=request.stack,
+        run_dir=request.run_dir / "eval" / "promotion_gate" / f"update_{request.update_count}",
+        focal_policy_id=request.candidate_policy_id,
+        anchor_policy_ids=request.anchor_policy_ids,
+        runner=_PromotionGateRunner(
+            stack=request.stack,
+            focal_policy_id=request.candidate_policy_id,
+            focal_model=focal_model,
+            anchor_models=anchor_models,
+            heuristic_policies=heuristic_policies,
+            observation_dim=observation_dim,
+            action_dim=action_dim,
+            pass_action_id=int(contract.spec_bundle["action"]["pass_action_id"]),
+            artifact_dir=request.run_dir / "eval" / "promotion_gate" / f"update_{request.update_count}",
+            require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+            eval_device=(evaluation.eval_device if request.eval_device_override is None else request.eval_device_override),
+        ),
+        run_id256=request.run_id256,
+        config_hash256=request.config_hash256,
+        spec_hash256=request.spec_hash256,
+        bootstrap_seed=_promotion_gate_bootstrap_seed(
+            update_count=request.update_count,
+            policy_version=request.policy_version,
+        ),
+    )
+    return {
+        "candidate_policy_id": request.candidate_policy_id,
+        "update_count": int(request.update_count),
+        "policy_version": int(request.policy_version),
+        "passed": bool(result.passed),
+        "ordered_opponents": list(result.ordered_opponents),
+        "reasons": [dict(reason) for reason in result.reasons],
+        "result": result.to_dict(),
+    }
+
+
+def _run_parallel_promotion_gate_anchor_worker(
+    *,
+    stack: StackConfig,
+    run_dir: Path,
+    candidate_policy_id: str,
+    candidate_snapshot_path: str,
+    update_count: int,
+    policy_version: int,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+    anchor_specs: Sequence[tuple[int, PeriodicDevEvalOpponentSpec]],
+    eval_device_override: str,
+) -> list[dict[str, Any]]:
+    contract = load_verified_simulator_contract(stack.root, expected_spec_hash=spec_hash256)
+    evaluation = _validate_periodic_dev_eval_contract(stack)
+    observation_dim, action_dim = _spec_dimensions(contract)
+    observation_spec = cast(dict[str, Any] | None, contract.spec_bundle.get("observation"))
+    spec_bundle = cast(dict[str, Any] | None, contract.spec_bundle)
+    focal_model = _load_snapshot_eval_model(
+        run_dir=run_dir,
+        snapshot_path=candidate_snapshot_path,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        stack=stack,
+        eval_device=eval_device_override,
+        observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
+    )
+    ordered_specs = [spec for _index, spec in anchor_specs]
+    opponents = _materialize_periodic_dev_eval_opponents(
+        stack=stack,
+        contract=contract,
+        run_dir=run_dir,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        opponent_specs=ordered_specs,
+        eval_device_override=eval_device_override,
+    )
+    anchor_models = {
+        policy_id: opponent_model
+        for policy_id, _display_name, opponent_model, _heuristic_policy in opponents
+        if opponent_model is not None
+    }
+    heuristic_policies = {
+        policy_id: heuristic_policy
+        for policy_id, _display_name, _opponent_model, heuristic_policy in opponents
+        if heuristic_policy is not None
+    }
+    seed_file = resolve_promotion_gate_seed_file(stack)
+    paired_seeds = parse_seed_file(seed_file)
+    league = stack.config.league
+    if league is None:
+        raise RuntimeError("Parallel promotion gate requires stack.config.league")
+    if len(paired_seeds) != int(league.promotion_gate_paired_seeds):
+        raise RuntimeError(
+            f"Promotion gate expected {int(league.promotion_gate_paired_seeds)} paired seeds in {seed_file}, "
+            f"found {len(paired_seeds)}"
+        )
+    runner = _PromotionGateRunner(
+        stack=stack,
+        focal_policy_id=candidate_policy_id,
+        focal_model=focal_model,
+        anchor_models=anchor_models,
+        heuristic_policies=heuristic_policies,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        pass_action_id=int(contract.spec_bundle["action"]["pass_action_id"]),
+        artifact_dir=run_dir / "eval" / "promotion_gate" / f"update_{update_count}",
+        require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+        eval_device=eval_device_override,
+    )
+    episodes_dir = run_dir / "eval" / "promotion_gate" / f"update_{update_count}" / "promotion_gate_episodes"
+    worker_payloads: list[dict[str, Any]] = []
+    for anchor_index, anchor_spec in anchor_specs:
+        anchor = PromotionGateAnchor(name=anchor_spec.display_name, policy_id=anchor_spec.policy_id)
+        matchup = run_seat_swapped_matchup(
+            focal_policy_id=candidate_policy_id,
+            opponent_policy_id=anchor.policy_id,
+            paired_seeds=paired_seeds,
+            runner=runner,
+            episodes_path=episodes_dir / f"{anchor_index:02d}_{_slug_policy_id(anchor.name)}.jsonl",
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+        )
+        pair_scores = [float(score) for score in paired_seed_scores(matchup.records, scheme="S0")]
+        truncated_games = sum(1 for record in matchup.records if record.truncated)
+        anchor_result = PromotionGateAnchorResult(
+            anchor_name=anchor.name,
+            opponent_policy_id=anchor.policy_id,
+            episodes_path=_relative_path_text(matchup.episodes_path, root=run_dir),
+            matchup_summary=matchup.summary,
+            truncation=PromotionGateRate(
+                numerator=int(truncated_games),
+                denominator=int(len(matchup.records)),
+                rate=(float(truncated_games) / float(len(matchup.records))) if matchup.records else 0.0,
+            ),
+            posterior=PromotionGatePosterior.from_scores(
+                pair_scores,
+                sample_count=1000,
+                seed=_promotion_gate_bootstrap_seed(update_count=update_count, policy_version=policy_version),
+            ),
+        )
+        worker_payloads.append(
+            {
+                "anchor_index": int(anchor_index),
+                "anchor": anchor,
+                "anchor_result": anchor_result,
+                "pair_scores": pair_scores,
+                "truncated_games": int(truncated_games),
+                "total_games": int(len(matchup.records)),
+            }
+        )
+    return worker_payloads
+
+
+def _run_parallel_snapshot_promotion_gate(
+    *,
+    stack: StackConfig,
+    artifacts: RunArtifacts,
+    training_paths: TrainingPaths,
+    candidate_policy_id: str,
+    update_count: int,
+    policy_version: int,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+    anchor_policy_ids: Mapping[str, str],
+    anchor_specs: Sequence[PeriodicDevEvalOpponentSpec],
+    candidate_snapshot_path: str,
+) -> PromotionGateResult:
+    league = stack.config.league
+    if league is None:
+        raise RuntimeError("Parallel promotion gate requires stack.config.league")
+    evaluation = _validate_periodic_dev_eval_contract(stack)
+    ordered_anchors = resolve_promotion_gate_anchors(stack, anchor_policy_ids)
+    configured_parallel_workers = max(1, int(getattr(league.promotion_gate, "parallel_workers", 1)))
+    effective_parallel_workers = min(configured_parallel_workers, len(anchor_specs))
+    worker_devices = _resolved_promotion_gate_worker_devices(
+        stack=stack,
+        parallel_workers=max(1, effective_parallel_workers),
+        explicit_worker_devices=tuple(getattr(league.promotion_gate, "parallel_worker_devices", ())),
+        eval_device=str(evaluation.eval_device),
+    )
+    anchor_shards = _shard_promotion_gate_anchor_specs(
+        anchor_specs=anchor_specs,
+        shard_count=max(1, effective_parallel_workers),
+    )
+    worker_payloads: list[dict[str, Any]] = []
+    ctx = mp.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=len(anchor_shards), mp_context=ctx) as executor:
+        futures = [
+            executor.submit(
+                _run_parallel_promotion_gate_anchor_worker,
+                stack=stack,
+                run_dir=artifacts.run_dir,
+                candidate_policy_id=candidate_policy_id,
+                candidate_snapshot_path=candidate_snapshot_path,
+                update_count=update_count,
+                policy_version=policy_version,
+                run_id256=run_id256,
+                config_hash256=config_hash256,
+                spec_hash256=spec_hash256,
+                anchor_specs=tuple(shard),
+                eval_device_override=worker_devices[shard_index],
+            )
+            for shard_index, shard in enumerate(anchor_shards)
+        ]
+        for future in futures:
+            worker_payloads.extend(future.result())
+    worker_payloads.sort(key=lambda payload: int(payload["anchor_index"]))
+    anchor_results = [cast(PromotionGateAnchorResult, payload["anchor_result"]) for payload in worker_payloads]
+    all_pair_scores: list[float] = []
+    total_truncated_games = 0
+    total_games = 0
+    for payload in worker_payloads:
+        all_pair_scores.extend(float(score) for score in cast(Sequence[float], payload["pair_scores"]))
+        total_truncated_games += int(payload["truncated_games"])
+        total_games += int(payload["total_games"])
+    seed_file = resolve_promotion_gate_seed_file(stack)
+    paired_seeds = parse_seed_file(seed_file)
+    result = build_promotion_gate_result(
+        stack=stack,
+        run_dir=artifacts.run_dir / "eval" / "promotion_gate" / f"update_{update_count}",
+        focal_policy_id=candidate_policy_id,
+        anchors=ordered_anchors,
+        anchor_results=tuple(anchor_results),
+        all_pair_scores=tuple(all_pair_scores),
+        total_truncated_games=total_truncated_games,
+        total_games=total_games,
+        paired_seed_count=len(paired_seeds),
+        sample_count=1000,
+        bootstrap_seed=_promotion_gate_bootstrap_seed(
+            update_count=update_count,
+            policy_version=policy_version,
+        ),
+    )
+    result.write_json(artifacts.run_dir / "eval" / "promotion_gate" / f"update_{update_count}" / league.promotion_gate.record_file)
+    return result
+
+
+def _process_completed_promotion_gate(
+    *,
+    pending_gate: PendingPromotionGate,
+    stack: StackConfig,
+    artifacts: RunArtifacts,
+    training_paths: TrainingPaths,
+) -> bool:
+    payload = pending_gate.future.result()
+    try:
+        if bool(payload["passed"]):
+            registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+            registry = SnapshotRegistry.load(registry_path)
+            registry.add_champion(str(payload["candidate_policy_id"]))
+            _save_snapshot_registry_with_retention(
+                stack=stack,
+                training_paths=training_paths,
+                run_dir=artifacts.run_dir,
+                registry=registry,
+            )
+            print(
+                "Promotion gate passed: "
+                f"update={int(payload['update_count'])} candidate={str(payload['candidate_policy_id'])} "
+                f"anchors={','.join(cast(list[str], payload['ordered_opponents']))}"
+            )
+            return True
+
+        reason_codes = ",".join(
+            str(reason.get("code", "unknown")) for reason in cast(list[dict[str, Any]], payload["reasons"])
+        ) or "unknown"
+        print(
+            "Promotion gate failed: "
+            f"update={int(payload['update_count'])} candidate={str(payload['candidate_policy_id'])} "
+            f"reasons={reason_codes}"
+        )
+        return False
+    finally:
+        _unpin_snapshot_ids(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=artifacts.run_dir,
+            snapshot_ids=pending_gate.pinned_snapshot_ids,
+        )
+
+
+def _drop_stale_pending_promotion_gate(
+    *,
+    pending_gate: PendingPromotionGate | None,
+    rollback_best_update_count: int,
+) -> PendingPromotionGate | None:
+    if pending_gate is None:
+        return None
+    if int(pending_gate.request.update_count) <= int(rollback_best_update_count):
+        return pending_gate
+    print(
+        "Promotion gate result discarded after rollback: "
+        f"candidate={pending_gate.request.candidate_policy_id} "
+        f"candidate_update={int(pending_gate.request.update_count)} "
+        f"rollback_best_update={int(rollback_best_update_count)}"
+    )
+    return None
 
 
 def _run_snapshot_promotion_gate(
@@ -3799,6 +5208,47 @@ def _run_snapshot_promotion_gate(
 
     observation_dim, action_dim = _spec_dimensions(contract)
     snapshot_index = _snapshot_meta_by_policy_id(registry)
+    configured_parallel_workers = max(1, int(getattr(league.promotion_gate, "parallel_workers", 1)))
+    if configured_parallel_workers > 1:
+        candidate_snapshot = snapshot_index.get(candidate_policy_id)
+        if candidate_snapshot is None:
+            raise RuntimeError(f"Promotion gate could not resolve candidate snapshot {candidate_policy_id!r}")
+        anchor_policy_ids_for_parallel, anchor_specs, _pinned_anchor_snapshot_ids = _resolve_promotion_gate_anchor_specs(
+            stack=stack,
+            training_paths=training_paths,
+        )
+        result = _run_parallel_snapshot_promotion_gate(
+            stack=stack,
+            artifacts=artifacts,
+            training_paths=training_paths,
+            candidate_policy_id=candidate_policy_id,
+            update_count=update_count,
+            policy_version=policy_version,
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+            anchor_policy_ids=anchor_policy_ids_for_parallel,
+            anchor_specs=anchor_specs,
+            candidate_snapshot_path=candidate_snapshot.path,
+        )
+        if result.passed:
+            registry.add_champion(candidate_policy_id)
+            _save_snapshot_registry_with_retention(
+                stack=stack,
+                training_paths=training_paths,
+                run_dir=artifacts.run_dir,
+                registry=registry,
+            )
+            print(
+                "Promotion gate passed: "
+                f"update={update_count} candidate={candidate_policy_id} "
+                f"anchors={','.join(result.ordered_opponents)}"
+            )
+            return True
+
+        reason_codes = ",".join(str(reason.get("code", "unknown")) for reason in result.reasons) or "unknown"
+        print(f"Promotion gate failed: update={update_count} candidate={candidate_policy_id} reasons={reason_codes}")
+        return False
     anchor_models = {
         policy_id: _load_snapshot_eval_model(
             run_dir=artifacts.run_dir,
@@ -3806,6 +5256,7 @@ def _run_snapshot_promotion_gate(
             observation_dim=observation_dim,
             action_dim=action_dim,
             stack=stack,
+            eval_device=evaluation.eval_device,
             observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
             spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
         )
@@ -3850,11 +5301,12 @@ def _run_snapshot_promotion_gate(
     runner = _PromotionGateRunner(
         stack=stack,
         focal_policy_id=candidate_policy_id,
-        focal_model=_clone_cpu_eval_model(
+        focal_model=_clone_eval_model(
             learner_model=cast(PolicyValueModel, learner.model),
             observation_dim=observation_dim,
             action_dim=action_dim,
             stack=stack,
+            eval_device=evaluation.eval_device,
             observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
             spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
         ),
@@ -3865,6 +5317,7 @@ def _run_snapshot_promotion_gate(
         pass_action_id=int(contract.spec_bundle["action"]["pass_action_id"]),
         artifact_dir=artifacts.run_dir / "eval" / "promotion_gate" / f"update_{update_count}",
         require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+        eval_device=evaluation.eval_device,
     )
     result = run_promotion_gate(
         stack=stack,
@@ -4030,12 +5483,40 @@ def _run_minimal_training(
     last_checkpoint_guard_rollback_update: int | None = None
     last_dev_eval_summary: Mapping[str, Any] | None = None
     last_dev_eval_update_count: int | None = None
+    collect_batch_prefetch_enabled = bool(getattr(training_config, "collect_batch_prefetch_enabled", False))
     start_time = time.time()
     profiler, profiler_context, profiler_trace_dir = _build_training_profiler(
         enabled=bool(torch_profiler),
         run_dir=artifacts.run_dir,
         device=device,
     )
+    prefetch_executor = (
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="collect-batch-prefetch")
+        if collect_batch_prefetch_enabled
+        else None
+    )
+    async_periodic_dev_eval_enabled = bool(
+        stack.config.evaluation is not None
+        and getattr(stack.config.evaluation, "async_periodic_dev_eval_enabled", False)
+    )
+    async_periodic_dev_eval_executor: ThreadPoolExecutor | None = None
+    if async_periodic_dev_eval_enabled:
+        async_periodic_dev_eval_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="async-periodic-dev-eval",
+        )
+    async_promotion_gate_enabled = bool(
+        stack.config.league is not None
+        and stack.config.league.promotion_gate_enabled
+        and bool(getattr(stack.config.league.promotion_gate, "async_enabled", False))
+    )
+    async_promotion_gate_executor: ProcessPoolExecutor | None = None
+    if async_promotion_gate_enabled:
+        async_promotion_gate_executor = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"))
+    pending_promotion_gate: PendingPromotionGate | None = None
+    pending_periodic_dev_eval: PendingPeriodicDevEval | None = None
+    prefetched_runtime_batch: Any | None = None
+    early_cutoff_payload: Mapping[str, Any] | None = None
     with profiler_context:
         if int(learner.update_count) == 0:
             latest_metrics = _run_structured_warmstart(
@@ -4057,6 +5538,90 @@ def _run_minimal_training(
             )
         try:
             for _update_index in range(int(learner.update_count), max_updates):
+                stop_requested = False
+                if pending_promotion_gate is not None and pending_promotion_gate.future.done():
+                    promotion_passed = _process_completed_promotion_gate(
+                        pending_gate=pending_promotion_gate,
+                        stack=stack,
+                        artifacts=artifacts,
+                        training_paths=training_paths,
+                    )
+                    pending_promotion_gate = None
+                    if promotion_passed:
+                        runtime.refresh_opponent_pool()
+                if pending_periodic_dev_eval is not None and pending_periodic_dev_eval.future.done():
+                    completed_summary, guard_event = _process_completed_periodic_dev_eval(
+                        pending_eval=pending_periodic_dev_eval,
+                        stack=stack,
+                        contract=contract,
+                        artifacts=artifacts,
+                        training_paths=training_paths,
+                        runtime=runtime,
+                        learner=learner,
+                        device=device,
+                        run_id256=run_id256,
+                        config_hash256=config_hash256,
+                        spec_hash256=spec_hash256,
+                        last_rollback_update=last_checkpoint_guard_rollback_update,
+                        tensorboard_logger=tensorboard_logger,
+                    )
+                    pending_periodic_dev_eval = None
+                    last_dev_eval_summary = completed_summary
+                    last_dev_eval_update_count = int(completed_summary["update_count"])
+                    anchor_keys = sorted(cast(dict[str, Any], completed_summary["anchor_scores"]).keys())
+                    opponent_fragment = f" opponent={_slug_policy_id(anchor_keys[0])}" if anchor_keys else ""
+                    print(
+                        "Periodic dev eval complete: "
+                        f"update={int(completed_summary['update_count'])}{opponent_fragment} "
+                        f"aggregate={completed_summary['aggregate_score']:.4f} "
+                        f"anchors={','.join(anchor_keys)}"
+                    )
+                    if guard_event is not None:
+                        last_checkpoint_guard_rollback_update = int(learner.update_count)
+                        pending_promotion_gate = _drop_stale_pending_promotion_gate(
+                            pending_gate=pending_promotion_gate,
+                            rollback_best_update_count=int(guard_event["best_update_count"]),
+                        )
+                        prefetched_runtime_batch = None
+                        print(
+                            "Checkpoint guard rollback: "
+                            f"update={guard_event['update_count']} "
+                            f"best_update={guard_event['best_update_count']} "
+                            f"current_score={float(guard_event['current_score']):.4f} "
+                            f"best_score={float(guard_event['best_score']):.4f} "
+                            f"reasons={','.join(cast(list[str], guard_event['reasons']))}"
+                        )
+                    early_cutoff_payload = _update_early_cutoff(
+                        stack=stack,
+                        training_paths=training_paths,
+                        update_count=int(completed_summary["update_count"]),
+                        summary_payload=completed_summary,
+                    )
+                    if early_cutoff_payload is not None and bool(early_cutoff_payload.get("should_stop", False)):
+                        latest_metrics.update(
+                            {
+                                "early_cutoff_triggered": 1.0,
+                                "early_cutoff_best_score": float(early_cutoff_payload["best_score"]),
+                                "early_cutoff_current_score": float(early_cutoff_payload["current_score"]),
+                                "early_cutoff_no_improvement_updates": float(
+                                    early_cutoff_payload["no_improvement_updates"]
+                                ),
+                                "early_cutoff_consecutive_stall_evals": float(
+                                    early_cutoff_payload["consecutive_stall_evals"]
+                                ),
+                            }
+                        )
+                        print(
+                            "Early cutoff triggered: "
+                            f"update={int(completed_summary['update_count'])} "
+                            f"best_update={int(early_cutoff_payload['best_update_count'])} "
+                            f"best_score={float(early_cutoff_payload['best_score']):.4f} "
+                            f"current_score={float(early_cutoff_payload['current_score']):.4f} "
+                            f"reasons={','.join(cast(list[str], early_cutoff_payload['reasons']))}"
+                        )
+                        stop_requested = True
+                if stop_requested:
+                    break
                 guidance_schedule_metrics = _apply_guidance_schedule_for_next_update(
                     learner=learner,
                     model=model,
@@ -4066,18 +5631,42 @@ def _run_minimal_training(
                 learner.set_entropy_coef(
                     _entropy_coef_for_next_update(training_config, update_count=int(learner.update_count) + 1)
                 )
-                with (
-                    _profile_block(profile_timers, "collect_update_batch"),
-                    _torch_num_threads_scope(actor_torch_threads),
-                ):
-                    runtime_batch = _collect_training_batch(
+                upcoming_update_count = int(learner.update_count) + 1
+                if prefetched_runtime_batch is not None:
+                    runtime_batch = prefetched_runtime_batch
+                    prefetched_runtime_batch = None
+                else:
+                    with (
+                        _profile_block(profile_timers, "collect_update_batch"),
+                        _torch_num_threads_scope(actor_torch_threads),
+                    ):
+                        runtime_batch = _collect_training_batch(
+                            runtime=runtime,
+                            algorithm=algorithm,
+                            training_config=training_config,
+                            rewards_config=rewards_config,
+                        )
+                prefetch_future: Future[Any] | None = None
+                should_prefetch_next_batch = (
+                    prefetch_executor is not None
+                    and upcoming_update_count < max_updates
+                    and upcoming_update_count % checkpoint_interval_updates != 0
+                    and not _should_run_periodic_dev_eval(stack, update_count=upcoming_update_count)
+                )
+                if should_prefetch_next_batch:
+                    prefetch_future = prefetch_executor.submit(
+                        _collect_training_batch_prefetch,
                         runtime=runtime,
                         algorithm=algorithm,
                         training_config=training_config,
                         rewards_config=rewards_config,
+                        actor_torch_threads=actor_torch_threads,
                     )
                 with _profile_block(profile_timers, "learner_update"), _torch_num_threads_scope(learner_torch_threads):
                     latest_metrics = learner.update(runtime_batch.learner_batch)
+                if prefetch_future is not None:
+                    with _profile_block(profile_timers, "collect_update_batch_prefetch_join"):
+                        prefetched_runtime_batch = prefetch_future.result()
                 latest_metrics.update(guidance_schedule_metrics)
                 with _profile_block(profile_timers, "runtime_snapshot_publish"):
                     latest_metrics.update(
@@ -4153,70 +5742,233 @@ def _run_minimal_training(
                             update=int(learner.update_count),
                         )
                     runtime.refresh_opponent_pool()
-                    promotion_passed = _run_snapshot_promotion_gate(
-                        stack=stack,
-                        contract=contract,
-                        artifacts=artifacts,
-                        training_paths=training_paths,
-                        learner=learner,
-                        candidate_policy_id=candidate_policy_id,
-                        update_count=int(learner.update_count),
-                        league_reference_update=(
+                    if async_promotion_gate_enabled:
+                        if async_promotion_gate_executor is None:
+                            raise RuntimeError("async promotion gate is enabled but the worker pool was not created")
+                        if pending_promotion_gate is not None:
+                            promotion_passed = _process_completed_promotion_gate(
+                                pending_gate=pending_promotion_gate,
+                                stack=stack,
+                                artifacts=artifacts,
+                                training_paths=training_paths,
+                            )
+                            pending_promotion_gate = None
+                            if promotion_passed:
+                                runtime.refresh_opponent_pool()
+                        league_reference_update = (
                             None
                             if "league_effective_update" not in latest_metrics
                             else int(latest_metrics["league_effective_update"])
-                        ),
-                        policy_version=int(learner.get_policy_version()),
-                        run_id256=run_id256,
-                        config_hash256=config_hash256,
-                        spec_hash256=spec_hash256,
-                    )
-                    if promotion_passed:
-                        runtime.refresh_opponent_pool()
+                        )
+                        league = stack.config.league
+                        reference_update = int(
+                            int(learner.update_count) if league_reference_update is None else league_reference_update
+                        )
+                        if (
+                            league is not None
+                            and league.enabled
+                            and league.promotion_gate_enabled
+                            and reference_update >= int(league.warmup.first_updates)
+                        ):
+                            registry = SnapshotRegistry.load(training_paths.snapshots_dir / REGISTRY_FILENAME)
+                            anchor_policy_ids, anchor_specs, pinned_anchor_snapshot_ids = _resolve_promotion_gate_anchor_specs(
+                                stack=stack,
+                                training_paths=training_paths,
+                            )
+                            snapshot_index = _snapshot_meta_by_policy_id(registry)
+                            candidate_snapshot = snapshot_index.get(candidate_policy_id)
+                            if candidate_snapshot is None:
+                                raise RuntimeError(
+                                    f"Could not resolve persisted candidate snapshot for promotion gate: {candidate_policy_id}"
+                                )
+                            newly_pinned_snapshot_ids = _pin_snapshot_ids(
+                                stack=stack,
+                                training_paths=training_paths,
+                                run_dir=artifacts.run_dir,
+                                snapshot_ids=(candidate_policy_id, *pinned_anchor_snapshot_ids),
+                            )
+                            request = AsyncPromotionGateRequest(
+                                stack=stack,
+                                run_dir=artifacts.run_dir,
+                                candidate_policy_id=candidate_policy_id,
+                                candidate_snapshot_path=candidate_snapshot.path,
+                                update_count=int(learner.update_count),
+                                policy_version=int(learner.get_policy_version()),
+                                run_id256=run_id256,
+                                config_hash256=config_hash256,
+                                spec_hash256=spec_hash256,
+                                anchor_policy_ids=anchor_policy_ids,
+                                anchor_specs=anchor_specs,
+                                eval_device_override=_resolve_async_promotion_gate_device(
+                                    stack=stack,
+                                    learner_device=device,
+                                ),
+                            )
+                            pending_promotion_gate = PendingPromotionGate(
+                                future=async_promotion_gate_executor.submit(_run_async_promotion_gate_worker, request),
+                                request=request,
+                                pinned_snapshot_ids=newly_pinned_snapshot_ids,
+                            )
+                            print(
+                                "Scheduled async promotion gate: "
+                                f"update={int(learner.update_count)} candidate={candidate_policy_id} "
+                                f"anchors={','.join(anchor_policy_ids.keys())}"
+                            )
+                        elif league is not None and league.enabled and league.promotion_gate_enabled:
+                            print(
+                                "Promotion gate skipped during league warmup: "
+                                f"update={int(learner.update_count)} effective_update={reference_update} "
+                                f"threshold={int(league.warmup.first_updates)} candidate={candidate_policy_id}"
+                            )
+                    else:
+                        promotion_passed = _run_snapshot_promotion_gate(
+                            stack=stack,
+                            contract=contract,
+                            artifacts=artifacts,
+                            training_paths=training_paths,
+                            learner=learner,
+                            candidate_policy_id=candidate_policy_id,
+                            update_count=int(learner.update_count),
+                            league_reference_update=(
+                                None
+                                if "league_effective_update" not in latest_metrics
+                                else int(latest_metrics["league_effective_update"])
+                            ),
+                            policy_version=int(learner.get_policy_version()),
+                            run_id256=run_id256,
+                            config_hash256=config_hash256,
+                            spec_hash256=spec_hash256,
+                        )
+                        if promotion_passed:
+                            runtime.refresh_opponent_pool()
 
                 if _should_run_periodic_dev_eval(stack, update_count=int(learner.update_count)):
-                    summary_payload = _run_periodic_dev_eval(
-                        stack=stack,
-                        contract=contract,
-                        artifacts=artifacts,
-                        training_paths=training_paths,
-                        learner=learner,
-                        device=device,
-                        run_id256=run_id256,
-                        config_hash256=config_hash256,
-                        spec_hash256=spec_hash256,
-                    )
-                    anchor_keys = sorted(cast(dict[str, Any], summary_payload["anchor_scores"]).keys())
-                    opponent_fragment = f" opponent={_slug_policy_id(anchor_keys[0])}" if anchor_keys else ""
-                    print(
-                        "Periodic dev eval: "
-                        f"update={learner.update_count}{opponent_fragment} "
-                        f"aggregate={summary_payload['aggregate_score']:.4f} "
-                        f"anchors={','.join(anchor_keys)}"
-                    )
-                    effective_summary = summary_payload
-                    tracker_before_dev_eval = _load_checkpoint_tracker(training_paths)
-                    existing_best_record = tracker_before_dev_eval.get("best")
-                    if not isinstance(existing_best_record, Mapping):
-                        existing_best_record = None
-                    confirmatory_request = _confirmatory_dev_eval_request(
-                        stack=stack,
-                        existing_best_record=cast(Mapping[str, Any] | None, existing_best_record),
-                        dev_eval_summary=summary_payload,
-                    )
-                    if confirmatory_request is not None:
-                        seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = (
-                            _periodic_dev_eval_schedule(stack)
+                    if async_periodic_dev_eval_enabled:
+                        if async_periodic_dev_eval_executor is None:
+                            raise RuntimeError("async periodic dev eval is enabled but the worker pool was not created")
+                        if pending_periodic_dev_eval is not None:
+                            completed_summary, guard_event = _process_completed_periodic_dev_eval(
+                                pending_eval=pending_periodic_dev_eval,
+                                stack=stack,
+                                contract=contract,
+                                artifacts=artifacts,
+                                training_paths=training_paths,
+                                runtime=runtime,
+                                learner=learner,
+                                device=device,
+                                run_id256=run_id256,
+                                config_hash256=config_hash256,
+                                spec_hash256=spec_hash256,
+                                last_rollback_update=last_checkpoint_guard_rollback_update,
+                                tensorboard_logger=tensorboard_logger,
+                            )
+                            pending_periodic_dev_eval = None
+                            last_dev_eval_summary = completed_summary
+                            last_dev_eval_update_count = int(completed_summary["update_count"])
+                            if guard_event is not None:
+                                last_checkpoint_guard_rollback_update = int(learner.update_count)
+                                pending_promotion_gate = _drop_stale_pending_promotion_gate(
+                                    pending_gate=pending_promotion_gate,
+                                    rollback_best_update_count=int(guard_event["best_update_count"]),
+                                )
+                                prefetched_runtime_batch = None
+                                print(
+                                    "Checkpoint guard rollback: "
+                                    f"update={guard_event['update_count']} "
+                                    f"best_update={guard_event['best_update_count']} "
+                                    f"current_score={float(guard_event['current_score']):.4f} "
+                                    f"best_score={float(guard_event['best_score']):.4f} "
+                                    f"reasons={','.join(cast(list[str], guard_event['reasons']))}"
+                                )
+                        checkpoint_path = _ensure_current_checkpoint(
+                            training_paths=training_paths,
+                            learner=learner,
+                            stack=stack,
+                            device=device,
+                            spec_hash256=spec_hash256,
+                            algorithm=algorithm,
                         )
-                        confirmatory_pairs = _expand_periodic_dev_eval_paired_seeds(
-                            base_paired_seeds,
-                            requested_pairs=int(confirmatory_request["target_pairs"]),
-                            seed_file_sha256=seed_file_sha256,
+                        opponent_specs, pinned_snapshot_ids = _resolve_periodic_dev_eval_opponent_specs(
+                            stack=stack,
+                            run_dir=artifacts.run_dir,
+                        )
+                        newly_pinned_snapshot_ids = _pin_snapshot_ids(
+                            stack=stack,
+                            training_paths=training_paths,
+                            run_dir=artifacts.run_dir,
+                            snapshot_ids=pinned_snapshot_ids,
+                        )
+                        request = AsyncPeriodicDevEvalRequest(
+                            stack=stack,
+                            checkpoint_path=checkpoint_path,
+                            focal_policy_id=_current_focal_policy_id(learner=learner),
                             update_count=int(learner.update_count),
                             policy_version=int(learner.get_policy_version()),
-                            scope="periodic_dev_eval_confirmatory",
+                            run_dir=artifacts.run_dir,
+                            run_id256=run_id256,
+                            config_hash256=config_hash256,
+                            spec_hash256=spec_hash256,
+                            artifact_dir_name="dev_eval",
+                            artifact_scope="periodic_dev_eval",
+                            paired_seeds=tuple(_periodic_dev_eval_schedule(stack)[2]),
+                            opponents=tuple(opponent_specs),
+                            eval_device_override=None,
+                            parallel_workers=max(
+                                1,
+                                int(
+                                    getattr(
+                                        stack.config.evaluation,
+                                        "periodic_dev_eval_parallel_workers",
+                                        1,
+                                    )
+                                ),
+                            ),
+                            parallel_worker_devices=_resolved_periodic_dev_eval_worker_devices(
+                                stack=stack,
+                                parallel_workers=max(
+                                    1,
+                                    int(
+                                        getattr(
+                                            stack.config.evaluation,
+                                            "periodic_dev_eval_parallel_workers",
+                                            1,
+                                        )
+                                    ),
+                                ),
+                                explicit_worker_devices=tuple(
+                                    getattr(
+                                        stack.config.evaluation,
+                                        "periodic_dev_eval_parallel_worker_devices",
+                                        (),
+                                    )
+                                ),
+                                eval_device=str(
+                                    getattr(
+                                        stack.config.evaluation,
+                                        "eval_device",
+                                        "cpu",
+                                    )
+                                ),
+                                learner_device=device,
+                            ),
                         )
-                        effective_summary = _run_periodic_dev_eval(
+                        pending_periodic_dev_eval = PendingPeriodicDevEval(
+                            future=async_periodic_dev_eval_executor.submit(
+                                _run_async_periodic_dev_eval_worker,
+                                request,
+                            ),
+                            request=request,
+                            pinned_snapshot_ids=tuple(newly_pinned_snapshot_ids),
+                            latest_metrics=dict(latest_metrics),
+                        )
+                        print(
+                            "Periodic dev eval scheduled: "
+                            f"update={int(learner.update_count)} "
+                            f"devices={','.join(request.parallel_worker_devices) or str(stack.config.evaluation.eval_device)} "
+                            f"anchors={','.join(spec.display_name for spec in request.opponents)}"
+                        )
+                    else:
+                        summary_payload = _run_periodic_dev_eval(
                             stack=stack,
                             contract=contract,
                             artifacts=artifacts,
@@ -4226,72 +5978,189 @@ def _run_minimal_training(
                             run_id256=run_id256,
                             config_hash256=config_hash256,
                             spec_hash256=spec_hash256,
-                            artifact_dir_name="dev_eval_confirmatory",
-                            artifact_scope="periodic_dev_eval_confirmatory",
-                            paired_seeds_override=confirmatory_pairs,
-                            persist_summary=False,
-                            update_stall_monitor=False,
                         )
+                        anchor_keys = sorted(cast(dict[str, Any], summary_payload["anchor_scores"]).keys())
+                        opponent_fragment = f" opponent={_slug_policy_id(anchor_keys[0])}" if anchor_keys else ""
                         print(
-                            "Confirmatory dev eval: "
-                            f"update={learner.update_count} paired_seeds={len(confirmatory_pairs)} "
-                            f"aggregate={effective_summary['aggregate_score']:.4f} "
-                            f"reasons={','.join(cast(list[str], confirmatory_request['reasons']))} "
-                            f"seed_file={seed_file.name}"
+                            "Periodic dev eval: "
+                            f"update={learner.update_count}{opponent_fragment} "
+                            f"aggregate={summary_payload['aggregate_score']:.4f} "
+                            f"anchors={','.join(anchor_keys)}"
                         )
-                    last_dev_eval_summary = effective_summary
-                    last_dev_eval_update_count = int(learner.update_count)
-                    ckpt_path = _ensure_current_checkpoint(
-                        training_paths=training_paths,
-                        learner=learner,
-                        stack=stack,
-                        device=device,
-                        spec_hash256=spec_hash256,
-                        algorithm=algorithm,
-                    )
-                    tracker_payload = _publish_checkpoint_aliases(
-                        stack=stack,
-                        training_paths=training_paths,
-                        artifacts=artifacts,
-                        checkpoint_path=ckpt_path,
-                        learner=learner,
-                        latest_metrics=latest_metrics,
-                        dev_eval_summary=effective_summary,
-                    )
-                    _maybe_log_structured_mainmove_guard(
-                        training_paths=training_paths,
-                        learner=learner,
-                        latest_metrics=latest_metrics,
-                        dev_eval_summary=effective_summary,
-                    )
-                    guard_event = _maybe_rollback_to_best_checkpoint(
-                        stack=stack,
-                        training_paths=training_paths,
-                        artifacts=artifacts,
-                        runtime=runtime,
-                        learner=learner,
-                        model=model,
-                        device=device,
-                        spec_hash256=spec_hash256,
-                        algorithm=algorithm,
-                        latest_metrics=latest_metrics,
-                        dev_eval_summary=effective_summary,
-                        last_rollback_update=last_checkpoint_guard_rollback_update,
-                    )
-                    if guard_event is not None:
-                        last_checkpoint_guard_rollback_update = int(learner.update_count)
-                        print(
-                            "Checkpoint guard rollback: "
-                            f"update={guard_event['update_count']} "
-                            f"best_update={guard_event['best_update_count']} "
-                            f"current_score={float(guard_event['current_score']):.4f} "
-                            f"best_score={float(guard_event['best_score']):.4f} "
-                            f"reasons={','.join(cast(list[str], guard_event['reasons']))}"
+                        effective_summary = summary_payload
+                        tracker_before_dev_eval = _load_checkpoint_tracker(training_paths)
+                        existing_best_record = tracker_before_dev_eval.get("best")
+                        if not isinstance(existing_best_record, Mapping):
+                            existing_best_record = None
+                        confirmatory_request = _confirmatory_dev_eval_request(
+                            stack=stack,
+                            existing_best_record=cast(Mapping[str, Any] | None, existing_best_record),
+                            dev_eval_summary=summary_payload,
                         )
-                    if tensorboard_logger is not None:
-                        tensorboard_logger.log_periodic_dev_eval(effective_summary, step=int(learner.update_count))
-                        tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
+                        if confirmatory_request is not None:
+                            seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = (
+                                _periodic_dev_eval_schedule(stack)
+                            )
+                            confirmatory_pairs = _expand_periodic_dev_eval_paired_seeds(
+                                base_paired_seeds,
+                                requested_pairs=int(confirmatory_request["target_pairs"]),
+                                seed_file_sha256=seed_file_sha256,
+                                update_count=int(learner.update_count),
+                                policy_version=int(learner.get_policy_version()),
+                                scope="periodic_dev_eval_confirmatory",
+                            )
+                            effective_summary = _run_periodic_dev_eval(
+                                stack=stack,
+                                contract=contract,
+                                artifacts=artifacts,
+                                training_paths=training_paths,
+                                learner=learner,
+                                device=device,
+                                run_id256=run_id256,
+                                config_hash256=config_hash256,
+                                spec_hash256=spec_hash256,
+                                artifact_dir_name="dev_eval_confirmatory",
+                                artifact_scope="periodic_dev_eval_confirmatory",
+                                paired_seeds_override=confirmatory_pairs,
+                                persist_summary=False,
+                                update_stall_monitor=False,
+                            )
+                            print(
+                                "Confirmatory dev eval: "
+                                f"update={learner.update_count} paired_seeds={len(confirmatory_pairs)} "
+                                f"aggregate={effective_summary['aggregate_score']:.4f} "
+                                f"reasons={','.join(cast(list[str], confirmatory_request['reasons']))} "
+                                f"seed_file={seed_file.name}"
+                            )
+                        last_dev_eval_summary = effective_summary
+                        last_dev_eval_update_count = int(learner.update_count)
+                        ckpt_path = _ensure_current_checkpoint(
+                            training_paths=training_paths,
+                            learner=learner,
+                            stack=stack,
+                            device=device,
+                            spec_hash256=spec_hash256,
+                            algorithm=algorithm,
+                        )
+                        tracker_payload = _publish_checkpoint_aliases(
+                            stack=stack,
+                            training_paths=training_paths,
+                            artifacts=artifacts,
+                            checkpoint_path=ckpt_path,
+                            learner=learner,
+                            latest_metrics=latest_metrics,
+                            dev_eval_summary=effective_summary,
+                        )
+                        _maybe_log_structured_mainmove_guard(
+                            training_paths=training_paths,
+                            learner=learner,
+                            latest_metrics=latest_metrics,
+                            dev_eval_summary=effective_summary,
+                        )
+                        guard_event = _maybe_rollback_to_best_checkpoint(
+                            stack=stack,
+                            training_paths=training_paths,
+                            artifacts=artifacts,
+                            runtime=runtime,
+                            learner=learner,
+                            model=model,
+                            device=device,
+                            spec_hash256=spec_hash256,
+                            algorithm=algorithm,
+                            latest_metrics=latest_metrics,
+                            dev_eval_summary=effective_summary,
+                            last_rollback_update=last_checkpoint_guard_rollback_update,
+                        )
+                        if guard_event is not None:
+                            last_checkpoint_guard_rollback_update = int(learner.update_count)
+                            pending_promotion_gate = _drop_stale_pending_promotion_gate(
+                                pending_gate=pending_promotion_gate,
+                                rollback_best_update_count=int(guard_event["best_update_count"]),
+                            )
+                            prefetched_runtime_batch = None
+                            print(
+                                "Checkpoint guard rollback: "
+                                f"update={guard_event['update_count']} "
+                                f"best_update={guard_event['best_update_count']} "
+                                f"current_score={float(guard_event['current_score']):.4f} "
+                                f"best_score={float(guard_event['best_score']):.4f} "
+                                f"reasons={','.join(cast(list[str], guard_event['reasons']))}"
+                            )
+                        if tensorboard_logger is not None:
+                            tensorboard_logger.log_periodic_dev_eval(effective_summary, step=int(learner.update_count))
+                            tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
+                        early_cutoff_payload = _update_early_cutoff(
+                            stack=stack,
+                            training_paths=training_paths,
+                            update_count=int(learner.update_count),
+                            summary_payload=effective_summary,
+                        )
+                        if early_cutoff_payload is not None and bool(early_cutoff_payload.get("should_stop", False)):
+                            latest_metrics.update(
+                                {
+                                    "early_cutoff_triggered": 1.0,
+                                    "early_cutoff_best_score": float(early_cutoff_payload["best_score"]),
+                                    "early_cutoff_current_score": float(early_cutoff_payload["current_score"]),
+                                    "early_cutoff_no_improvement_updates": float(
+                                        early_cutoff_payload["no_improvement_updates"]
+                                    ),
+                                    "early_cutoff_consecutive_stall_evals": float(
+                                        early_cutoff_payload["consecutive_stall_evals"]
+                                    ),
+                                }
+                            )
+                            print(
+                                "Early cutoff triggered: "
+                                f"update={int(learner.update_count)} "
+                                f"best_update={int(early_cutoff_payload['best_update_count'])} "
+                                f"best_score={float(early_cutoff_payload['best_score']):.4f} "
+                                f"current_score={float(early_cutoff_payload['current_score']):.4f} "
+                                f"reasons={','.join(cast(list[str], early_cutoff_payload['reasons']))}"
+                            )
+                            break
         finally:
+            if pending_promotion_gate is not None:
+                promotion_passed = _process_completed_promotion_gate(
+                    pending_gate=pending_promotion_gate,
+                    stack=stack,
+                    artifacts=artifacts,
+                    training_paths=training_paths,
+                )
+                pending_promotion_gate = None
+                if promotion_passed:
+                    runtime.refresh_opponent_pool()
+            if pending_periodic_dev_eval is not None:
+                completed_summary, guard_event = _process_completed_periodic_dev_eval(
+                    pending_eval=pending_periodic_dev_eval,
+                    stack=stack,
+                    contract=contract,
+                    artifacts=artifacts,
+                    training_paths=training_paths,
+                    runtime=runtime,
+                    learner=learner,
+                    device=device,
+                    run_id256=run_id256,
+                    config_hash256=config_hash256,
+                    spec_hash256=spec_hash256,
+                    last_rollback_update=last_checkpoint_guard_rollback_update,
+                    tensorboard_logger=tensorboard_logger,
+                )
+                pending_periodic_dev_eval = None
+                last_dev_eval_summary = completed_summary
+                last_dev_eval_update_count = int(completed_summary["update_count"])
+                if guard_event is not None:
+                    last_checkpoint_guard_rollback_update = int(learner.update_count)
+                    pending_promotion_gate = _drop_stale_pending_promotion_gate(
+                        pending_gate=pending_promotion_gate,
+                        rollback_best_update_count=int(guard_event["best_update_count"]),
+                    )
+                    prefetched_runtime_batch = None
+            if prefetch_executor is not None:
+                prefetch_executor.shutdown(wait=False, cancel_futures=True)
+            if async_promotion_gate_executor is not None:
+                async_promotion_gate_executor.shutdown(wait=True, cancel_futures=False)
+            if async_periodic_dev_eval_executor is not None:
+                async_periodic_dev_eval_executor.shutdown(wait=True, cancel_futures=False)
             runtime.close()
 
     if profiler is not None and profiler_trace_dir is not None:
@@ -4354,6 +6223,8 @@ def _run_minimal_training(
         tracker_payload = _load_checkpoint_tracker(training_paths)
     if tensorboard_logger is not None:
         tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
+    if early_cutoff_payload is not None and bool(early_cutoff_payload.get("should_stop", False)):
+        latest_metrics.setdefault("early_cutoff_triggered", 1.0)
     return latest_metrics
 
 
@@ -4717,6 +6588,14 @@ def main() -> None:
             f"value_loss={metrics.get('value_loss', 0.0):.6f} "
             f"entropy={metrics.get('entropy', 0.0):.6f}"
         )
+        if float(metrics.get("early_cutoff_triggered", 0.0)) >= 0.5:
+            print(
+                "Training stopped by early cutoff: "
+                f"best_score={metrics.get('early_cutoff_best_score', 0.0):.4f} "
+                f"current_score={metrics.get('early_cutoff_current_score', 0.0):.4f} "
+                f"no_improvement_updates={int(metrics.get('early_cutoff_no_improvement_updates', 0.0))} "
+                f"consecutive_stall_evals={int(metrics.get('early_cutoff_consecutive_stall_evals', 0.0))}"
+            )
     finally:
         tensorboard_logger.close()
 

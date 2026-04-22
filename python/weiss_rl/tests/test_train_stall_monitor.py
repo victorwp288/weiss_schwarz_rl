@@ -9,6 +9,7 @@ import scripts.train as train_script
 import torch
 from scripts.train import (
     MinimalRollout,
+    PeriodicDevEvalOpponentSpec,
     TrainingPaths,
     _build_learner_batch,
     _checkpoint_candidate_metric,
@@ -17,11 +18,17 @@ from scripts.train import (
     _entropy_coef_for_next_update,
     _expand_periodic_dev_eval_paired_seeds,
     _periodic_dev_eval_opponents,
+    _pin_snapshot_ids,
+    _resolve_async_periodic_dev_eval_device,
+    _resolve_periodic_dev_eval_opponent_specs,
+    _resolved_periodic_dev_eval_worker_devices,
     _should_promote_best_checkpoint,
+    _unpin_snapshot_ids,
+    _update_early_cutoff,
     _update_stall_monitor,
 )
 
-from weiss_rl.config import load_stack_config
+from weiss_rl.config import apply_stack_overrides, load_stack_config
 from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
 
 
@@ -29,8 +36,7 @@ def _repo_root():
     return Path(__file__).resolve().parents[3]
 
 
-def test_update_stall_monitor_marks_run_after_consecutive_truncating_evals(tmp_path: Path) -> None:
-    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+def _training_paths(tmp_path: Path) -> TrainingPaths:
     training_dir = tmp_path / "training"
     logs_dir = training_dir / "logs"
     snapshots_dir = training_dir / "snapshots"
@@ -38,7 +44,7 @@ def test_update_stall_monitor_marks_run_after_consecutive_truncating_evals(tmp_p
     tensorboard_dir = tmp_path / "tensorboard"
     for path in (logs_dir, snapshots_dir, checkpoints_dir, tensorboard_dir):
         path.mkdir(parents=True, exist_ok=True)
-    training_paths = TrainingPaths(
+    return TrainingPaths(
         training_dir=training_dir,
         checkpoints_dir=checkpoints_dir,
         logs_dir=logs_dir,
@@ -50,6 +56,11 @@ def test_update_stall_monitor_marks_run_after_consecutive_truncating_evals(tmp_p
         best_checkpoint_path=checkpoints_dir / "best.pt",
         checkpoint_tracker_path=checkpoints_dir / "checkpoint_tracker.json",
     )
+
+
+def test_update_stall_monitor_marks_run_after_consecutive_truncating_evals(tmp_path: Path) -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+    training_paths = _training_paths(tmp_path)
     payload = {
         "anchors": {
             "B0 RandomLegal": {"summary": {"games": 10, "truncations": 4}},
@@ -79,25 +90,7 @@ def test_update_stall_monitor_marks_run_after_consecutive_truncating_evals(tmp_p
 
 def test_update_stall_monitor_includes_optional_b2_anchor(tmp_path: Path) -> None:
     stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
-    training_dir = tmp_path / "training"
-    logs_dir = training_dir / "logs"
-    snapshots_dir = training_dir / "snapshots"
-    checkpoints_dir = training_dir / "checkpoints"
-    tensorboard_dir = tmp_path / "tensorboard"
-    for path in (logs_dir, snapshots_dir, checkpoints_dir, tensorboard_dir):
-        path.mkdir(parents=True, exist_ok=True)
-    training_paths = TrainingPaths(
-        training_dir=training_dir,
-        checkpoints_dir=checkpoints_dir,
-        logs_dir=logs_dir,
-        snapshots_dir=snapshots_dir,
-        tensorboard_dir=tensorboard_dir,
-        scalars_path=logs_dir / "training_metrics.jsonl",
-        performance_log_path=logs_dir / "performance.jsonl",
-        latest_checkpoint_path=checkpoints_dir / "latest.pt",
-        best_checkpoint_path=checkpoints_dir / "best.pt",
-        checkpoint_tracker_path=checkpoints_dir / "checkpoint_tracker.json",
-    )
+    training_paths = _training_paths(tmp_path)
     payload = {
         "anchors": {
             "B0 RandomLegal": {"summary": {"games": 10, "truncations": 1}},
@@ -123,6 +116,138 @@ def test_update_stall_monitor_includes_optional_b2_anchor(tmp_path: Path) -> Non
     assert second is not None
     assert second["stall_risk"] is True
     assert second["worst_anchor"] == "B2 HeuristicPublic"
+
+
+def test_update_early_cutoff_triggers_after_patience_without_meaningful_improvement(tmp_path: Path) -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+    stack = apply_stack_overrides(
+        stack,
+        {
+            "curriculum.early_cutoff.enabled": True,
+            "curriculum.early_cutoff.warmup_updates": 20,
+            "curriculum.early_cutoff.patience_updates": 20,
+            "curriculum.early_cutoff.min_improvement": 0.01,
+            "curriculum.early_cutoff.stall_patience_evals": 0,
+        },
+    )
+    training_paths = _training_paths(tmp_path)
+
+    first = _update_early_cutoff(
+        stack=stack,
+        training_paths=training_paths,
+        update_count=20,
+        summary_payload={"aggregate_score": 0.60},
+    )
+    second = _update_early_cutoff(
+        stack=stack,
+        training_paths=training_paths,
+        update_count=40,
+        summary_payload={"aggregate_score": 0.605},
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first["should_stop"] is False
+    assert second["should_stop"] is True
+    assert second["reasons"] == ["no_improvement"]
+    assert second["best_update_count"] == 20
+
+
+def test_update_early_cutoff_triggers_after_repeated_stall_evals(tmp_path: Path) -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+    stack = apply_stack_overrides(
+        stack,
+        {
+            "curriculum.early_cutoff.enabled": True,
+            "curriculum.early_cutoff.patience_updates": 0,
+            "curriculum.early_cutoff.stall_patience_evals": 2,
+            "curriculum.early_cutoff.stall_rate_threshold": 0.25,
+        },
+    )
+    training_paths = _training_paths(tmp_path)
+    payload = {
+        "aggregate_score": 0.50,
+        "anchors": {
+            "B0 RandomLegal": {"summary": {"games": 10, "no_progress_timeouts": 4}},
+            "B1 NoLeague baseline": {"summary": {"games": 10, "no_progress_timeouts": 1}},
+        },
+    }
+
+    first = _update_early_cutoff(
+        stack=stack,
+        training_paths=training_paths,
+        update_count=10,
+        summary_payload=payload,
+    )
+    second = _update_early_cutoff(
+        stack=stack,
+        training_paths=training_paths,
+        update_count=20,
+        summary_payload=payload,
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first["should_stop"] is False
+    assert second["should_stop"] is True
+    assert second["reasons"] == ["stall"]
+    assert second["consecutive_stall_evals"] == 2
+
+
+def test_dev_eval_ineligibility_reasons_still_enforces_checkpoint_guard_when_stall_monitor_is_disabled() -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+    stack = apply_stack_overrides(
+        stack,
+        {
+            "curriculum.stall_monitor.enabled": False,
+            "curriculum.checkpoint_guard.enabled": True,
+            "curriculum.checkpoint_guard.promote_min_prob_gt_half": 0.6,
+            "curriculum.checkpoint_guard.promote_max_ci_half_width": 0.24,
+        },
+    )
+
+    reasons = _dev_eval_ineligibility_reasons(
+        stack,
+        dev_eval_summary={
+            "aggregate_score": 0.70,
+            "anchors": {
+                "B0 RandomLegal": {
+                    "uncertainty": {
+                        "prob_gt_half": 0.55,
+                        "prob_lt_half": 0.10,
+                        "ci_half_width": 0.30,
+                    }
+                }
+            },
+        },
+    )
+
+    assert reasons == ("confidence_prob", "confidence_ci")
+
+
+def test_drop_stale_pending_promotion_gate_discards_candidates_newer_than_rollback_target() -> None:
+    stale_gate = SimpleNamespace(
+        request=SimpleNamespace(update_count=220, candidate_policy_id="policy_000220"),
+        future=object(),
+        pinned_snapshot_ids=(),
+    )
+    retained_gate = SimpleNamespace(
+        request=SimpleNamespace(update_count=160, candidate_policy_id="policy_000160"),
+        future=object(),
+        pinned_snapshot_ids=(),
+    )
+
+    assert train_script._drop_stale_pending_promotion_gate(
+        pending_gate=stale_gate,
+        rollback_best_update_count=160,
+    ) is None
+    assert (
+        train_script._drop_stale_pending_promotion_gate(
+            pending_gate=retained_gate,
+            rollback_best_update_count=160,
+        )
+        is retained_gate
+    )
 
 
 def test_train_build_learner_batch_does_not_double_apply_truncation_reward() -> None:
@@ -268,6 +393,7 @@ def test_periodic_dev_eval_opponents_include_extra_snapshot_anchor_from_promotio
 ) -> None:
     stack = SimpleNamespace(
         config=SimpleNamespace(
+            evaluation=SimpleNamespace(eval_device="cpu"),
             league=SimpleNamespace(
                 promotion_anchor_set_v1=SimpleNamespace(
                     required=("B0 RandomLegal", "B1 NoLeague baseline"),
@@ -321,6 +447,7 @@ def test_periodic_dev_eval_opponents_resolve_symbolic_snapshot_anchor_aliases(
 ) -> None:
     stack = SimpleNamespace(
         config=SimpleNamespace(
+            evaluation=SimpleNamespace(eval_device="cpu"),
             league=SimpleNamespace(
                 promotion_anchor_set_v1=SimpleNamespace(
                     required=("B0 RandomLegal", "B1 NoLeague baseline"),
@@ -382,6 +509,158 @@ def test_periodic_dev_eval_opponents_resolve_symbolic_snapshot_anchor_aliases(
     assert opponents[2][2] is fake_model
     assert opponents[3][0] == "policy_000020"
     assert opponents[3][2] is fake_model
+
+
+def test_resolve_periodic_dev_eval_opponent_specs_returns_explicit_snapshot_specs(tmp_path: Path) -> None:
+    stack = SimpleNamespace(
+        config=SimpleNamespace(
+            league=SimpleNamespace(
+                promotion_anchor_set_v1=SimpleNamespace(
+                    required=("B0 RandomLegal", "B1 NoLeague baseline"),
+                    optional_if_available=("Previous recent snapshot",),
+                )
+            )
+        )
+    )
+    snapshots_dir = tmp_path / "training" / "snapshots"
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    registry = SnapshotRegistry(recent_size=4, champion_size=1)
+    registry.add_snapshot(
+        policy_id="b1_noleague_baseline",
+        update=5,
+        weights_sha256="a" * 64,
+        path=snapshot_weights_relpath("b1_noleague_baseline"),
+    )
+    registry.add_snapshot(
+        policy_id="policy_000020",
+        update=20,
+        weights_sha256="b" * 64,
+        path=snapshot_weights_relpath("policy_000020"),
+    )
+    registry.add_snapshot(
+        policy_id="policy_000030",
+        update=30,
+        weights_sha256="c" * 64,
+        path=snapshot_weights_relpath("policy_000030"),
+    )
+    registry.save(snapshots_dir / "registry.json")
+
+    specs, pinned_snapshot_ids = _resolve_periodic_dev_eval_opponent_specs(stack=stack, run_dir=tmp_path)
+
+    assert specs == (
+        PeriodicDevEvalOpponentSpec(
+            policy_id="b0_randomlegal",
+            display_name="B0 RandomLegal",
+            kind="random_legal",
+            snapshot_path=None,
+            heuristic_profile=None,
+        ),
+        PeriodicDevEvalOpponentSpec(
+            policy_id="b1_noleague_baseline",
+            display_name="B1 NoLeague baseline",
+            kind="snapshot",
+            snapshot_path=snapshot_weights_relpath("b1_noleague_baseline"),
+            heuristic_profile=None,
+        ),
+        PeriodicDevEvalOpponentSpec(
+            policy_id="policy_000020",
+            display_name="Previous recent snapshot",
+            kind="snapshot",
+            snapshot_path=snapshot_weights_relpath("policy_000020"),
+            heuristic_profile=None,
+        ),
+    )
+    assert pinned_snapshot_ids == ("b1_noleague_baseline", "policy_000020")
+
+
+def test_pin_and_unpin_snapshot_ids_preserve_existing_pins(tmp_path: Path) -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+    training_dir = tmp_path / "training"
+    snapshots_dir = training_dir / "snapshots"
+    checkpoints_dir = training_dir / "checkpoints"
+    logs_dir = training_dir / "logs"
+    tensorboard_dir = tmp_path / "tensorboard"
+    for path in (snapshots_dir, checkpoints_dir, logs_dir, tensorboard_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    training_paths = TrainingPaths(
+        training_dir=training_dir,
+        checkpoints_dir=checkpoints_dir,
+        logs_dir=logs_dir,
+        snapshots_dir=snapshots_dir,
+        tensorboard_dir=tensorboard_dir,
+        scalars_path=logs_dir / "training_metrics.jsonl",
+        performance_log_path=logs_dir / "performance.jsonl",
+        latest_checkpoint_path=checkpoints_dir / "latest.pt",
+        best_checkpoint_path=checkpoints_dir / "best.pt",
+        checkpoint_tracker_path=checkpoints_dir / "checkpoint_tracker.json",
+    )
+    registry = SnapshotRegistry(recent_size=4, champion_size=1)
+    registry.add_snapshot(
+        policy_id="baseline",
+        update=1,
+        weights_sha256="a" * 64,
+        path=snapshot_weights_relpath("baseline"),
+    )
+    registry.add_snapshot(
+        policy_id="candidate",
+        update=2,
+        weights_sha256="b" * 64,
+        path=snapshot_weights_relpath("candidate"),
+    )
+    registry.pin_snapshot("baseline")
+    registry.save(snapshots_dir / "registry.json")
+
+    newly_pinned = _pin_snapshot_ids(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=tmp_path,
+        snapshot_ids=("baseline", "candidate"),
+    )
+    assert newly_pinned == ("candidate",)
+
+    _unpin_snapshot_ids(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=tmp_path,
+        snapshot_ids=newly_pinned,
+    )
+    reloaded = SnapshotRegistry.load(snapshots_dir / "registry.json")
+    assert reloaded.pinned_snapshots == ["baseline"]
+
+
+def test_resolve_async_periodic_dev_eval_device_prefers_non_learner_actor_gpu(monkeypatch) -> None:
+    stack = SimpleNamespace(
+        config=SimpleNamespace(
+            evaluation=SimpleNamespace(eval_device="cuda:auto"),
+            system=SimpleNamespace(actor_process_count=4),
+        )
+    )
+    monkeypatch.setattr(
+        train_script,
+        "resolve_actor_device_layout",
+        lambda stack, actor_count, learner_device, prefer_process_collectors: ("cuda:1", "cuda:2"),
+    )
+
+    resolved = _resolve_async_periodic_dev_eval_device(
+        stack=stack,
+        learner_device=torch.device("cuda:0"),
+    )
+
+    assert resolved == "cuda:2"
+
+
+def test_resolved_periodic_dev_eval_worker_devices_cycles_explicit_devices() -> None:
+    stack = SimpleNamespace(config=SimpleNamespace(system=None))
+
+    resolved = _resolved_periodic_dev_eval_worker_devices(
+        stack=stack,
+        parallel_workers=4,
+        explicit_worker_devices=("cuda:0", "cuda:2"),
+        eval_device="cuda:auto",
+        learner_device=None,
+    )
+
+    assert resolved == ("cuda:0", "cuda:2", "cuda:0", "cuda:2")
 
 
 def test_dev_eval_ineligibility_reasons_identify_borderline_confidence_only() -> None:

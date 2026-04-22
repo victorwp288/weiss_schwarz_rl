@@ -1,0 +1,20 @@
+schema_version: 2
+description: canonical frozen structured_acceptance thesis model eval preset for Linux servers with GPU eval inference
+extends: structured_acceptance_thesis_model_auto_gpu.yaml
+curriculum:
+  early_cutoff:
+    enabled: true
+    warmup_updates: 120
+    patience_updates: 120
+    min_improvement: 0.01
+    stall_patience_evals: 4
+    stall_rate_threshold: 0.25
+evaluation:
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+        - Previous champion snapshot
+        - Previous recent snapshot

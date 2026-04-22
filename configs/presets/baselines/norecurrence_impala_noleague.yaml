@@ -1,0 +1,9 @@
+schema_version: 2
+extends: norecurrence_impala.yaml
+description: "Baseline no-league non-recurrent IMPALA preset aligned to the frozen thesis-model surface"
+experiment:
+  role: baseline_noleague
+evaluation:
+  periodic_dev_eval_interval_updates: 0
+league:
+  enabled: false

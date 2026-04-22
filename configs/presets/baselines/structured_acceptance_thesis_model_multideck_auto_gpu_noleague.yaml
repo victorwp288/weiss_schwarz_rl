@@ -1,0 +1,17 @@
+schema_version: 2
+description: no-league baseline aligned to the thesis-model multideck surface
+extends: ../structured_acceptance_thesis_model_multideck_auto_gpu.yaml
+experiment:
+  role: baseline_noleague_multideck
+evaluation:
+  periodic_dev_eval_interval_updates: 10
+curriculum:
+  early_cutoff:
+    enabled: true
+    warmup_updates: 120
+    patience_updates: 120
+    min_improvement: 0.01
+    stall_patience_evals: 4
+    stall_rate_threshold: 0.25
+league:
+  enabled: false

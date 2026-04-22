@@ -17,11 +17,12 @@ uv sync --extra dev
 
 ### `uv sync` cannot resolve `torch`
 
-The pinned `torch` build is only intended for the supported Python matrix above.
+The repo prefers the CUDA 12.4 PyTorch index only on the supported CPython Linux/Windows wheel targets and otherwise falls back to PyPI.
 
 Fix:
 
 - switch to Python 3.10-3.12
+- if you are on an unsupported Linux/Windows architecture or interpreter, let `uv` use the fallback PyPI build instead of forcing a CUDA-specific install
 - re-run `uv sync --extra dev`
 - if you need `weiss-sim 0.8.1` too, use `uv sync --extra dev --extra sim`
 

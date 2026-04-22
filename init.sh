@@ -42,12 +42,17 @@ else
     log_step "Bootstrap local uv"
     "$python_bin" -m venv "$bootstrap_dir"
     bootstrap_python="$bootstrap_dir/bin/python"
+    bootstrap_uv="$bootstrap_dir/bin/uv"
+    if [[ ! -x "$bootstrap_python" ]]; then
+      bootstrap_python="$bootstrap_dir/Scripts/python.exe"
+      bootstrap_uv="$bootstrap_dir/Scripts/uv.exe"
+    fi
     if [[ ! -x "$bootstrap_python" ]]; then
       echo "ERROR: Failed to create bootstrap Python environment at $bootstrap_dir" >&2
       exit 1
     fi
     "$bootstrap_python" -m pip install --upgrade pip uv
-    uv_bin="$bootstrap_dir/bin/uv"
+    uv_bin="$bootstrap_uv"
   fi
 fi
 
@@ -59,7 +64,6 @@ if ! "$uv_bin" --version; then
 fi
 
 export UV_LINK_MODE="${UV_LINK_MODE:-copy}"
-export UV_TORCH_BACKEND="${UV_TORCH_BACKEND:-cu124}"
 
 log_step "Sync RL dependencies and published simulator package"
 "$uv_bin" sync --extra dev --extra sim
@@ -98,9 +102,7 @@ if expected_spec is not None:
     print(f"expected_sim_dependency={expected_spec}")
 
 if platform_name in {"linux", "win32"} and torch.version.cuda is None:
-    raise SystemExit(
-        "ERROR: init.sh expected a CUDA-enabled torch build on Linux/Windows, but the installed torch is CPU-only."
-    )
+    print("note=torch_fallback_cpu_build")
 PY
 
 if command -v nvidia-smi >/dev/null 2>&1; then

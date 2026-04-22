@@ -5051,6 +5051,18 @@ def build_policy_value_model(
             spec_bundle=spec_bundle,
             card_table=card_table,
         )
+    if (
+        float(config.public_heuristic_logit_bias_scale) != 0.0
+        or float(config.public_heuristic_actor_logit_bias_scale) != -1.0
+        or int(config.public_heuristic_logit_bias_start_updates) != 0
+        or int(config.public_heuristic_logit_bias_end_updates) != -1
+        or float(config.public_heuristic_logit_bias_final_scale) != 0.0
+        or bool(config.public_heuristic_logit_bias_families)
+    ):
+        raise ValueError(
+            "public_heuristic_* model settings require encoder_kind='structured_v2'; "
+            f"got encoder_kind={config.encoder_kind!r}"
+        )
     return PolicyValueModel(
         observation_dim=observation_dim,
         config=config,

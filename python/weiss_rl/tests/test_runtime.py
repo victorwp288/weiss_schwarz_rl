@@ -1104,6 +1104,8 @@ def test_handle_collector_commands_tracks_update_and_refreshes_pool() -> None:
         def __init__(self) -> None:
             self.loaded = 0
             self.evaluated = 0
+            self.learner_scale = 0.0
+            self.actor_scale = 0.0
 
         def load_state_dict(self, state_dict: dict[str, Any]) -> None:
             self.loaded += len(state_dict)
@@ -1111,6 +1113,16 @@ def test_handle_collector_commands_tracks_update_and_refreshes_pool() -> None:
         def eval(self) -> _FakeModel:
             self.evaluated += 1
             return self
+
+        def set_public_heuristic_logit_bias_scale(
+            self,
+            value: float,
+            *,
+            actor_value: float | None = None,
+        ) -> None:
+            self.learner_scale = float(value)
+            if actor_value is not None:
+                self.actor_scale = float(actor_value)
 
     actor = cast(Any, SimpleNamespace(model=_FakeModel(), snapshot_version=0, fixed_opponent_policy_id_by_env=None))
 
@@ -1126,7 +1138,14 @@ def test_handle_collector_commands_tracks_update_and_refreshes_pool() -> None:
     queue_obj = _Queue(
         [
             {"kind": "set_update", "update": 7, "refresh_opponent_pool": True},
-            {"kind": "reload", "model_state_dict": {"w": torch.tensor([1.0])}, "update": 8, "effective_update": 5},
+            {
+                "kind": "reload",
+                "model_state_dict": {"w": torch.tensor([1.0])},
+                "public_heuristic_logit_bias_scale": 0.75,
+                "public_heuristic_actor_logit_bias_scale": 0.5,
+                "update": 8,
+                "effective_update": 5,
+            },
             {"kind": "refresh_opponent_pool", "update": 9},
         ]
     )
@@ -1147,6 +1166,8 @@ def test_handle_collector_commands_tracks_update_and_refreshes_pool() -> None:
     assert runtime._effective_learner_update == 5
     assert actor.model.loaded == 1
     assert actor.model.evaluated == 1
+    assert actor.model.learner_scale == pytest.approx(0.75)
+    assert actor.model.actor_scale == pytest.approx(0.5)
     assert len(refresh_calls) == 2
 
 

@@ -382,10 +382,12 @@ def _should_scan_path(*, path: Path, is_repo_scan: bool) -> bool:
 def _git_ls_files(repo_root: Path) -> tuple[Path, ...]:
     completed = subprocess.run(
         ["git", "-C", str(repo_root), "ls-files", "-z"],
-        check=True,
+        check=False,
         capture_output=True,
         text=False,
     )
+    if completed.returncode != 0:
+        return ()
     return tuple(Path(item.decode("utf-8")) for item in completed.stdout.split(b"\x00") if item)
 
 

@@ -566,12 +566,14 @@ def _winner_seat_from_terminal_step(
     truncated: bool,
     acting_seat: int | None,
 ) -> int | None:
-    if not terminated or truncated:
+    if not terminated:
         return None
 
     explicit_winner_seat = _optional_terminal_winner_seat(step, env_index=env_index)
     if explicit_winner_seat is not _MISSING:
         return cast(int | None, explicit_winner_seat)
+    if truncated:
+        return None
     if reward == 0.0:
         return None
 

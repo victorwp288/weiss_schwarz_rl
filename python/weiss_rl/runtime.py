@@ -11,7 +11,7 @@ import queue
 import threading
 import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
@@ -92,6 +92,38 @@ def _deserialize_state_dict_from_ipc(state_dict: dict[str, Any]) -> dict[str, An
         else:
             restored[str(key)] = copy.deepcopy(value)
     return restored
+
+
+def _model_guidance_payload(model: PolicyValueModel | None) -> dict[str, float]:
+    if model is None:
+        return {}
+    get_bias_scale = getattr(model, "get_public_heuristic_logit_bias_scale", None)
+    if not callable(get_bias_scale):
+        return {}
+    return {
+        "public_heuristic_logit_bias_scale": float(get_bias_scale(scoring_mode="learner")),
+        "public_heuristic_actor_logit_bias_scale": float(get_bias_scale(scoring_mode="actor")),
+    }
+
+
+def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload: Mapping[str, object]) -> None:
+    if model is None:
+        return
+    set_bias_scale = getattr(model, "set_public_heuristic_logit_bias_scale", None)
+    if not callable(set_bias_scale):
+        return
+    learner_scale = payload.get("public_heuristic_logit_bias_scale")
+    actor_scale = payload.get("public_heuristic_actor_logit_bias_scale")
+    if learner_scale is None and actor_scale is None:
+        return
+    resolved_learner_scale = None if learner_scale is None else float(learner_scale)
+    resolved_actor_scale = None if actor_scale is None else float(actor_scale)
+    if resolved_learner_scale is None:
+        get_bias_scale = getattr(model, "get_public_heuristic_logit_bias_scale", None)
+        if not callable(get_bias_scale):
+            return
+        resolved_learner_scale = float(get_bias_scale(scoring_mode="learner"))
+    set_bias_scale(resolved_learner_scale, actor_value=resolved_actor_scale)
 
 
 @dataclass(frozen=True, slots=True)
@@ -556,6 +588,7 @@ def _handle_collector_commands(
             return True
         if kind == "reload":
             actor.model.load_state_dict(_deserialize_state_dict_from_ipc(command["model_state_dict"]))
+            _restore_model_guidance_from_payload(actor.model, command)
             actor.model.eval()
             update = int(command.get("update", actor.snapshot_version))
             actor.snapshot_version = update
@@ -1194,6 +1227,7 @@ def _collector_process_main(
     stack: StackConfig,
     config: QueueRuntimeConfig,
     model_state_dict: dict[str, Any],
+    model_guidance_payload: dict[str, float],
     observation_dim: int,
     action_dim: int,
     observation_spec: dict[str, Any] | None,
@@ -1249,6 +1283,7 @@ def _collector_process_main(
         spec_bundle=spec_bundle,
     ).to(torch.device("cpu"))
     model.load_state_dict(_deserialize_state_dict_from_ipc(model_state_dict))
+    _restore_model_guidance_from_payload(model, model_guidance_payload)
     model.eval()
     local_config = QueueRuntimeConfig(
         mode="train_async_fast",
@@ -1516,6 +1551,11 @@ class QueueRuntime:
         )
         if self._diverse_opponent_batch_wait_ms < 0:
             raise ValueError("training.diverse_opponent_batch_wait_ms must be >= 0")
+        self._heuristic_native_rollout_enabled = (
+            False
+            if training_config is None
+            else bool(getattr(training_config, "heuristic_native_rollout_enabled", False))
+        )
         self._heuristic_actor_hidden_state_tracking = (
             True
             if training_config is None
@@ -2053,6 +2093,7 @@ class QueueRuntime:
         publish_latency_ms = (time.perf_counter() - publish_started) * 1000.0
 
         apply_started = time.perf_counter()
+        guidance_payload = _model_guidance_payload(learner_model)
         if self._collector_result_queue is not None:
             serialized_state_dict = _serialize_state_dict_for_ipc(state_dict)
             for control_queue in self._collector_control_queues:
@@ -2060,6 +2101,7 @@ class QueueRuntime:
                     {
                         "kind": "reload",
                         "model_state_dict": serialized_state_dict,
+                        **guidance_payload,
                         "update": int(learner_update_count),
                         "effective_update": int(published_snapshot_update),
                     }
@@ -2067,17 +2109,20 @@ class QueueRuntime:
         else:
             if self._shared_actor_model is not None:
                 self._shared_actor_model.load_state_dict(state_dict)
+                _restore_model_guidance_from_payload(self._shared_actor_model, guidance_payload)
                 self._shared_actor_model.eval()
                 for actor in self._actors:
                     actor.snapshot_version = int(learner_update_count)
             else:
                 for actor in self._actors:
                     actor.model.load_state_dict(state_dict)
+                    _restore_model_guidance_from_payload(actor.model, guidance_payload)
                     actor.model.eval()
                     actor.snapshot_version = int(learner_update_count)
         if self._bootstrap_models is not None:
             for bootstrap_model in self._bootstrap_models:
                 bootstrap_model.load_state_dict(state_dict)
+                _restore_model_guidance_from_payload(bootstrap_model, guidance_payload)
                 bootstrap_model.eval()
         apply_latency_ms = (time.perf_counter() - apply_started) * 1000.0
         self._last_published_snapshot_version = int(learner_update_count)
@@ -2735,6 +2780,7 @@ class QueueRuntime:
         model_state_dict = _serialize_state_dict_for_ipc(
             {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
         )
+        model_guidance_payload = _model_guidance_payload(model)
         slot_configs: dict[int, list[dict[str, Any]]] = {}
         if self._use_shared_collector_transport:
             hidden_size = int(getattr(model, "hidden_size", 1))
@@ -2783,6 +2829,7 @@ class QueueRuntime:
                     "stack": self.stack,
                     "config": self.config,
                     "model_state_dict": model_state_dict,
+                    "model_guidance_payload": model_guidance_payload,
                     "observation_dim": int(self.observation_dim),
                     "action_dim": int(self.action_dim),
                     "observation_spec": self._observation_spec,

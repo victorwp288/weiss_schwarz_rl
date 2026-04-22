@@ -8,6 +8,7 @@ from .promotion_gate import (
     PromotionGatePosterior,
     PromotionGateRate,
     PromotionGateResult,
+    build_promotion_gate_result,
     resolve_promotion_gate_anchors,
     resolve_promotion_gate_seed_file,
     run_promotion_gate,
@@ -16,6 +17,7 @@ from .registry import SnapshotRegistry
 
 __all__ = [
     "OpponentPoolSampler",
+    "build_promotion_gate_result",
     "PromotionGateAnchor",
     "PromotionGateAnchorResult",
     "PromotionGatePosterior",

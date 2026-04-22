@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
@@ -43,7 +44,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Write the run-group plan without spawning train.py")
     args = parser.parse_args()
 
-    repo_root = Path(__file__).resolve().parents[2].parent
+    repo_root = Path(__file__).resolve().parents[2]
     devices = resolve_devices(
         requested_devices=args.device,
         cuda_available=torch.cuda.is_available(),
@@ -57,7 +58,11 @@ def main() -> None:
         run_label_prefix=args.run_label_prefix or None,
         extra_args=args.train_arg,
     )
-    summary = execute_launch_plan(repo_root=repo_root, plan=plan, dry_run=bool(args.dry_run))
+    try:
+        summary = execute_launch_plan(repo_root=repo_root, plan=plan, dry_run=bool(args.dry_run))
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
     print(
         "Launch group summary: "
         f"group={summary['group_label']} jobs={len(summary['jobs'])} "

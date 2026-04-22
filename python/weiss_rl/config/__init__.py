@@ -8,6 +8,7 @@ from .hashing import (
 )
 from .models import (
     CurriculumConfig,
+    CurriculumEarlyCutoffConfig,
     CurriculumStallMonitorConfig,
     DecisionKindTaggingConfig,
     DeckSetSizeConfig,
@@ -67,6 +68,7 @@ from .study import load_study_config
 
 __all__ = [
     "CurriculumConfig",
+    "CurriculumEarlyCutoffConfig",
     "CurriculumStallMonitorConfig",
     "DecisionKindTaggingConfig",
     "DeckSetSizeConfig",

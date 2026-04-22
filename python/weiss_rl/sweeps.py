@@ -25,40 +25,78 @@ class SweepPreset:
 
 
 _PRESETS = {
-    "impala_compact": SweepPreset(
-        preset_id="impala_compact",
-        stack_config="configs/presets/typed_local.yaml",
+    "noleague_impala_compact": SweepPreset(
+        preset_id="noleague_impala_compact",
+        stack_config="configs/presets/baselines/noleague_impala.yaml",
         candidates=(
             SweepCandidate(
-                candidate_id="impala_lr1e4_ent1e2",
-                description="Lower learning rate sanity point",
+                candidate_id="impala_lr1p5e4_ent2e2",
+                description="Lower entropy, slightly lower learning rate",
                 overrides={
-                    "training.optimizer.learning_rate": 1.0e-4,
-                    "training.exploration.entropy_coef": 1.0e-2,
+                    "training.optimizer.learning_rate": 1.5e-4,
+                    "training.exploration.entropy_coef": 2.0e-2,
                 },
             ),
             SweepCandidate(
-                candidate_id="impala_lr2e4_ent1e2",
-                description="Locked baseline anchor",
-                overrides={
-                    "training.optimizer.learning_rate": 2.0e-4,
-                    "training.exploration.entropy_coef": 1.0e-2,
-                },
-            ),
-            SweepCandidate(
-                candidate_id="impala_lr2e4_ent5e3",
-                description="Lower entropy pressure",
+                candidate_id="impala_lr2e4_ent2e2",
+                description="Locked learning rate with reduced entropy",
                 overrides={
                     "training.optimizer.learning_rate": 2.0e-4,
-                    "training.exploration.entropy_coef": 5.0e-3,
+                    "training.exploration.entropy_coef": 2.0e-2,
                 },
             ),
             SweepCandidate(
-                candidate_id="impala_lr4e4_ent5e3",
+                candidate_id="impala_lr2e4_ent3e2",
+                description="Frozen thesis-model anchor",
+                overrides={
+                    "training.optimizer.learning_rate": 2.0e-4,
+                    "training.exploration.entropy_coef": 3.0e-2,
+                },
+            ),
+            SweepCandidate(
+                candidate_id="impala_lr3e4_ent2e2",
                 description="Higher learning rate stress point",
                 overrides={
-                    "training.optimizer.learning_rate": 4.0e-4,
-                    "training.exploration.entropy_coef": 5.0e-3,
+                    "training.optimizer.learning_rate": 3.0e-4,
+                    "training.exploration.entropy_coef": 2.0e-2,
+                },
+            ),
+        ),
+    ),
+    "norecurrence_compact": SweepPreset(
+        preset_id="norecurrence_compact",
+        stack_config="configs/presets/baselines/norecurrence_impala.yaml",
+        candidates=(
+            SweepCandidate(
+                candidate_id="ff_lr1p5e4_ent2e2",
+                description="Lower entropy, slightly lower learning rate",
+                overrides={
+                    "training.optimizer.learning_rate": 1.5e-4,
+                    "training.exploration.entropy_coef": 2.0e-2,
+                },
+            ),
+            SweepCandidate(
+                candidate_id="ff_lr2e4_ent2e2",
+                description="Locked learning rate with reduced entropy",
+                overrides={
+                    "training.optimizer.learning_rate": 2.0e-4,
+                    "training.exploration.entropy_coef": 2.0e-2,
+                },
+            ),
+            SweepCandidate(
+                candidate_id="ff_lr2e4_ent3e2",
+                description="Frozen thesis-model anchor",
+                overrides={
+                    "training.optimizer.learning_rate": 2.0e-4,
+                    "training.exploration.entropy_coef": 3.0e-2,
+                },
+            ),
+            SweepCandidate(
+                candidate_id="ff_lr3e4_ent2e2",
+                description="Higher learning rate stress point",
+                overrides={
+                    "training.optimizer.learning_rate": 3.0e-4,
+                    "training.exploration.entropy_coef": 2.0e-2,
                 },
             ),
         ),

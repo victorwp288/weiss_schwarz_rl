@@ -16,7 +16,7 @@ PYRUN := uv run --extra dev python
 SYNC_MSG := "[make] using uv"
 endif
 
-.PHONY: sync sync-sim lint fmt fmt-check type deadcode test verify check check-placeholders standard-wrapper-smoke standard-auto-gpu-wrapper-smoke package-smoke simulator-check train-min train-inline-smoke toy-public-e2e artifact-hygiene artifact-contract eval-dev figures clean
+.PHONY: sync sync-sim lint fmt fmt-check type deadcode test verify check check-placeholders thesis-model-auto-gpu-wrapper-smoke thesis-model-multideck-wrapper-smoke standard-wrapper-smoke standard-auto-gpu-wrapper-smoke package-smoke simulator-check train-min train-inline-smoke toy-public-e2e artifact-hygiene artifact-contract eval-dev figures clean
 
 FIGURE_FORMAT_ARGS = $(foreach fmt,$(FORMATS),--format $(fmt))
 FIGURE_ID_ARG = $(if $(FIG_ID),--fig-id "$(FIG_ID)")
@@ -66,11 +66,15 @@ deadcode:
 test:
 	@$(PYRUN) -m pytest -q python/weiss_rl/tests
 
-standard-wrapper-smoke:
-	@$(PYRUN) python/scripts/thesis_run.py --preset standard --run-label standard_surface_ci --dry-run --skip-compare
+thesis-model-auto-gpu-wrapper-smoke:
+	@$(PYRUN) python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label thesis_model_auto_gpu_surface_ci --dry-run --skip-compare
 
-standard-auto-gpu-wrapper-smoke:
-	@$(PYRUN) python/scripts/thesis_run.py --preset standard-auto-gpu --run-label standard_auto_gpu_surface_ci --dry-run --skip-compare
+thesis-model-multideck-wrapper-smoke:
+	@$(PYRUN) python/scripts/thesis_run.py --preset thesis-model-multideck --run-label thesis_model_multideck_surface_ci --dry-run --skip-compare
+
+# Compatibility aliases for older wrapper names.
+standard-wrapper-smoke: thesis-model-auto-gpu-wrapper-smoke
+standard-auto-gpu-wrapper-smoke: thesis-model-auto-gpu-wrapper-smoke
 
 verify: sync
 	@$(PYRUN) python/scripts/verify_repo.py
@@ -103,12 +107,12 @@ train-min:
 	@$(PYRUN) python/scripts/train.py --stack-config configs/stack_smoke.yaml
 
 train-inline-smoke:
-	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --run-label m3_08_smoke --device cpu
+	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml --run-label m3_08_smoke --device cpu
 
 toy-public-e2e:
 	@rm -rf runs/toy_public_demo_ci
-	@$(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --public-demo --run-label toy_public_demo_ci
-	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --public-demo --run-dir runs/toy_public_demo_ci
+	@$(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml --public-demo --run-label toy_public_demo_ci
+	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml --public-demo --run-dir runs/toy_public_demo_ci
 	@$(PYRUN) python/scripts/make_figures.py --public-demo --final-eval-dir runs/toy_public_demo_ci/eval/final_eval --out-dir runs/toy_public_demo_ci/figures
 
 artifact-hygiene:
@@ -116,7 +120,7 @@ artifact-hygiene:
 	@$(PYRUN) python/scripts/artifact_scan.py --artifact-root runs/toy_public_demo_ci
 
 eval-dev:
-	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
+	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml
 
 figures:
 	@test -n "$(RUN_DIR)" || { echo "Usage: make figures RUN_DIR=runs/<run_dir> [FIG_ID=seat_bias] [FORMATS=\"pdf png\"]" >&2; exit 1; }

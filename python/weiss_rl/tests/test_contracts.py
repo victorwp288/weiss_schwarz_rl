@@ -60,6 +60,15 @@ def test_spec_bundle_contract_rejects_bundle_sha256_mismatch() -> None:
         assert_spec_bundle_contract("0" * 64, _VALID_BUNDLE)
 
 
+def test_build_policy_value_model_rejects_public_heuristic_config_on_non_structured_model() -> None:
+    with pytest.raises(ValueError, match="public_heuristic_\\* model settings require encoder_kind='structured_v2'"):
+        build_policy_value_model(
+            observation_dim=32,
+            action_dim=9,
+            config=replace(_model_config(), public_heuristic_logit_bias_scale=0.5),
+        )
+
+
 def test_normalize_spec_mismatch_policy_rejects_non_fail_fast_modes() -> None:
     with pytest.raises(ValueError, match="must be 'hard_fail'"):
         normalize_spec_mismatch_policy("warn", source="test.policy")

@@ -23,6 +23,7 @@ _DEFAULT_BOOTSTRAP_SAMPLE_COUNT = 1000
 _ANCHOR_EPISODES_DIRNAME = "promotion_gate_episodes"
 
 __all__ = [
+    "build_promotion_gate_result",
     "PromotionGateAnchor",
     "PromotionGateAnchorResult",
     "PromotionGatePosterior",
@@ -207,6 +208,40 @@ def run_promotion_gate(
         total_truncated_games += anchor_result.truncation.numerator
         total_games += anchor_result.truncation.denominator
 
+    result = build_promotion_gate_result(
+        stack=stack,
+        run_dir=run_dir,
+        focal_policy_id=focal_policy_id,
+        anchors=anchors,
+        anchor_results=tuple(anchor_results),
+        all_pair_scores=tuple(all_pair_scores),
+        total_truncated_games=total_truncated_games,
+        total_games=total_games,
+        paired_seed_count=len(paired_seeds),
+        sample_count=sample_count,
+        bootstrap_seed=bootstrap_seed,
+    )
+    result.write_json(record_path)
+    return result
+
+
+def build_promotion_gate_result(
+    *,
+    stack: StackConfig,
+    run_dir: Path,
+    focal_policy_id: str,
+    anchors: Sequence[PromotionGateAnchor],
+    anchor_results: Sequence[PromotionGateAnchorResult],
+    all_pair_scores: Sequence[float],
+    total_truncated_games: int,
+    total_games: int,
+    paired_seed_count: int,
+    sample_count: int = _DEFAULT_BOOTSTRAP_SAMPLE_COUNT,
+    bootstrap_seed: int | None = None,
+) -> PromotionGateResult:
+    league = _require_league_config(stack)
+    record_path = run_dir / league.promotion_gate.record_file
+    seed_file = resolve_promotion_gate_seed_file(stack)
     overall_posterior = PromotionGatePosterior.from_scores(
         all_pair_scores,
         sample_count=sample_count,
@@ -226,7 +261,7 @@ def run_promotion_gate(
         record_path=_display_path(record_path, root=run_dir),
         seed_file_path=_display_path(seed_file, root=stack.root),
         seed_file_sha256=hash_seed_file(seed_file),
-        paired_seed_count=len(paired_seeds),
+        paired_seed_count=int(paired_seed_count),
         weighting=league.promotion_gate.weighting,
         seat_swap=league.promotion_gate.seat_swap,
         folding=league.promotion_gate.folding,
@@ -236,7 +271,6 @@ def run_promotion_gate(
         passed=not reasons,
         reasons=tuple(reasons),
     )
-    result.write_json(record_path)
     return result
 
 

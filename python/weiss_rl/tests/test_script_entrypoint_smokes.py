@@ -102,9 +102,9 @@ def test_verify_repo_entrypoint_runs_release_verification_steps(monkeypatch) -> 
                 "C:/Python/python.exe",
                 "python/scripts/thesis_run.py",
                 "--preset",
-                "standard",
+                "thesis-model-auto-gpu",
                 "--run-label",
-                "standard_surface_ci",
+                "thesis_model_surface_ci",
                 "--dry-run",
                 "--skip-compare",
             ],
@@ -116,9 +116,9 @@ def test_verify_repo_entrypoint_runs_release_verification_steps(monkeypatch) -> 
                 "C:/Python/python.exe",
                 "python/scripts/thesis_run.py",
                 "--preset",
-                "standard-auto-gpu",
+                "ablate-no-tactical-bias",
                 "--run-label",
-                "standard_auto_gpu_surface_ci",
+                "ablate_no_tactical_bias_surface_ci",
                 "--dry-run",
                 "--skip-compare",
             ],
@@ -130,9 +130,9 @@ def test_verify_repo_entrypoint_runs_release_verification_steps(monkeypatch) -> 
                 "C:/Python/python.exe",
                 "python/scripts/thesis_run.py",
                 "--preset",
-                "standard-multideck",
+                "thesis-model-multideck",
                 "--run-label",
-                "standard_multideck_surface_ci",
+                "thesis_model_multideck_surface_ci",
                 "--dry-run",
                 "--skip-compare",
             ],
@@ -184,6 +184,27 @@ def test_train_entrypoint_resolves_cuda_auto_to_first_visible_gpu(monkeypatch) -
     resolved = module._resolve_device(stack, "")
 
     assert resolved == module.torch.device("cuda:0")
+
+
+def test_train_entrypoint_periodic_dev_eval_contract_accepts_cuda_auto(monkeypatch) -> None:
+    module = _load_script_module("train.py")
+
+    monkeypatch.setattr(module.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(module.torch.cuda, "device_count", lambda: 3)
+    stack = SimpleNamespace(
+        config=SimpleNamespace(
+            evaluation=SimpleNamespace(
+                seat_swap=True,
+                eval_device="cuda:auto",
+                eval_inference_mode=True,
+                eval_sampling_algorithm="pinned_cdf_pcg_v1",
+            )
+        )
+    )
+
+    resolved = module._validate_periodic_dev_eval_contract(stack)
+
+    assert resolved.eval_device == "cuda:auto"
 
 
 def test_compare_runs_entrypoint_expands_launch_group_and_deduplicates(monkeypatch, tmp_path: Path) -> None:
@@ -527,7 +548,7 @@ def test_launch_experiments_entrypoint_dry_run_plumbs_devices(monkeypatch, tmp_p
         "extra_args": ["--max-updates", "2"],
     }
     assert observed["execute_launch_plan"] == {
-        "repo_root": WORKSPACE_ROOT,
+        "repo_root": REPO_ROOT,
         "plan": observed["execute_launch_plan"]["plan"],
         "dry_run": True,
     }
@@ -535,7 +556,7 @@ def test_launch_experiments_entrypoint_dry_run_plumbs_devices(monkeypatch, tmp_p
 
 def test_sweep_experiments_entrypoint_writes_plan_and_summary(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module("sweep_experiments.py")
-    group_dir = WORKSPACE_ROOT / "runs" / "launch_groups" / "cli_sweep"
+    group_dir = REPO_ROOT / "runs" / "launch_groups" / "cli_sweep"
     if group_dir.exists():
         import shutil
 
@@ -580,7 +601,7 @@ def test_sweep_experiments_entrypoint_writes_plan_and_summary(monkeypatch, tmp_p
         [
             "sweep_experiments.py",
             "--preset",
-            "impala_compact",
+            "noleague_impala_compact",
             "--group-label",
             "cli_sweep",
             "--seed",
@@ -596,17 +617,17 @@ def test_sweep_experiments_entrypoint_writes_plan_and_summary(monkeypatch, tmp_p
     plan_path = group_dir / "sweep_plan.json"
     assert plan_path.is_file()
     payload = json.loads(plan_path.read_text(encoding="utf-8"))
-    assert payload["preset_id"] == "impala_compact"
+    assert payload["preset_id"] == "noleague_impala_compact"
     assert observed["build_sweep_launch_plan"] == {
-        "preset_id": "impala_compact",
-        "repo_root": WORKSPACE_ROOT,
+        "preset_id": "noleague_impala_compact",
+        "repo_root": REPO_ROOT,
         "group_label": "cli_sweep",
         "seeds": [3],
         "devices": ("cpu",),
         "train_args": ["--max-updates", "2"],
     }
     assert observed["execute_launch_plan"] == {
-        "repo_root": WORKSPACE_ROOT,
+        "repo_root": REPO_ROOT,
         "plan": observed["execute_launch_plan"]["plan"],
         "dry_run": True,
     }

@@ -10,7 +10,13 @@ import pytest
 
 from weiss_rl.config import load_stack_config
 from weiss_rl.config.models import StopRulesConfig
-from weiss_rl.eval import resolve_final_policy_set, run_final_eval
+from weiss_rl.eval import (
+    build_final_eval_matchups,
+    finalize_final_eval,
+    resolve_final_policy_set,
+    run_final_eval,
+    run_final_eval_matchup,
+)
 from weiss_rl.eval.harness import GameResult, ScheduledGame
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
@@ -319,7 +325,119 @@ def test_run_final_eval_rejects_duplicate_explicit_policy_ids(tmp_path: Path) ->
         )
 
 
-def test_run_final_eval_rejects_underfilled_deterministic_selection(tmp_path: Path) -> None:
+def test_build_final_eval_matchups_returns_canonical_unordered_pairs() -> None:
+    policies = ["policy_beta", "policy_alpha", "policy_gamma"]
+
+    matchups = build_final_eval_matchups(policy_ids=policies)
+
+    assert matchups == [
+        {
+            "focal_index": 0,
+            "opponent_index": 0,
+            "focal_policy_id": "policy_beta",
+            "opponent_policy_id": "policy_beta",
+        },
+        {
+            "focal_index": 0,
+            "opponent_index": 1,
+            "focal_policy_id": "policy_beta",
+            "opponent_policy_id": "policy_alpha",
+        },
+        {
+            "focal_index": 0,
+            "opponent_index": 2,
+            "focal_policy_id": "policy_beta",
+            "opponent_policy_id": "policy_gamma",
+        },
+        {
+            "focal_index": 1,
+            "opponent_index": 1,
+            "focal_policy_id": "policy_alpha",
+            "opponent_policy_id": "policy_alpha",
+        },
+        {
+            "focal_index": 1,
+            "opponent_index": 2,
+            "focal_policy_id": "policy_alpha",
+            "opponent_policy_id": "policy_gamma",
+        },
+        {
+            "focal_index": 2,
+            "opponent_index": 2,
+            "focal_policy_id": "policy_gamma",
+            "opponent_policy_id": "policy_gamma",
+        },
+    ]
+
+
+def test_finalize_final_eval_sorts_matchup_results_before_writing(tmp_path: Path) -> None:
+    output_dir = tmp_path / "final_eval_parallel_finalize"
+    policies = ["policy_beta", "policy_alpha"]
+    paired_seeds = [11, 22, 33]
+    outcomes: dict[tuple[str, str, int, int], OutcomeToken] = {
+        ("policy_beta", "policy_beta", 0, 0): "D",
+        ("policy_beta", "policy_beta", 0, 1): "D",
+        ("policy_beta", "policy_beta", 1, 0): "D",
+        ("policy_beta", "policy_beta", 1, 1): "D",
+        ("policy_beta", "policy_alpha", 0, 0): "W",
+        ("policy_beta", "policy_alpha", 0, 1): "W",
+        ("policy_beta", "policy_alpha", 1, 0): "L",
+        ("policy_beta", "policy_alpha", 1, 1): "L",
+        ("policy_beta", "policy_alpha", 2, 0): "W",
+        ("policy_beta", "policy_alpha", 2, 1): "L",
+        ("policy_alpha", "policy_alpha", 0, 0): "D",
+        ("policy_alpha", "policy_alpha", 0, 1): "D",
+        ("policy_alpha", "policy_alpha", 1, 0): "D",
+        ("policy_alpha", "policy_alpha", 1, 1): "D",
+    }
+    runner = _FakeMatrixRunner(outcomes)
+    matchup_results = [
+        run_final_eval_matchup(
+            output_dir=output_dir,
+            matchup_spec=matchup_spec,
+            paired_seeds=paired_seeds,
+            stage1_paired_seeds=2,
+            max_paired_seeds=3,
+            stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+            runner=runner,
+            run_id256=_RUN_ID256,
+            config_hash256=_CONFIG_HASH256,
+            spec_hash256=_SPEC_HASH256,
+            scheme="S0",
+            sample_count=16,
+        )
+        for matchup_spec in build_final_eval_matchups(policy_ids=policies)
+    ]
+
+    payload = finalize_final_eval(
+        output_dir=output_dir,
+        policy_ids=policies,
+        matchup_results=list(reversed(matchup_results)),
+        stage1_paired_seeds=2,
+        max_paired_seeds=3,
+        paired_seeds=paired_seeds,
+        stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+        scheme="S0",
+        sample_count=16,
+        selection_payload={"mode": "explicit", "policy_count": 2},
+        metadata={"pipeline": {"kind": "parallel_test"}},
+        seed_file_path=None,
+    )
+
+    assert [matchup["matchup_dir"] for matchup in payload["matchups"]] == [
+        "matchups/00_policy_beta__vs__00_policy_beta",
+        "matchups/00_policy_beta__vs__01_policy_alpha",
+        "matchups/01_policy_alpha__vs__01_policy_alpha",
+    ]
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert [matchup["matchup_dir"] for matchup in summary["matchups"]] == [
+        "matchups/00_policy_beta__vs__00_policy_beta",
+        "matchups/00_policy_beta__vs__01_policy_alpha",
+        "matchups/01_policy_alpha__vs__01_policy_alpha",
+    ]
+
+
+def test_run_final_eval_marks_underfilled_deterministic_selection_as_degraded(tmp_path: Path) -> None:
     snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
     config = _selection_config(
         include_random_legal_baseline_b0=False,
@@ -328,23 +446,41 @@ def test_run_final_eval_rejects_underfilled_deterministic_selection(tmp_path: Pa
         include_final_champion_snapshot=False,
         include_spaced_snapshots_near_percent_updates=(),
     )
+    selected = resolve_final_policy_set(
+        snapshot_registry_path=snapshot_registry_path,
+        dev_eval_summaries_path=dev_eval_summaries_path,
+        config=config,
+        final_policy_set_size=3,
+    )
+    outcomes: dict[tuple[str, str, int, int], OutcomeToken] = {
+        (focal_policy_id, opponent_policy_id, 0, swap_index): "D"
+        for focal_policy_id in selected
+        for opponent_policy_id in selected
+        for swap_index in (0, 1)
+    }
 
-    with pytest.raises(ValueError, match="underfilled"):
-        run_final_eval(
-            output_dir=tmp_path / "final_eval",
-            runner=_FakeMatrixRunner({}),
-            paired_seeds=[11],
-            stage1_paired_seeds=1,
-            max_paired_seeds=1,
-            stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
-            run_id256=_RUN_ID256,
-            config_hash256=_CONFIG_HASH256,
-            spec_hash256=_SPEC_HASH256,
-            snapshot_registry_path=snapshot_registry_path,
-            dev_eval_summaries_path=dev_eval_summaries_path,
-            selection_config=config,
-            final_policy_set_size=3,
-        )
+    payload = run_final_eval(
+        output_dir=tmp_path / "final_eval",
+        runner=_FakeMatrixRunner(outcomes),
+        paired_seeds=[11],
+        stage1_paired_seeds=1,
+        max_paired_seeds=1,
+        stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+        run_id256=_RUN_ID256,
+        config_hash256=_CONFIG_HASH256,
+        spec_hash256=_SPEC_HASH256,
+        snapshot_registry_path=snapshot_registry_path,
+        dev_eval_summaries_path=dev_eval_summaries_path,
+        selection_config=config,
+        final_policy_set_size=3,
+    )
+
+    assert payload["policy_ids"] == selected
+    assert payload["metadata"]["degraded"] is True
+    assert payload["metadata"]["selection"]["underfilled"] is True
+    assert payload["metadata"]["selection"]["degraded_reason"] == "underfilled_policy_set"
+    assert payload["metadata"]["selection"]["requested_policy_count"] == 3
+    assert payload["metadata"]["selection"]["resolved_policy_count"] == len(selected)
 
 
 def test_run_final_eval_emits_explicit_s2_no_included_pair_artifacts(tmp_path: Path) -> None:

@@ -13,25 +13,23 @@ If you are doing an ad-hoc local invocation without installing the package, use 
 
 ## Canonical recipe shortcuts
 
-The current ship-ready stack surface is:
+The frozen thesis-facing stack surface is:
 
-- `configs/presets/structured_acceptance_standard.yaml`
-- `configs/presets/structured_acceptance_standard_auto_gpu.yaml`
-- `configs/presets/structured_acceptance_standard_thesis_eval.yaml`
-- `configs/presets/structured_acceptance_standard_multideck.yaml`
+- `configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml`
+- `configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml`
+- `configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml`
 
-The wrapper exposes them as named presets, so the shortest standard commands are:
+The wrapper exposes the main recipe as `thesis-model-auto-gpu`, so the shortest current commands are:
 
 ```bash
 uv run python python/scripts/thesis_run.py --list-presets
-uv run python python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_tiny32_fast_noleague.yaml --run-label b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset standard --run-label thesis_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset standard-auto-gpu --run-label thesis_server_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --run-dir runs/<run_dir>
+uv run python python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml --run-label b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label thesis_model_seed1 --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 400 --skip-compare
+uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml --run-dir runs/<run_dir>
 uv run python python/scripts/play_vs_model.py --run-dir runs/<run_dir>
 ```
 
-`thesis_run.py --preset standard` now trains with `structured_acceptance_standard.yaml`, requires `--run-label`, imports the canonical `B1 NoLeague baseline` from `--b1-baseline-run-dir`, and by default evaluates with `structured_acceptance_standard_thesis_eval.yaml`.
+`thesis_run.py --preset thesis-model-auto-gpu` trains with the frozen tiny248 thesis recipe, requires `--run-label`, imports the canonical `B1 NoLeague baseline` from `--b1-baseline-run-dir`, and by default evaluates with `structured_acceptance_thesis_model_eval_auto_gpu.yaml`.
 
 For the current recommended ablations and what they answer, see `docs/standard_recipe.md`.
 
@@ -56,7 +54,7 @@ make train-min
 # or, when you want a low-level simulator-backed smoke on the canonical stack
 make train-inline-smoke
 # or directly
-PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --run-label m3_08_smoke --device cpu
+PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.py --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml --run-label m3_08_smoke --device cpu
 ```
 
 What it does today:
@@ -87,7 +85,7 @@ Resume support:
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/structured_acceptance_standard.yaml \
+  --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml \
   --resume-run-dir runs/my_locked_run \
   --resume-from latest \
   --max-updates 200
@@ -110,7 +108,7 @@ Public-safe toy/demo staging:
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/structured_acceptance_standard.yaml \
+  --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml \
   --public-demo \
   --run-label toy_public_demo
 ```
@@ -124,14 +122,14 @@ Evaluation reporting and contract-check entrypoint.
 Contract-only smoke check:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
+uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml
 ```
 
 Summary export from an existing episodes file:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml \
+  --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml \
   --episodes-jsonl runs/some_eval/episodes.jsonl \
   --summary-json runs/some_eval/summary.json \
   --summary-csv runs/some_eval/summary.csv \
@@ -158,7 +156,7 @@ Public-safe toy/demo eval:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml \
+  --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml \
   --public-demo \
   --run-dir runs/toy_public_demo
 ```
@@ -171,19 +169,19 @@ Thin orchestration wrapper for the canonical thesis flow: `train.py -> eval.py -
 
 ```bash
 uv run python python/scripts/thesis_run.py \
-  --preset standard \
-  --run-label thesis_seed1 \
-  --b1-baseline-run-dir runs/b1_anchor_seed1 \
-  --device cuda:0 \
-  --max-updates 200
+  --preset thesis-model-auto-gpu \
+  --run-label thesis_model_seed1 \
+  --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 \
+  --max-updates 400 \
+  --skip-compare
 ```
 
 Dry-run planning:
 
 ```bash
 uv run python python/scripts/thesis_run.py \
-  --preset standard \
-  --run-label thesis_seed1 \
+  --preset thesis-model-auto-gpu \
+  --run-label thesis_model_seed1 \
   --dry-run
 ```
 
@@ -225,7 +223,7 @@ Compare two policies on the recorded states from a deterministic replay bundle.
 ```bash
 uv run python python/scripts/replay_inspector.py \
   --bundle runs/some_run/replays/regression/replay_deadbeef.zip \
-  --stack-config configs/presets/structured_acceptance_standard.yaml \
+  --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml \
   --run-dir runs/some_run \
   --policy-a policy_000123 \
   --policy-b policy_000456 \
@@ -341,15 +339,16 @@ Compact reproducible sweep launcher for the thesis baselines. It uses determinis
 
 ```bash
 uv run python python/scripts/sweep_experiments.py \
-  --preset impala_compact \
-  --group-label impala_tune_a \
+  --preset noleague_impala_compact \
+  --group-label noleague_impala_tune_a \
   --seed 1 \
   --seed 2 \
   --device cuda:0
 ```
 
 Shipped presets:
-- `impala_compact`
+- `noleague_impala_compact`
+- `norecurrence_compact`
 - `ppo_compact`
 
 Current non-claim:

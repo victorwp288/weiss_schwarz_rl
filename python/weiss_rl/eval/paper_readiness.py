@@ -820,6 +820,7 @@ def _build_final_eval_guardrail_summary(
     }
     alarms = [name for name, check in checks.items() if not bool(check["passed"])]
     metadata = cast(Mapping[str, Any], payload.get("metadata", {}))
+    selection = dict(cast(Mapping[str, Any], metadata.get("selection", {})))
 
     return {
         "passed": not alarms,
@@ -828,7 +829,8 @@ def _build_final_eval_guardrail_summary(
             "dir": final_eval_dir.as_posix(),
             "summary_path": summary_path.as_posix(),
             "policy_ids": list(policy_ids),
-            "selection": dict(cast(Mapping[str, Any], metadata.get("selection", {}))),
+            "selection": selection,
+            "degraded": bool(selection.get("degraded", metadata.get("degraded", False))),
         },
         "checks": checks,
     }

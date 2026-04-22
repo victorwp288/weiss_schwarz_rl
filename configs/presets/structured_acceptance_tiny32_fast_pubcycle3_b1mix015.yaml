@@ -1,6 +1,0 @@
-schema_version: 2
-description: structured_acceptance tiny32 fast packed WSL frontier with cyclic public teacher and persistent B1 mix
-extends: structured_acceptance_tiny32_fast_pubcycle3.yaml
-league:
-  sampling:
-    noleague_baseline_mix_fraction: 0.15

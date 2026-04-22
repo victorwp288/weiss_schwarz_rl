@@ -1,0 +1,17 @@
+schema_version: 2
+description: thesis-model ablation without tactical public-bias shaping
+extends: ../structured_acceptance_thesis_model_auto_gpu.yaml
+experiment:
+  role: ablation_no_tactical_bias
+curriculum:
+  early_cutoff:
+    enabled: true
+    warmup_updates: 120
+    patience_updates: 120
+    min_improvement: 0.01
+    stall_patience_evals: 4
+    stall_rate_threshold: 0.25
+model:
+  public_heuristic_logit_bias_scale: 1.0
+  public_heuristic_logit_bias_final_scale: 1.0
+  public_heuristic_logit_bias_families: []

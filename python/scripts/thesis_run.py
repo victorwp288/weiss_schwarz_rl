@@ -8,20 +8,45 @@ from pathlib import Path
 from typing import Any
 
 _PRESET_PATHS = {
-    "standard": Path("configs/presets/structured_acceptance_standard.yaml"),
-    "standard-auto-gpu": Path("configs/presets/structured_acceptance_standard_auto_gpu.yaml"),
-    "standard-thesis-eval": Path("configs/presets/structured_acceptance_standard_thesis_eval.yaml"),
-    "standard-multideck": Path("configs/presets/structured_acceptance_standard_multideck.yaml"),
-    "ablate-teacher-fade": Path("configs/presets/ablations/standard_teacher_fade.yaml"),
-    "ablate-teacher-fade-auto-gpu": Path("configs/presets/ablations/standard_teacher_fade_auto_gpu.yaml"),
-    "ablate-no-tactical-bias": Path("configs/presets/ablations/standard_no_tactical_bias.yaml"),
-    "ablate-no-b1-cutoff": Path("configs/presets/ablations/standard_no_b1_cutoff.yaml"),
-    "ablate-multideck": Path("configs/presets/ablations/standard_multideck_generalization.yaml"),
+    "thesis-model-auto-gpu": Path("configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml"),
+    "thesis-model-eval-auto-gpu": Path("configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml"),
+    "thesis-model-multideck": Path("configs/presets/structured_acceptance_thesis_model_multideck_auto_gpu.yaml"),
+    "thesis-model-multideck-eval-auto-gpu": Path(
+        "configs/presets/structured_acceptance_thesis_model_multideck_eval_auto_gpu.yaml"
+    ),
+    "ablate-teacher-fade": Path(
+        "configs/presets/ablations/structured_acceptance_thesis_model_teacher_fade_auto_gpu.yaml"
+    ),
+    "ablate-teacher-fade-eval-auto-gpu": Path(
+        "configs/presets/ablations/structured_acceptance_thesis_model_teacher_fade_eval_auto_gpu.yaml"
+    ),
+    "ablate-no-tactical-bias": Path(
+        "configs/presets/ablations/structured_acceptance_thesis_model_no_tactical_bias_auto_gpu.yaml"
+    ),
+    "ablate-no-tactical-bias-eval-auto-gpu": Path(
+        "configs/presets/ablations/structured_acceptance_thesis_model_no_tactical_bias_eval_auto_gpu.yaml"
+    ),
+    "ablate-no-b1-cutoff": Path(
+        "configs/presets/ablations/structured_acceptance_thesis_model_no_b1_cutoff_auto_gpu.yaml"
+    ),
+    "ablate-no-b1-cutoff-eval-auto-gpu": Path(
+        "configs/presets/ablations/structured_acceptance_thesis_model_no_b1_cutoff_eval_auto_gpu.yaml"
+    ),
+    "ablate-reward-shaping": Path(
+        "configs/presets/ablations/structured_acceptance_thesis_model_reward_shaping_auto_gpu.yaml"
+    ),
+    "ablate-reward-shaping-eval-auto-gpu": Path(
+        "configs/presets/ablations/structured_acceptance_thesis_model_reward_shaping_eval_auto_gpu.yaml"
+    ),
 }
-_DEFAULT_EVAL_PRESET = "standard-thesis-eval"
+_DEFAULT_EVAL_PRESET = "thesis-model-eval-auto-gpu"
 _DEFAULT_EVAL_PRESET_OVERRIDES = {
-    "standard-multideck": "standard-multideck",
-    "ablate-multideck": "ablate-multideck",
+    "thesis-model-auto-gpu": "thesis-model-eval-auto-gpu",
+    "thesis-model-multideck": "thesis-model-multideck-eval-auto-gpu",
+    "ablate-teacher-fade": "ablate-teacher-fade-eval-auto-gpu",
+    "ablate-no-tactical-bias": "ablate-no-tactical-bias-eval-auto-gpu",
+    "ablate-no-b1-cutoff": "ablate-no-b1-cutoff-eval-auto-gpu",
+    "ablate-reward-shaping": "ablate-reward-shaping-eval-auto-gpu",
 }
 
 
@@ -86,11 +111,19 @@ def _default_eval_preset_for_preset(preset: str) -> str:
     return _DEFAULT_EVAL_PRESET_OVERRIDES.get(preset, _DEFAULT_EVAL_PRESET)
 
 
+def _should_run_compare(
+    *,
+    compare_run_dirs: list[str] | None,
+    compare_launch_group_summary: Path | None,
+) -> bool:
+    return bool(compare_run_dirs) or compare_launch_group_summary is not None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Thin wrapper for canonical thesis train/eval/compare runs")
     parser.add_argument("--stack-config", type=Path, default=None)
     parser.add_argument("--eval-stack-config", type=Path, default=None)
-    parser.add_argument("--preset", choices=tuple(_PRESET_PATHS), default="standard")
+    parser.add_argument("--preset", choices=tuple(_PRESET_PATHS), default="thesis-model-auto-gpu")
     parser.add_argument("--eval-preset", choices=tuple(_PRESET_PATHS), default="")
     parser.add_argument("--list-presets", action="store_true")
     parser.add_argument("--run-label", type=str, default="")
@@ -186,7 +219,11 @@ def main() -> None:
                 eval_command.append(str(extra))
             steps.append(_run_step(command=eval_command, cwd=repo_root, dry_run=bool(args.dry_run)))
 
-        if not args.skip_compare:
+        should_run_compare = _should_run_compare(
+            compare_run_dirs=args.compare_run_dir,
+            compare_launch_group_summary=args.compare_launch_group_summary,
+        )
+        if not args.skip_compare and should_run_compare:
             compare_command = [
                 python_exe,
                 "python/scripts/compare_runs.py",

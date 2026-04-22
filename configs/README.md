@@ -19,12 +19,13 @@ The repo now has one public config system: grouped presets.
 - `presets/baselines/norecurrence_impala.yaml`
 - `presets/baselines/ppo_lite.yaml`
 
-Each baseline extends the thesis-safe typed preset and overrides only the scientific difference that defines the baseline.
+Each baseline extends the frozen thesis-model surface and overrides only the scientific difference that defines the baseline.
 
-## Ablations
+## Thesis Ablations
 
-- `presets/ablations/discount_gamma099.yaml`
-- `presets/ablations/reward_shaping.yaml`
+- `presets/ablations/structured_acceptance_thesis_model_no_tactical_bias_auto_gpu.yaml`
+- `presets/ablations/structured_acceptance_thesis_model_no_b1_cutoff_auto_gpu.yaml`
+- `presets/ablations/structured_acceptance_thesis_model_teacher_fade_auto_gpu.yaml`
 
 ## Study Config
 
@@ -49,7 +50,7 @@ Seed files contain one unsigned 64-bit integer per line with no comments.
 CLI overrides now follow grouped paths, for example:
 
 ```bash
-python python/scripts/train.py \
+uv run python python/scripts/train.py \
   --stack-config configs/presets/typed_local.yaml \
   --override training.optimizer.learning_rate=0.0002 \
   --override rewards.truncation.reward=-0.05 \

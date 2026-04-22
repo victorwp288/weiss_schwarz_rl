@@ -1,3 +1,0 @@
-schema_version: 2
-description: ablation of the canonical standard preset without tactical public-bias shaping
-extends: ../structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10.yaml

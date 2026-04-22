@@ -13,6 +13,7 @@ from weiss_rl.spec import normalize_spec_mismatch_policy, require_fail_on_spec_m
 
 from .models import (
     CurriculumCheckpointGuardConfig,
+    CurriculumEarlyCutoffConfig,
     CurriculumConfig,
     CurriculumStallMonitorConfig,
     DecisionKindTaggingConfig,
@@ -64,9 +65,16 @@ from .models import (
 _EXPERIMENT_ROLES = frozenset(
     {
         "main",
+        "thesis_multideck",
         "baseline_noleague",
+        "baseline_noleague_multideck",
+        "baseline_noleague_ablation_teacher_fade",
+        "baseline_noleague_ablation_no_tactical_bias",
         "baseline_norecurrence",
         "baseline_ppo_lite",
+        "ablation_teacher_fade",
+        "ablation_no_tactical_bias",
+        "ablation_no_b1_cutoff",
         "ablation_discount",
         "ablation_reward",
     }
@@ -446,6 +454,8 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             "diverse_model_actor_count",
             "diverse_opponent_batch_fraction",
             "diverse_opponent_batch_wait_ms",
+            "collect_batch_prefetch_enabled",
+            "heuristic_native_rollout_enabled",
             "heuristic_actor_hidden_state_tracking",
         },
         context="training",
@@ -612,6 +622,14 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         body.get("diverse_opponent_batch_wait_ms", 0),
         field_name="training.diverse_opponent_batch_wait_ms",
         minimum=0,
+    )
+    collect_batch_prefetch_enabled = _require_bool(
+        body.get("collect_batch_prefetch_enabled", False),
+        field_name="training.collect_batch_prefetch_enabled",
+    )
+    heuristic_native_rollout_enabled = _require_bool(
+        body.get("heuristic_native_rollout_enabled", False),
+        field_name="training.heuristic_native_rollout_enabled",
     )
     structured_aux_public_temperature = _require_float(
         structured_aux.get("teacher_public_heuristic_temperature", 32.0),
@@ -907,6 +925,8 @@ def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         diverse_model_actor_count=diverse_model_actor_count,
         diverse_opponent_batch_fraction=diverse_opponent_batch_fraction,
         diverse_opponent_batch_wait_ms=diverse_opponent_batch_wait_ms,
+        collect_batch_prefetch_enabled=collect_batch_prefetch_enabled,
+        heuristic_native_rollout_enabled=heuristic_native_rollout_enabled,
         heuristic_actor_hidden_state_tracking=heuristic_actor_hidden_state_tracking,
     )
 
@@ -1038,14 +1058,31 @@ def _normalize_curriculum_payload(value: Any, *, field_name: str) -> Any:
 def _parse_curriculum_config(body: dict[str, Any] | None) -> CurriculumConfig:
     if body is None:
         return CurriculumConfig()
-    _reject_unknown_keys(body, allowed={"simulator", "stall_monitor", "checkpoint_guard"}, context="curriculum")
+    _reject_unknown_keys(
+        body,
+        allowed={"simulator", "stall_monitor", "early_cutoff", "checkpoint_guard"},
+        context="curriculum",
+    )
     simulator = _require_mapping(body.get("simulator", {}), context="curriculum.simulator")
     stall_monitor = _require_mapping(body.get("stall_monitor", {}), context="curriculum.stall_monitor")
+    early_cutoff = _require_mapping(body.get("early_cutoff", {}), context="curriculum.early_cutoff")
     checkpoint_guard = _require_mapping(body.get("checkpoint_guard", {}), context="curriculum.checkpoint_guard")
     _reject_unknown_keys(
         stall_monitor,
         allowed={"enabled", "truncation_rate_threshold", "consecutive_evals"},
         context="curriculum.stall_monitor",
+    )
+    _reject_unknown_keys(
+        early_cutoff,
+        allowed={
+            "enabled",
+            "warmup_updates",
+            "patience_updates",
+            "min_improvement",
+            "stall_patience_evals",
+            "stall_rate_threshold",
+        },
+        context="curriculum.early_cutoff",
     )
     _reject_unknown_keys(
         checkpoint_guard,
@@ -1076,6 +1113,32 @@ def _parse_curriculum_config(body: dict[str, Any] | None) -> CurriculumConfig:
                 stall_monitor.get("consecutive_evals", 2),
                 field_name="curriculum.stall_monitor.consecutive_evals",
                 minimum=1,
+            ),
+        ),
+        early_cutoff=CurriculumEarlyCutoffConfig(
+            enabled=_require_bool(early_cutoff.get("enabled", False), field_name="curriculum.early_cutoff.enabled"),
+            warmup_updates=_require_int(
+                early_cutoff.get("warmup_updates", 0),
+                field_name="curriculum.early_cutoff.warmup_updates",
+                minimum=0,
+            ),
+            patience_updates=_require_int(
+                early_cutoff.get("patience_updates", 0),
+                field_name="curriculum.early_cutoff.patience_updates",
+                minimum=0,
+            ),
+            min_improvement=_require_float(
+                early_cutoff.get("min_improvement", 0.0),
+                field_name="curriculum.early_cutoff.min_improvement",
+            ),
+            stall_patience_evals=_require_int(
+                early_cutoff.get("stall_patience_evals", 0),
+                field_name="curriculum.early_cutoff.stall_patience_evals",
+                minimum=0,
+            ),
+            stall_rate_threshold=_require_float(
+                early_cutoff.get("stall_rate_threshold", 1.0),
+                field_name="curriculum.early_cutoff.stall_rate_threshold",
             ),
         ),
         checkpoint_guard=CurriculumCheckpointGuardConfig(
@@ -1173,7 +1236,17 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
     )
     _reject_unknown_keys(
         gate,
-        allowed={"uncertainty_method", "weighting", "seat_swap", "folding", "guardrails", "record_file"},
+        allowed={
+            "uncertainty_method",
+            "weighting",
+            "seat_swap",
+            "folding",
+            "guardrails",
+            "record_file",
+            "async_enabled",
+            "parallel_workers",
+            "parallel_worker_devices",
+        },
         context="league.promotion.gate",
     )
     _reject_unknown_keys(
@@ -1344,6 +1417,19 @@ def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
                     ),
                 ),
                 record_file=_require_text(gate["record_file"], field_name="league.promotion.gate.record_file"),
+                async_enabled=_require_bool(
+                    gate.get("async_enabled", False),
+                    field_name="league.promotion.gate.async_enabled",
+                ),
+                parallel_workers=_require_int(
+                    gate.get("parallel_workers", 1),
+                    field_name="league.promotion.gate.parallel_workers",
+                    minimum=1,
+                ),
+                parallel_worker_devices=_require_str_list(
+                    gate.get("parallel_worker_devices", []),
+                    field_name="league.promotion.gate.parallel_worker_devices",
+                ),
             ),
         ),
     )
@@ -1355,6 +1441,9 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
         allowed={
             "seat_swap",
             "eval_device",
+            "async_periodic_dev_eval_enabled",
+            "periodic_dev_eval_parallel_workers",
+            "periodic_dev_eval_parallel_worker_devices",
             "eval_inference_mode",
             "eval_sampling_algorithm",
             "eval_assert_sorted_legal_ids",
@@ -1428,6 +1517,19 @@ def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
     return EvaluationConfig(
         seat_swap=_require_bool(body["seat_swap"], field_name="evaluation.seat_swap"),
         eval_device=_require_text(body["eval_device"], field_name="evaluation.eval_device"),
+        async_periodic_dev_eval_enabled=_require_bool(
+            body.get("async_periodic_dev_eval_enabled", False),
+            field_name="evaluation.async_periodic_dev_eval_enabled",
+        ),
+        periodic_dev_eval_parallel_workers=_require_int(
+            body.get("periodic_dev_eval_parallel_workers", 1),
+            field_name="evaluation.periodic_dev_eval_parallel_workers",
+            minimum=1,
+        ),
+        periodic_dev_eval_parallel_worker_devices=_require_str_list(
+            body.get("periodic_dev_eval_parallel_worker_devices", []),
+            field_name="evaluation.periodic_dev_eval_parallel_worker_devices",
+        ),
         eval_inference_mode=_require_bool(body["eval_inference_mode"], field_name="evaluation.eval_inference_mode"),
         eval_sampling_algorithm=_require_text(
             body["eval_sampling_algorithm"],

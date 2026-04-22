@@ -280,7 +280,10 @@ class SnapshotRegistry:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_stable_json_dumps(self.to_dict()) + "\n", encoding="utf-8")
+        payload = _stable_json_dumps(self.to_dict()) + "\n"
+        tmp_path = path.with_name(f".{path.name}.tmp")
+        tmp_path.write_text(payload, encoding="utf-8")
+        tmp_path.replace(path)
 
     def _normalized_snapshots(self) -> list[SnapshotMeta]:
         deduped: dict[str, SnapshotMeta] = {}

@@ -1,0 +1,26 @@
+schema_version: 2
+description: frozen thesis-model multideck generalization preset for Linux servers
+extends: structured_acceptance_thesis_model_auto_gpu.yaml
+experiment:
+  role: thesis_multideck
+environment:
+  deck_pool:
+    - preset:starter_v1
+    - preset:quints_balanced_v2
+    - preset:quints_ichika_focus_v1
+    - preset:quints_yotsuba_focus_v1
+    - preset:quints_support_mix_v1
+  opponent_deck_pool:
+    - preset:quints_support_mix_v1
+    - preset:quints_yotsuba_focus_v1
+    - preset:quints_balanced_v2
+    - preset:starter_v1
+    - preset:quints_ichika_focus_v1
+curriculum:
+  early_cutoff:
+    enabled: true
+    warmup_updates: 120
+    patience_updates: 120
+    min_improvement: 0.01
+    stall_patience_evals: 4
+    stall_rate_threshold: 0.25

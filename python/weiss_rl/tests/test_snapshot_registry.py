@@ -1206,6 +1206,24 @@ def test_finalize_from_best_checkpoint_rewrites_latest_alias(tmp_path: Path) -> 
     assert tracker["latest"]["metric_kind"] == "dev_eval_mean"
     assert tracker["latest"]["metric_value"] == pytest.approx(0.65625)
     assert tracker["latest"]["source_checkpoint_path"].endswith("training/checkpoints/best.pt")
+    latest_payload = torch.load(training_paths.latest_checkpoint_path, map_location="cpu", weights_only=False)
+    best_payload = torch.load(training_paths.best_checkpoint_path, map_location="cpu", weights_only=False)
+    assert latest_payload["update_count"] == 160
+    assert latest_payload["policy_version"] == 8
+    assert latest_payload["total_samples_processed"] == 5120
+    assert latest_payload["model_state_dict"].keys() == best_payload["model_state_dict"].keys()
+    for key, value in latest_payload["model_state_dict"].items():
+        assert torch.equal(value, best_payload["model_state_dict"][key])
+    resumed = train_script._restore_learner_from_checkpoint(
+        checkpoint_path=training_paths.latest_checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        expected_spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+    assert resumed.update_count == 160
+    assert resumed.policy_version == 8
 
 
 def test_demote_registry_champions_newer_than_removes_newer_refs_only(tmp_path: Path) -> None:
@@ -1723,3 +1741,47 @@ def test_simulator_eval_runner_uses_learner_scoring_mode(tmp_path: Path, monkeyp
     assert env.reset_seed == scheduled_game.episode_seed
     assert model.scoring_modes == ["learner"]
     assert env.closed is True
+
+
+def test_simulator_eval_runner_honors_cuda_auto_eval_device(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.to_calls: list[str] = []
+
+        def to(self, device: torch.device | str) -> FakeModel:
+            self.to_calls.append(str(device))
+            return self
+
+        def eval(self) -> FakeModel:
+            return self
+
+    monkeypatch.setattr("weiss_rl.eval.simulator_runner.torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr("weiss_rl.eval.simulator_runner.torch.cuda.device_count", lambda: 3)
+
+    model = FakeModel()
+    layout = ArtifactLayout.from_run_dir(tmp_path)
+    layout.ensure_directories()
+    runner = SimulatorEvalRunner(
+        stack=SimpleNamespace(config=SimpleNamespace(curriculum=None, evaluation=SimpleNamespace(eval_device="cuda:auto"))),
+        policies={
+            "candidate": ResolvedEvalPolicy(
+                policy_id="candidate",
+                kind="snapshot_registry",
+                model=model,
+            )
+        },
+        artifact_layout=layout,
+        run_id256="ab" * 32,
+        spec_hash256="cd" * 32,
+        action_dim=1,
+        pass_action_id=0,
+        require_sorted_legal_ids=False,
+        replay_capture_rate=0.0,
+        regression_capture_count=0,
+    )
+
+    assert model.to_calls[-1] == "cuda:0"
+    assert str(cast(Any, runner)._device) == "cuda:0"

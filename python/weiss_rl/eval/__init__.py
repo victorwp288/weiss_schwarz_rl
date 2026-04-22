@@ -10,10 +10,18 @@ from weiss_rl.eval.diagnostics import (
 from weiss_rl.eval.export import (
     build_matchup_export,
     load_eval_game_records,
+    validate_eval_game_records_contract,
     write_matchup_summary_csv,
     write_matchup_summary_json,
 )
-from weiss_rl.eval.final_eval import load_dev_eval_summaries, resolve_final_policy_set, run_final_eval
+from weiss_rl.eval.final_eval import (
+    build_final_eval_matchups,
+    finalize_final_eval,
+    load_dev_eval_summaries,
+    resolve_final_policy_set,
+    run_final_eval,
+    run_final_eval_matchup,
+)
 from weiss_rl.eval.harness import (
     EvalGameRecord,
     EvalRunResult,
@@ -77,6 +85,7 @@ __all__ = [
     "Stage2StopReason",
     "bayesian_bootstrap_posterior_samples",
     "bayesian_bootstrap_summary",
+    "build_final_eval_matchups",
     "build_hidden_info_leakage_diagnostics",
     "build_matchup_export",
     "build_paper_readiness_summary",
@@ -94,7 +103,9 @@ __all__ = [
     "posterior_samples",
     "recommend_focal_policy_id",
     "resolve_final_policy_set",
+    "run_final_eval_matchup",
     "run_final_eval",
+    "finalize_final_eval",
     "select_final_policy_set_deterministic_v1",
     "record_completed_game",
     "run_seat_swapped_matchup",
@@ -102,6 +113,7 @@ __all__ = [
     "summarize_game_records",
     "summarize_pair_outcomes",
     "summarize_stage2_records",
+    "validate_eval_game_records_contract",
     "write_episodes_jsonl",
     "write_leakage_diagnostics_json",
     "write_matchup_diagnostics_json",

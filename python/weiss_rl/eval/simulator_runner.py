@@ -55,6 +55,30 @@ _LEGACY_B1_POLICY_ID = "b1_noleague_baseline"
 _U64_DENOMINATOR = float(1 << 64)
 
 
+def _resolve_eval_device(
+    stack: StackConfig,
+    *,
+    eval_device: torch.device | str | None = None,
+) -> torch.device:
+    if eval_device is not None:
+        requested = str(eval_device).strip()
+    else:
+        stack_config = getattr(stack, "config", None)
+        evaluation = getattr(stack_config, "evaluation", None)
+        requested = "cpu" if evaluation is None else str(getattr(evaluation, "eval_device", "cpu")).strip()
+    if not requested:
+        requested = "cpu"
+    normalized = requested.lower()
+    if normalized in {"auto", "cuda:auto"}:
+        requested = "cuda:0" if torch.cuda.is_available() and int(torch.cuda.device_count()) > 0 else "cpu"
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        requested = "cpu"
+    device = torch.device(requested)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda:0")
+    return device
+
+
 def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload: Mapping[str, object]) -> None:
     if model is None:
         return
@@ -111,7 +135,9 @@ def resolve_eval_policies(
     spec_bundle: Mapping[str, object] | None = None,
     snapshot_registry_path: Path | None = None,
     b1_baseline_run_dir: Path | None = None,
+    eval_device: torch.device | str | None = None,
 ) -> dict[str, ResolvedEvalPolicy]:
+    resolved_eval_device = _resolve_eval_device(stack, eval_device=eval_device)
     registry_path = snapshot_registry_path or (
         ArtifactLayout.from_run_dir(run_dir).training_snapshots_dir / "registry.json"
     )
@@ -160,6 +186,7 @@ def resolve_eval_policies(
                 observation_dim=observation_dim,
                 action_dim=action_dim,
                 spec_bundle=spec_bundle,
+                eval_device=resolved_eval_device,
             )
             continue
 
@@ -175,6 +202,7 @@ def resolve_eval_policies(
             action_dim=action_dim,
             observation_spec=_observation_spec_from_bundle(spec_bundle),
             spec_bundle=spec_bundle,
+            eval_device=resolved_eval_device,
         )
         resolved[policy_id] = ResolvedEvalPolicy(
             policy_id=policy_id,
@@ -405,6 +433,7 @@ class SimulatorEvalRunner(EvalGameRunner):
         require_sorted_legal_ids: bool,
         replay_capture_rate: float,
         regression_capture_count: int,
+        eval_device: torch.device | str | None = None,
     ) -> None:
         self.stack = stack
         self.policies = dict(policies)
@@ -416,7 +445,11 @@ class SimulatorEvalRunner(EvalGameRunner):
         self.replay_capture_rate = float(replay_capture_rate)
         self.regression_capture_count = int(regression_capture_count)
         self._capture_count = 0
-        self._device = torch.device("cpu")
+        self._device = _resolve_eval_device(stack, eval_device=eval_device)
+        for policy in self.policies.values():
+            if policy.model is not None and callable(getattr(policy.model, "to", None)):
+                policy.model.to(self._device)
+                policy.model.eval()
         self._baseline_logits = np.zeros((int(action_dim),), dtype=np.float32)
 
     def run_game(self, scheduled_game: ScheduledGame) -> GameResult:
@@ -596,6 +629,12 @@ class SimulatorEvalRunner(EvalGameRunner):
     def _abort_on_fault(self, *, batch: DecisionBoundaryBatch, scheduled_game: ScheduledGame) -> None:
         matchup_dir = (
             self.artifact_layout.final_eval_matchups_dir
+            / (
+                "fault_"
+                + _eval_policy_slug(scheduled_game.focal_policy_id)
+                + "__vs__"
+                + _eval_policy_slug(scheduled_game.opponent_policy_id)
+            )
             / f"{scheduled_game.pair_index:04d}_{scheduled_game.swap_index:01d}_{scheduled_game.episode_seed:016x}"
         )
         abort_on_engine_fault_eval(
@@ -776,6 +815,7 @@ def _resolve_b1_policy(
     observation_dim: int,
     action_dim: int,
     spec_bundle: Mapping[str, object] | None,
+    eval_device: torch.device | str | None = None,
 ) -> ResolvedEvalPolicy:
     for candidate_run_dir in _candidate_b1_run_dirs(
         run_dir=run_dir,
@@ -793,6 +833,7 @@ def _resolve_b1_policy(
             action_dim=action_dim,
             observation_spec=_observation_spec_from_bundle(spec_bundle, run_dir=candidate_run_dir),
             spec_bundle=spec_bundle,
+            eval_device=eval_device,
         )
         return ResolvedEvalPolicy(
             policy_id=NO_LEAGUE_POLICY_ID,
@@ -873,6 +914,7 @@ def _load_snapshot_eval_model(
     action_dim: int,
     observation_spec: Mapping[str, object] | None = None,
     spec_bundle: Mapping[str, object] | None = None,
+    eval_device: torch.device | str | None = None,
 ) -> PolicyValueModel:
     payload = torch.load(run_dir / snapshot_path, map_location="cpu", weights_only=True)
     model_state_dict = payload.get("model_state_dict")
@@ -881,13 +923,14 @@ def _load_snapshot_eval_model(
     model_config = stack.config.model
     if model_config is None:
         raise RuntimeError("The locked stack is missing the model config block")
+    resolved_eval_device = _resolve_eval_device(stack, eval_device=eval_device)
     eval_model = build_policy_value_model(
         observation_dim=observation_dim,
         config=model_config,
         action_dim=action_dim,
         observation_spec=observation_spec,
         spec_bundle=spec_bundle,
-    ).to(torch.device("cpu"))
+    ).to(resolved_eval_device)
     eval_model.load_state_dict(model_state_dict)
     _restore_model_guidance_from_payload(eval_model, payload)
     eval_model.eval()
@@ -917,3 +960,12 @@ def _observation_spec_from_bundle(
     if not isinstance(observation, Mapping):
         raise RuntimeError(f"spec_bundle.json observation payload must be an object: {layout.spec_bundle_path}")
     return observation
+
+
+def _eval_policy_slug(value: str) -> str:
+    parts = [
+        "".join(char.lower() for char in chunk if char.isalnum())
+        for chunk in str(value).replace("-", " ").replace("_", " ").split()
+    ]
+    slug = "_".join(part for part in parts if part)
+    return slug or "policy"

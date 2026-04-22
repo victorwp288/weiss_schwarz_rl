@@ -15,6 +15,7 @@ from weiss_rl.eval.stage2 import summarize_stage2_records
 __all__ = [
     "build_matchup_export",
     "load_eval_game_records",
+    "validate_eval_game_records_contract",
     "write_matchup_summary_csv",
     "write_matchup_summary_json",
 ]
@@ -52,15 +53,15 @@ def load_eval_game_records(path: Path) -> tuple[EvalGameRecord, ...]:
                     terminated=bool(payload["terminated"]),
                     truncated=bool(payload["truncated"]),
                     engine_status=int(payload["engine_status"]),
-                    decision_count=int(payload.get("decision_count", 0)),
-                    tick_count=int(payload.get("tick_count", 0)),
-                    no_progress_count=int(payload.get("no_progress_count", 0)),
-                    termination_reason=str(payload.get("termination_reason", "terminated")),
-                    total_actions=int(payload.get("total_actions", 0)),
-                    pass_actions=int(payload.get("pass_actions", 0)),
-                    main_move_actions=int(payload.get("main_move_actions", 0)),
-                    pass_with_nonpass_available=int(payload.get("pass_with_nonpass_available", 0)),
-                    max_consecutive_main_moves=int(payload.get("max_consecutive_main_moves", 0)),
+                    decision_count=int(payload["decision_count"]),
+                    tick_count=int(payload["tick_count"]),
+                    no_progress_count=int(payload["no_progress_count"]),
+                    termination_reason=str(payload["termination_reason"]),
+                    total_actions=int(payload["total_actions"]),
+                    pass_actions=int(payload["pass_actions"]),
+                    main_move_actions=int(payload["main_move_actions"]),
+                    pass_with_nonpass_available=int(payload["pass_with_nonpass_available"]),
+                    max_consecutive_main_moves=int(payload["max_consecutive_main_moves"]),
                     run_id256=_normalize_optional_hash256(raw_run_id256, name="run_id256"),
                 )
             except KeyError as exc:
@@ -144,6 +145,28 @@ def build_matchup_export(
         },
         "uncertainty": uncertainty_payload,
     }
+
+
+def validate_eval_game_records_contract(
+    records: tuple[EvalGameRecord, ...] | list[EvalGameRecord],
+    *,
+    config_hash256: str,
+    spec_hash256: str,
+) -> None:
+    _require_single_contract(records)
+    record = records[0]
+    expected_config_hash = str(config_hash256).strip().lower()
+    expected_spec_hash = str(spec_hash256).strip().lower()
+    if record.config_hash256 != expected_config_hash:
+        raise ValueError(
+            "episodes file config_hash256 does not match the loaded stack config: "
+            f"episodes={record.config_hash256} current={expected_config_hash}"
+        )
+    if record.spec_hash256 != expected_spec_hash:
+        raise ValueError(
+            "episodes file spec_hash256 does not match the verified runtime spec: "
+            f"episodes={record.spec_hash256} current={expected_spec_hash}"
+        )
 
 
 def write_matchup_summary_json(path: Path, payload: dict[str, Any]) -> None:

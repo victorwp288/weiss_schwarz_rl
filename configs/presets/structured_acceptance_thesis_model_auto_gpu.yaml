@@ -1,0 +1,103 @@
+schema_version: 2
+description: canonical frozen structured_acceptance thesis model preset for Linux servers with automatic multi-GPU actor sharding
+extends: typed_structured_v2.yaml
+system:
+  learner_device: cuda:auto
+  actor_device: cuda:auto
+  actor_process_count: 32
+  learner_torch_threads: 16
+  collection_backend: process
+model:
+  gru_hidden_size: 248
+  encoder_mlp_width: 248
+  typed_feature_width: 62
+  public_heuristic_logit_bias_scale: 2.0
+  public_heuristic_actor_logit_bias_scale: 1.0
+  public_heuristic_logit_bias_final_scale: 2.0
+  public_heuristic_logit_bias_families:
+    - main_play_character
+    - main_move
+    - attack
+training:
+  profile_timers: true
+  fixed_opponent_backend: simulator_native
+  actor_policy_backend: heuristic_public
+  actor_heuristic_fraction: 1.0
+  structured_aux:
+    teacher_public_heuristic_coef: 0.10
+    teacher_public_heuristic_final_coef: 0.10
+    teacher_public_heuristic_profiles:
+      - base
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle
+  structured_warmstart:
+    updates: 1
+    teacher_public_heuristic_coef: 0.50
+    teacher_public_heuristic_profiles:
+      - base
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle
+evaluation:
+  seed_files:
+    dev_eval: configs/seeds/dev_eval_seeds.txt
+    report_eval: configs/seeds/report_eval_seeds.txt
+    promotion_gate: configs/seeds/promotion_eval_seeds.txt
+  periodic_dev_eval_paired_seeds: 32
+  eval_device: cuda:auto
+  async_periodic_dev_eval_enabled: true
+  periodic_dev_eval_interval_updates: 10
+  periodic_dev_eval_parallel_workers: 6
+  periodic_dev_eval_parallel_worker_devices:
+    - cuda:0
+    - cuda:1
+    - cuda:2
+    - cuda:0
+    - cuda:1
+    - cuda:2
+league:
+  sampling:
+    heuristic_public_start_updates: 0
+    heuristic_public_mix_fraction: 1.0
+    heuristic_public_final_mix_fraction: 1.0
+    noleague_baseline_mix_fraction: 0.15
+    noleague_baseline_mix_end_updates: 10
+  promotion:
+    paired_seeds: 16
+    seed_file: configs/seeds/promotion_eval_seeds.txt
+    anchor_set_v1:
+      required:
+        - B0 RandomLegal
+        - B1 NoLeague baseline
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+        - Previous champion snapshot
+        - Previous recent snapshot
+    gate:
+      parallel_workers: 6
+      parallel_worker_devices:
+        - cuda:0
+        - cuda:1
+        - cuda:2
+        - cuda:0
+        - cuda:1
+        - cuda:2
+curriculum:
+  stall_monitor:
+    enabled: false
+  early_cutoff:
+    enabled: true
+    warmup_updates: 120
+    patience_updates: 120
+    min_improvement: 0.01
+    stall_patience_evals: 4
+    stall_rate_threshold: 0.25
+  checkpoint_guard:
+    rollback_score_margin: 0.01
+reproducibility:
+  seed_files:
+    dev_eval: configs/seeds/dev_eval_seeds.txt
+    promotion_gate: configs/seeds/promotion_eval_seeds.txt

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -26,6 +27,13 @@ class LaunchPlan:
     group_label: str
     jobs: tuple[LaunchJob, ...]
     max_parallel_jobs: int
+
+
+def _stack_config_run_label_fragment(stack_config: str) -> str:
+    stack_path = Path(stack_config)
+    stem = stack_path.stem or "stack"
+    digest = hashlib.sha1(str(stack_path).encode("utf-8")).hexdigest()[:8]
+    return f"{stem}_{digest}"
 
 
 def resolve_devices(*, requested_devices: list[str] | None, cuda_available: bool, cuda_count: int) -> tuple[str, ...]:
@@ -60,10 +68,10 @@ def build_launch_plan(
     extra_args_tuple = tuple(extra_args or ())
     job_index = 0
     for stack_config in stack_configs:
-        stack_stem = Path(stack_config).stem or "stack"
+        stack_fragment = _stack_config_run_label_fragment(stack_config)
         for seed in seeds:
             device = devices[job_index % len(devices)]
-            run_label = f"{base_prefix}_{stack_stem}_seed{int(seed)}"
+            run_label = f"{base_prefix}_{stack_fragment}_seed{int(seed)}"
             jobs.append(
                 LaunchJob(
                     job_id=f"job_{job_index:03d}",
@@ -90,7 +98,7 @@ def execute_launch_plan(
     group_dir = runs_root / "launch_groups" / plan.group_label
     group_dir.mkdir(parents=True, exist_ok=True)
     summary_path = group_dir / "summary.json"
-    train_script = repo_root / "weiss_schwarz_rl" / "python" / "scripts" / "train.py"
+    train_script = repo_root / "python" / "scripts" / "train.py"
     python_cmd = python_executable or sys.executable
 
     summary: dict[str, Any] = {
@@ -99,6 +107,7 @@ def execute_launch_plan(
         "repo_root": repo_root.as_posix(),
         "dry_run": bool(dry_run),
         "max_parallel_jobs": int(plan.max_parallel_jobs),
+        "status": "planned" if dry_run else "running",
         "jobs": [],
     }
 
@@ -125,7 +134,7 @@ def execute_launch_plan(
                 {
                     **asdict(job),
                     "command": command,
-                    "expected_run_dir": (repo_root / "weiss_schwarz_rl" / "runs" / job.run_label).as_posix(),
+                    "expected_run_dir": (repo_root / "runs" / job.run_label).as_posix(),
                     "status": "planned" if dry_run else "running",
                     "started_at_unix": started_at,
                 }
@@ -136,7 +145,7 @@ def execute_launch_plan(
                 (
                     subprocess.Popen(
                         command,
-                        cwd=repo_root / "weiss_schwarz_rl",
+                        cwd=repo_root,
                         text=True,
                     ),
                     job,
@@ -166,8 +175,17 @@ def execute_launch_plan(
     if dry_run:
         for job in plan.jobs:
             _update_job_summary(summary, job_id=job.job_id, status="planned", return_code=None, finished_at=None)
+        summary["status"] = "planned"
+    else:
+        failed_jobs = [job for job in summary["jobs"] if str(job.get("status")) == "failed"]
+        summary["status"] = "failed" if failed_jobs else "completed"
+        summary["failed_job_count"] = len(failed_jobs)
 
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if not dry_run and int(summary.get("failed_job_count", 0)) > 0:
+        raise RuntimeError(
+            f"launch group {plan.group_label} failed with {int(summary['failed_job_count'])} job(s); see {summary_path}"
+        )
     return summary
 
 

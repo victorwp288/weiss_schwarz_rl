@@ -6,13 +6,13 @@ from weiss_rl.sweeps import build_sweep_launch_plan, get_sweep_preset, list_swee
 
 
 def test_list_sweep_presets_is_stable() -> None:
-    assert list_sweep_presets() == ("impala_compact", "ppo_compact")
+    assert list_sweep_presets() == ("noleague_impala_compact", "norecurrence_compact", "ppo_compact")
 
 
 def test_get_sweep_preset_returns_candidates() -> None:
-    preset = get_sweep_preset("impala_compact")
+    preset = get_sweep_preset("noleague_impala_compact")
 
-    assert preset.stack_config == "configs/presets/typed_local.yaml"
+    assert preset.stack_config == "configs/presets/baselines/noleague_impala.yaml"
     assert len(preset.candidates) == 4
 
 
