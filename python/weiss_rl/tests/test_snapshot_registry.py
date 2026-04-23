@@ -24,6 +24,9 @@ from weiss_rl.model import PolicyValueModel
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+NOLEAGUE_BASELINE_STACK_CONFIG = (
+    REPO_ROOT / "configs" / "presets" / "baselines" / "structured_acceptance_thesis_model_auto_gpu_noleague.yaml"
+)
 
 
 class _TrainingPathsLike(Protocol):
@@ -758,6 +761,7 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
         raise RuntimeError("stop after bootstrap")
 
     monkeypatch.setattr(train_script, "_ensure_noleague_baseline_anchor", fake_ensure_noleague_baseline_anchor)
+    monkeypatch.setattr(train_script, "_experiment_role", lambda _stack: "baseline_noleague")
     monkeypatch.setattr(train_script, "QueueRuntime", stop_before_runtime)
 
     run_dir = tmp_path / "run"
@@ -792,6 +796,38 @@ def test_run_minimal_training_bootstraps_noleague_baseline_before_env_start(tmp_
     assert bootstrap_call["device"] == torch.device("cpu")
     assert bootstrap_call["config_hash256"] == train_script.compute_config_hash256(stack)
     assert bootstrap_call["baseline_run_dir"] is None
+    assert bootstrap_call["permit_current_run_alias"] is True
+    assert bootstrap_call["update"] == 0
+
+
+def test_defer_noleague_baseline_alias_refresh_only_on_periodic_eval_updates() -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(NOLEAGUE_BASELINE_STACK_CONFIG)
+
+    assert (
+        train_script._should_defer_noleague_baseline_alias_refresh(
+            stack=stack,
+            experiment_role="baseline_noleague",
+            update_count=10,
+        )
+        is True
+    )
+    assert (
+        train_script._should_defer_noleague_baseline_alias_refresh(
+            stack=stack,
+            experiment_role="baseline_noleague",
+            update_count=11,
+        )
+        is False
+    )
+    assert (
+        train_script._should_defer_noleague_baseline_alias_refresh(
+            stack=stack,
+            experiment_role="main",
+            update_count=10,
+        )
+        is False
+    )
 
 
 def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path: Path, monkeypatch) -> None:

@@ -3378,6 +3378,18 @@ def _should_run_periodic_dev_eval(stack: StackConfig, *, update_count: int) -> b
     return interval > 0 and update_count % interval == 0
 
 
+def _should_defer_noleague_baseline_alias_refresh(
+    *,
+    stack: StackConfig,
+    experiment_role: str,
+    update_count: int,
+) -> bool:
+    return _is_noleague_baseline_role(experiment_role) and _should_run_periodic_dev_eval(
+        stack,
+        update_count=update_count,
+    )
+
+
 def _periodic_dev_eval_summaries_path(training_paths: TrainingPaths) -> Path:
     return training_paths.logs_dir / "periodic_dev_eval_summaries.json"
 
@@ -5454,6 +5466,8 @@ def _run_minimal_training(
         config_hash256=config_hash256,
         spec_hash256=spec_hash256,
         baseline_run_dir=b1_baseline_run_dir,
+        permit_current_run_alias=_is_noleague_baseline_role(experiment_role),
+        update=int(learner.update_count),
     )
     if seed_snapshot_run_dir is not None:
         _import_seed_snapshot_pool(
@@ -5741,7 +5755,12 @@ def _run_minimal_training(
                         policy_version=int(learner.get_policy_version()),
                         model=learner.model,
                     )
-                    if _is_noleague_baseline_role(experiment_role):
+                    defer_noleague_baseline_alias_refresh = _should_defer_noleague_baseline_alias_refresh(
+                        stack=stack,
+                        experiment_role=experiment_role,
+                        update_count=int(learner.update_count),
+                    )
+                    if _is_noleague_baseline_role(experiment_role) and not defer_noleague_baseline_alias_refresh:
                         _ensure_noleague_baseline_anchor(
                             stack=stack,
                             training_paths=training_paths,
@@ -5855,6 +5874,11 @@ def _run_minimal_training(
                             runtime.refresh_opponent_pool()
 
                 if _should_run_periodic_dev_eval(stack, update_count=int(learner.update_count)):
+                    defer_noleague_baseline_alias_refresh = _should_defer_noleague_baseline_alias_refresh(
+                        stack=stack,
+                        experiment_role=experiment_role,
+                        update_count=int(learner.update_count),
+                    )
                     checkpoint_path = _ensure_current_checkpoint(
                         training_paths=training_paths,
                         learner=learner,
@@ -5863,19 +5887,6 @@ def _run_minimal_training(
                         spec_hash256=spec_hash256,
                         algorithm=algorithm,
                     )
-                    if _is_noleague_baseline_role(experiment_role):
-                        _ensure_noleague_baseline_anchor(
-                            stack=stack,
-                            training_paths=training_paths,
-                            run_dir=artifacts.run_dir,
-                            learner=learner,
-                            device=device,
-                            config_hash256=config_hash256,
-                            spec_hash256=spec_hash256,
-                            permit_current_run_alias=True,
-                            source_checkpoint_path=checkpoint_path,
-                            update=int(learner.update_count),
-                        )
                     if async_periodic_dev_eval_enabled:
                         if async_periodic_dev_eval_executor is None:
                             raise RuntimeError("async periodic dev eval is enabled but the worker pool was not created")
@@ -5995,6 +6006,19 @@ def _run_minimal_training(
                             f"devices={','.join(request.parallel_worker_devices) or str(stack.config.evaluation.eval_device)} "
                             f"anchors={','.join(spec.display_name for spec in request.opponents)}"
                         )
+                        if defer_noleague_baseline_alias_refresh:
+                            _ensure_noleague_baseline_anchor(
+                                stack=stack,
+                                training_paths=training_paths,
+                                run_dir=artifacts.run_dir,
+                                learner=learner,
+                                device=device,
+                                config_hash256=config_hash256,
+                                spec_hash256=spec_hash256,
+                                permit_current_run_alias=True,
+                                source_checkpoint_path=checkpoint_path,
+                                update=int(learner.update_count),
+                            )
                     else:
                         summary_payload = _run_periodic_dev_eval(
                             stack=stack,
@@ -6116,6 +6140,18 @@ def _run_minimal_training(
                                 f"current_score={float(guard_event['current_score']):.4f} "
                                 f"best_score={float(guard_event['best_score']):.4f} "
                                 f"reasons={','.join(cast(list[str], guard_event['reasons']))}"
+                            )
+                        if defer_noleague_baseline_alias_refresh:
+                            _ensure_noleague_baseline_anchor(
+                                stack=stack,
+                                training_paths=training_paths,
+                                run_dir=artifacts.run_dir,
+                                learner=learner,
+                                device=device,
+                                config_hash256=config_hash256,
+                                spec_hash256=spec_hash256,
+                                permit_current_run_alias=True,
+                                update=int(learner.update_count),
                             )
                         if tensorboard_logger is not None:
                             tensorboard_logger.log_periodic_dev_eval(effective_summary, step=int(learner.update_count))

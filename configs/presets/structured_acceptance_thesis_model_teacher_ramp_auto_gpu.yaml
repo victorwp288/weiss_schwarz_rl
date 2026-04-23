@@ -1,0 +1,21 @@
+schema_version: 2
+description: thesis-standard candidate with strong early public-heuristic guidance that fades over the first 20 updates
+extends: structured_acceptance_thesis_model_auto_gpu.yaml
+experiment:
+  role: thesis_teacher_ramp
+model:
+  public_heuristic_logit_bias_start_updates: 0
+  public_heuristic_logit_bias_end_updates: 20
+  public_heuristic_logit_bias_final_scale: 0.25
+  public_heuristic_actor_logit_bias_scale: 0.0
+training:
+  actor_heuristic_start_updates: 0
+  actor_heuristic_end_updates: 20
+  actor_heuristic_final_fraction: 0.25
+  structured_aux:
+    teacher_public_heuristic_start_updates: 0
+    teacher_public_heuristic_end_updates: 20
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_heuristic_profile_mode: mixture
+  structured_warmstart:
+    teacher_public_heuristic_profile_mode: mixture
