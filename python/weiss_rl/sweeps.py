@@ -65,7 +65,7 @@ _PRESETS = {
     ),
     "norecurrence_compact": SweepPreset(
         preset_id="norecurrence_compact",
-        stack_config="configs/presets/baselines/norecurrence_impala.yaml",
+        stack_config="configs/presets/baselines/norecurrence_impala_noleague.yaml",
         candidates=(
             SweepCandidate(
                 candidate_id="ff_lr1p5e4_ent2e2",
@@ -173,7 +173,7 @@ def build_sweep_launch_plan(
     preset = get_sweep_preset(preset_id)
     jobs: list[LaunchJob] = []
     sweep_payload_jobs: list[dict[str, Any]] = []
-    stack_config = str((Path(repo_root) / "weiss_schwarz_rl" / preset.stack_config).resolve())
+    stack_config = str((Path(repo_root) / preset.stack_config).resolve())
     job_index = 0
     for candidate in preset.candidates:
         for seed in seeds:

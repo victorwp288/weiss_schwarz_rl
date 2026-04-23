@@ -1176,6 +1176,81 @@ def test_eval_pipeline_uses_parallel_helper_when_requested(tmp_path: Path, monke
     assert persisted["policy_set_selection"] == expected_policy_ids
 
 
+def test_parallel_final_eval_falls_back_to_serial_for_single_matchup(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import scripts.eval as eval_script
+
+    stack_config = REPO_ROOT / "configs" / "presets" / "typed_local.yaml"
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "run"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.ensure_directories()
+    observed: dict[str, object] = {}
+
+    def _fake_worker(**kwargs: object) -> list[dict[str, object]]:
+        observed["worker_policy_ids"] = kwargs["policy_ids"]
+        observed["worker_matchup_specs"] = kwargs["matchup_specs"]
+        observed["worker_eval_device"] = kwargs["eval_device"]
+        return [{"focal_index": 0, "opponent_index": 1, "summary": {"games": 1}}]
+
+    def _fake_finalize_final_eval(**kwargs: object) -> dict[str, object]:
+        observed["selection_payload"] = kwargs["selection_payload"]
+        observed["metadata"] = kwargs["metadata"]
+        observed["matchup_results"] = kwargs["matchup_results"]
+        return {"status": "ok"}
+
+    monkeypatch.setattr(
+        eval_script,
+        "build_final_eval_matchups",
+        lambda *, policy_ids: [
+            {
+                "focal_index": 0,
+                "opponent_index": 1,
+                "focal_policy_id": str(policy_ids[0]),
+                "opponent_policy_id": str(policy_ids[1]),
+            }
+        ],
+    )
+    monkeypatch.setattr(eval_script, "_run_final_eval_matchup_worker", _fake_worker)
+    monkeypatch.setattr(eval_script, "finalize_final_eval", _fake_finalize_final_eval)
+
+    payload = eval_script._run_parallel_final_eval(
+        stack_config_path=stack_config.resolve(),
+        stack=stack,
+        run_dir=run_dir,
+        layout=layout,
+        policy_ids=("policy_a", "policy_b"),
+        paired_seeds=(1,),
+        stage1_paired_seeds=1,
+        max_paired_seeds=1,
+        stop_rules=stack.config.evaluation.stop_rules,
+        run_id256="ab" * 32,
+        config_hash256="cd" * 32,
+        spec_hash256="ef" * 32,
+        scheme=cast(object, stack.config.evaluation.final_policy_set_selection.folding),
+        sample_count=8,
+        snapshot_registry_path=None,
+        b1_baseline_run_dir=None,
+        metadata={},
+        seed_file_path=None,
+        parallel_workers=4,
+        parallel_worker_devices=("cuda:1", "cuda:2"),
+    )
+
+    assert payload == {"status": "ok"}
+    assert observed["worker_policy_ids"] == ["policy_a", "policy_b"]
+    assert len(cast(list[dict[str, object]], observed["worker_matchup_specs"])) == 1
+    assert observed["worker_eval_device"] == str(stack.config.evaluation.eval_device)
+    assert observed["selection_payload"] == {"mode": "explicit", "policy_count": 2}
+    metadata = cast(dict[str, object], observed["metadata"])
+    parallel_eval = cast(dict[str, object], cast(dict[str, object], metadata["pipeline"])["parallel_eval"])
+    assert parallel_eval["enabled"] is False
+    assert parallel_eval["fallback_reason"] == "single_matchup"
+    assert observed["matchup_results"] == [{"focal_index": 0, "opponent_index": 1, "summary": {"games": 1}}]
+
+
 def test_eval_git_commit_override_does_not_mutate_manifest_payload() -> None:
     import scripts.eval as eval_script
 

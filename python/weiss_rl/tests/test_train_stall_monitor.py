@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pytest
@@ -225,29 +226,48 @@ def test_dev_eval_ineligibility_reasons_still_enforces_checkpoint_guard_when_sta
     assert reasons == ("confidence_prob", "confidence_ci")
 
 
-def test_drop_stale_pending_promotion_gate_discards_candidates_newer_than_rollback_target() -> None:
+def test_drop_stale_pending_promotion_gate_discards_candidates_newer_than_rollback_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+    training_paths = _training_paths(tmp_path)
+    observed: list[tuple[str, ...]] = []
+
+    def _fake_unpin_snapshot_ids(**kwargs: object) -> None:
+        observed.append(tuple(cast(tuple[str, ...], kwargs["snapshot_ids"])))
+
+    monkeypatch.setattr(train_script, "_unpin_snapshot_ids", _fake_unpin_snapshot_ids)
     stale_gate = SimpleNamespace(
         request=SimpleNamespace(update_count=220, candidate_policy_id="policy_000220"),
         future=object(),
-        pinned_snapshot_ids=(),
+        pinned_snapshot_ids=("policy_000220", "anchor_000160"),
     )
     retained_gate = SimpleNamespace(
         request=SimpleNamespace(update_count=160, candidate_policy_id="policy_000160"),
         future=object(),
-        pinned_snapshot_ids=(),
+        pinned_snapshot_ids=("policy_000160", "anchor_000160"),
     )
 
     assert train_script._drop_stale_pending_promotion_gate(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=tmp_path,
         pending_gate=stale_gate,
         rollback_best_update_count=160,
     ) is None
+    assert observed == [("policy_000220", "anchor_000160")]
     assert (
         train_script._drop_stale_pending_promotion_gate(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=tmp_path,
             pending_gate=retained_gate,
             rollback_best_update_count=160,
         )
         is retained_gate
     )
+    assert observed == [("policy_000220", "anchor_000160")]
 
 
 def test_train_build_learner_batch_does_not_double_apply_truncation_reward() -> None:

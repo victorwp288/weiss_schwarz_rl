@@ -13,6 +13,9 @@ curriculum:
     stall_rate_threshold: 0.25
 training:
   algorithm: ppo_lite_masked_v1
+  structured_warmstart:
+    enabled: false
+    updates: 0
   optimizer:
     learning_rate: 0.00015
     grad_norm_clip: 10.0

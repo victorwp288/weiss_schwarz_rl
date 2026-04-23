@@ -5146,6 +5146,9 @@ def _process_completed_promotion_gate(
 
 def _drop_stale_pending_promotion_gate(
     *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    run_dir: Path,
     pending_gate: PendingPromotionGate | None,
     rollback_best_update_count: int,
 ) -> PendingPromotionGate | None:
@@ -5158,6 +5161,12 @@ def _drop_stale_pending_promotion_gate(
         f"candidate={pending_gate.request.candidate_policy_id} "
         f"candidate_update={int(pending_gate.request.update_count)} "
         f"rollback_best_update={int(rollback_best_update_count)}"
+    )
+    _unpin_snapshot_ids(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        snapshot_ids=pending_gate.pinned_snapshot_ids,
     )
     return None
 
@@ -5579,6 +5588,9 @@ def _run_minimal_training(
                     if guard_event is not None:
                         last_checkpoint_guard_rollback_update = int(learner.update_count)
                         pending_promotion_gate = _drop_stale_pending_promotion_gate(
+                            stack=stack,
+                            training_paths=training_paths,
+                            run_dir=artifacts.run_dir,
                             pending_gate=pending_promotion_gate,
                             rollback_best_update_count=int(guard_event["best_update_count"]),
                         )
@@ -5843,6 +5855,27 @@ def _run_minimal_training(
                             runtime.refresh_opponent_pool()
 
                 if _should_run_periodic_dev_eval(stack, update_count=int(learner.update_count)):
+                    checkpoint_path = _ensure_current_checkpoint(
+                        training_paths=training_paths,
+                        learner=learner,
+                        stack=stack,
+                        device=device,
+                        spec_hash256=spec_hash256,
+                        algorithm=algorithm,
+                    )
+                    if _is_noleague_baseline_role(experiment_role):
+                        _ensure_noleague_baseline_anchor(
+                            stack=stack,
+                            training_paths=training_paths,
+                            run_dir=artifacts.run_dir,
+                            learner=learner,
+                            device=device,
+                            config_hash256=config_hash256,
+                            spec_hash256=spec_hash256,
+                            permit_current_run_alias=True,
+                            source_checkpoint_path=checkpoint_path,
+                            update=int(learner.update_count),
+                        )
                     if async_periodic_dev_eval_enabled:
                         if async_periodic_dev_eval_executor is None:
                             raise RuntimeError("async periodic dev eval is enabled but the worker pool was not created")
@@ -5868,6 +5901,9 @@ def _run_minimal_training(
                             if guard_event is not None:
                                 last_checkpoint_guard_rollback_update = int(learner.update_count)
                                 pending_promotion_gate = _drop_stale_pending_promotion_gate(
+                                    stack=stack,
+                                    training_paths=training_paths,
+                                    run_dir=artifacts.run_dir,
                                     pending_gate=pending_promotion_gate,
                                     rollback_best_update_count=int(guard_event["best_update_count"]),
                                 )
@@ -5880,14 +5916,6 @@ def _run_minimal_training(
                                     f"best_score={float(guard_event['best_score']):.4f} "
                                     f"reasons={','.join(cast(list[str], guard_event['reasons']))}"
                                 )
-                        checkpoint_path = _ensure_current_checkpoint(
-                            training_paths=training_paths,
-                            learner=learner,
-                            stack=stack,
-                            device=device,
-                            spec_hash256=spec_hash256,
-                            algorithm=algorithm,
-                        )
                         opponent_specs, pinned_snapshot_ids = _resolve_periodic_dev_eval_opponent_specs(
                             stack=stack,
                             run_dir=artifacts.run_dir,
@@ -6074,6 +6102,9 @@ def _run_minimal_training(
                         if guard_event is not None:
                             last_checkpoint_guard_rollback_update = int(learner.update_count)
                             pending_promotion_gate = _drop_stale_pending_promotion_gate(
+                                stack=stack,
+                                training_paths=training_paths,
+                                run_dir=artifacts.run_dir,
                                 pending_gate=pending_promotion_gate,
                                 rollback_best_update_count=int(guard_event["best_update_count"]),
                             )
@@ -6151,6 +6182,9 @@ def _run_minimal_training(
                 if guard_event is not None:
                     last_checkpoint_guard_rollback_update = int(learner.update_count)
                     pending_promotion_gate = _drop_stale_pending_promotion_gate(
+                        stack=stack,
+                        training_paths=training_paths,
+                        run_dir=artifacts.run_dir,
                         pending_gate=pending_promotion_gate,
                         rollback_best_update_count=int(guard_event["best_update_count"]),
                     )

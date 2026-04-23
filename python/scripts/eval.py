@@ -548,20 +548,65 @@ def _run_parallel_final_eval(
         raise ValueError("stack config is missing evaluation settings")
 
     matchup_specs = build_final_eval_matchups(policy_ids=policy_ids)
+    metadata_payload = dict(metadata)
+    pipeline_metadata = dict(cast(dict[str, Any], metadata_payload.get("pipeline", {})))
     worker_count = min(int(parallel_workers), len(matchup_specs))
     if worker_count < 2:
-        raise ValueError("parallel final eval requires at least two workers and at least two matchups")
+        pipeline_metadata["parallel_eval"] = {
+            "enabled": False,
+            "requested_worker_count": int(parallel_workers),
+            "worker_count": int(max(1, worker_count)),
+            "matchup_count": len(matchup_specs),
+            "fallback_reason": "single_matchup",
+            "replay_capture_mode": "serial_fallback_v1",
+        }
+        metadata_payload["pipeline"] = pipeline_metadata
+        matchup_results = _run_final_eval_matchup_worker(
+            stack_config_path=stack_config_path,
+            run_dir=run_dir,
+            output_dir=layout.final_eval_dir,
+            policy_ids=_policy_ids_for_matchup_shard(matchup_specs),
+            matchup_specs=matchup_specs,
+            paired_seeds=list(paired_seeds),
+            stage1_paired_seeds=int(stage1_paired_seeds),
+            max_paired_seeds=int(max_paired_seeds),
+            stop_rules=stop_rules,
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+            scheme=scheme,
+            sample_count=int(sample_count),
+            snapshot_registry_path=snapshot_registry_path,
+            b1_baseline_run_dir=b1_baseline_run_dir,
+            eval_device=str(evaluation.eval_device),
+            replay_capture_rate=float(evaluation.replay_capture_rate_eval),
+            regression_capture_count=int(evaluation.regression_capture_count),
+        )
+        return finalize_final_eval(
+            output_dir=layout.final_eval_dir,
+            policy_ids=policy_ids,
+            matchup_results=matchup_results,
+            stage1_paired_seeds=stage1_paired_seeds,
+            max_paired_seeds=max_paired_seeds,
+            paired_seeds=paired_seeds,
+            stop_rules=stop_rules,
+            scheme=scheme,
+            sample_count=sample_count,
+            selection_payload={"mode": "explicit", "policy_count": len(policy_ids)},
+            metadata=metadata_payload,
+            seed_file_path=seed_file_path,
+        )
     worker_devices = _resolved_parallel_worker_devices(
         parallel_workers=worker_count,
         explicit_worker_devices=parallel_worker_devices,
         eval_device=str(evaluation.eval_device),
     )
     matchup_shards = _shard_matchup_specs(matchup_specs=matchup_specs, shard_count=worker_count)
-    metadata_payload = dict(metadata)
-    pipeline_metadata = dict(cast(dict[str, Any], metadata_payload.get("pipeline", {})))
     pipeline_metadata["parallel_eval"] = {
         "enabled": True,
+        "requested_worker_count": int(parallel_workers),
         "worker_count": len(matchup_shards),
+        "matchup_count": len(matchup_specs),
         "worker_devices": list(worker_devices[: len(matchup_shards)]),
         "matchup_shard_sizes": [len(shard) for shard in matchup_shards],
         "replay_capture_mode": "disabled_parallel_v1",
