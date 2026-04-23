@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "recent_size": 24,
+  "champion_size": 4,
+  "champion_snapshots": [],
+  "pinned_snapshots": [
+    "b1_noleague_baseline"
+  ],
+  "snapshots": [
+    {
+      "created_utc": "2026-04-23T05:40:49.578310+00:00",
+      "path": "training/snapshots/b1_noleague_baseline/weights.pt",
+      "policy_id": "b1_noleague_baseline",
+      "update": 10,
+      "weights_sha256": "1f648d950551db436f68b2932f71b43f8facc6e74057edb796b26538aa68f443"
+    }
+  ]
+}

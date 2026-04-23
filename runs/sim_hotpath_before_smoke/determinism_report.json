@@ -1,0 +1,46 @@
+{
+  "artifact_schema_version": "run_artifacts_v2",
+  "canonical_artifact_hashes": {},
+  "device_policy": {
+    "evaluation": "cuda:auto",
+    "learner": "cuda:0"
+  },
+  "evaluation_pinning": {
+    "eval_device": "cuda:auto",
+    "eval_inference_mode": true,
+    "eval_sampling_algorithm": "pinned_cdf_pcg_v1",
+    "legal_fingerprint_mismatch_policy": "hard_fail",
+    "legal_fingerprint_version": "legal_fingerprint_v1",
+    "seat_swap": true
+  },
+  "kind": "determinism_report_v1",
+  "policy_selection_mode": "unresolved",
+  "replay_verification": {
+    "path": "eval/diagnostics/replay_verification.json",
+    "status": "pending"
+  },
+  "run_id256": "3c881cdb377b175635b8a5ca0961ae67ef89a10c22fc57eec2decbb7aa199234",
+  "run_id64": "56177b37db1c883c",
+  "runtime_mode": "train_async_fast",
+  "seed_files": {
+    "dev_eval": {
+      "path": "configs/seeds/dev_eval_seeds.txt",
+      "sha256": "568c17562f825562579b8a6ec54d8e83b7ad33471e9bad3de462055efd4679c3"
+    },
+    "promotion_gate": {
+      "path": "configs/seeds/promotion_eval_seeds.txt",
+      "sha256": "12cb2549f6297d0418cbc203e157b3363579189412ec40b652f90417e5f78987"
+    },
+    "report_eval": {
+      "path": "configs/seeds/report_eval_seeds.txt",
+      "sha256": "5db0677f8ff932a95bb86cb91e6902de3ed3460ad8303858e169e0a17c728df0"
+    }
+  },
+  "training_controls": {
+    "fixed_opponent_backend": "simulator_native",
+    "profile_timers": true,
+    "structured_metrics_mode": "sampled",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false
+  }
+}

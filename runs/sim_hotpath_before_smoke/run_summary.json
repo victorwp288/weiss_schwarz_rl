@@ -1,0 +1,28 @@
+{
+  "artifact_roots": {
+    "eval": "eval",
+    "figures": "figures",
+    "replays": "replays",
+    "tensorboard": "tensorboard",
+    "training": "training"
+  },
+  "artifact_schema_version": "run_artifacts_v2",
+  "determinism_report_path": "determinism_report.json",
+  "environment_path": "environment.json",
+  "kind": "run_summary_v1",
+  "manifest_path": "manifest.json",
+  "paper_grade": false,
+  "paper_readiness_summary_path": "paper_readiness_summary.json",
+  "policy_set_selection_mode": "unresolved",
+  "run_dir": "/work/Thesis/weiss_schwarz_rl/runs/sim_hotpath_before_smoke",
+  "run_id256": "3c881cdb377b175635b8a5ca0961ae67ef89a10c22fc57eec2decbb7aa199234",
+  "run_id64": "56177b37db1c883c",
+  "runtime_mode": "train_async_fast",
+  "training_controls": {
+    "fixed_opponent_backend": "simulator_native",
+    "profile_timers": true,
+    "structured_metrics_mode": "sampled",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "train_u10_p0": {
+    "aggregate_score": 0.8375,
+    "anchor_scores": {
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.5625,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.65625,
+      "B4 HeuristicPublicControl": 0.96875
+    },
+    "policy_version": 0,
+    "update_count": 10
+  },
+  "train_u20_p1": {
+    "aggregate_score": 0.7916666666666666,
+    "anchor_scores": {
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.515625,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.71875,
+      "B4 HeuristicPublicControl": 1.0,
+      "Previous recent snapshot": 0.515625
+    },
+    "policy_version": 1,
+    "update_count": 20
+  },
+  "train_u30_p1": {
+    "aggregate_score": 0.7864583333333334,
+    "anchor_scores": {
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.5,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.71875,
+      "B4 HeuristicPublicControl": 1.0,
+      "Previous recent snapshot": 0.5
+    },
+    "policy_version": 1,
+    "update_count": 30
+  },
+  "train_u40_p2": {
+    "aggregate_score": 0.7838541666666666,
+    "anchor_scores": {
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.515625,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.703125,
+      "B4 HeuristicPublicControl": 1.0,
+      "Previous recent snapshot": 0.484375
+    },
+    "policy_version": 2,
+    "update_count": 40
+  },
+  "train_u50_p2": {
+    "aggregate_score": 0.7890625,
+    "anchor_scores": {
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.546875,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.671875,
+      "B4 HeuristicPublicControl": 1.0,
+      "Previous recent snapshot": 0.515625
+    },
+    "policy_version": 2,
+    "update_count": 50
+  },
+  "train_u60_p3": {
+    "aggregate_score": 0.7682291666666666,
+    "anchor_scores": {
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.53125,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.59375,
+      "B4 HeuristicPublicControl": 0.984375,
+      "Previous recent snapshot": 0.5
+    },
+    "policy_version": 3,
+    "update_count": 60
+  },
+  "train_u70_p3": {
+    "aggregate_score": 0.765625,
+    "anchor_scores": {
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.46875,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.71875,
+      "B4 HeuristicPublicControl": 0.953125,
+      "Previous recent snapshot": 0.453125
+    },
+    "policy_version": 3,
+    "update_count": 70
+  }
+}

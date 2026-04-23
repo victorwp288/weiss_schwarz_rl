@@ -1,0 +1,28 @@
+{
+  "artifact_roots": {
+    "eval": "eval",
+    "figures": "figures",
+    "replays": "replays",
+    "tensorboard": "tensorboard",
+    "training": "training"
+  },
+  "artifact_schema_version": "run_artifacts_v2",
+  "determinism_report_path": "determinism_report.json",
+  "environment_path": "environment.json",
+  "kind": "run_summary_v1",
+  "manifest_path": "manifest.json",
+  "paper_grade": false,
+  "paper_readiness_summary_path": "paper_readiness_summary.json",
+  "policy_set_selection_mode": "unresolved",
+  "run_dir": "/work/Thesis/weiss_schwarz_rl/runs/b1_anchor_thesis_model_seed20260421",
+  "run_id256": "52604e83fb1626be42cf8180256b7d1390dd72dbaa693031404f16fec55cdec4",
+  "run_id64": "be2616fb834e6052",
+  "runtime_mode": "train_async_fast",
+  "training_controls": {
+    "fixed_opponent_backend": "simulator_native",
+    "profile_timers": true,
+    "structured_metrics_mode": "sampled",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false
+  }
+}

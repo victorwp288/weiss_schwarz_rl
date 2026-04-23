@@ -1,0 +1,8 @@
+{
+  "format": "minimal_train_snapshot_metadata_v1",
+  "policy_id": "b1_noleague_baseline",
+  "source_checkpoint_path": "training/checkpoints/baseline_checkpoint.pt",
+  "update": 0,
+  "weights_path": "training/snapshots/b1_noleague_baseline/weights.pt",
+  "weights_sha256": "cb984c5bc739c9e35c7098704fee5ca54aa727c58239ef144a04c8c3e144046d"
+}

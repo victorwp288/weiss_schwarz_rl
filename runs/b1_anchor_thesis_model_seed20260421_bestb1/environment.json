@@ -1,0 +1,58 @@
+{
+  "argv": [
+    "python/scripts/train.py",
+    "--stack-config",
+    "configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml",
+    "--run-label",
+    "b1_anchor_thesis_model_seed20260421",
+    "--num-envs",
+    "2048",
+    "--unroll-length",
+    "64",
+    "--runtime-mode",
+    "train_async_fast",
+    "--max-updates",
+    "200",
+    "--seed",
+    "20260421",
+    "--config-override",
+    "training.optimizer.learning_rate=0.0003",
+    "--config-override",
+    "training.exploration.entropy_coef=0.02"
+  ],
+  "artifact_schema_version": "run_artifacts_v2",
+  "cwd": "/work/Thesis/weiss_schwarz_rl",
+  "hardware": {
+    "actor_device": "cuda:auto",
+    "actor_device_layout": "cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2,cuda:1,cuda:2",
+    "actor_device_unique_count": 2,
+    "cpu_count": 192,
+    "learner_device": "cuda:0",
+    "machine": "x86_64",
+    "platform": "Linux-5.15.0-173-generic-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "python_version": "3.12.3"
+  },
+  "kind": "environment_manifest_v1",
+  "packages": {
+    "matplotlib": "3.10.1",
+    "numpy": "2.1.3",
+    "scipy": "1.14.1",
+    "torch": "2.5.1+cu124",
+    "weiss-rl": null,
+    "weiss-sim": "0.8.1"
+  },
+  "platform": {
+    "machine": "x86_64",
+    "platform": "Linux-5.15.0-173-generic-x86_64-with-glibc2.39",
+    "release": "5.15.0-173-generic",
+    "system": "Linux"
+  },
+  "python": {
+    "executable": "/work/Thesis/weiss_schwarz_rl/.venv/bin/python3",
+    "implementation": "CPython",
+    "version": "3.12.3"
+  },
+  "run_id256": "52604e83fb1626be42cf8180256b7d1390dd72dbaa693031404f16fec55cdec4",
+  "run_id64": "be2616fb834e6052"
+}

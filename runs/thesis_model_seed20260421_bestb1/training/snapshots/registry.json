@@ -1,0 +1,47 @@
+{
+  "champion_size": 4,
+  "champion_snapshots": [],
+  "pinned_snapshots": [
+    "b1_noleague_baseline",
+    "policy_000003"
+  ],
+  "recent_size": 24,
+  "schema_version": 1,
+  "snapshots": [
+    {
+      "created_utc": "2026-04-23T05:41:05.317544+00:00",
+      "path": "training/snapshots/b1_noleague_baseline/weights.pt",
+      "policy_id": "b1_noleague_baseline",
+      "update": 10,
+      "weights_sha256": "5cb9dfc9880faf21fa4f7f85c123c5cde0ac325e490ab304274f8606b8e92b3b"
+    },
+    {
+      "created_utc": "2026-04-23T05:43:15.219706+00:00",
+      "path": "training/snapshots/policy_000001/weights.pt",
+      "policy_id": "policy_000001",
+      "update": 20,
+      "weights_sha256": "da352834cc1bc96837b3214912b3f9f2fc75b46e5eca7b6fe6b2287b0078fc20"
+    },
+    {
+      "created_utc": "2026-04-23T05:49:55.078903+00:00",
+      "path": "training/snapshots/policy_000002/weights.pt",
+      "policy_id": "policy_000002",
+      "update": 40,
+      "weights_sha256": "2799fc252f170088958534b1f72d10187d78ff1f20ed60597d6c3cbfb212c2a8"
+    },
+    {
+      "created_utc": "2026-04-23T05:57:45.460671+00:00",
+      "path": "training/snapshots/policy_000003/weights.pt",
+      "policy_id": "policy_000003",
+      "update": 60,
+      "weights_sha256": "b2f19aeac1d6a16089a57134a48247eac292a565267a1014548c3bc36e00f3f9"
+    },
+    {
+      "created_utc": "2026-04-23T06:08:59.902721+00:00",
+      "path": "training/snapshots/policy_000004/weights.pt",
+      "policy_id": "policy_000004",
+      "update": 80,
+      "weights_sha256": "47a8e7e2fa70a4734343e13e9802766a8101ffb20d8bf28b85b8b25ecae014b9"
+    }
+  ]
+}

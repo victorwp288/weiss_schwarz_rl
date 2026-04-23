@@ -1,0 +1,50 @@
+{
+  "artifact_roots": {
+    "eval": "eval",
+    "figures": "figures",
+    "replays": "replays",
+    "tensorboard": "tensorboard",
+    "training": "training"
+  },
+  "artifact_schema_version": "run_artifacts_v2",
+  "b1_baseline_run_dir": "/work/Thesis/weiss_schwarz_rl/runs/b1_anchor_thesis_model_seed20260421_bestb1",
+  "canonical_eval_completed": true,
+  "determinism_report_path": "determinism_report.json",
+  "environment_path": "environment.json",
+  "figure_outputs": [
+    "figures/paper/fig_matchup_heatmap.pdf",
+    "figures/paper/fig_matchup_heatmap.png",
+    "figures/paper/fig_truncation_heatmap.pdf",
+    "figures/paper/fig_truncation_heatmap.png",
+    "figures/paper/fig_seat_bias.pdf",
+    "figures/paper/fig_seat_bias.png",
+    "figures/paper/fig_learning_curves.pdf",
+    "figures/paper/fig_learning_curves.png"
+  ],
+  "final_eval_dir": "eval/final_eval",
+  "kind": "run_summary_v1",
+  "manifest_path": "manifest.json",
+  "metagame_dir": null,
+  "paper_grade": false,
+  "paper_readiness_summary_path": "paper_readiness_summary.json",
+  "policy_ids": [
+    "policy_000001",
+    "B0 RandomLegal",
+    "B1 NoLeague baseline",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "policy_set_selection_mode": "explicit_cli",
+  "run_dir": "/work/Thesis/weiss_schwarz_rl/runs/thesis_model_seed20260421_bestb1",
+  "run_id256": "c04a4f9b0805ac743b64d2139bceca08897f61eb6c1f10d87e2a068b07375ab1",
+  "run_id64": "74ac05089b4f4ac0",
+  "runtime_mode": "train_async_fast",
+  "training_controls": {
+    "fixed_opponent_backend": "simulator_native",
+    "profile_timers": true,
+    "structured_metrics_mode": "sampled",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false
+  }
+}

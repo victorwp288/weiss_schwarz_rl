@@ -1,0 +1,158 @@
+{
+  "global": {
+    "ci_high": 0.4659090909090909,
+    "ci_low": 0.4659090909090909,
+    "decisive_games": 352,
+    "seat0_win_rate": 0.4659090909090909
+  },
+  "kind": "seat_bias_summary_v1",
+  "matchups": [
+    {
+      "decisive_games": 16,
+      "policy_a": "policy_000001",
+      "policy_b": "policy_000001",
+      "seat0_win_rate": 0.375,
+      "seat1_win_rate": 0.625
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "policy_000001",
+      "policy_b": "B0 RandomLegal",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "policy_000001",
+      "policy_b": "B1 NoLeague baseline",
+      "seat0_win_rate": 0.375,
+      "seat1_win_rate": 0.625
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "policy_000001",
+      "policy_b": "B2 HeuristicPublic",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "policy_000001",
+      "policy_b": "B3 HeuristicPublicAggro",
+      "seat0_win_rate": 0.5625,
+      "seat1_win_rate": 0.4375
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "policy_000001",
+      "policy_b": "B4 HeuristicPublicControl",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B0 RandomLegal",
+      "policy_b": "B0 RandomLegal",
+      "seat0_win_rate": 0.625,
+      "seat1_win_rate": 0.375
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B0 RandomLegal",
+      "policy_b": "B1 NoLeague baseline",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B0 RandomLegal",
+      "policy_b": "B2 HeuristicPublic",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B0 RandomLegal",
+      "policy_b": "B3 HeuristicPublicAggro",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B0 RandomLegal",
+      "policy_b": "B4 HeuristicPublicControl",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B1 NoLeague baseline",
+      "policy_b": "B1 NoLeague baseline",
+      "seat0_win_rate": 0.4375,
+      "seat1_win_rate": 0.5625
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B1 NoLeague baseline",
+      "policy_b": "B2 HeuristicPublic",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 32,
+      "policy_a": "B1 NoLeague baseline",
+      "policy_b": "B3 HeuristicPublicAggro",
+      "seat0_win_rate": 0.46875,
+      "seat1_win_rate": 0.53125
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B1 NoLeague baseline",
+      "policy_b": "B4 HeuristicPublicControl",
+      "seat0_win_rate": 0.4375,
+      "seat1_win_rate": 0.5625
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B2 HeuristicPublic",
+      "policy_b": "B2 HeuristicPublic",
+      "seat0_win_rate": 0.375,
+      "seat1_win_rate": 0.625
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B2 HeuristicPublic",
+      "policy_b": "B3 HeuristicPublicAggro",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B2 HeuristicPublic",
+      "policy_b": "B4 HeuristicPublicControl",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B3 HeuristicPublicAggro",
+      "policy_b": "B3 HeuristicPublicAggro",
+      "seat0_win_rate": 0.375,
+      "seat1_win_rate": 0.625
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B3 HeuristicPublicAggro",
+      "policy_b": "B4 HeuristicPublicControl",
+      "seat0_win_rate": 0.375,
+      "seat1_win_rate": 0.625
+    },
+    {
+      "decisive_games": 16,
+      "policy_a": "B4 HeuristicPublicControl",
+      "policy_b": "B4 HeuristicPublicControl",
+      "seat0_win_rate": 0.375,
+      "seat1_win_rate": 0.625
+    }
+  ]
+}

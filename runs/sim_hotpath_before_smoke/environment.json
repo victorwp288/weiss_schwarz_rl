@@ -1,0 +1,56 @@
+{
+  "argv": [
+    "python/scripts/train.py",
+    "--stack-config",
+    "configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml",
+    "--run-label",
+    "sim_hotpath_before_smoke",
+    "--num-envs",
+    "128",
+    "--unroll-length",
+    "32",
+    "--runtime-mode",
+    "train_async_fast",
+    "--max-updates",
+    "3",
+    "--seed",
+    "20260423",
+    "--config-override",
+    "evaluation.periodic_dev_eval_interval_updates=1000"
+  ],
+  "artifact_schema_version": "run_artifacts_v2",
+  "cwd": "/work/Thesis/weiss_schwarz_rl",
+  "hardware": {
+    "actor_device": "cuda:auto",
+    "actor_device_layout": "cuda:1,cuda:2",
+    "actor_device_unique_count": 2,
+    "cpu_count": 192,
+    "learner_device": "cuda:0",
+    "machine": "x86_64",
+    "platform": "Linux-5.15.0-173-generic-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "python_version": "3.12.3"
+  },
+  "kind": "environment_manifest_v1",
+  "packages": {
+    "matplotlib": "3.10.1",
+    "numpy": "2.1.3",
+    "scipy": "1.14.1",
+    "torch": "2.5.1+cu124",
+    "weiss-rl": null,
+    "weiss-sim": "0.8.1"
+  },
+  "platform": {
+    "machine": "x86_64",
+    "platform": "Linux-5.15.0-173-generic-x86_64-with-glibc2.39",
+    "release": "5.15.0-173-generic",
+    "system": "Linux"
+  },
+  "python": {
+    "executable": "/work/Thesis/weiss_schwarz_rl/.venv/bin/python",
+    "implementation": "CPython",
+    "version": "3.12.3"
+  },
+  "run_id256": "3c881cdb377b175635b8a5ca0961ae67ef89a10c22fc57eec2decbb7aa199234",
+  "run_id64": "56177b37db1c883c"
+}
