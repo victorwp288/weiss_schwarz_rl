@@ -5,6 +5,7 @@ import hashlib
 import importlib
 import inspect
 import json
+import math
 import multiprocessing as mp
 import os
 import platform
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext, suppress
@@ -23,6 +25,13 @@ import numpy as np
 import torch
 from torch import nn
 from weiss_rl.artifacts import ArtifactLayout
+from weiss_rl.action_catalog import ActionCatalog
+from weiss_rl.autoscale import (
+    ResolvedTrainingTopology,
+    ScalingRequest,
+    hardware_profile_from_name,
+    resolve_training_topology,
+)
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import (
     StackConfig,
@@ -32,18 +41,35 @@ from weiss_rl.config import (
     load_stack_config,
     parse_override_tokens,
 )
+from weiss_rl.distributed import (
+    DistributedContext,
+    all_reduce_float,
+    average_gradients,
+    barrier as distributed_barrier,
+    broadcast_object,
+    destroy_process_group_if_initialized,
+    distributed_context_from_env,
+    init_process_group_if_needed,
+    rank_seed,
+    shard_env_count,
+)
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
 from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
 from weiss_rl.eval import (
     DevEvalPolicySummary,
+    EvalGameRecord,
     PayoffFoldScheme,
     Pcg32XshRrV1,
     build_matchup_export,
     build_seat_advantage_diagnostics,
+    build_seat_swapped_schedule,
     game_result_from_step,
     paired_seed_scores,
+    record_completed_game,
     run_seat_swapped_matchup,
     sample_action_pinned,
+    summarize_game_records,
+    write_episodes_jsonl,
     write_matchup_diagnostics_json,
     write_matchup_summary_csv,
     write_matchup_summary_json,
@@ -51,6 +77,7 @@ from weiss_rl.eval import (
 from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policy_set import (
+    HEURISTIC_PUBLIC_POLICY_ID,
     heuristic_public_profile_name_for_policy_id,
     select_final_policy_set_deterministic_v1,
 )
@@ -114,16 +141,33 @@ _PROMOTION_GATE_RANDOMLEGAL_POLICY_ID = "b0_randomlegal"
 _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME = "B1 NoLeague baseline"
 _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID = "b1_noleague_baseline"
 _PROMOTION_GATE_NOLEAGUE_BASELINE_CHECKPOINT = "baseline_checkpoint.pt"
+_FIXED_OPPONENT_EXCLUSIONS = frozenset({_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID})
 _LATEST_CHECKPOINT_FILENAME = "latest.pt"
 _BEST_CHECKPOINT_FILENAME = "best.pt"
 _CHECKPOINT_TRACKER_FILENAME = "checkpoint_tracker.json"
+_CHECKPOINT_TRACKER_FORMAT = "checkpoint_tracker_v2"
+_PERIODIC_DEV_EVAL_SUMMARY_FORMAT = "periodic_dev_eval_summary_v2"
+_B2_DISAGREEMENT_AUDIT_REQUESTS_FILENAME = "b2_disagreement_audit_requests.jsonl"
 _IMPALA_ALGORITHMS = frozenset(
     {"impala_vtrace_gru", "impala_vtrace_ff", "structured_v2", "impala_vtrace_structured_v1"}
+)
+from weiss_rl.residual_policy import (
+    FrozenStoredLogitResidual,
+    TrainableLiveFrozenB1Residual,
+    load_frozen_stored_logit_residual,
 )
 _PPO_ALGORITHMS = frozenset({"ppo_lite_masked_v1"})
 _CONFIRMATORY_DEV_EVAL_MAX_PROB_SHORTFALL = 0.1
 _CONFIRMATORY_DEV_EVAL_MAX_CI_EXCESS = 0.05
+_B2_FLATLINE_WINDOW = 3
+_B2_FLATLINE_MAX_DELTA = 0.02
+_B2_FLATLINE_LOW_SCORE = 0.35
+_B2_ACTION_WARNING_SCORE_THRESHOLD = 0.25
+_B2_ACTION_WARNING_MAIN_MOVE_RATE = 0.45
+_B2_ACTION_WARNING_PASS_NONPASS_RATE = 0.05
 _GIT_COMMIT_HEX_LENGTH = 40
+_EVAL_SNAPSHOT_MODEL_CACHE_MAX_ENTRIES = 12
+_EVAL_SNAPSHOT_MODEL_CACHE: OrderedDict[tuple[Any, ...], PolicyValueModel] = OrderedDict()
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +215,34 @@ class PeriodicDevEvalOpponentSpec:
     kind: str
     snapshot_path: str | None = None
     heuristic_profile: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PeriodicDevEvalSeedBlockJob:
+    opponent_index: int
+    block_index: int
+    opponent_spec: PeriodicDevEvalOpponentSpec
+    paired_seed_items: tuple[tuple[int, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PromotionGateSeedBlockJob:
+    anchor_index: int
+    block_index: int
+    anchor_spec: PeriodicDevEvalOpponentSpec
+    paired_seed_items: tuple[tuple[int, int], ...]
+
+
+@dataclass(slots=True)
+class _PeriodicDevEvalActiveGame:
+    env: DecisionBoundaryEnv
+    scheduled_game: ScheduledGame
+    batch: DecisionBoundaryBatch
+    focal_hidden: torch.Tensor
+    opponent_hidden: torch.Tensor | None
+    seat_rngs: dict[int, Pcg32XshRrV1]
+    last_acting_seat: int | None = None
+    completed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,13 +326,84 @@ class _PeriodicDevEvalRunner:
         self.require_sorted_legal_ids = require_sorted_legal_ids
         self._baseline_logits = np.zeros((action_dim,), dtype=np.float32)
         self._device = _resolve_eval_device(stack, eval_device=eval_device)
+        self._persistent_env: DecisionBoundaryEnv | None = None
+        self._batched_envs: list[DecisionBoundaryEnv] = []
+        self._runtime_seconds: dict[str, float] = {}
+        self._runtime_counts: dict[str, int] = {}
+
+    def close(self) -> None:
+        env = self._persistent_env
+        self._persistent_env = None
+        if env is not None:
+            env.close()
+        batched_envs = self._batched_envs
+        self._batched_envs = []
+        for batched_env in batched_envs:
+            batched_env.close()
+
+    def drain_runtime_counters(self) -> dict[str, Any]:
+        seconds = {key: float(value) for key, value in sorted(self._runtime_seconds.items())}
+        counts = {key: int(value) for key, value in sorted(self._runtime_counts.items())}
+        self._runtime_seconds.clear()
+        self._runtime_counts.clear()
+        return {
+            "seconds": seconds,
+            "counts": counts,
+        }
+
+    def run_scheduled_games_batched(
+        self,
+        scheduled_games: Sequence[ScheduledGame],
+    ) -> tuple[tuple[ScheduledGame, Any], ...]:
+        if not scheduled_games:
+            return ()
+        env_seed = int(scheduled_games[0].episode_seed)
+        active_games = [self._start_active_game(scheduled_game, env_seed=env_seed) for scheduled_game in scheduled_games]
+        completed: list[tuple[ScheduledGame, Any]] = []
+        remaining = len(active_games)
+        while remaining > 0:
+            ready_slots: list[tuple[int, _PeriodicDevEvalActiveGame]] = []
+            for index, active_game in enumerate(active_games):
+                if active_game.completed:
+                    continue
+                batch = active_game.batch
+                if bool(batch.terminated[0]) or bool(batch.truncated[0]):
+                    completed.append(
+                        (
+                            active_game.scheduled_game,
+                            game_result_from_step(
+                                batch,
+                                env_index=0,
+                                acting_seat=active_game.last_acting_seat,
+                                episode_seed=active_game.scheduled_game.episode_seed,
+                                max_decisions=getattr(active_game.env, "max_decisions", None),
+                                max_ticks=getattr(active_game.env, "max_ticks", None),
+                                max_no_progress_decisions=getattr(active_game.env, "max_no_progress_decisions", None),
+                            ),
+                        )
+                    )
+                    active_game.completed = True
+                    remaining -= 1
+                    continue
+                ready_slots.append((index, active_game))
+
+            if not ready_slots:
+                continue
+
+            actions = self._select_batched_actions(ready_slots)
+            for index, action in actions.items():
+                active_game = active_games[index]
+                active_game.last_acting_seat = int(active_game.batch.actor[0])
+                started = time.perf_counter()
+                active_game.batch = active_game.env.step(np.asarray([action], dtype=np.uint32))
+                self._add_seconds("env_step", time.perf_counter() - started)
+                self._abort_on_fault(active_game.batch)
+        completed.sort(key=lambda item: (item[0].episode_index, item[0].pair_index, item[0].swap_index))
+        return tuple(completed)
 
     def run_game(self, scheduled_game: ScheduledGame):
-        env = _build_ids_eval_env(
-            self.stack,
-            seed=scheduled_game.episode_seed,
-            pass_action_id=self.pass_action_id,
-        )
+        self._add_count("games")
+        env = self._env_for_game(seed=scheduled_game.episode_seed)
         focal_hidden = self.model.initial_seat_hidden(1, device=self._device)
         opponent_hidden = (
             None if self.opponent_model is None else self.opponent_model.initial_seat_hidden(1, device=self._device)
@@ -270,35 +413,196 @@ class _PeriodicDevEvalRunner:
         }
         last_acting_seat: int | None = None
 
-        try:
-            batch = env.reset(seed=scheduled_game.episode_seed)
-            self._abort_on_fault(batch)
-            while True:
-                if bool(batch.terminated[0]) or bool(batch.truncated[0]):
-                    return game_result_from_step(
-                        batch,
-                        env_index=0,
-                        acting_seat=last_acting_seat,
-                        episode_seed=scheduled_game.episode_seed,
-                        max_decisions=getattr(env, "max_decisions", None),
-                        max_ticks=getattr(env, "max_ticks", None),
-                        max_no_progress_decisions=getattr(env, "max_no_progress_decisions", None),
-                    )
-
-                current_seat = int(batch.actor[0])
-                action, focal_hidden, opponent_hidden = self._select_action(
-                    batch=batch,
-                    scheduled_game=scheduled_game,
-                    current_seat=current_seat,
-                    focal_hidden=focal_hidden,
-                    opponent_hidden=opponent_hidden,
-                    rng=seat_rngs[current_seat],
+        started = time.perf_counter()
+        batch = env.reset(seed=scheduled_game.episode_seed)
+        self._add_seconds("env_reset", time.perf_counter() - started)
+        self._abort_on_fault(batch)
+        while True:
+            if bool(batch.terminated[0]) or bool(batch.truncated[0]):
+                return game_result_from_step(
+                    batch,
+                    env_index=0,
+                    acting_seat=last_acting_seat,
+                    episode_seed=scheduled_game.episode_seed,
+                    max_decisions=getattr(env, "max_decisions", None),
+                    max_ticks=getattr(env, "max_ticks", None),
+                    max_no_progress_decisions=getattr(env, "max_no_progress_decisions", None),
                 )
-                last_acting_seat = current_seat
-                batch = env.step(np.asarray([action], dtype=np.uint32))
-                self._abort_on_fault(batch)
-        finally:
-            env.close()
+
+            current_seat = int(batch.actor[0])
+            self._add_count("decisions")
+            started = time.perf_counter()
+            action, focal_hidden, opponent_hidden = self._select_action(
+                batch=batch,
+                scheduled_game=scheduled_game,
+                current_seat=current_seat,
+                focal_hidden=focal_hidden,
+                opponent_hidden=opponent_hidden,
+                rng=seat_rngs[current_seat],
+            )
+            self._add_seconds("select_action", time.perf_counter() - started)
+            last_acting_seat = current_seat
+            started = time.perf_counter()
+            batch = env.step(np.asarray([action], dtype=np.uint32))
+            self._add_seconds("env_step", time.perf_counter() - started)
+            self._abort_on_fault(batch)
+
+    def _env_for_game(self, *, seed: int) -> DecisionBoundaryEnv:
+        if self._persistent_env is None:
+            self._persistent_env = _build_ids_eval_env(
+                self.stack,
+                seed=seed,
+                pass_action_id=self.pass_action_id,
+            )
+        return self._persistent_env
+
+    def _start_active_game(self, scheduled_game: ScheduledGame, *, env_seed: int) -> _PeriodicDevEvalActiveGame:
+        self._add_count("games")
+        env = _build_ids_eval_env(
+            self.stack,
+            seed=env_seed,
+            pass_action_id=self.pass_action_id,
+        )
+        self._batched_envs.append(env)
+        started = time.perf_counter()
+        batch = env.reset(seed=scheduled_game.episode_seed)
+        self._add_seconds("env_reset", time.perf_counter() - started)
+        self._abort_on_fault(batch)
+        return _PeriodicDevEvalActiveGame(
+            env=env,
+            scheduled_game=scheduled_game,
+            batch=batch,
+            focal_hidden=self.model.initial_seat_hidden(1, device=self._device),
+            opponent_hidden=(
+                None
+                if self.opponent_model is None
+                else self.opponent_model.initial_seat_hidden(1, device=self._device)
+            ),
+            seat_rngs={
+                seat: Pcg32XshRrV1(_periodic_dev_eval_rng_seed(scheduled_game=scheduled_game, seat=seat))
+                for seat in (0, 1)
+            },
+        )
+
+    def _select_batched_actions(
+        self,
+        ready_slots: Sequence[tuple[int, _PeriodicDevEvalActiveGame]],
+    ) -> dict[int, int]:
+        actions: dict[int, int] = {}
+        focal_requests: list[tuple[int, _PeriodicDevEvalActiveGame, np.ndarray]] = []
+        opponent_requests: list[tuple[int, _PeriodicDevEvalActiveGame, np.ndarray]] = []
+
+        for index, active_game in ready_slots:
+            batch = active_game.batch
+            current_seat = int(batch.actor[0])
+            self._add_count("decisions")
+            legal_ids = _legal_ids_for_env_row(
+                batch=batch,
+                env_index=0,
+                require_sorted=self.require_sorted_legal_ids,
+            )
+            current_policy_id = (
+                active_game.scheduled_game.seat0_policy_id
+                if current_seat == 0
+                else active_game.scheduled_game.seat1_policy_id
+            )
+            if current_policy_id == self.focal_policy_id:
+                self._add_count("focal_model_actions")
+                focal_requests.append((index, active_game, legal_ids))
+                continue
+            if self.opponent_model is not None and current_policy_id == self.opponent_policy_id:
+                self._add_count("opponent_model_actions")
+                opponent_requests.append((index, active_game, legal_ids))
+                continue
+            if self.heuristic_policy is not None and current_policy_id == self.opponent_policy_id:
+                self._add_count("heuristic_actions")
+                actions[index] = int(
+                    self.heuristic_policy.choose_action(
+                        np.asarray(batch.obs[0], dtype=np.float32),
+                        legal_ids,
+                    )
+                )
+                continue
+            self._add_count("random_legal_actions")
+            action, _ = sample_action_pinned(
+                self._baseline_logits,
+                legal_ids,
+                rng=active_game.seat_rngs[current_seat],
+                pass_action_id=self.pass_action_id,
+            )
+            actions[index] = int(action)
+
+        actions.update(
+            self._sample_batched_model_actions(
+                model=self.model,
+                requests=focal_requests,
+                hidden_name="focal_hidden",
+            )
+        )
+        if self.opponent_model is not None:
+            actions.update(
+                self._sample_batched_model_actions(
+                    model=self.opponent_model,
+                    requests=opponent_requests,
+                    hidden_name="opponent_hidden",
+                )
+            )
+        return actions
+
+    def _sample_batched_model_actions(
+        self,
+        *,
+        model: PolicyValueModel,
+        requests: Sequence[tuple[int, _PeriodicDevEvalActiveGame, np.ndarray]],
+        hidden_name: str,
+    ) -> dict[int, int]:
+        if not requests:
+            return {}
+        started = time.perf_counter()
+        obs = torch.as_tensor(
+            np.stack([np.asarray(active_game.batch.obs[0], dtype=np.float32) for _index, active_game, _legal in requests]),
+            device=self._device,
+        )
+        acting_seats = torch.as_tensor(
+            [int(active_game.batch.actor[0]) for _index, active_game, _legal in requests],
+            device=self._device,
+            dtype=torch.long,
+        )
+        hidden_tensors: list[torch.Tensor] = []
+        for _index, active_game, _legal in requests:
+            hidden = getattr(active_game, hidden_name)
+            if hidden is None:
+                raise RuntimeError(f"Missing periodic dev-eval hidden state for {hidden_name}")
+            hidden_tensors.append(hidden)
+        seat_hidden = torch.cat(hidden_tensors, dim=0)
+        with torch.inference_mode():
+            logits_tensor, _value_tensor, next_hidden = model.forward_seat_aware(
+                obs,
+                acting_seats,
+                seat_hidden,
+                scoring_mode="learner",
+            )
+        self._add_seconds("model_forward", time.perf_counter() - started)
+        self._add_count("model_forward_calls")
+        self._add_count("model_forward_rows", len(requests))
+        started = time.perf_counter()
+        logits_batch = logits_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+        self._add_seconds("logits_to_cpu", time.perf_counter() - started)
+
+        actions: dict[int, int] = {}
+        started = time.perf_counter()
+        for row, (index, active_game, legal_ids) in enumerate(requests):
+            current_seat = int(active_game.batch.actor[0])
+            action, _ = sample_action_pinned(
+                logits_batch[row],
+                legal_ids,
+                rng=active_game.seat_rngs[current_seat],
+                pass_action_id=self.pass_action_id,
+            )
+            setattr(active_game, hidden_name, next_hidden[row : row + 1].detach())
+            actions[index] = int(action)
+        self._add_seconds("sample_action", time.perf_counter() - started)
+        return actions
 
     def _select_action(
         self,
@@ -317,6 +621,7 @@ class _PeriodicDevEvalRunner:
         )
         current_policy_id = scheduled_game.seat0_policy_id if current_seat == 0 else scheduled_game.seat1_policy_id
         if current_policy_id == self.focal_policy_id:
+            self._add_count("focal_model_actions")
             action, focal_hidden = self._sample_model_action(
                 model=self.model,
                 seat_hidden=focal_hidden,
@@ -328,6 +633,7 @@ class _PeriodicDevEvalRunner:
             return action, focal_hidden, opponent_hidden
         if self.opponent_model is not None and current_policy_id == self.opponent_policy_id:
             assert opponent_hidden is not None
+            self._add_count("opponent_model_actions")
             action, opponent_hidden = self._sample_model_action(
                 model=self.opponent_model,
                 seat_hidden=opponent_hidden,
@@ -338,11 +644,13 @@ class _PeriodicDevEvalRunner:
             )
             return action, focal_hidden, opponent_hidden
         if self.heuristic_policy is not None and current_policy_id == self.opponent_policy_id:
+            self._add_count("heuristic_actions")
             action = self.heuristic_policy.choose_action(
                 np.asarray(batch.obs[0], dtype=np.float32),
                 legal_ids,
             )
             return int(action), focal_hidden, opponent_hidden
+        self._add_count("random_legal_actions")
         action, _ = sample_action_pinned(
             self._baseline_logits,
             legal_ids,
@@ -361,6 +669,7 @@ class _PeriodicDevEvalRunner:
         legal_ids: np.ndarray,
         rng: Pcg32XshRrV1,
     ) -> tuple[int, torch.Tensor]:
+        started = time.perf_counter()
         with torch.inference_mode():
             logits_tensor, _value_tensor, next_seat_hidden = model.forward_seat_aware(
                 torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
@@ -368,14 +677,25 @@ class _PeriodicDevEvalRunner:
                 seat_hidden,
                 scoring_mode="learner",
             )
+        self._add_seconds("model_forward", time.perf_counter() - started)
+        started = time.perf_counter()
         logits = logits_tensor[0].detach().cpu().numpy().astype(np.float32, copy=False)
+        self._add_seconds("logits_to_cpu", time.perf_counter() - started)
+        started = time.perf_counter()
         action, _ = sample_action_pinned(
             logits,
             legal_ids,
             rng=rng,
             pass_action_id=self.pass_action_id,
         )
+        self._add_seconds("sample_action", time.perf_counter() - started)
         return action, next_seat_hidden
+
+    def _add_seconds(self, key: str, value: float) -> None:
+        self._runtime_seconds[key] = self._runtime_seconds.get(key, 0.0) + max(0.0, float(value))
+
+    def _add_count(self, key: str, value: int = 1) -> None:
+        self._runtime_counts[key] = self._runtime_counts.get(key, 0) + int(value)
 
     def _abort_on_fault(self, batch: DecisionBoundaryBatch) -> None:
         abort_on_engine_fault_eval(
@@ -694,6 +1014,44 @@ def _hardware_summary(
     return payload
 
 
+def _scaling_request_from_config(training_config: Any) -> ScalingRequest:
+    scaling = getattr(training_config, "scaling", None)
+    return ScalingRequest(
+        learner_parallelism=str(getattr(scaling, "learner_parallelism", "auto")),
+        learner_gpu_count=str(getattr(scaling, "learner_gpu_count", "auto")),
+        actor_topology=str(getattr(scaling, "actor_topology", "auto")),
+        target_envs_per_gpu=int(getattr(scaling, "target_envs_per_gpu", 512)),
+        min_envs_per_actor=int(getattr(scaling, "min_envs_per_actor", 32)),
+        max_envs_per_actor=int(getattr(scaling, "max_envs_per_actor", 64)),
+        max_actor_process_count=int(getattr(scaling, "max_actor_process_count", 64)),
+        reserve_cpu_cores=int(getattr(scaling, "reserve_cpu_cores", 4)),
+        learner_cpu_cores_per_gpu=int(getattr(scaling, "learner_cpu_cores_per_gpu", 2)),
+        queue_depth_multiplier=int(getattr(scaling, "queue_depth_multiplier", 2)),
+        ram_queue_fraction=float(getattr(scaling, "ram_queue_fraction", 0.25)),
+        vram_fraction=float(getattr(scaling, "vram_fraction", 0.85)),
+    )
+
+
+def _resolve_autoscale_topology(
+    *,
+    stack: StackConfig,
+    hardware_profile_name: str,
+    runtime_mode: QueueRuntimeMode,
+) -> ResolvedTrainingTopology:
+    if stack.config.system is None or stack.config.training is None:
+        raise RuntimeError("autoscale requires system and training config blocks")
+    hardware = hardware_profile_from_name(hardware_profile_name)
+    return resolve_training_topology(
+        hardware=hardware,
+        request=_scaling_request_from_config(stack.config.training),
+        configured_actor_count=int(stack.config.system.actor_process_count),
+        configured_envs_per_actor=int(stack.config.system.envs_per_actor),
+        configured_batch_unrolls_per_update=int(stack.config.training.batch_unrolls_per_update),
+        configured_queue_capacity_unrolls=int(stack.config.system.actor_queue_capacity_unrolls),
+        runtime_mode=str(runtime_mode),
+    )
+
+
 def _manifest_actor_device_layout(
     *,
     stack: StackConfig,
@@ -704,6 +1062,7 @@ def _manifest_actor_device_layout(
     pass_action_id: int,
     runtime_mode: QueueRuntimeMode,
     learner_device: torch.device,
+    resolved_topology: ResolvedTrainingTopology | None = None,
 ) -> tuple[str, ...] | None:
     if stack.config.system is None or stack.config.training is None:
         return None
@@ -715,6 +1074,14 @@ def _manifest_actor_device_layout(
         seed=seed,
         pass_action_id=pass_action_id,
         runtime_mode=runtime_mode,
+        resolved_actor_count=None if resolved_topology is None else int(resolved_topology.actor_count),
+        resolved_envs_per_actor=None if resolved_topology is None else int(resolved_topology.envs_per_actor),
+        resolved_batch_unrolls_per_update=(
+            None if resolved_topology is None else int(resolved_topology.batch_unrolls_per_update)
+        ),
+        resolved_queue_capacity_unrolls=(
+            None if resolved_topology is None else int(resolved_topology.queue_capacity_unrolls)
+        ),
     )
     return tuple(
         str(device_name)
@@ -779,7 +1146,8 @@ def _experiment_role(stack: StackConfig) -> str:
 
 
 def _is_noleague_baseline_role(role: str) -> bool:
-    return str(role).strip() == "baseline_noleague"
+    normalized = str(role).strip()
+    return normalized == "baseline_noleague" or normalized.startswith("baseline_noleague_")
 
 
 def _canonical_config_sections(config_canonical: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -844,6 +1212,21 @@ def _validate_imported_snapshot_contract(
     expected_config_canonical: dict[str, Any] | None,
     expected_spec_hash256: str | None,
 ) -> None:
+    def _model_section_for_contract(section: Any) -> Any:
+        if not isinstance(section, Mapping):
+            return section
+        normalized = dict(section)
+        # These are per-snapshot guidance values stored in weights.pt and restored
+        # when loading a policy. They do not change the state_dict contract.
+        normalized.pop("public_heuristic_logit_bias_scale", None)
+        normalized.pop("public_heuristic_actor_logit_bias_scale", None)
+        # Schedule-only guidance fields affect future training updates, not
+        # the imported snapshot tensor contract or restored snapshot behavior.
+        normalized.pop("public_heuristic_logit_bias_start_updates", None)
+        normalized.pop("public_heuristic_logit_bias_end_updates", None)
+        normalized.pop("public_heuristic_logit_bias_final_scale", None)
+        return normalized
+
     source_layout = ArtifactLayout.from_run_dir(source_run_dir)
     manifest_path = source_layout.manifest_path
     source_manifest = (
@@ -860,6 +1243,9 @@ def _validate_imported_snapshot_contract(
                 expected_section = expected_config_sections.get(section_name)
                 if source_section is None or expected_section is None:
                     continue
+                if section_name == "model":
+                    source_section = _model_section_for_contract(source_section)
+                    expected_section = _model_section_for_contract(expected_section)
                 if source_section != expected_section:
                     raise RuntimeError(
                         f"Imported B1 baseline config does not match the current run for section={section_name!r}"
@@ -1043,6 +1429,33 @@ def _require_positive_int(name: str, value: int) -> int:
     if number < 1:
         raise ValueError(f"{name} must be >= 1, got {value}")
     return number
+
+
+def _require_positive_optional_float(name: str, value: float | None) -> float | None:
+    if value is None:
+        return None
+    number = float(value)
+    if not np.isfinite(number) or number <= 0.0:
+        raise ValueError(f"{name} must be a finite number > 0, got {value}")
+    return number
+
+
+def _wall_clock_budget_seconds(max_wall_clock_minutes: float | None) -> float | None:
+    if max_wall_clock_minutes is None:
+        return None
+    return float(max_wall_clock_minutes) * 60.0
+
+
+def _wall_clock_budget_reached(
+    *,
+    start_time: float,
+    max_wall_clock_seconds: float | None,
+    now: float | None = None,
+) -> bool:
+    if max_wall_clock_seconds is None:
+        return False
+    current_time = time.time() if now is None else float(now)
+    return (current_time - float(start_time)) >= float(max_wall_clock_seconds)
 
 
 def _resolve_runtime_profile(stack: StackConfig, profile_override: str) -> str:
@@ -1428,17 +1841,25 @@ def _relative_path_text(path: Path, *, root: Path) -> str:
 
 def _load_checkpoint_tracker(training_paths: TrainingPaths) -> dict[str, Any]:
     if not training_paths.checkpoint_tracker_path.is_file():
-        return {"format": "checkpoint_tracker_v1", "latest": None, "best": None}
+        return {"format": _CHECKPOINT_TRACKER_FORMAT, "latest": None, "best": None, "secondary": {}}
     payload = json.loads(training_paths.checkpoint_tracker_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise RuntimeError(f"checkpoint tracker must be a JSON object: {training_paths.checkpoint_tracker_path}")
-    payload.setdefault("format", "checkpoint_tracker_v1")
+    payload.setdefault("format", _CHECKPOINT_TRACKER_FORMAT)
     payload.setdefault("latest", None)
     payload.setdefault("best", None)
+    secondary = payload.get("secondary")
+    if not isinstance(secondary, dict):
+        payload["secondary"] = {}
     return payload
 
 
 def _write_checkpoint_tracker(training_paths: TrainingPaths, payload: dict[str, Any]) -> None:
+    payload = dict(payload)
+    payload["format"] = _CHECKPOINT_TRACKER_FORMAT
+    secondary = payload.get("secondary")
+    if not isinstance(secondary, dict):
+        payload["secondary"] = {}
     training_paths.checkpoint_tracker_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -1447,6 +1868,10 @@ def _write_checkpoint_tracker(training_paths: TrainingPaths, payload: dict[str, 
 
 def _checkpoint_guard_log_path(training_paths: TrainingPaths) -> Path:
     return training_paths.logs_dir / "checkpoint_guard.jsonl"
+
+
+def _b2_disagreement_audit_requests_path(training_paths: TrainingPaths) -> Path:
+    return training_paths.logs_dir / _B2_DISAGREEMENT_AUDIT_REQUESTS_FILENAME
 
 
 def _build_checkpoint_record(
@@ -1470,6 +1895,39 @@ def _build_checkpoint_record(
     }
 
 
+def _build_secondary_checkpoint_record(
+    *,
+    source_checkpoint_path: Path,
+    artifacts: RunArtifacts,
+    update_count: int,
+    policy_version: int,
+    metric_kind: str,
+    metric_value: float,
+    aggregate_score: float | None,
+    dev_eval_ineligibility_reasons: Sequence[str] = (),
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "source_checkpoint_path": _relative_path_text(source_checkpoint_path, root=artifacts.run_dir),
+        "update_count": int(update_count),
+        "policy_version": int(policy_version),
+        "metric_kind": str(metric_kind),
+        "metric_value": float(metric_value),
+    }
+    if aggregate_score is not None and np.isfinite(float(aggregate_score)):
+        record["aggregate_score"] = float(aggregate_score)
+    if dev_eval_ineligibility_reasons:
+        record["dev_eval_ineligibility_reasons"] = [str(reason) for reason in dev_eval_ineligibility_reasons]
+    return record
+
+
+def _checkpoint_secondary_records(tracker: dict[str, Any]) -> dict[str, Any]:
+    secondary = tracker.get("secondary")
+    if isinstance(secondary, dict):
+        return secondary
+    tracker["secondary"] = {}
+    return cast(dict[str, Any], tracker["secondary"])
+
+
 def _dev_eval_aggregate_score(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
     if dev_eval_summary is None:
         return None
@@ -1482,6 +1940,162 @@ def _dev_eval_aggregate_score(dev_eval_summary: Mapping[str, Any] | None) -> flo
         if isinstance(mean_value, (int, float)) and np.isfinite(float(mean_value)):
             return float(mean_value)
     return None
+
+
+def _periodic_dev_eval_anchor_weight_map(stack: StackConfig) -> dict[str, float]:
+    evaluation = stack.config.evaluation
+    if evaluation is None:
+        return {}
+    raw_weights = getattr(evaluation, "periodic_dev_eval_anchor_weights", {}) or {}
+    if not isinstance(raw_weights, Mapping):
+        return {}
+    weights: dict[str, float] = {}
+    for anchor_name, value in raw_weights.items():
+        name = str(anchor_name).strip()
+        if not name:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        weight = float(value)
+        if not np.isfinite(weight) or weight < 0.0:
+            continue
+        weights[name] = weight
+    return weights
+
+
+def _weighted_dev_eval_aggregate(
+    anchor_scores: Mapping[str, float],
+    *,
+    anchor_weights: Mapping[str, float],
+) -> tuple[float, dict[str, float], float]:
+    if not anchor_scores:
+        return 0.0, {}, 0.0
+    active_weights: dict[str, float] = {}
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for anchor_name, score in anchor_scores.items():
+        weight = float(anchor_weights.get(anchor_name, 1.0))
+        if weight <= 0.0:
+            continue
+        active_weights[str(anchor_name)] = weight
+        weighted_sum += float(score) * weight
+        total_weight += weight
+    if total_weight <= 0.0:
+        for anchor_name, score in anchor_scores.items():
+            active_weights[str(anchor_name)] = 1.0
+            weighted_sum += float(score)
+            total_weight += 1.0
+    return float(weighted_sum / total_weight), active_weights, float(total_weight)
+
+
+def _league_eval_warmup_gate_status(
+    stack: StackConfig,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    league = stack.config.league
+    if league is None or not bool(league.enabled):
+        return {"enabled": False, "open": True, "reasons": []}
+    warmup = league.warmup
+    if not bool(getattr(warmup, "eval_gate_enabled", False)):
+        return {"enabled": False, "open": True, "reasons": []}
+    reasons: list[str] = []
+    if dev_eval_summary is None:
+        return {"enabled": True, "open": False, "reasons": ["missing_dev_eval"]}
+    current_score = _dev_eval_aggregate_score(dev_eval_summary)
+    min_aggregate_score = getattr(warmup, "eval_gate_min_aggregate_score", None)
+    if min_aggregate_score is not None:
+        if current_score is None or float(current_score) < float(min_aggregate_score):
+            reasons.append("aggregate_score")
+    anchor_scores = dev_eval_summary.get("anchor_scores")
+    if not isinstance(anchor_scores, Mapping):
+        anchor_scores = {}
+    failed_anchors: dict[str, dict[str, float | None]] = {}
+    for anchor_name, min_score in dict(getattr(warmup, "eval_gate_min_anchor_scores", {}) or {}).items():
+        anchor_name_text = str(anchor_name)
+        value = anchor_scores.get(anchor_name_text)
+        if value is None and anchor_name_text in {"Latest recent snapshot", "Previous recent snapshot"}:
+            continue
+        score = float(value) if isinstance(value, (int, float)) and np.isfinite(float(value)) else None
+        if score is None or score < float(min_score):
+            failed_anchors[anchor_name_text] = {
+                "score": score,
+                "min_score": float(min_score),
+            }
+    if failed_anchors:
+        reasons.append("anchor_scores")
+    return {
+        "enabled": True,
+        "open": not reasons,
+        "reasons": reasons,
+        "failed_anchors": failed_anchors,
+        "aggregate_score": current_score,
+        "min_aggregate_score": min_aggregate_score,
+    }
+
+
+def _sync_runtime_league_eval_warmup_gate(
+    *,
+    runtime: QueueRuntime,
+    stack: StackConfig,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    status = _league_eval_warmup_gate_status(stack, dev_eval_summary)
+    setter = getattr(runtime, "set_league_eval_warmup_gate", None)
+    if callable(setter):
+        setter(open=bool(status["open"]))
+    return status
+
+
+def _dev_eval_surface(dev_eval_summary: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    if dev_eval_summary is None:
+        return {}
+    surface = dev_eval_summary.get("evaluation_surface")
+    if isinstance(surface, Mapping):
+        return cast(Mapping[str, Any], surface)
+    return {}
+
+
+def _dev_eval_is_authoritative(dev_eval_summary: Mapping[str, Any] | None) -> bool:
+    if dev_eval_summary is None:
+        return False
+    surface = _dev_eval_surface(dev_eval_summary)
+    authoritative = surface.get("authoritative")
+    if isinstance(authoritative, bool):
+        return authoritative
+    # Older summaries predate the surface contract and are canonical scalar by construction.
+    return True
+
+
+def _dev_eval_batched_screen_enabled(dev_eval_summary: Mapping[str, Any] | None) -> bool:
+    surface = _dev_eval_surface(dev_eval_summary)
+    return str(surface.get("kind", "")).strip() == "fast_batched_screen"
+
+
+def _periodic_dev_eval_fast_screens_path(training_paths: TrainingPaths) -> Path:
+    return training_paths.logs_dir / "periodic_dev_eval_fast_screens.json"
+
+
+def _persist_periodic_dev_eval_fast_screen(
+    *,
+    training_paths: TrainingPaths,
+    payload: Mapping[str, Any],
+) -> None:
+    focal_policy_id = str(payload.get("policy_id", "")).strip()
+    if not focal_policy_id:
+        return
+    path = _periodic_dev_eval_fast_screens_path(training_paths)
+    summaries = _load_json_object(path, label="periodic dev-eval fast screens") if path.is_file() else {}
+    summaries[focal_policy_id] = {
+        "format": "periodic_dev_eval_fast_screen_v1",
+        "aggregate_score": payload.get("aggregate_score"),
+        "anchor_scores": dict(cast(Mapping[str, Any], payload.get("anchor_scores", {}))),
+        "update_count": int(payload.get("update_count", 0)),
+        "policy_version": int(payload.get("policy_version", 0)),
+        "evaluation_surface": dict(_dev_eval_surface(payload)),
+        "periodic_dev_eval_parallel": dict(cast(Mapping[str, Any], payload.get("periodic_dev_eval_parallel", {}))),
+        "periodic_dev_eval_runtime": dict(cast(Mapping[str, Any], payload.get("periodic_dev_eval_runtime", {}))),
+    }
+    _write_json(path, summaries)
 
 
 def _dev_eval_worst_truncation_rate(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
@@ -1617,6 +2231,207 @@ def _dev_eval_confidence_stats(dev_eval_summary: Mapping[str, Any] | None) -> di
     return stats
 
 
+def _extract_anchor_payload(dev_eval_summary: Mapping[str, Any] | None, anchor_name: str) -> Mapping[str, Any] | None:
+    if dev_eval_summary is None:
+        return None
+    anchors = dev_eval_summary.get("anchors")
+    if not isinstance(anchors, Mapping):
+        return None
+    anchor_payload = anchors.get(anchor_name)
+    if not isinstance(anchor_payload, Mapping):
+        return None
+    return cast(Mapping[str, Any], anchor_payload)
+
+
+def _extract_anchor_score(dev_eval_summary: Mapping[str, Any] | None, anchor_name: str) -> float | None:
+    if dev_eval_summary is None:
+        return None
+    anchor_scores = dev_eval_summary.get("anchor_scores")
+    if isinstance(anchor_scores, Mapping):
+        score = anchor_scores.get(anchor_name)
+        if isinstance(score, (int, float)) and np.isfinite(float(score)):
+            return float(score)
+    anchor_payload = _extract_anchor_payload(dev_eval_summary, anchor_name)
+    if anchor_payload is None:
+        return None
+    uncertainty = anchor_payload.get("uncertainty")
+    if not isinstance(uncertainty, Mapping):
+        return None
+    mean_value = uncertainty.get("mean")
+    if isinstance(mean_value, (int, float)) and np.isfinite(float(mean_value)):
+        return float(mean_value)
+    return None
+
+
+def _extract_anchor_summary(dev_eval_summary: Mapping[str, Any] | None, anchor_name: str) -> Mapping[str, Any] | None:
+    anchor_payload = _extract_anchor_payload(dev_eval_summary, anchor_name)
+    if anchor_payload is None:
+        return None
+    summary = anchor_payload.get("summary")
+    if not isinstance(summary, Mapping):
+        return None
+    return cast(Mapping[str, Any], summary)
+
+
+def _extract_anchor_uncertainty(
+    dev_eval_summary: Mapping[str, Any] | None,
+    anchor_name: str,
+) -> Mapping[str, Any] | None:
+    anchor_payload = _extract_anchor_payload(dev_eval_summary, anchor_name)
+    if anchor_payload is None:
+        return None
+    uncertainty = anchor_payload.get("uncertainty")
+    if not isinstance(uncertainty, Mapping):
+        return None
+    return cast(Mapping[str, Any], uncertainty)
+
+
+def _summary_fraction(summary: Mapping[str, Any] | None, *, numerator_key: str, denominator_key: str) -> float | None:
+    if summary is None:
+        return None
+    numerator = summary.get(numerator_key)
+    denominator = summary.get(denominator_key)
+    if not isinstance(numerator, (int, float)) or not isinstance(denominator, (int, float)):
+        return None
+    if float(denominator) <= 0.0:
+        return None
+    return float(numerator) / float(denominator)
+
+
+def _b2_recent_scores_from_persisted_summaries(
+    summaries: Mapping[str, Any],
+    *,
+    current_policy_id: str,
+) -> list[float]:
+    scored_entries: list[tuple[int, float]] = []
+    for policy_id, raw_entry in summaries.items():
+        if policy_id == current_policy_id or not isinstance(raw_entry, Mapping):
+            continue
+        update_count = raw_entry.get("update_count")
+        b2_payload = raw_entry.get("b2")
+        score: float | None = None
+        if isinstance(b2_payload, Mapping):
+            raw_score = b2_payload.get("score")
+            if isinstance(raw_score, (int, float)) and np.isfinite(float(raw_score)):
+                score = float(raw_score)
+        if score is None:
+            raw_anchor_scores = raw_entry.get("anchor_scores")
+            if isinstance(raw_anchor_scores, Mapping):
+                raw_score = raw_anchor_scores.get(HEURISTIC_PUBLIC_POLICY_ID)
+                if isinstance(raw_score, (int, float)) and np.isfinite(float(raw_score)):
+                    score = float(raw_score)
+        if score is None:
+            continue
+        scored_entries.append((0 if not isinstance(update_count, int) else int(update_count), score))
+    scored_entries.sort(key=lambda item: item[0])
+    return [score for _update_count, score in scored_entries[-(_B2_FLATLINE_WINDOW - 1) :]]
+
+
+def _build_b2_warning_flags(
+    *,
+    current_score: float | None,
+    current_summary: Mapping[str, Any] | None,
+    recent_scores: Sequence[float],
+) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    if current_score is None:
+        return warnings
+
+    score_window = [*recent_scores, float(current_score)]
+    if (
+        len(score_window) >= _B2_FLATLINE_WINDOW
+        and max(score_window) - min(score_window) <= _B2_FLATLINE_MAX_DELTA
+        and float(current_score) <= _B2_FLATLINE_LOW_SCORE
+    ):
+        warnings.append(
+            {
+                "kind": "b2_flatline_v1",
+                "recent_eval_count": len(score_window),
+                "min_score": float(min(score_window)),
+                "max_score": float(max(score_window)),
+                "score_delta": float(max(score_window) - min(score_window)),
+            }
+        )
+
+    main_move_rate = _summary_fraction(current_summary, numerator_key="main_move_actions", denominator_key="total_actions")
+    pass_nonpass_rate = _summary_fraction(
+        current_summary,
+        numerator_key="pass_with_nonpass_available",
+        denominator_key="total_actions",
+    )
+    max_consecutive_main_moves = None if current_summary is None else current_summary.get("max_consecutive_main_moves")
+    if float(current_score) <= _B2_ACTION_WARNING_SCORE_THRESHOLD and (
+        (main_move_rate is not None and main_move_rate >= _B2_ACTION_WARNING_MAIN_MOVE_RATE)
+        or (pass_nonpass_rate is not None and pass_nonpass_rate >= _B2_ACTION_WARNING_PASS_NONPASS_RATE)
+    ):
+        warning_payload: dict[str, Any] = {
+            "kind": "b2_action_family_warning_v1",
+            "score": float(current_score),
+        }
+        if main_move_rate is not None:
+            warning_payload["main_move_rate"] = float(main_move_rate)
+        if pass_nonpass_rate is not None:
+            warning_payload["pass_with_nonpass_available_rate"] = float(pass_nonpass_rate)
+        if isinstance(max_consecutive_main_moves, (int, float)):
+            warning_payload["max_consecutive_main_moves"] = int(max_consecutive_main_moves)
+        warnings.append(warning_payload)
+    return warnings
+
+
+def _build_periodic_dev_eval_summary_record(
+    *,
+    payload: Mapping[str, Any],
+    prior_summaries: Mapping[str, Any],
+) -> dict[str, Any]:
+    focal_policy_id = str(payload.get("policy_id", "")).strip()
+    anchor_scores = dict(cast(Mapping[str, Any], payload.get("anchor_scores", {})))
+    record: dict[str, Any] = {
+        "format": _PERIODIC_DEV_EVAL_SUMMARY_FORMAT,
+        "aggregate_score": float(payload.get("aggregate_score", 0.0)),
+        "anchor_scores": anchor_scores,
+        "update_count": int(payload.get("update_count", 0)),
+        "policy_version": int(payload.get("policy_version", 0)),
+    }
+    for optional_key in (
+        "uncertainty",
+        "periodic_dev_eval_parallel",
+        "stall_monitor",
+        "evaluation_surface",
+        "aggregate_weighting",
+    ):
+        optional_payload = payload.get(optional_key)
+        if isinstance(optional_payload, Mapping):
+            record[optional_key] = dict(optional_payload)
+    unweighted_aggregate_score = payload.get("unweighted_aggregate_score")
+    if isinstance(unweighted_aggregate_score, (int, float)):
+        record["unweighted_aggregate_score"] = float(unweighted_aggregate_score)
+    anchors = payload.get("anchors")
+    if isinstance(anchors, Mapping):
+        record["anchors"] = dict(cast(Mapping[str, Any], anchors))
+
+    b2_summary = _extract_anchor_summary(payload, HEURISTIC_PUBLIC_POLICY_ID)
+    b2_uncertainty = _extract_anchor_uncertainty(payload, HEURISTIC_PUBLIC_POLICY_ID)
+    b2_score = _extract_anchor_score(payload, HEURISTIC_PUBLIC_POLICY_ID)
+    recent_b2_scores = _b2_recent_scores_from_persisted_summaries(prior_summaries, current_policy_id=focal_policy_id)
+    b2_warning_flags = _build_b2_warning_flags(
+        current_score=b2_score,
+        current_summary=b2_summary,
+        recent_scores=recent_b2_scores,
+    )
+    if b2_score is not None or b2_summary is not None or b2_uncertainty is not None:
+        record["b2"] = {
+            "available": True,
+            "score": None if b2_score is None else float(b2_score),
+            "summary": None if b2_summary is None else dict(b2_summary),
+            "uncertainty": None if b2_uncertainty is None else dict(b2_uncertainty),
+            "warning_flags": b2_warning_flags,
+        }
+
+    warning_flags: list[dict[str, Any]] = [*b2_warning_flags]
+    record["warning_flags"] = warning_flags
+    return record
+
+
 def _dev_eval_ineligibility_reasons(
     stack: StackConfig,
     *,
@@ -1627,6 +2442,8 @@ def _dev_eval_ineligibility_reasons(
     current_score = _dev_eval_aggregate_score(dev_eval_summary)
     if current_score is None:
         return ("missing_score",)
+    if not _dev_eval_is_authoritative(dev_eval_summary):
+        return ("non_authoritative",)
     curriculum = stack.config.curriculum
     if curriculum is None:
         return ()
@@ -1643,7 +2460,10 @@ def _dev_eval_ineligibility_reasons(
         if min_prob_gt_half is not None and (
             float(min_prob_gt_half) < float(checkpoint_guard.promote_min_prob_gt_half)
         ):
-            reasons.append("confidence_prob")
+            max_prob_lt_half = confidence["max_prob_lt_half"]
+            tolerated_prob_lt_half = max(0.0, 1.0 - float(checkpoint_guard.promote_min_prob_gt_half))
+            if max_prob_lt_half is None or float(max_prob_lt_half) > tolerated_prob_lt_half:
+                reasons.append("confidence_prob")
         if max_ci_half_width is not None and (
             float(max_ci_half_width) > float(checkpoint_guard.promote_max_ci_half_width)
         ):
@@ -1788,11 +2608,7 @@ def _checkpoint_candidate_metric(
         if aggregate_score is not None:
             return "dev_eval_mean", aggregate_score
     evaluation = stack.config.evaluation
-    if (
-        evaluation is not None
-        and int(evaluation.periodic_dev_eval_interval_updates) > 0
-        and dev_eval_summary is not None
-    ):
+    if evaluation is not None and int(evaluation.periodic_dev_eval_interval_updates) > 0:
         return None, None
     if latest_metrics is not None:
         loss_value = latest_metrics.get("loss")
@@ -1828,6 +2644,82 @@ def _should_promote_best_checkpoint(
     return False
 
 
+def _should_update_secondary_b2_record(
+    *,
+    existing_record: Mapping[str, Any] | None,
+    candidate_b2_score: float,
+    candidate_aggregate_score: float | None,
+    update_count: int,
+    policy_version: int,
+) -> bool:
+    if existing_record is None:
+        return True
+    existing_metric = existing_record.get("metric_value")
+    if not isinstance(existing_metric, (int, float)) or not np.isfinite(float(existing_metric)):
+        return True
+    existing_b2_score = float(existing_metric)
+    if float(candidate_b2_score) > existing_b2_score:
+        return True
+    if float(candidate_b2_score) < existing_b2_score:
+        return False
+
+    existing_aggregate = existing_record.get("aggregate_score")
+    if (
+        candidate_aggregate_score is not None
+        and isinstance(existing_aggregate, (int, float))
+        and np.isfinite(float(existing_aggregate))
+    ):
+        if float(candidate_aggregate_score) > float(existing_aggregate):
+            return True
+        if float(candidate_aggregate_score) < float(existing_aggregate):
+            return False
+
+    existing_update = existing_record.get("update_count")
+    if isinstance(existing_update, int) and int(update_count) != int(existing_update):
+        return int(update_count) > int(existing_update)
+    existing_version = existing_record.get("policy_version")
+    if isinstance(existing_version, int) and int(policy_version) != int(existing_version):
+        return int(policy_version) > int(existing_version)
+    return False
+
+
+def _update_secondary_b2_checkpoint_record(
+    *,
+    tracker: dict[str, Any],
+    stack: StackConfig,
+    artifacts: RunArtifacts,
+    source_checkpoint_path: Path,
+    update_count: int,
+    policy_version: int,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> None:
+    b2_score = _extract_anchor_score(dev_eval_summary, HEURISTIC_PUBLIC_POLICY_ID)
+    if b2_score is None:
+        return
+    aggregate_score = _dev_eval_aggregate_score(dev_eval_summary)
+    secondary_records = _checkpoint_secondary_records(tracker)
+    existing_record = secondary_records.get("best_b2")
+    existing_mapping = existing_record if isinstance(existing_record, Mapping) else None
+    if not _should_update_secondary_b2_record(
+        existing_record=cast(Mapping[str, Any] | None, existing_mapping),
+        candidate_b2_score=float(b2_score),
+        candidate_aggregate_score=aggregate_score,
+        update_count=int(update_count),
+        policy_version=int(policy_version),
+    ):
+        return
+    secondary_records["best_b2"] = _build_secondary_checkpoint_record(
+        source_checkpoint_path=source_checkpoint_path,
+        artifacts=artifacts,
+        update_count=int(update_count),
+        policy_version=int(policy_version),
+        metric_kind="b2_score",
+        metric_value=float(b2_score),
+        aggregate_score=aggregate_score,
+        dev_eval_ineligibility_reasons=_dev_eval_ineligibility_reasons(stack, dev_eval_summary=dev_eval_summary),
+    )
+
+
 def _publish_checkpoint_aliases(
     *,
     stack: StackConfig,
@@ -1860,10 +2752,13 @@ def _publish_checkpoint_aliases(
     best_record = tracker.get("best")
     if not isinstance(best_record, Mapping):
         best_record = None
-    should_update_best = best_record is None or _should_promote_best_checkpoint(
-        existing_record=cast(Mapping[str, Any], best_record),
-        candidate_kind=latest_kind,
-        candidate_value=latest_value,
+    should_update_best = latest_kind is not None and (
+        best_record is None
+        or _should_promote_best_checkpoint(
+            existing_record=cast(Mapping[str, Any], best_record),
+            candidate_kind=latest_kind,
+            candidate_value=latest_value,
+        )
     )
     if should_update_best:
         shutil.copy2(checkpoint_path, training_paths.best_checkpoint_path)
@@ -1877,6 +2772,15 @@ def _publish_checkpoint_aliases(
             metric_value=latest_value,
         )
 
+    _update_secondary_b2_checkpoint_record(
+        tracker=tracker,
+        stack=stack,
+        artifacts=artifacts,
+        source_checkpoint_path=checkpoint_path,
+        update_count=int(learner.update_count),
+        policy_version=int(learner.get_policy_version()),
+        dev_eval_summary=dev_eval_summary,
+    )
     _write_checkpoint_tracker(training_paths, tracker)
     return tracker
 
@@ -1886,6 +2790,111 @@ def _append_checkpoint_guard_event(training_paths: TrainingPaths, payload: Mappi
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(dict(payload), sort_keys=True) + "\n")
+
+
+def _append_b2_disagreement_audit_request(training_paths: TrainingPaths, payload: Mapping[str, Any]) -> None:
+    path = _b2_disagreement_audit_requests_path(training_paths)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(payload), sort_keys=True) + "\n")
+
+
+def _run_stack_config_path(artifacts: RunArtifacts) -> Path | None:
+    if not artifacts.run_summary_path.is_file():
+        return None
+    run_summary = _load_json_object(artifacts.run_summary_path, label="run summary")
+    raw_path = run_summary.get("stack_config_path")
+    if not isinstance(raw_path, str) or not str(raw_path).strip():
+        return None
+    return Path(raw_path)
+
+
+def _dev_eval_has_confidence_only_block(dev_eval_summary: Mapping[str, Any] | None, *, stack: StackConfig) -> bool:
+    reasons = _dev_eval_ineligibility_reasons(stack, dev_eval_summary=dev_eval_summary)
+    return bool(reasons) and all(reason in {"confidence_prob", "confidence_ci"} for reason in reasons)
+
+
+def _maybe_request_b2_disagreement_audit(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    artifacts: RunArtifacts,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if dev_eval_summary is None:
+        return None
+    if not _dev_eval_is_authoritative(dev_eval_summary):
+        return None
+    b2_payload = _extract_anchor_payload(dev_eval_summary, HEURISTIC_PUBLIC_POLICY_ID)
+    if b2_payload is None:
+        return None
+    evaluation_context = b2_payload.get("evaluation_context")
+    if not isinstance(evaluation_context, Mapping):
+        return None
+    episodes_rel = evaluation_context.get("episodes_path")
+    if not isinstance(episodes_rel, str) or not str(episodes_rel).strip():
+        return None
+    episodes_path = artifacts.run_dir / str(episodes_rel)
+    if not episodes_path.is_file():
+        return None
+
+    triggers: list[str] = []
+    b2_record = dev_eval_summary.get("b2")
+    if isinstance(b2_record, Mapping):
+        warning_flags = b2_record.get("warning_flags")
+        if isinstance(warning_flags, Sequence):
+            for warning in warning_flags:
+                if not isinstance(warning, Mapping):
+                    continue
+                if str(warning.get("kind", "")).strip() == "b2_flatline_v1":
+                    triggers.append("b2_flatline")
+                    break
+    if _dev_eval_has_confidence_only_block(dev_eval_summary, stack=stack):
+        triggers.append("confidence_only_gate")
+    if not triggers:
+        return None
+
+    canonical_stack_config_path = artifacts.run_dir / "config_canonical.json"
+    stack_config_path = canonical_stack_config_path if canonical_stack_config_path.is_file() else _run_stack_config_path(artifacts)
+    update_count = int(dev_eval_summary.get("update_count", 0))
+    policy_version = int(dev_eval_summary.get("policy_version", 0))
+    audit_policy_id = f"policy_{policy_version:06d}" if policy_version > 0 else str(dev_eval_summary.get("policy_id", ""))
+    output_run_dir = artifacts.run_dir / "eval" / "b2_disagreement_audit" / f"update_{update_count}"
+    command: list[str] = []
+    if stack_config_path is not None:
+        command = [
+            sys.executable,
+            "python/scripts/b2_disagreement_audit.py",
+            "--stack-config",
+            stack_config_path.as_posix(),
+            "--run-dir",
+            artifacts.run_dir.as_posix(),
+            "--output-run-dir",
+            output_run_dir.as_posix(),
+            "--episodes-jsonl",
+            episodes_path.as_posix(),
+            "--policy-id",
+            audit_policy_id,
+            "--summary-json",
+            (output_run_dir / "audit" / "summary.json").as_posix(),
+        ]
+
+    payload = {
+        "format": "b2_disagreement_audit_request_v1",
+        "event_kind": "b2_disagreement_audit_requested_v1",
+        "trigger_reasons": list(dict.fromkeys(triggers)),
+        "update_count": update_count,
+        "policy_version": policy_version,
+        "policy_id": str(dev_eval_summary.get("policy_id", "")),
+        "audit_policy_id": audit_policy_id,
+        "b2_score": _extract_anchor_score(dev_eval_summary, HEURISTIC_PUBLIC_POLICY_ID),
+        "episodes_path": _relative_path_text(episodes_path, root=artifacts.run_dir),
+        "output_run_dir": _relative_path_text(output_run_dir, root=artifacts.run_dir),
+        "command": command,
+    }
+    _append_b2_disagreement_audit_request(training_paths, payload)
+    _append_checkpoint_guard_event(training_paths, payload)
+    return payload
 
 
 def _maybe_log_structured_mainmove_guard(
@@ -1953,6 +2962,44 @@ def _demote_registry_champions_newer_than(training_paths: TrainingPaths, *, upda
     return removed
 
 
+def _is_current_run_train_snapshot_for_rollback(training_paths: TrainingPaths, snapshot: SnapshotMeta) -> bool:
+    policy_id = str(snapshot.policy_id).strip()
+    if not policy_id.startswith("policy_"):
+        return False
+    metadata_path = training_paths.snapshots_dir / policy_id / SNAPSHOT_METADATA_FILENAME
+    if metadata_path.is_file():
+        try:
+            metadata = _load_json_object(metadata_path, label="snapshot metadata")
+        except Exception:
+            metadata = {}
+        if isinstance(metadata, Mapping) and (
+            "imported_from_run_dir" in metadata
+            or "imported_from_policy_id" in metadata
+            or bool(metadata.get("seeded_from_external_registry", False))
+        ):
+            return False
+    return True
+
+
+def _reject_registry_snapshots_newer_than(training_paths: TrainingPaths, *, update_count: int) -> list[str]:
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    if not registry_path.is_file():
+        return []
+    registry = SnapshotRegistry.load(registry_path)
+    update_count_i = int(update_count)
+    rejected: list[str] = []
+    for snapshot in registry.snapshots:
+        if int(snapshot.update) <= update_count_i:
+            continue
+        if not _is_current_run_train_snapshot_for_rollback(training_paths, snapshot):
+            continue
+        registry.reject_snapshot(snapshot.policy_id)
+        rejected.append(snapshot.policy_id)
+    if rejected:
+        registry.save(registry_path)
+    return rejected
+
+
 def _best_checkpoint_record(training_paths: TrainingPaths) -> Mapping[str, Any] | None:
     tracker = _load_checkpoint_tracker(training_paths)
     best_record = tracker.get("best")
@@ -1968,6 +3015,7 @@ def _restore_checkpoint_to_latest_alias(
     device: torch.device,
     expected_spec_hash256: str,
     algorithm: str,
+    restore_counters: bool = True,
 ) -> ResumeCheckpoint:
     resume_state = _restore_learner_from_checkpoint(
         checkpoint_path=checkpoint_path,
@@ -1976,7 +3024,7 @@ def _restore_checkpoint_to_latest_alias(
         device=device,
         expected_spec_hash256=expected_spec_hash256,
         algorithm=algorithm,
-        restore_counters=True,
+        restore_counters=restore_counters,
     )
     shutil.copy2(checkpoint_path, training_paths.latest_checkpoint_path)
     return resume_state
@@ -2005,6 +3053,187 @@ def _resolve_resume_checkpoint_path(
     return checkpoint_path
 
 
+def _infer_seed_snapshot_run_dir_from_resume_checkpoint(
+    *,
+    stack: StackConfig,
+    resume_checkpoint_path: Path | None,
+    resume_run_dir: Path | None,
+) -> Path | None:
+    if resume_checkpoint_path is None or resume_run_dir is not None:
+        return None
+    league = stack.config.league
+    if league is None or not bool(league.enabled):
+        return None
+    checkpoint_path = Path(resume_checkpoint_path).resolve()
+    checkpoint_dir = checkpoint_path.parent
+    training_dir = checkpoint_dir.parent
+    if checkpoint_dir.name != "checkpoints" or training_dir.name != "training":
+        return None
+    source_run_dir = training_dir.parent
+    registry_path = source_run_dir / "training" / "snapshots" / REGISTRY_FILENAME
+    if not registry_path.is_file():
+        return None
+    return source_run_dir
+
+
+def _infer_run_dir_from_checkpoint_path(checkpoint_path: Path | None) -> Path | None:
+    if checkpoint_path is None:
+        return None
+    resolved = Path(checkpoint_path).resolve()
+    checkpoint_dir = resolved.parent
+    training_dir = checkpoint_dir.parent
+    if checkpoint_dir.name != "checkpoints" or training_dir.name != "training":
+        return None
+    return training_dir.parent
+
+
+def _seed_snapshot_import_max_update(
+    *,
+    resume_state: ResumeCheckpoint | None,
+    seed_snapshot_run_dir: Path | None,
+    seed_snapshot_run_dir_auto_inferred: bool,
+) -> int | None:
+    if resume_state is None or seed_snapshot_run_dir is None:
+        return None
+    if not bool(seed_snapshot_run_dir_auto_inferred):
+        return None
+    return int(resume_state.update_count)
+
+
+def _resolve_resume_source_checkpoint_path(
+    *,
+    source_run_dir: Path,
+    record: Mapping[str, Any],
+    key: str,
+) -> Path | None:
+    value = record.get(key)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        path = source_run_dir / path
+    return path.resolve()
+
+
+def _seed_checkpoint_tracker_from_resume_best(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    artifacts: RunArtifacts,
+    resume_checkpoint_path: Path,
+) -> dict[str, Any] | None:
+    target_tracker = _load_checkpoint_tracker(training_paths)
+    if isinstance(target_tracker.get("best"), Mapping):
+        return None
+
+    checkpoint_path = Path(resume_checkpoint_path).resolve()
+    checkpoint_dir = checkpoint_path.parent
+    training_dir = checkpoint_dir.parent
+    if checkpoint_dir.name != "checkpoints" or training_dir.name != "training":
+        return None
+    source_run_dir = training_dir.parent
+    source_tracker_path = source_run_dir / "training" / "checkpoints" / _CHECKPOINT_TRACKER_FILENAME
+    if not source_tracker_path.is_file():
+        return None
+    source_tracker = json.loads(source_tracker_path.read_text(encoding="utf-8"))
+    if not isinstance(source_tracker, Mapping):
+        return None
+    source_best = source_tracker.get("best")
+    if not isinstance(source_best, Mapping):
+        return None
+    metric_kind = source_best.get("metric_kind")
+    metric_value = source_best.get("metric_value")
+    if str(metric_kind).strip() != "dev_eval_mean":
+        return None
+    if not isinstance(metric_value, (int, float)) or not np.isfinite(float(metric_value)):
+        return None
+
+    candidate_paths = tuple(
+        path
+        for path in (
+            _resolve_resume_source_checkpoint_path(
+                source_run_dir=source_run_dir,
+                record=source_best,
+                key="source_checkpoint_path",
+            ),
+            _resolve_resume_source_checkpoint_path(
+                source_run_dir=source_run_dir,
+                record=source_best,
+                key="alias_path",
+            ),
+        )
+        if path is not None
+    )
+    if checkpoint_path not in candidate_paths:
+        return None
+
+    try:
+        checkpoint_payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except Exception:
+        return None
+    if not isinstance(checkpoint_payload, Mapping):
+        return None
+    checkpoint_config_hash = str(checkpoint_payload.get("config_hash256", "")).strip().lower()
+    if checkpoint_config_hash != compute_config_hash256(stack):
+        return None
+
+    update_count = source_best.get("update_count")
+    policy_version = source_best.get("policy_version")
+    if not isinstance(update_count, int) or not isinstance(policy_version, int):
+        return None
+
+    shutil.copy2(checkpoint_path, training_paths.best_checkpoint_path)
+    seeded_record = {
+        "alias": "best",
+        "alias_path": _relative_path_text(training_paths.best_checkpoint_path, root=artifacts.run_dir),
+        "source_checkpoint_path": _relative_path_text(checkpoint_path, root=artifacts.run_dir),
+        "update_count": int(update_count),
+        "policy_version": int(policy_version),
+        "metric_kind": "dev_eval_mean",
+        "metric_value": float(metric_value),
+        "seeded_from_run_dir": source_run_dir.as_posix(),
+    }
+    target_tracker["best"] = seeded_record
+    _write_checkpoint_tracker(training_paths, target_tracker)
+    return seeded_record
+
+
+def _load_resume_checkpoint_dev_eval_summary(
+    *,
+    stack: StackConfig,
+    resume_checkpoint_path: Path,
+    update_count: int,
+    allow_config_hash_mismatch: bool = False,
+) -> dict[str, Any] | None:
+    checkpoint_path = Path(resume_checkpoint_path).resolve()
+    checkpoint_dir = checkpoint_path.parent
+    training_dir = checkpoint_dir.parent
+    if checkpoint_dir.name != "checkpoints" or training_dir.name != "training":
+        return None
+    try:
+        checkpoint_payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except Exception:
+        return None
+    if not isinstance(checkpoint_payload, Mapping):
+        return None
+    checkpoint_config_hash = str(checkpoint_payload.get("config_hash256", "")).strip().lower()
+    if checkpoint_config_hash != compute_config_hash256(stack) and not bool(allow_config_hash_mismatch):
+        return None
+
+    source_run_dir = training_dir.parent
+    for artifact_dir_name in ("dev_eval_confirmatory", "dev_eval"):
+        summary_path = source_run_dir / "eval" / artifact_dir_name / f"update_{int(update_count)}" / "summary.json"
+        if not summary_path.is_file():
+            continue
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict) and _dev_eval_is_authoritative(payload):
+            return payload
+    return None
+
+
 def _restore_learner_from_checkpoint(
     *,
     checkpoint_path: Path,
@@ -2014,6 +3243,8 @@ def _restore_learner_from_checkpoint(
     expected_spec_hash256: str,
     algorithm: str,
     restore_counters: bool = True,
+    restore_optimizer_state: bool = True,
+    allow_config_hash_mismatch: bool = False,
 ) -> ResumeCheckpoint:
     payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
     if not isinstance(payload, dict):
@@ -2023,8 +3254,14 @@ def _restore_learner_from_checkpoint(
     payload_config_hash = str(payload.get("config_hash256", "")).strip().lower()
     expected_config_hash = compute_config_hash256(stack)
     if payload_config_hash != expected_config_hash:
-        raise RuntimeError(
-            f"checkpoint config hash mismatch for {checkpoint_path}: expected {expected_config_hash}, got {payload_config_hash}"
+        if not allow_config_hash_mismatch:
+            raise RuntimeError(
+                f"checkpoint config hash mismatch for {checkpoint_path}: expected {expected_config_hash}, got {payload_config_hash}"
+            )
+        print(
+            "Warning: resuming checkpoint under a different config hash "
+            f"(checkpoint={payload_config_hash}, current={expected_config_hash}). "
+            "Use this only for explicit research continuations."
         )
     payload_spec_hash = payload.get("spec_hash256")
     if payload_spec_hash is not None and str(payload_spec_hash).strip().lower() != expected_spec_hash256:
@@ -2042,11 +3279,17 @@ def _restore_learner_from_checkpoint(
     learner.model.load_state_dict(model_state_dict)
     _restore_model_guidance_from_payload(learner.model, payload)
     optimizer_state_dict = payload.get("optimizer_state_dict")
-    if optimizer_state_dict is not None:
+    if restore_optimizer_state and optimizer_state_dict is not None:
         optimizer = learner._optimizer_for_step()
         optimizer.load_state_dict(optimizer_state_dict)
+        for group in optimizer.param_groups:
+            group["lr"] = float(learner.learning_rate)
     grad_scaler_state_dict = payload.get("grad_scaler_state_dict")
-    if grad_scaler_state_dict is not None and getattr(learner, "_grad_scaler", None) is not None:
+    if (
+        restore_optimizer_state
+        and grad_scaler_state_dict is not None
+        and getattr(learner, "_grad_scaler", None) is not None
+    ):
         learner._grad_scaler.load_state_dict(grad_scaler_state_dict)
     if restore_counters:
         learner.update_count = int(payload.get("update_count", 0))
@@ -2070,18 +3313,22 @@ def _build_training_learner(
     training_paths: TrainingPaths,
     pass_action_id: int,
     checkpoint_interval_updates: int,
+    gradient_sync: Any | None = None,
+    artifact_writes_enabled: bool = True,
 ) -> ImpalaLearner | PpoLiteLearner:
     common_kwargs = {
         "model": model,
         "compiled_model": compiled_model,
         "learning_rate": training_config.learning_rate,
+        "policy_loss_coef": float(getattr(training_config, "policy_loss_coef", 1.0)),
         "value_loss_coef": training_config.value_loss_coef,
         "entropy_coef": training_config.entropy_coef,
         "grad_norm_clip": training_config.grad_norm_clip,
+        "optimizer_backend": str(getattr(training_config, "optimizer_backend", "auto")),
         "mixed_precision": bool(training_config.mixed_precision),
-        "checkpoint_dir": training_paths.checkpoints_dir,
+        "checkpoint_dir": training_paths.checkpoints_dir if artifact_writes_enabled else None,
         "checkpoint_interval_updates": int(checkpoint_interval_updates),
-        "logs_dir": training_paths.logs_dir,
+        "logs_dir": training_paths.logs_dir if artifact_writes_enabled else None,
         "logging_interval_updates": 1,
         "pass_action_id": pass_action_id,
         "teacher_family_coef": training_config.teacher_family_coef,
@@ -2091,14 +3338,70 @@ def _build_training_learner(
         "teacher_action_coef": training_config.teacher_action_coef,
         "teacher_same_family_action_coef": training_config.teacher_same_family_action_coef,
         "teacher_public_heuristic_coef": training_config.teacher_public_heuristic_coef,
+        "teacher_public_main_move_coef": training_config.teacher_public_main_move_coef,
+        "teacher_development_pass_suppression_coef": training_config.teacher_development_pass_suppression_coef,
         "teacher_public_heuristic_temperature": training_config.teacher_public_heuristic_temperature,
         "teacher_public_heuristic_families": training_config.teacher_public_heuristic_families,
         "teacher_public_heuristic_profiles": training_config.teacher_public_heuristic_profiles,
         "teacher_public_heuristic_profile_mode": training_config.teacher_public_heuristic_profile_mode,
         "teacher_public_heuristic_profiles_end_updates": training_config.teacher_public_heuristic_profiles_end_updates,
+        "behavior_action_bc_coef": float(getattr(training_config, "behavior_action_bc_coef", 0.0)),
+        "reference_policy_top_action_bc_coef": float(
+            getattr(training_config, "reference_policy_top_action_bc_coef", 0.0)
+        ),
+        "b1_opponent_reference_policy_top_action_bc_coef": float(
+            getattr(training_config, "b1_opponent_reference_policy_top_action_bc_coef", 0.0)
+        ),
+        "b1_second_seat_positive_advantage_policy_coef": float(
+            getattr(training_config, "b1_second_seat_positive_advantage_policy_coef", 0.0)
+        ),
+        "b1_second_seat_reference_top_action_avoidance_coef": float(
+            getattr(training_config, "b1_second_seat_reference_top_action_avoidance_coef", 0.0)
+        ),
+        "reference_policy_top_action_family_bc_coef": float(
+            getattr(training_config, "reference_policy_top_action_family_bc_coef", 0.0)
+        ),
+        "raw_b1_distill_coef": float(getattr(getattr(training_config, "raw_b1_distill", None), "coef", 0.0)),
+        "raw_b1_distill_teacher_bias_scale": float(
+            getattr(
+                getattr(training_config, "raw_b1_distill", None),
+                "teacher_public_heuristic_bias_scale",
+                0.0,
+            )
+        ),
+        "raw_b1_distill_student_bias_scale": float(
+            getattr(
+                getattr(training_config, "raw_b1_distill", None),
+                "student_public_heuristic_bias_scale",
+                0.0,
+            )
+        ),
+        "raw_b1_distill_top_k": int(getattr(getattr(training_config, "raw_b1_distill", None), "top_k", 16)),
+        "raw_b1_distill_temperature": float(
+            getattr(getattr(training_config, "raw_b1_distill", None), "temperature", 1.5)
+        ),
+        "raw_b1_distill_top_action_ce_coef": float(
+            getattr(getattr(training_config, "raw_b1_distill", None), "top_action_ce_coef", 0.0)
+        ),
+        "counterfactual_positive_label_dirs": tuple(
+            getattr(getattr(training_config, "counterfactual_positive", None), "label_dirs", ()) or ()
+        ),
+        "counterfactual_positive_coef": float(
+            getattr(getattr(training_config, "counterfactual_positive", None), "coef", 0.0)
+        ),
+        "counterfactual_positive_margin_coef": float(
+            getattr(getattr(training_config, "counterfactual_positive", None), "margin_coef", 0.0)
+        ),
+        "counterfactual_positive_margin": float(
+            getattr(getattr(training_config, "counterfactual_positive", None), "margin", 1.0)
+        ),
+        "counterfactual_positive_max_labels": int(
+            getattr(getattr(training_config, "counterfactual_positive", None), "max_labels", 0)
+        ),
         "profile_timers": bool(getattr(training_config, "profile_timers", False)),
         "structured_metrics_mode": str(getattr(training_config, "structured_metrics_mode", "full")),
         "teacher_aux_mode": str(getattr(training_config, "teacher_aux_mode", "always")),
+        "gradient_sync": gradient_sync,
     }
     if algorithm in _IMPALA_ALGORITHMS:
         return ImpalaLearner(
@@ -2138,6 +3441,64 @@ def _teacher_public_heuristic_coef_for_next_update(training_config: Any, *, upda
     )
 
 
+def _reference_policy_top_action_bc_coef_for_next_update(training_config: Any, *, update_count: int) -> float:
+    initial = float(getattr(training_config, "reference_policy_top_action_bc_coef", 0.0))
+    return float(
+        linear_anneal_value(
+            initial_value=initial,
+            final_value=float(getattr(training_config, "reference_policy_top_action_bc_final_coef", initial)),
+            start_update=int(getattr(training_config, "reference_policy_top_action_bc_start_updates", 0)),
+            end_update=int(getattr(training_config, "reference_policy_top_action_bc_end_updates", -1)),
+            update_count=int(update_count),
+        )
+    )
+
+
+def _reference_policy_top_action_family_bc_coef_for_next_update(training_config: Any, *, update_count: int) -> float:
+    initial = float(getattr(training_config, "reference_policy_top_action_family_bc_coef", 0.0))
+    return float(
+        linear_anneal_value(
+            initial_value=initial,
+            final_value=float(getattr(training_config, "reference_policy_top_action_family_bc_final_coef", initial)),
+            start_update=int(getattr(training_config, "reference_policy_top_action_family_bc_start_updates", 0)),
+            end_update=int(getattr(training_config, "reference_policy_top_action_family_bc_end_updates", -1)),
+            update_count=int(update_count),
+        )
+    )
+
+
+def _raw_b1_distill_coef_for_next_update(training_config: Any, *, update_count: int) -> float:
+    raw_b1_distill = getattr(training_config, "raw_b1_distill", None)
+    if raw_b1_distill is None or not bool(getattr(raw_b1_distill, "enabled", False)):
+        return 0.0
+    initial = float(getattr(raw_b1_distill, "coef", 0.0))
+    return float(
+        linear_anneal_value(
+            initial_value=initial,
+            final_value=float(getattr(raw_b1_distill, "final_coef", initial)),
+            start_update=int(getattr(raw_b1_distill, "start_updates", 0)),
+            end_update=int(getattr(raw_b1_distill, "end_updates", -1)),
+            update_count=int(update_count),
+        )
+    )
+
+
+def _counterfactual_positive_coef_for_next_update(training_config: Any, *, update_count: int) -> float:
+    counterfactual_positive = getattr(training_config, "counterfactual_positive", None)
+    if counterfactual_positive is None or not bool(getattr(counterfactual_positive, "enabled", False)):
+        return 0.0
+    initial = float(getattr(counterfactual_positive, "coef", 0.0))
+    return float(
+        linear_anneal_value(
+            initial_value=initial,
+            final_value=float(getattr(counterfactual_positive, "final_coef", initial)),
+            start_update=int(getattr(counterfactual_positive, "start_updates", 0)),
+            end_update=int(getattr(counterfactual_positive, "end_updates", -1)),
+            update_count=int(update_count),
+        )
+    )
+
+
 def _public_heuristic_logit_bias_scale_for_next_update(model_config: Any, *, update_count: int) -> float:
     return float(
         linear_anneal_value(
@@ -2156,6 +3517,17 @@ def _public_heuristic_logit_bias_scale_for_next_update(model_config: Any, *, upd
     )
 
 
+def _public_heuristic_actor_logit_bias_scale_for_next_update(
+    model_config: Any,
+    *,
+    learner_bias_scale: float,
+) -> float:
+    configured_actor_scale = float(getattr(model_config, "public_heuristic_actor_logit_bias_scale", -1.0))
+    if configured_actor_scale < 0.0:
+        return float(learner_bias_scale)
+    return configured_actor_scale
+
+
 def _apply_guidance_schedule_for_next_update(
     *,
     learner: ImpalaLearner,
@@ -2169,22 +3541,46 @@ def _apply_guidance_schedule_for_next_update(
         teacher_coef = _teacher_public_heuristic_coef_for_next_update(training_config, update_count=update_count)
         learner.set_teacher_aux_coefs(public_heuristic=teacher_coef)
         metrics["teacher_public_heuristic_coef_active"] = float(teacher_coef)
+        reference_top_action_coef = _reference_policy_top_action_bc_coef_for_next_update(
+            training_config,
+            update_count=update_count,
+        )
+        reference_family_coef = _reference_policy_top_action_family_bc_coef_for_next_update(
+            training_config,
+            update_count=update_count,
+        )
+        learner.set_reference_policy_bc_coefs(
+            top_action=reference_top_action_coef,
+            top_action_family=reference_family_coef,
+        )
+        raw_b1_distill_coef = _raw_b1_distill_coef_for_next_update(training_config, update_count=update_count)
+        if hasattr(learner, "set_raw_b1_distill_coef"):
+            learner.set_raw_b1_distill_coef(raw_b1_distill_coef)
+        counterfactual_positive_coef = _counterfactual_positive_coef_for_next_update(
+            training_config,
+            update_count=update_count,
+        )
+        if hasattr(learner, "set_counterfactual_positive_coef"):
+            learner.set_counterfactual_positive_coef(counterfactual_positive_coef)
+        metrics["reference_policy_top_action_bc_coef_active"] = float(reference_top_action_coef)
+        metrics["reference_policy_top_action_family_bc_coef_active"] = float(reference_family_coef)
+        metrics["raw_b1_distill_coef_active"] = float(raw_b1_distill_coef)
+        metrics["counterfactual_positive_coef_active"] = float(counterfactual_positive_coef)
     model_config = stack.config.model
     if model is not None and model_config is not None:
         set_bias_scale = getattr(model, "set_public_heuristic_logit_bias_scale", None)
-        get_bias_scale = getattr(model, "get_public_heuristic_logit_bias_scale", None)
         if callable(set_bias_scale):
-            actor_bias_scale: float | None = None
-            if callable(get_bias_scale):
-                actor_bias_scale = float(get_bias_scale(scoring_mode="actor"))
             learner_bias_scale = _public_heuristic_logit_bias_scale_for_next_update(
                 model_config,
                 update_count=update_count,
             )
+            actor_bias_scale = _public_heuristic_actor_logit_bias_scale_for_next_update(
+                model_config,
+                learner_bias_scale=learner_bias_scale,
+            )
             set_bias_scale(learner_bias_scale, actor_value=actor_bias_scale)
             metrics["public_heuristic_logit_bias_scale_active"] = float(learner_bias_scale)
-            if actor_bias_scale is not None:
-                metrics["public_heuristic_actor_logit_bias_scale_active"] = float(actor_bias_scale)
+            metrics["public_heuristic_actor_logit_bias_scale_active"] = float(actor_bias_scale)
     return metrics
 
 
@@ -2295,11 +3691,17 @@ def _collect_training_batch(
     training_config: Any,
     rewards_config: Any,
 ) -> Any:
+    pass_with_nonpass_penalty = float(
+        getattr(getattr(rewards_config, "shaping", None), "pass_with_nonpass_penalty", 0.0)
+    )
+    if str(getattr(rewards_config, "objective", "")).strip().lower() == "terminal_only_pm1":
+        pass_with_nonpass_penalty = 0.0
     if algorithm in _IMPALA_ALGORITHMS:
         return runtime.collect_update_batch(
             gamma=float(rewards_config.gamma),
             truncation_reward=float(rewards_config.truncation.reward),
             truncation_bootstrap_value=bool(rewards_config.truncation.bootstrap_value),
+            pass_with_nonpass_penalty=pass_with_nonpass_penalty,
             vtrace_rho_bar=float(training_config.vtrace_rho_bar),
             vtrace_c_bar=float(training_config.vtrace_c_bar),
         )
@@ -2309,6 +3711,7 @@ def _collect_training_batch(
             gae_lambda=float(training_config.ppo_gae_lambda),
             truncation_reward=float(rewards_config.truncation.reward),
             truncation_bootstrap_value=bool(rewards_config.truncation.bootstrap_value),
+            pass_with_nonpass_penalty=pass_with_nonpass_penalty,
         )
     raise RuntimeError(f"Unsupported training.algorithm: {algorithm}")
 
@@ -2486,20 +3889,63 @@ def _resolve_symbolic_promotion_anchor_policy_id(
     anchor_name: str,
     *,
     registry: SnapshotRegistry,
+    promotion_gate_enabled: bool = False,
 ) -> str | None:
-    if anchor_name == "Latest champion snapshot":
-        champion_ids = registry.latest_champions(1)
+    if anchor_name in {"Latest champion snapshot", "Latest promoted champion snapshot"}:
+        champion_ids = registry.latest_active_champion_ids(
+            1,
+            exclude_policy_ids=_FIXED_OPPONENT_EXCLUSIONS,
+        )
         return None if not champion_ids else str(champion_ids[-1])
-    if anchor_name == "Previous champion snapshot":
-        champion_ids = registry.latest_champions(2)
+    if anchor_name in {"Previous champion snapshot", "Previous promoted champion snapshot"}:
+        champion_ids = registry.latest_active_champion_ids(
+            2,
+            exclude_policy_ids=_FIXED_OPPONENT_EXCLUSIONS,
+        )
         return None if len(champion_ids) < 2 else str(champion_ids[-2])
-    if anchor_name == "Latest recent snapshot":
-        recent_ids = registry.latest_ids(1)
+    if anchor_name in {"Latest recent snapshot", "Latest local candidate snapshot"}:
+        recent_ids = _true_local_recent_snapshot_ids(registry, promotion_gate_enabled=promotion_gate_enabled)
         return None if not recent_ids else str(recent_ids[-1])
-    if anchor_name == "Previous recent snapshot":
-        recent_ids = registry.latest_ids(2)
+    if anchor_name in {"Previous recent snapshot", "Previous local candidate snapshot"}:
+        recent_ids = _true_local_recent_snapshot_ids(registry, promotion_gate_enabled=promotion_gate_enabled)
         return None if len(recent_ids) < 2 else str(recent_ids[-2])
+    if anchor_name == "Latest imported seed history snapshot":
+        seed_ids = registry.latest_seed_history_ids(
+            1,
+            exclude_rejected=True,
+            exclude_policy_ids=_FIXED_OPPONENT_EXCLUSIONS,
+        )
+        return None if not seed_ids else str(seed_ids[-1])
+    if anchor_name == "Previous imported seed history snapshot":
+        seed_ids = registry.latest_seed_history_ids(
+            2,
+            exclude_rejected=True,
+            exclude_policy_ids=_FIXED_OPPONENT_EXCLUSIONS,
+        )
+        return None if len(seed_ids) < 2 else str(seed_ids[-2])
     return None
+
+
+def _true_local_recent_snapshot_ids(
+    registry: SnapshotRegistry,
+    *,
+    promotion_gate_enabled: bool = False,
+) -> tuple[str, ...]:
+    if promotion_gate_enabled:
+        return tuple(
+            registry.latest_active_champion_ids(
+                len(getattr(registry, "champion_snapshots", ())),
+                exclude_policy_ids=_FIXED_OPPONENT_EXCLUSIONS,
+            )
+        )
+    return tuple(
+        registry.latest_local_candidate_ids(
+            len(getattr(registry, "snapshots", ())),
+            include_league_import=True,
+            exclude_rejected=True,
+            exclude_policy_ids=_FIXED_OPPONENT_EXCLUSIONS,
+        )
+    )
 
 
 def _build_heuristic_public_policy(
@@ -2602,6 +4048,67 @@ def _import_noleague_baseline_anchor(
     return weights_path, weights_sha256, int(source_snapshot.update)
 
 
+def _attach_reference_policy_model_if_configured(
+    *,
+    learner: ImpalaLearner | PpoLiteLearner,
+    training_config: Any,
+    training_paths: TrainingPaths,
+    model_config: Any,
+    observation_dim: int,
+    action_dim: int,
+    observation_spec: Mapping[str, Any] | None,
+    spec_bundle: Mapping[str, Any],
+    device: torch.device,
+) -> None:
+    if not isinstance(learner, ImpalaLearner):
+        return
+    coef = float(getattr(training_config, "reference_policy_top_action_bc_coef", 0.0))
+    family_coef = float(getattr(training_config, "reference_policy_top_action_family_bc_coef", 0.0))
+    raw_b1_distill = getattr(training_config, "raw_b1_distill", None)
+    raw_b1_distill_enabled = bool(getattr(raw_b1_distill, "enabled", False)) and (
+        float(getattr(raw_b1_distill, "coef", 0.0)) != 0.0
+        or float(getattr(raw_b1_distill, "final_coef", 0.0)) != 0.0
+    )
+    if coef == 0.0 and family_coef == 0.0 and not raw_b1_distill_enabled:
+        return
+    policy_id = str(getattr(training_config, "reference_policy_id", "") or "").strip()
+    if raw_b1_distill_enabled:
+        raw_policy_id = str(getattr(raw_b1_distill, "teacher_policy_id", "") or "").strip()
+        if raw_policy_id:
+            if policy_id and raw_policy_id != policy_id and (coef != 0.0 or family_coef != 0.0):
+                raise ValueError(
+                    "training.raw_b1_distill.teacher_policy_id must match training.reference_policy_id "
+                    "when both reference BC and raw B1 distill are enabled"
+                )
+            policy_id = raw_policy_id
+    if not policy_id:
+        policy_id = _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID
+    weights_path = training_paths.snapshots_dir / policy_id / SNAPSHOT_WEIGHTS_FILENAME
+    if not weights_path.is_file():
+        raise FileNotFoundError(f"reference policy weights not found for policy_id={policy_id!r}: {weights_path}")
+    payload = torch.load(weights_path, map_location=device, weights_only=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("model_state_dict"), dict):
+        raise RuntimeError(f"reference policy weights payload is missing model_state_dict: {weights_path}")
+    reference_model = build_policy_value_model(
+        observation_dim=observation_dim,
+        config=model_config,
+        action_dim=action_dim,
+        observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
+    ).to(device)
+    reference_model.load_state_dict(payload["model_state_dict"])
+    _restore_model_guidance_from_payload(reference_model, payload)
+    reference_model.eval()
+    for parameter in reference_model.parameters():
+        parameter.requires_grad_(False)
+    learner.reference_policy_model = reference_model
+    print(
+        "Attached frozen reference policy: "
+        f"policy_id={policy_id} coef={coef:g} family_coef={family_coef:g} "
+        f"raw_b1_distill={raw_b1_distill_enabled} weights={weights_path}"
+    )
+
+
 def _validate_seed_snapshot_import_contract(
     *,
     source_run_dir: Path,
@@ -2610,6 +4117,19 @@ def _validate_seed_snapshot_import_contract(
     expected_config_canonical: dict[str, Any] | None,
     expected_spec_hash256: str | None,
 ) -> None:
+    def _model_section_for_contract(section: Any) -> Any:
+        if not isinstance(section, Mapping):
+            return section
+        normalized = dict(section)
+        # Snapshot guidance values are carried in weights.pt and restored per
+        # policy when the snapshot is loaded.
+        normalized.pop("public_heuristic_logit_bias_scale", None)
+        normalized.pop("public_heuristic_actor_logit_bias_scale", None)
+        normalized.pop("public_heuristic_logit_bias_start_updates", None)
+        normalized.pop("public_heuristic_logit_bias_end_updates", None)
+        normalized.pop("public_heuristic_logit_bias_final_scale", None)
+        return normalized
+
     source_layout = ArtifactLayout.from_run_dir(source_run_dir)
     manifest_path = source_layout.manifest_path
     source_manifest = (
@@ -2624,6 +4144,9 @@ def _validate_seed_snapshot_import_contract(
             expected_section = expected_config_sections.get(section_name)
             if source_section is None or expected_section is None:
                 continue
+            if section_name == "model":
+                source_section = _model_section_for_contract(source_section)
+                expected_section = _model_section_for_contract(expected_section)
             if source_section != expected_section:
                 raise RuntimeError(
                     f"Imported seed snapshot config does not match the current run for section={section_name!r}"
@@ -2663,6 +4186,36 @@ def _validate_seed_snapshot_import_contract(
             )
 
 
+def _validate_snapshot_tensor_contract(
+    *,
+    label: str,
+    source_path: Path,
+    payload: dict[str, Any],
+    expected_model_state_dict: dict[str, Any],
+) -> None:
+    source_model_state_dict = payload.get("model_state_dict")
+    if not isinstance(source_model_state_dict, dict):
+        raise RuntimeError(f"{label} weights payload is missing model_state_dict: {source_path}")
+    source_keys = set(source_model_state_dict)
+    expected_keys = set(expected_model_state_dict)
+    if source_keys != expected_keys:
+        missing = sorted(expected_keys - source_keys)
+        extra = sorted(source_keys - expected_keys)
+        raise RuntimeError(f"{label} model contract does not match the current run: missing_keys={missing} extra_keys={extra}")
+    for key in sorted(expected_keys):
+        source_value = source_model_state_dict[key]
+        expected_value = expected_model_state_dict[key]
+        if not isinstance(source_value, torch.Tensor) or not isinstance(expected_value, torch.Tensor):
+            continue
+        if tuple(source_value.shape) != tuple(expected_value.shape) or source_value.dtype != expected_value.dtype:
+            raise RuntimeError(
+                f"{label} tensor contract does not match the current run: "
+                f"key={key} source_shape={tuple(source_value.shape)} "
+                f"expected_shape={tuple(expected_value.shape)} "
+                f"source_dtype={source_value.dtype} expected_dtype={expected_value.dtype}"
+            )
+
+
 def _seed_snapshot_policy_id(*, source_run_dir: Path, source_policy_id: str) -> str:
     source_hash = hashlib.sha1(source_run_dir.as_posix().encode("utf-8")).hexdigest()[:10]
     safe_policy_id = str(source_policy_id).replace("/", "_").replace("\\", "_").strip()
@@ -2675,6 +4228,8 @@ def _import_seed_snapshot_pool(
     training_paths: TrainingPaths,
     run_dir: Path,
     seed_snapshot_run_dir: Path,
+    max_update: int | None = None,
+    exclude_source_policy_ids: Sequence[str] = (),
     expected_model_state_dict: dict[str, Any],
     expected_config_canonical: dict[str, Any] | None,
     expected_spec_hash256: str | None,
@@ -2687,10 +4242,13 @@ def _import_seed_snapshot_pool(
             f"Could not resolve a snapshot registry in the seed snapshot run: {source_registry_path}"
         )
     source_registry = SnapshotRegistry.load(source_registry_path)
+    excluded_source_policy_ids = {str(policy_id).strip() for policy_id in exclude_source_policy_ids}
     source_snapshots = [
         snapshot
         for snapshot in source_registry.snapshots
         if snapshot.policy_id not in _promotion_anchor_policy_id_candidates(_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME)
+        and snapshot.policy_id not in excluded_source_policy_ids
+        and (max_update is None or int(snapshot.update) <= int(max_update))
     ]
     if not source_snapshots:
         return []
@@ -2731,6 +4289,7 @@ def _import_seed_snapshot_pool(
         imported_payload["imported_from_policy_id"] = source_snapshot.policy_id
         imported_payload["imported_from_snapshot_path"] = source_snapshot.path
         imported_payload["seeded_from_external_registry"] = True
+        imported_payload["source_was_champion"] = source_snapshot.policy_id in source_champions
         torch.save(imported_payload, weights_path)
         weights_sha256 = _sha256_file(weights_path)
         _write_json_file(
@@ -2744,6 +4303,7 @@ def _import_seed_snapshot_pool(
                 "imported_from_run_dir": source_run_dir.as_posix(),
                 "imported_from_policy_id": source_snapshot.policy_id,
                 "imported_from_snapshot_path": source_snapshot.path,
+                "source_was_champion": source_snapshot.policy_id in source_champions,
             },
         )
         registry.add_snapshot(
@@ -2751,9 +4311,8 @@ def _import_seed_snapshot_pool(
             update=int(source_snapshot.update),
             weights_sha256=weights_sha256,
             path=weights_path.relative_to(run_dir).as_posix(),
+            source_kind="seed_import",
         )
-        if source_snapshot.policy_id in source_champions:
-            registry.add_champion(imported_policy_id)
         existing_policy_ids.add(imported_policy_id)
         imported_policy_ids.append(imported_policy_id)
 
@@ -2766,6 +4325,150 @@ def _import_seed_snapshot_pool(
         )
         print(
             "Imported seeded snapshot pool: "
+            f"count={len(imported_policy_ids)} "
+            f"source_run_dir={source_run_dir.as_posix()}"
+        )
+    return imported_policy_ids
+
+
+def _source_snapshot_is_resume_league_snapshot(snapshot: SnapshotMeta, *, rejected_policy_ids: set[str]) -> bool:
+    policy_id = str(snapshot.policy_id).strip()
+    if (
+        not policy_id
+        or policy_id in rejected_policy_ids
+        or policy_id in _FIXED_OPPONENT_EXCLUSIONS
+        or policy_id.startswith("seed_")
+    ):
+        return False
+    source_kind = str(getattr(snapshot, "source_kind", "local") or "local").strip().lower()
+    return source_kind not in {"seed_import", "baseline_anchor"}
+
+
+def _validate_existing_resume_league_import(
+    *,
+    training_paths: TrainingPaths,
+    source_run_dir: Path,
+    source_snapshot: SnapshotMeta,
+) -> None:
+    policy_id = str(source_snapshot.policy_id)
+    metadata_path = training_paths.snapshots_dir / policy_id / SNAPSHOT_METADATA_FILENAME
+    if not metadata_path.is_file():
+        raise RuntimeError(f"Existing resume league snapshot import is missing metadata: {metadata_path}")
+    metadata = _load_json_object(metadata_path, label="existing resume league snapshot metadata")
+    expected_source_run_dir = source_run_dir.as_posix()
+    if (
+        metadata.get("format") != "resume_league_snapshot_metadata_v1"
+        or str(metadata.get("imported_from_run_dir", "")) != expected_source_run_dir
+        or str(metadata.get("imported_from_policy_id", "")) != policy_id
+        or str(metadata.get("imported_from_snapshot_path", "")) != str(source_snapshot.path)
+    ):
+        raise RuntimeError(
+            "Existing resume league snapshot policy_id collision does not match the requested import: "
+            f"policy_id={policy_id} metadata_path={metadata_path}"
+        )
+
+
+def _import_resume_league_snapshot_pool(
+    *,
+    stack: StackConfig,
+    training_paths: TrainingPaths,
+    run_dir: Path,
+    resume_checkpoint_path: Path,
+    max_update: int,
+    expected_model_state_dict: dict[str, Any],
+) -> list[str]:
+    source_run_dir = _infer_run_dir_from_checkpoint_path(resume_checkpoint_path)
+    if source_run_dir is None or source_run_dir.resolve() == Path(run_dir).resolve():
+        return []
+    source_layout = ArtifactLayout.from_run_dir(source_run_dir)
+    source_registry_path = source_layout.training_snapshots_dir / REGISTRY_FILENAME
+    if not source_registry_path.is_file():
+        return []
+    source_registry = SnapshotRegistry.load(source_registry_path)
+    rejected_policy_ids = set(getattr(source_registry, "rejected_snapshots", ()))
+    source_snapshots = [
+        snapshot
+        for snapshot in source_registry.snapshots
+        if int(snapshot.update) <= int(max_update)
+        and _source_snapshot_is_resume_league_snapshot(snapshot, rejected_policy_ids=rejected_policy_ids)
+    ]
+    if not source_snapshots:
+        return []
+
+    registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+    registry = SnapshotRegistry.load(registry_path)
+    _sync_snapshot_registry_retention(stack, registry)
+    existing_policy_ids = {snapshot.policy_id for snapshot in registry.snapshots}
+    source_champions = set(source_registry.champion_snapshots)
+    imported_policy_ids: list[str] = []
+    for source_snapshot in source_snapshots:
+        policy_id = str(source_snapshot.policy_id)
+        if policy_id in existing_policy_ids:
+            _validate_existing_resume_league_import(
+                training_paths=training_paths,
+                source_run_dir=source_run_dir,
+                source_snapshot=source_snapshot,
+            )
+            imported_policy_ids.append(policy_id)
+            continue
+        source_weights_path = source_run_dir / source_snapshot.path
+        if not source_weights_path.is_file():
+            raise FileNotFoundError(f"Resolved resume league snapshot is missing weights: {source_weights_path}")
+        payload = torch.load(source_weights_path, map_location="cpu", weights_only=True)
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Imported resume league snapshot weights payload must be a dict: {source_weights_path}")
+        _validate_snapshot_tensor_contract(
+            label="Imported resume league snapshot",
+            source_path=source_weights_path,
+            payload=payload,
+            expected_model_state_dict=expected_model_state_dict,
+        )
+        snapshot_dir = training_paths.snapshots_dir / policy_id
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        weights_path = snapshot_dir / SNAPSHOT_WEIGHTS_FILENAME
+        imported_payload = dict(payload)
+        imported_payload["policy_id"] = policy_id
+        imported_payload["imported_from_run_dir"] = source_run_dir.as_posix()
+        imported_payload["imported_from_policy_id"] = source_snapshot.policy_id
+        imported_payload["imported_from_snapshot_path"] = source_snapshot.path
+        imported_payload["resumed_from_league_registry"] = True
+        torch.save(imported_payload, weights_path)
+        weights_sha256 = _sha256_file(weights_path)
+        _write_json_file(
+            snapshot_dir / SNAPSHOT_METADATA_FILENAME,
+            {
+                "format": "resume_league_snapshot_metadata_v1",
+                "policy_id": policy_id,
+                "update": int(source_snapshot.update),
+                "weights_path": snapshot_weights_relpath(policy_id),
+                "weights_sha256": weights_sha256,
+                "imported_from_run_dir": source_run_dir.as_posix(),
+                "imported_from_policy_id": source_snapshot.policy_id,
+                "imported_from_snapshot_path": source_snapshot.path,
+                "source_kind": str(getattr(source_snapshot, "source_kind", "local") or "local"),
+            },
+        )
+        registry.add_snapshot(
+            policy_id=policy_id,
+            update=int(source_snapshot.update),
+            weights_sha256=weights_sha256,
+            path=weights_path.relative_to(run_dir).as_posix(),
+            source_kind="league_import",
+        )
+        if source_snapshot.policy_id in source_champions:
+            registry.add_champion(policy_id)
+        existing_policy_ids.add(policy_id)
+        imported_policy_ids.append(policy_id)
+
+    if imported_policy_ids:
+        _save_snapshot_registry_with_retention(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=run_dir,
+            registry=registry,
+        )
+        print(
+            "Imported resume league snapshot pool: "
             f"count={len(imported_policy_ids)} "
             f"source_run_dir={source_run_dir.as_posix()}"
         )
@@ -2789,11 +4492,33 @@ def _ensure_noleague_baseline_anchor(
     league = stack.config.league
     training_config = stack.config.training
     experiment_role = _experiment_role(stack)
+    reference_policy_id = str(getattr(training_config, "reference_policy_id", "") or "").strip()
+    if not reference_policy_id:
+        reference_policy_id = _PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID
+    raw_b1_distill = getattr(training_config, "raw_b1_distill", None)
+    raw_b1_distill_enabled = bool(getattr(raw_b1_distill, "enabled", False)) and (
+        float(getattr(raw_b1_distill, "coef", 0.0)) != 0.0
+        or float(getattr(raw_b1_distill, "final_coef", 0.0)) != 0.0
+    )
+    raw_b1_distill_policy_id = str(getattr(raw_b1_distill, "teacher_policy_id", "") or "").strip()
+    reference_needs_b1_anchor = (
+        float(getattr(training_config, "reference_policy_top_action_bc_coef", 0.0)) != 0.0
+        or float(getattr(training_config, "reference_policy_top_action_family_bc_coef", 0.0)) != 0.0
+        or float(getattr(training_config, "b1_opponent_reference_policy_top_action_bc_coef", 0.0)) != 0.0
+        or raw_b1_distill_enabled
+    ) and reference_policy_id in _promotion_anchor_policy_id_candidates(_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME)
+    if raw_b1_distill_enabled and raw_b1_distill_policy_id:
+        reference_needs_b1_anchor = reference_needs_b1_anchor or (
+            raw_b1_distill_policy_id in _promotion_anchor_policy_id_candidates(_PROMOTION_GATE_NOLEAGUE_BASELINE_NAME)
+        )
     requires_anchor = bool(
-        league is not None
-        and league.enabled
-        and league.promotion_gate_enabled
-        and _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME in league.promotion_anchor_set_v1.required
+        reference_needs_b1_anchor
+        or (
+            league is not None
+            and league.enabled
+            and league.promotion_gate_enabled
+            and _PROMOTION_GATE_NOLEAGUE_BASELINE_NAME in league.promotion_anchor_set_v1.required
+        )
     )
     if not requires_anchor and not permit_current_run_alias:
         return None
@@ -2844,6 +4569,7 @@ def _ensure_noleague_baseline_anchor(
             update=int(imported_update),
             weights_sha256=weights_sha256,
             path=weights_path.relative_to(run_dir).as_posix(),
+            source_kind="baseline_anchor",
         )
         registry.pin_snapshot(_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID)
         _save_snapshot_registry_with_retention(
@@ -2901,6 +4627,7 @@ def _ensure_noleague_baseline_anchor(
         update=resolved_update,
         weights_sha256=weights_sha256,
         path=weights_path.relative_to(run_dir).as_posix(),
+        source_kind="baseline_anchor",
     )
     registry.pin_snapshot(_PROMOTION_GATE_NOLEAGUE_BASELINE_POLICY_ID)
     _save_snapshot_registry_with_retention(
@@ -2935,9 +4662,14 @@ def _resolve_promotion_anchor_policy_ids(
         *league.promotion_anchor_set_v1.optional_if_available,
     ]
     required_names = set(league.promotion_anchor_set_v1.required)
+    promotion_gate_enabled = bool(getattr(league, "promotion_gate_enabled", False))
 
     for anchor_name in anchor_names:
-        policy_id = _resolve_symbolic_promotion_anchor_policy_id(anchor_name, registry=registry)
+        policy_id = _resolve_symbolic_promotion_anchor_policy_id(
+            anchor_name,
+            registry=registry,
+            promotion_gate_enabled=promotion_gate_enabled,
+        )
         if policy_id is None:
             candidates = _promotion_anchor_policy_id_candidates(anchor_name)
             policy_id = next((candidate for candidate in candidates if candidate in available_policy_ids), None)
@@ -2958,6 +4690,21 @@ def _snapshot_meta_by_policy_id(registry: SnapshotRegistry) -> dict[str, Any]:
     return {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
 
 
+def _get_cached_eval_snapshot_model(cache_key: tuple[Any, ...]) -> PolicyValueModel | None:
+    cached_model = _EVAL_SNAPSHOT_MODEL_CACHE.get(cache_key)
+    if cached_model is not None:
+        _EVAL_SNAPSHOT_MODEL_CACHE.move_to_end(cache_key)
+        cached_model.eval()
+    return cached_model
+
+
+def _remember_eval_snapshot_model(cache_key: tuple[Any, ...], eval_model: PolicyValueModel) -> None:
+    _EVAL_SNAPSHOT_MODEL_CACHE[cache_key] = eval_model
+    _EVAL_SNAPSHOT_MODEL_CACHE.move_to_end(cache_key)
+    while len(_EVAL_SNAPSHOT_MODEL_CACHE) > _EVAL_SNAPSHOT_MODEL_CACHE_MAX_ENTRIES:
+        _EVAL_SNAPSHOT_MODEL_CACHE.popitem(last=False)
+
+
 def _load_snapshot_eval_model(
     *,
     run_dir: Path,
@@ -2969,7 +4716,22 @@ def _load_snapshot_eval_model(
     observation_spec: dict[str, Any] | None = None,
     spec_bundle: dict[str, Any] | None = None,
 ) -> PolicyValueModel:
-    payload = torch.load(run_dir / snapshot_path, map_location="cpu", weights_only=True)
+    resolved_snapshot_path = (run_dir / snapshot_path).resolve()
+    stat = resolved_snapshot_path.stat()
+    resolved_eval_device = _resolve_eval_device(stack, eval_device=eval_device)
+    cache_key = (
+        str(resolved_snapshot_path),
+        int(stat.st_mtime_ns),
+        int(stat.st_size),
+        str(resolved_eval_device),
+        int(observation_dim),
+        int(action_dim),
+    )
+    cached_model = _get_cached_eval_snapshot_model(cache_key)
+    if cached_model is not None:
+        return cached_model
+
+    payload = torch.load(resolved_snapshot_path, map_location="cpu", weights_only=True)
     model_state_dict = payload.get("model_state_dict")
     if not isinstance(model_state_dict, dict):
         raise RuntimeError(f"Snapshot weights payload missing model_state_dict: {snapshot_path}")
@@ -2978,7 +4740,6 @@ def _load_snapshot_eval_model(
     if model_config is None:
         raise RuntimeError("The locked stack is missing the model config block")
 
-    resolved_eval_device = _resolve_eval_device(stack, eval_device=eval_device)
     eval_model = build_policy_value_model(
         observation_dim=observation_dim,
         config=model_config,
@@ -2991,6 +4752,7 @@ def _load_snapshot_eval_model(
     )
     _restore_model_guidance_from_payload(eval_model, payload)
     eval_model.eval()
+    _remember_eval_snapshot_model(cache_key, eval_model)
     return eval_model
 
 
@@ -3056,13 +4818,16 @@ class _PromotionGateRunner:
         self._heuristic_policies = dict(heuristic_policies)
         self._baseline_logits = np.zeros((action_dim,), dtype=np.float32)
         self._device = _resolve_eval_device(stack, eval_device=eval_device)
+        self._persistent_env: DecisionBoundaryEnv | None = None
+
+    def close(self) -> None:
+        env = self._persistent_env
+        self._persistent_env = None
+        if env is not None:
+            env.close()
 
     def run_game(self, scheduled_game: ScheduledGame):
-        env = _build_ids_eval_env(
-            self.stack,
-            seed=scheduled_game.episode_seed,
-            pass_action_id=self.pass_action_id,
-        )
+        env = self._env_for_game(seed=scheduled_game.episode_seed)
         seat_hidden = {
             seat: self._initial_hidden(scheduled_game.seat0_policy_id if seat == 0 else scheduled_game.seat1_policy_id)
             for seat in (0, 1)
@@ -3100,7 +4865,16 @@ class _PromotionGateRunner:
                 batch = env.step(np.asarray([action], dtype=np.uint32))
                 self._abort_on_fault(batch)
         finally:
-            env.close()
+            pass
+
+    def _env_for_game(self, *, seed: int) -> DecisionBoundaryEnv:
+        if self._persistent_env is None:
+            self._persistent_env = _build_ids_eval_env(
+                self.stack,
+                seed=seed,
+                pass_action_id=self.pass_action_id,
+            )
+        return self._persistent_env
 
     def _initial_hidden(self, policy_id: str) -> torch.Tensor | None:
         model = self._policy_models.get(policy_id)
@@ -3194,6 +4968,129 @@ def _validate_periodic_dev_eval_contract(stack: StackConfig) -> Any:
 def _resolve_repo_path(root: Path, path_text: str) -> Path:
     path = Path(path_text)
     return path if path.is_absolute() else root / path
+
+
+def _action_family_ids_from_spec(*, action_dim: int, spec_bundle: Mapping[str, Any]) -> tuple[torch.Tensor | None, int]:
+    try:
+        catalog = ActionCatalog.from_spec_bundle(spec_bundle)
+    except Exception:
+        return None, 0
+    family_names = tuple(family.name for family in catalog.families)
+    family_index = {name: index for index, name in enumerate(family_names)}
+    ids = torch.full((int(action_dim),), -1, dtype=torch.long)
+    for action_id in range(int(action_dim)):
+        try:
+            decoded = catalog.decode(action_id)
+        except Exception:
+            continue
+        ids[action_id] = int(family_index.get(decoded.family, -1))
+    return ids, len(family_names)
+
+
+def _load_main_residual_base_model(
+    *,
+    stack: StackConfig,
+    checkpoint_path: Path,
+    observation_dim: int,
+    action_dim: int,
+    observation_spec: Mapping[str, Any] | None,
+    spec_bundle: Mapping[str, Any],
+    device: torch.device,
+) -> PolicyValueModel:
+    payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("model_state_dict"), dict):
+        raise RuntimeError(f"main residual base checkpoint is missing model_state_dict: {checkpoint_path}")
+    model_config = stack.config.model
+    if model_config is None:
+        raise RuntimeError("main residual base model requires stack.config.model")
+    base_model = build_policy_value_model(
+        observation_dim=observation_dim,
+        config=model_config,
+        action_dim=action_dim,
+        observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
+    ).to(device)
+    base_model.load_state_dict(payload["model_state_dict"])
+    _restore_model_guidance_from_payload(base_model, payload)
+    base_model.eval()
+    for parameter in base_model.parameters():
+        parameter.requires_grad_(False)
+    return base_model
+
+
+def _maybe_build_main_residual_model(
+    *,
+    stack: StackConfig,
+    observation_dim: int,
+    action_dim: int,
+    observation_spec: Mapping[str, Any] | None,
+    spec_bundle: Mapping[str, Any],
+    device: torch.device,
+) -> nn.Module | None:
+    training_config = stack.config.training
+    if training_config is None:
+        return None
+    residual_config = getattr(training_config, "main_residual_policy", None)
+    if residual_config is None or not bool(getattr(residual_config, "enabled", False)):
+        return None
+    checkpoint_path = _resolve_repo_path(stack.root, str(residual_config.base_snapshot_path))
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"training.main_residual_policy.base_snapshot_path not found: {checkpoint_path}")
+    base_model = _load_main_residual_base_model(
+        stack=stack,
+        checkpoint_path=checkpoint_path,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
+        device=device,
+    )
+    set_bias = getattr(base_model, "set_public_heuristic_logit_bias_scale", None)
+    if callable(set_bias):
+        scale = float(getattr(residual_config, "public_heuristic_bias_scale", 1.0))
+        set_bias(scale, actor_value=scale)
+    initial_state_path_text = str(getattr(residual_config, "initial_residual_state_path", "") or "").strip()
+    if initial_state_path_text:
+        initial_state_path = _resolve_repo_path(stack.root, initial_state_path_text)
+        if not initial_state_path.is_file():
+            raise FileNotFoundError(
+                f"training.main_residual_policy.initial_residual_state_path not found: {initial_state_path}"
+            )
+        residual = load_frozen_stored_logit_residual(initial_state_path, device=device)
+        if int(residual.action_dim) != int(action_dim):
+            raise RuntimeError(
+                "training.main_residual_policy.initial_residual_state_path action_dim mismatch: "
+                f"expected {action_dim}, got {residual.action_dim}"
+            )
+        residual.alpha = float(getattr(residual_config, "alpha", residual.alpha))
+        residual.train()
+    else:
+        action_family_ids: torch.Tensor | None = None
+        family_count = 0
+        if str(getattr(residual_config, "residual_mode", "plain")) == "family_gated":
+            action_family_ids, family_count = _action_family_ids_from_spec(
+                action_dim=action_dim,
+                spec_bundle=spec_bundle,
+            )
+        residual = FrozenStoredLogitResidual(
+            obs_dim=observation_dim,
+            action_dim=action_dim,
+            hidden_dim=int(getattr(residual_config, "hidden_dim", 256)),
+            alpha=float(getattr(residual_config, "alpha", 0.1)),
+            residual_mode=str(getattr(residual_config, "residual_mode", "plain")),
+            action_family_ids=action_family_ids,
+            family_count=family_count,
+            gate_bias=float(getattr(residual_config, "gate_bias", 0.0)),
+        ).to(device)
+    wrapper = TrainableLiveFrozenB1Residual(base_model=base_model, residual_probe=residual).to(device)
+    print(
+        "Enabled trainable main residual policy: "
+        f"base={checkpoint_path} alpha={residual.alpha:g} "
+        f"hidden_dim={int(getattr(residual_config, 'hidden_dim', 256))} "
+        f"mode={residual.residual_mode} "
+        f"initial_state={initial_state_path_text or '<zero>'}"
+    )
+    return wrapper
 
 
 def _resolve_periodic_dev_eval_seed_file(stack: StackConfig) -> tuple[Path, dict[str, str]]:
@@ -3622,12 +5519,10 @@ def _persist_periodic_dev_eval_summary(
         return
     path = _periodic_dev_eval_summaries_path(training_paths)
     summaries = _load_json_object(path, label="periodic dev-eval summaries") if path.is_file() else {}
-    summaries[focal_policy_id] = {
-        "aggregate_score": float(payload.get("aggregate_score", 0.0)),
-        "anchor_scores": dict(cast(Mapping[str, Any], payload.get("anchor_scores", {}))),
-        "update_count": int(payload.get("update_count", 0)),
-        "policy_version": int(payload.get("policy_version", 0)),
-    }
+    summaries[focal_policy_id] = _build_periodic_dev_eval_summary_record(
+        payload=payload,
+        prior_summaries=summaries,
+    )
     _write_json(path, summaries)
 
 
@@ -3672,10 +5567,13 @@ def _publish_best_checkpoint_from_dev_eval(
     best_record = tracker.get("best")
     if not isinstance(best_record, Mapping):
         best_record = None
-    should_update_best = best_record is None or _should_promote_best_checkpoint(
-        existing_record=cast(Mapping[str, Any], best_record),
-        candidate_kind=candidate_kind,
-        candidate_value=candidate_value,
+    should_update_best = candidate_kind is not None and (
+        best_record is None
+        or _should_promote_best_checkpoint(
+            existing_record=cast(Mapping[str, Any], best_record),
+            candidate_kind=candidate_kind,
+            candidate_value=candidate_value,
+        )
     )
     if should_update_best:
         shutil.copy2(checkpoint_path, training_paths.best_checkpoint_path)
@@ -3689,7 +5587,16 @@ def _publish_best_checkpoint_from_dev_eval(
             metric_kind=candidate_kind,
             metric_value=candidate_value,
         )
-        _write_checkpoint_tracker(training_paths, tracker)
+    _update_secondary_b2_checkpoint_record(
+        tracker=tracker,
+        stack=stack,
+        artifacts=artifacts,
+        source_checkpoint_path=checkpoint_path,
+        update_count=int(update_count),
+        policy_version=int(policy_version),
+        dev_eval_summary=dev_eval_summary,
+    )
+    _write_checkpoint_tracker(training_paths, tracker)
     return tracker
 
 
@@ -3876,6 +5783,8 @@ def _maybe_rollback_to_best_checkpoint(
     checkpoint_guard = curriculum.checkpoint_guard
     if not checkpoint_guard.enabled or dev_eval_summary is None:
         return None
+    if not _dev_eval_is_authoritative(dev_eval_summary):
+        return None
     if last_rollback_update is not None and (int(learner.update_count) - int(last_rollback_update)) < int(
         checkpoint_guard.cooldown_updates
     ):
@@ -3905,6 +5814,8 @@ def _maybe_rollback_to_best_checkpoint(
     if best_score < float(checkpoint_guard.min_best_score):
         return None
 
+    pre_rollback_update_count = int(learner.update_count)
+    pre_rollback_policy_version = int(learner.get_policy_version())
     confidence = _dev_eval_confidence_stats(dev_eval_summary)
     rollback_reasons: list[str] = []
     if current_score <= best_score - float(checkpoint_guard.rollback_score_margin):
@@ -3914,7 +5825,11 @@ def _maybe_rollback_to_best_checkpoint(
     ):
         rollback_reasons.append("truncation")
     max_prob_lt_half = confidence["max_prob_lt_half"]
-    if max_prob_lt_half is not None and (float(max_prob_lt_half) >= float(checkpoint_guard.rollback_max_prob_lt_half)):
+    if (
+        current_score < best_score
+        and max_prob_lt_half is not None
+        and (float(max_prob_lt_half) >= float(checkpoint_guard.rollback_max_prob_lt_half))
+    ):
         rollback_reasons.append("confidence")
     if not rollback_reasons:
         return None
@@ -3928,8 +5843,15 @@ def _maybe_rollback_to_best_checkpoint(
         device=device,
         expected_spec_hash256=spec_hash256,
         algorithm=algorithm,
+        restore_counters=False,
     )
+    learner.update_count = pre_rollback_update_count
+    learner.policy_version = max(int(learner.get_policy_version()), pre_rollback_policy_version)
     demoted_champions = _demote_registry_champions_newer_than(
+        training_paths,
+        update_count=int(best_update_count),
+    )
+    rejected_snapshots = _reject_registry_snapshots_newer_than(
         training_paths,
         update_count=int(best_update_count),
     )
@@ -3956,6 +5878,7 @@ def _maybe_rollback_to_best_checkpoint(
         "action": "rollback_to_best",
         "update_count": int(learner.update_count),
         "policy_version": int(learner.get_policy_version()),
+        "restored_weight_update_count": int(best_update_count),
         "current_score": current_score,
         "best_score": best_score,
         "best_update_count": int(best_update_count),
@@ -3973,6 +5896,7 @@ def _maybe_rollback_to_best_checkpoint(
         "snapshot_apply_latency_ms": publish_metrics.get("snapshot_apply_latency_ms", 0.0),
         "latest_loss": None if latest_metrics is None else latest_metrics.get("loss"),
         "demoted_champions": demoted_champions,
+        "rejected_snapshots": rejected_snapshots,
     }
     _append_checkpoint_guard_event(training_paths, payload)
     return payload
@@ -3993,6 +5917,8 @@ def _maybe_finalize_from_best_checkpoint(
 ) -> dict[str, Any] | None:
     curriculum = stack.config.curriculum
     if curriculum is None or not curriculum.checkpoint_guard.enabled:
+        return None
+    if dev_eval_summary is not None and not _dev_eval_is_authoritative(dev_eval_summary):
         return None
     best_record = _best_checkpoint_record(training_paths)
     if best_record is None:
@@ -4025,6 +5951,10 @@ def _maybe_finalize_from_best_checkpoint(
         training_paths,
         update_count=int(best_update_count),
     )
+    rejected_snapshots = _reject_registry_snapshots_newer_than(
+        training_paths,
+        update_count=int(best_update_count),
+    )
     runtime.reset_outcome_tracker()
     runtime.refresh_opponent_pool()
     tracker = _load_checkpoint_tracker(training_paths)
@@ -4053,6 +5983,7 @@ def _maybe_finalize_from_best_checkpoint(
         "best_checkpoint_path": _relative_path_text(best_checkpoint_path, root=artifacts.run_dir),
         "latest_checkpoint_path": _relative_path_text(training_paths.latest_checkpoint_path, root=artifacts.run_dir),
         "demoted_champions": demoted_champions,
+        "rejected_snapshots": rejected_snapshots,
     }
     _append_checkpoint_guard_event(training_paths, payload)
     return payload
@@ -4072,6 +6003,7 @@ def _resolved_periodic_dev_eval_worker_devices(
     normalized_explicit = tuple(device.strip() for device in explicit_worker_devices if str(device).strip())
     if normalized_explicit:
         device_pool = normalized_explicit
+        _validate_parallel_worker_device_pool(device_pool, source="periodic_dev_eval_parallel_worker_devices")
     else:
         normalized_eval_device = str(eval_device).strip().lower()
         if normalized_eval_device in {"auto", "cuda:auto"} and torch.cuda.is_available():
@@ -4092,11 +6024,29 @@ def _resolved_periodic_dev_eval_worker_devices(
                     device_pool = tuple(f"cuda:{index}" for index in range(torch.cuda.device_count())) or ("cpu",)
             else:
                 device_pool = tuple(f"cuda:{index}" for index in range(torch.cuda.device_count())) or ("cpu",)
-        elif normalized_eval_device.startswith("cuda:"):
-            device_pool = (str(eval_device).strip(),)
+        elif normalized_eval_device in {"auto", "cuda:auto"}:
+            device_pool = ("cpu",)
         else:
             device_pool = (str(eval_device).strip() or "cpu",)
+            _validate_parallel_worker_device_pool(device_pool, source="periodic_dev_eval eval_device")
     return tuple(device_pool[index % len(device_pool)] for index in range(parallel_workers))
+
+
+def _validate_parallel_worker_device_pool(device_pool: Sequence[str], *, source: str) -> None:
+    for device_text in device_pool:
+        try:
+            device = torch.device(str(device_text).strip())
+        except (RuntimeError, ValueError) as exc:
+            raise ValueError(f"{source} contains invalid device {device_text!r}") from exc
+        if device.type != "cuda":
+            continue
+        if not torch.cuda.is_available():
+            raise ValueError(f"{source} requested CUDA device {device_text!r}, but CUDA is not available")
+        device_count = int(torch.cuda.device_count())
+        if device.index is not None and device.index >= device_count:
+            raise ValueError(
+                f"{source} requested CUDA device {device_text!r}, but only {device_count} CUDA device(s) are available"
+            )
 
 
 def _shard_periodic_dev_eval_opponents(
@@ -4110,6 +6060,148 @@ def _shard_periodic_dev_eval_opponents(
     for index, opponent_spec in enumerate(opponent_specs):
         shards[index % shard_count].append(opponent_spec)
     return [shard for shard in shards if shard]
+
+
+def _periodic_dev_eval_duplicate_policy_ids(
+    opponent_specs: Sequence[PeriodicDevEvalOpponentSpec],
+) -> set[str]:
+    counts: dict[str, int] = {}
+    for spec in opponent_specs:
+        counts[spec.policy_id] = counts.get(spec.policy_id, 0) + 1
+    return {policy_id for policy_id, count in counts.items() if count > 1}
+
+
+def _periodic_dev_eval_matchup_dir(
+    *,
+    update_dir: Path,
+    opponent_spec: PeriodicDevEvalOpponentSpec,
+    duplicate_policy_ids: set[str],
+) -> Path:
+    if opponent_spec.policy_id not in duplicate_policy_ids:
+        return update_dir / opponent_spec.policy_id
+    display_hash = f"{stable_hash64(opponent_spec.display_name.encode('utf-8')):016x}"
+    return update_dir / f"{opponent_spec.policy_id}__{display_hash}"
+
+
+def _split_periodic_dev_eval_seed_blocks(
+    paired_seeds: Sequence[int],
+    *,
+    block_count: int,
+) -> list[tuple[tuple[int, int], ...]]:
+    if block_count < 1:
+        raise ValueError("periodic dev eval seed block_count must be >= 1")
+    indexed_seeds = tuple((index, int(seed)) for index, seed in enumerate(paired_seeds))
+    if not indexed_seeds:
+        return []
+    effective_block_count = min(int(block_count), len(indexed_seeds))
+    base_block_size, remainder = divmod(len(indexed_seeds), effective_block_count)
+    blocks: list[tuple[tuple[int, int], ...]] = []
+    start = 0
+    for block_index in range(effective_block_count):
+        block_size = base_block_size + (1 if block_index < remainder else 0)
+        blocks.append(tuple(indexed_seeds[start : start + block_size]))
+        start += block_size
+    return blocks
+
+
+def _build_periodic_dev_eval_seed_block_jobs(
+    *,
+    opponent_specs: Sequence[PeriodicDevEvalOpponentSpec],
+    paired_seeds: Sequence[int],
+    configured_parallel_workers: int,
+) -> list[PeriodicDevEvalSeedBlockJob]:
+    if configured_parallel_workers < 1:
+        raise ValueError("periodic dev eval configured_parallel_workers must be >= 1")
+    if not opponent_specs:
+        return []
+    per_opponent_block_count = max(
+        1,
+        min(
+            len(paired_seeds),
+            int(math.ceil(configured_parallel_workers / max(1, len(opponent_specs)))),
+        ),
+    )
+    seed_blocks = _split_periodic_dev_eval_seed_blocks(
+        paired_seeds,
+        block_count=per_opponent_block_count,
+    )
+    jobs: list[PeriodicDevEvalSeedBlockJob] = []
+    for opponent_index, opponent_spec in enumerate(opponent_specs):
+        for block_index, paired_seed_items in enumerate(seed_blocks):
+            jobs.append(
+                PeriodicDevEvalSeedBlockJob(
+                    opponent_index=opponent_index,
+                    block_index=block_index,
+                    opponent_spec=opponent_spec,
+                    paired_seed_items=paired_seed_items,
+                )
+            )
+    return jobs
+
+
+def _shard_periodic_dev_eval_seed_block_jobs(
+    *,
+    jobs: Sequence[PeriodicDevEvalSeedBlockJob],
+    shard_count: int,
+) -> list[list[PeriodicDevEvalSeedBlockJob]]:
+    if shard_count < 1:
+        raise ValueError("periodic dev eval seed-block shard_count must be >= 1")
+    shards: list[list[PeriodicDevEvalSeedBlockJob]] = [[] for _ in range(shard_count)]
+    for index, job in enumerate(jobs):
+        shards[index % shard_count].append(job)
+    return [shard for shard in shards if shard]
+
+
+def _periodic_dev_eval_schedule_for_seed_items(
+    *,
+    focal_policy_id: str,
+    opponent_policy_id: str,
+    paired_seed_items: Sequence[tuple[int, int]],
+) -> list[ScheduledGame]:
+    schedule: list[ScheduledGame] = []
+    for pair_index, raw_seed in paired_seed_items:
+        episode_seed = int(raw_seed)
+        schedule.append(
+            ScheduledGame(
+                pair_index=int(pair_index),
+                swap_index=0,
+                episode_index=int(pair_index) * 2,
+                episode_seed=episode_seed,
+                focal_policy_id=focal_policy_id,
+                opponent_policy_id=opponent_policy_id,
+                seat0_policy_id=focal_policy_id,
+                seat1_policy_id=opponent_policy_id,
+                focal_seat=0,
+            )
+        )
+        schedule.append(
+            ScheduledGame(
+                pair_index=int(pair_index),
+                swap_index=1,
+                episode_index=int(pair_index) * 2 + 1,
+                episode_seed=episode_seed,
+                focal_policy_id=focal_policy_id,
+                opponent_policy_id=opponent_policy_id,
+                seat0_policy_id=opponent_policy_id,
+                seat1_policy_id=focal_policy_id,
+                focal_seat=1,
+            )
+        )
+    return schedule
+
+
+def _sum_periodic_dev_eval_counter_payloads(counter_payloads: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    seconds: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for payload in counter_payloads:
+        for key, value in cast(Mapping[str, Any], payload.get("seconds", {})).items():
+            seconds[str(key)] = seconds.get(str(key), 0.0) + float(value)
+        for key, value in cast(Mapping[str, Any], payload.get("counts", {})).items():
+            counts[str(key)] = counts.get(str(key), 0) + int(value)
+    return {
+        "seconds": {key: float(value) for key, value in sorted(seconds.items())},
+        "counts": {key: int(value) for key, value in sorted(counts.items())},
+    }
 
 
 def _resolve_async_periodic_dev_eval_device(
@@ -4236,14 +6328,16 @@ def _resolved_promotion_gate_worker_devices(
     normalized_explicit = tuple(device.strip() for device in explicit_worker_devices if str(device).strip())
     if normalized_explicit:
         device_pool = normalized_explicit
+        _validate_parallel_worker_device_pool(device_pool, source="promotion_gate parallel_worker_devices")
     else:
         normalized_eval_device = str(eval_device).strip().lower()
         if normalized_eval_device in {"auto", "cuda:auto"} and torch.cuda.is_available():
             device_pool = tuple(f"cuda:{index}" for index in range(torch.cuda.device_count())) or ("cpu",)
-        elif normalized_eval_device.startswith("cuda:"):
-            device_pool = (str(eval_device).strip(),)
+        elif normalized_eval_device in {"auto", "cuda:auto"}:
+            device_pool = ("cpu",)
         else:
             device_pool = (str(eval_device).strip() or "cpu",)
+            _validate_parallel_worker_device_pool(device_pool, source="promotion_gate eval_device")
     return tuple(device_pool[index % len(device_pool)] for index in range(parallel_workers))
 
 
@@ -4257,6 +6351,54 @@ def _shard_promotion_gate_anchor_specs(
     shards: list[list[tuple[int, PeriodicDevEvalOpponentSpec]]] = [[] for _ in range(shard_count)]
     for index, anchor_spec in enumerate(anchor_specs):
         shards[index % shard_count].append((index, anchor_spec))
+    return [shard for shard in shards if shard]
+
+
+def _build_promotion_gate_seed_block_jobs(
+    *,
+    anchor_specs: Sequence[PeriodicDevEvalOpponentSpec],
+    paired_seeds: Sequence[int],
+    configured_parallel_workers: int,
+) -> list[PromotionGateSeedBlockJob]:
+    if configured_parallel_workers < 1:
+        raise ValueError("promotion gate configured_parallel_workers must be >= 1")
+    if not anchor_specs:
+        return []
+    per_anchor_block_count = max(
+        1,
+        min(
+            len(paired_seeds),
+            int(math.ceil(configured_parallel_workers / max(1, len(anchor_specs)))),
+        ),
+    )
+    seed_blocks = _split_periodic_dev_eval_seed_blocks(
+        paired_seeds,
+        block_count=per_anchor_block_count,
+    )
+    jobs: list[PromotionGateSeedBlockJob] = []
+    for anchor_index, anchor_spec in enumerate(anchor_specs):
+        for block_index, paired_seed_items in enumerate(seed_blocks):
+            jobs.append(
+                PromotionGateSeedBlockJob(
+                    anchor_index=anchor_index,
+                    block_index=block_index,
+                    anchor_spec=anchor_spec,
+                    paired_seed_items=paired_seed_items,
+                )
+            )
+    return jobs
+
+
+def _shard_promotion_gate_seed_block_jobs(
+    *,
+    jobs: Sequence[PromotionGateSeedBlockJob],
+    shard_count: int,
+) -> list[list[PromotionGateSeedBlockJob]]:
+    if shard_count < 1:
+        raise ValueError("promotion gate seed-block shard_count must be >= 1")
+    shards: list[list[PromotionGateSeedBlockJob]] = [[] for _ in range(shard_count)]
+    for index, job in enumerate(jobs):
+        shards[index % shard_count].append(job)
     return [shard for shard in shards if shard]
 
 
@@ -4281,6 +6423,7 @@ def _run_periodic_dev_eval_matchups_for_opponents(
     seed_file_sha256: str,
     opponent_specs: Sequence[PeriodicDevEvalOpponentSpec],
     eval_device_override: torch.device | str | None,
+    batched_inference_override: bool | None = None,
 ) -> list[dict[str, Any]]:
     evaluation = _validate_periodic_dev_eval_contract(stack)
     observation_dim, action_dim = _spec_dimensions(contract)
@@ -4305,8 +6448,17 @@ def _run_periodic_dev_eval_matchups_for_opponents(
         eval_device_override=eval_device_override,
     )
     matchup_results: list[dict[str, Any]] = []
-    for opponent_policy_id, display_name, opponent_model, heuristic_policy in opponents:
-        matchup_dir = update_dir / opponent_policy_id
+    duplicate_policy_ids = _periodic_dev_eval_duplicate_policy_ids(opponent_specs)
+    for opponent_spec, (opponent_policy_id, display_name, opponent_model, heuristic_policy) in zip(
+        opponent_specs,
+        opponents,
+        strict=True,
+    ):
+        matchup_dir = _periodic_dev_eval_matchup_dir(
+            update_dir=update_dir,
+            opponent_spec=opponent_spec,
+            duplicate_policy_ids=duplicate_policy_ids,
+        )
         runner = _PeriodicDevEvalRunner(
             stack=stack,
             model=eval_model,
@@ -4321,6 +6473,7 @@ def _run_periodic_dev_eval_matchups_for_opponents(
             require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
             eval_device=(evaluation.eval_device if eval_device_override is None else eval_device_override),
         )
+        matchup_started = time.perf_counter()
 
         seed_usage_payload = {
             "seed_set": "dev_eval",
@@ -4357,43 +6510,91 @@ def _run_periodic_dev_eval_matchups_for_opponents(
         }
         _write_json(matchup_dir / "seed_usage.json", seed_usage_payload)
 
-        matchup = run_seat_swapped_matchup(
-            focal_policy_id=focal_policy_id,
-            opponent_policy_id=opponent_policy_id,
-            paired_seeds=paired_seeds,
-            runner=runner,
-            episodes_path=matchup_dir / "episodes.jsonl",
-            run_id256=run_id256,
-            config_hash256=config_hash256,
-            spec_hash256=spec_hash256,
+        batched_inference_enabled = (
+            bool(getattr(evaluation, "periodic_dev_eval_batched_inference_enabled", False))
+            if batched_inference_override is None
+            else bool(batched_inference_override)
         )
+        try:
+            if batched_inference_enabled:
+                scheduled_games = build_seat_swapped_schedule(
+                    focal_policy_id=focal_policy_id,
+                    opponent_policy_id=opponent_policy_id,
+                    paired_seeds=paired_seeds,
+                )
+                completed_games = runner.run_scheduled_games_batched(scheduled_games)
+                records = tuple(
+                    record_completed_game(
+                        scheduled_game=scheduled_game,
+                        result=result,
+                        run_id256=run_id256,
+                        config_hash256=config_hash256,
+                        spec_hash256=spec_hash256,
+                    )
+                    for scheduled_game, result in completed_games
+                )
+                write_episodes_jsonl(matchup_dir / "episodes.jsonl", records)
+            else:
+                matchup = run_seat_swapped_matchup(
+                    focal_policy_id=focal_policy_id,
+                    opponent_policy_id=opponent_policy_id,
+                    paired_seeds=paired_seeds,
+                    runner=runner,
+                    episodes_path=matchup_dir / "episodes.jsonl",
+                    run_id256=run_id256,
+                    config_hash256=config_hash256,
+                    spec_hash256=spec_hash256,
+                )
+                records = matchup.records
+            runner_counters = runner.drain_runtime_counters()
+        finally:
+            close_runner = getattr(runner, "close", None)
+            if callable(close_runner):
+                close_runner()
+        matchup_wall_clock_seconds = max(0.0, time.perf_counter() - matchup_started)
 
         matchup_payload = build_matchup_export(
-            matchup.records,
+            records,
             stop_rules=evaluation.stop_rules,
             max_paired_seeds=len(paired_seeds),
             scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
             sample_count=1000,
             seed=_periodic_dev_eval_bootstrap_seed(update_count=update_count, policy_version=policy_version),
         )
+        seat_diagnostics = build_seat_advantage_diagnostics(records)
+        matchup_payload["seat_diagnostics"] = seat_diagnostics
         matchup_payload["evaluation_context"] = {
             "artifact_scope": artifact_scope,
             "update_count": update_count,
             "policy_version": policy_version,
             "checkpoint_path": _json_relative_path(checkpoint_path, root=run_dir),
+            "matchup_dir": _json_relative_path(matchup_dir, root=run_dir),
+            "episodes_path": _json_relative_path(matchup_dir / "episodes.jsonl", root=run_dir),
             "seed_usage_path": _json_relative_path(matchup_dir / "seed_usage.json", root=run_dir),
             "anchor_display_name": display_name,
+        }
+        matchup_payload["evaluation_runtime"] = {
+            "wall_clock_seconds": matchup_wall_clock_seconds,
+            "games_per_sec": float(len(records) / matchup_wall_clock_seconds)
+            if matchup_wall_clock_seconds > 0.0
+            else 0.0,
+            "game_count": int(len(records)),
+            "persistent_env_reuse": True,
+            "batched_model_inference": batched_inference_enabled,
+            "runner_counters": runner_counters,
         }
         write_matchup_summary_json(matchup_dir / "matchup_summary.json", matchup_payload)
         write_matchup_summary_csv(matchup_dir / "matchup_summary.csv", matchup_payload)
         write_matchup_diagnostics_json(
             matchup_dir / "diagnostics.json",
-            build_seat_advantage_diagnostics(matchup.records),
+            seat_diagnostics,
         )
         matchup_results.append(
             {
                 "policy_id": opponent_policy_id,
                 "display_name": display_name,
+                "matchup_dir": matchup_dir,
+                "episodes_path": matchup_dir / "episodes.jsonl",
                 "matchup_payload": matchup_payload,
             }
         )
@@ -4421,6 +6622,7 @@ def _run_periodic_dev_eval_matchup_worker(
     seed_file_sha256: str,
     opponent_specs: Sequence[PeriodicDevEvalOpponentSpec],
     eval_device_override: str,
+    batched_inference_override: bool | None = None,
 ) -> list[dict[str, Any]]:
     return _run_periodic_dev_eval_matchups_for_opponents(
         stack=stack,
@@ -4442,7 +6644,159 @@ def _run_periodic_dev_eval_matchup_worker(
         seed_file_sha256=seed_file_sha256,
         opponent_specs=opponent_specs,
         eval_device_override=eval_device_override,
+        batched_inference_override=batched_inference_override,
     )
+
+
+def _run_periodic_dev_eval_seed_block_worker(
+    *,
+    stack: StackConfig,
+    contract: SimulatorContract,
+    run_dir: Path,
+    checkpoint_path: Path,
+    focal_policy_id: str,
+    update_count: int,
+    run_id256: str,
+    config_hash256: str,
+    spec_hash256: str,
+    artifact_dir_name: str,
+    jobs: Sequence[PeriodicDevEvalSeedBlockJob],
+    eval_device_override: str,
+    worker_index: int,
+    batched_inference_override: bool | None = None,
+) -> list[dict[str, Any]]:
+    if not jobs:
+        return []
+    evaluation = _validate_periodic_dev_eval_contract(stack)
+    batched_inference_enabled = (
+        bool(getattr(evaluation, "periodic_dev_eval_batched_inference_enabled", False))
+        if batched_inference_override is None
+        else bool(batched_inference_override)
+    )
+    observation_dim, action_dim = _spec_dimensions(contract)
+    pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
+    update_dir = run_dir / "eval" / artifact_dir_name / f"update_{update_count}"
+    worker_artifact_dir = update_dir / "_seed_block_workers" / f"worker_{worker_index}"
+    eval_model = _load_checkpoint_eval_model(
+        checkpoint_path=checkpoint_path,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        stack=stack,
+        eval_device=(evaluation.eval_device if eval_device_override is None else eval_device_override),
+        observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
+        spec_bundle=cast(dict[str, Any] | None, contract.spec_bundle),
+    )
+
+    unique_specs: list[PeriodicDevEvalOpponentSpec] = []
+    unique_spec_keys: set[tuple[str, str, str, str | None, str | None]] = set()
+    for job in jobs:
+        key = (
+            job.opponent_spec.policy_id,
+            job.opponent_spec.display_name,
+            job.opponent_spec.kind,
+            job.opponent_spec.snapshot_path,
+            job.opponent_spec.heuristic_profile,
+        )
+        if key in unique_spec_keys:
+            continue
+        unique_spec_keys.add(key)
+        unique_specs.append(job.opponent_spec)
+
+    materialized = _materialize_periodic_dev_eval_opponents(
+        stack=stack,
+        contract=contract,
+        run_dir=run_dir,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        opponent_specs=tuple(unique_specs),
+        eval_device_override=eval_device_override,
+    )
+    opponent_by_key = {
+        (
+            spec.policy_id,
+            spec.display_name,
+            spec.kind,
+            spec.snapshot_path,
+            spec.heuristic_profile,
+        ): opponent
+        for spec, opponent in zip(unique_specs, materialized, strict=True)
+    }
+    runners: dict[tuple[str, str, str, str | None, str | None], _PeriodicDevEvalRunner] = {}
+    results: list[dict[str, Any]] = []
+    try:
+        for job in jobs:
+            key = (
+                job.opponent_spec.policy_id,
+                job.opponent_spec.display_name,
+                job.opponent_spec.kind,
+                job.opponent_spec.snapshot_path,
+                job.opponent_spec.heuristic_profile,
+            )
+            opponent_policy_id, display_name, opponent_model, heuristic_policy = opponent_by_key[key]
+            runner = runners.get(key)
+            if runner is None:
+                runner = _PeriodicDevEvalRunner(
+                    stack=stack,
+                    model=eval_model,
+                    opponent_policy_id=opponent_policy_id,
+                    opponent_model=opponent_model,
+                    heuristic_policy=heuristic_policy,
+                    observation_dim=observation_dim,
+                    action_dim=action_dim,
+                    pass_action_id=pass_action_id,
+                    artifact_dir=worker_artifact_dir / f"opponent_{job.opponent_index}",
+                    focal_policy_id=focal_policy_id,
+                    require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+                    eval_device=(evaluation.eval_device if eval_device_override is None else eval_device_override),
+                )
+                runners[key] = runner
+            block_started = time.perf_counter()
+            scheduled_games = _periodic_dev_eval_schedule_for_seed_items(
+                focal_policy_id=focal_policy_id,
+                opponent_policy_id=opponent_policy_id,
+                paired_seed_items=job.paired_seed_items,
+            )
+            if batched_inference_enabled:
+                completed_games = runner.run_scheduled_games_batched(scheduled_games)
+                records = tuple(
+                    record_completed_game(
+                        scheduled_game=scheduled_game,
+                        result=result,
+                        run_id256=run_id256,
+                        config_hash256=config_hash256,
+                        spec_hash256=spec_hash256,
+                    )
+                    for scheduled_game, result in completed_games
+                )
+            else:
+                records = tuple(
+                    record_completed_game(
+                        scheduled_game=scheduled_game,
+                        result=runner.run_game(scheduled_game),
+                        run_id256=run_id256,
+                        config_hash256=config_hash256,
+                        spec_hash256=spec_hash256,
+                    )
+                    for scheduled_game in scheduled_games
+                )
+            results.append(
+                {
+                    "opponent_index": int(job.opponent_index),
+                    "block_index": int(job.block_index),
+                    "policy_id": opponent_policy_id,
+                    "display_name": display_name,
+                    "paired_seed_items": tuple(job.paired_seed_items),
+                    "records": records,
+                    "wall_clock_seconds": max(0.0, time.perf_counter() - block_started),
+                    "runner_counters": runner.drain_runtime_counters(),
+                    "worker_index": int(worker_index),
+                    "worker_device": str(eval_device_override),
+                }
+            )
+    finally:
+        for runner in runners.values():
+            runner.close()
+    return results
 
 
 def _run_periodic_dev_eval_for_checkpoint(
@@ -4464,9 +6818,12 @@ def _run_periodic_dev_eval_for_checkpoint(
     artifact_dir_name: str = "dev_eval",
     artifact_scope: str = "periodic_dev_eval",
     paired_seeds_override: Sequence[int] | None = None,
+    batched_inference_override: bool | None = None,
+    process_pool_executor: ProcessPoolExecutor | None = None,
 ) -> dict[str, Any]:
     evaluation = _validate_periodic_dev_eval_contract(stack)
     seed_file, validated_sources, scheduled_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
+    eval_started = time.perf_counter()
     paired_seeds = (
         [int(seed) for seed in paired_seeds_override]
         if paired_seeds_override is not None
@@ -4474,6 +6831,11 @@ def _run_periodic_dev_eval_for_checkpoint(
     )
     if not paired_seeds:
         raise RuntimeError("Periodic dev eval requires at least one paired seed")
+    batched_inference_enabled = (
+        bool(getattr(evaluation, "periodic_dev_eval_batched_inference_enabled", False))
+        if batched_inference_override is None
+        else bool(batched_inference_override)
+    )
     observation_dim, action_dim = _spec_dimensions(contract)
     update_dir = run_dir / "eval" / artifact_dir_name / f"update_{update_count}"
     resolved_opponent_specs = opponent_specs
@@ -4496,53 +6858,185 @@ def _run_periodic_dev_eval_for_checkpoint(
         if parallel_worker_devices_override is None
         else parallel_worker_devices_override
     )
-    effective_parallel_workers = min(configured_parallel_workers, len(resolved_opponent_specs))
+    seed_block_jobs = _build_periodic_dev_eval_seed_block_jobs(
+        opponent_specs=resolved_opponent_specs,
+        paired_seeds=tuple(paired_seeds),
+        configured_parallel_workers=configured_parallel_workers,
+    )
+    effective_parallel_workers = min(configured_parallel_workers, max(1, len(seed_block_jobs)))
     matchup_results: list[dict[str, Any]]
     worker_devices: tuple[str, ...]
+    worker_devices = _resolved_periodic_dev_eval_worker_devices(
+        stack=stack,
+        parallel_workers=max(1, effective_parallel_workers),
+        explicit_worker_devices=explicit_parallel_devices,
+        eval_device=requested_eval_device,
+        learner_device=None,
+    )
     if effective_parallel_workers > 1:
-        worker_devices = _resolved_periodic_dev_eval_worker_devices(
-            stack=stack,
-            parallel_workers=effective_parallel_workers,
-            explicit_worker_devices=explicit_parallel_devices,
-            eval_device=requested_eval_device,
-            learner_device=None,
-        )
-        opponent_shards = _shard_periodic_dev_eval_opponents(
-            opponent_specs=resolved_opponent_specs,
+        job_shards = _shard_periodic_dev_eval_seed_block_jobs(
+            jobs=seed_block_jobs,
             shard_count=effective_parallel_workers,
         )
-        ctx = mp.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=len(opponent_shards), mp_context=ctx) as executor:
+        executor_context = (
+            nullcontext(process_pool_executor)
+            if process_pool_executor is not None
+            else ProcessPoolExecutor(max_workers=len(job_shards), mp_context=mp.get_context("spawn"))
+        )
+        with executor_context as executor:
+            assert executor is not None
             futures = [
                 executor.submit(
-                    _run_periodic_dev_eval_matchup_worker,
+                    _run_periodic_dev_eval_seed_block_worker,
                     stack=stack,
                     contract=contract,
                     run_dir=run_dir,
                     checkpoint_path=checkpoint_path,
                     focal_policy_id=focal_policy_id,
                     update_count=update_count,
-                    policy_version=policy_version,
                     run_id256=run_id256,
                     config_hash256=config_hash256,
                     spec_hash256=spec_hash256,
                     artifact_dir_name=artifact_dir_name,
-                    artifact_scope=artifact_scope,
-                    paired_seeds=tuple(paired_seeds),
-                    scheduled_paired_seed_count=len(scheduled_paired_seeds),
-                    validated_sources=validated_sources,
-                    seed_file=seed_file,
-                    seed_file_sha256=seed_file_sha256,
-                    opponent_specs=tuple(shard),
+                    jobs=tuple(shard),
                     eval_device_override=worker_devices[shard_index],
+                    worker_index=shard_index,
+                    batched_inference_override=batched_inference_enabled,
                 )
-                for shard_index, shard in enumerate(opponent_shards)
+                for shard_index, shard in enumerate(job_shards)
             ]
-            matchup_results = []
+            block_results: list[dict[str, Any]] = []
             for future in futures:
-                matchup_results.extend(future.result())
+                block_results.extend(future.result())
+
+        duplicate_policy_ids = _periodic_dev_eval_duplicate_policy_ids(resolved_opponent_specs)
+        block_results_by_opponent: dict[int, list[dict[str, Any]]] = {}
+        for block_result in block_results:
+            block_results_by_opponent.setdefault(int(block_result["opponent_index"]), []).append(block_result)
+        matchup_results = []
+        for opponent_index, opponent_spec in enumerate(resolved_opponent_specs):
+            opponent_blocks = sorted(
+                block_results_by_opponent.get(opponent_index, []),
+                key=lambda item: int(item["block_index"]),
+            )
+            if not opponent_blocks:
+                raise RuntimeError(f"Periodic dev eval produced no seed-block results for {opponent_spec.display_name}")
+            matchup_dir = _periodic_dev_eval_matchup_dir(
+                update_dir=update_dir,
+                opponent_spec=opponent_spec,
+                duplicate_policy_ids=duplicate_policy_ids,
+            )
+            records = tuple(
+                sorted(
+                    (
+                        record
+                        for block_result in opponent_blocks
+                        for record in cast(tuple[EvalGameRecord, ...], block_result["records"])
+                    ),
+                    key=lambda record: (record.pair_index, record.swap_index),
+                )
+            )
+            seed_usage_payload = {
+                "seed_set": "dev_eval",
+                "seed_file": {
+                    "path": _json_relative_path(seed_file, root=stack.root),
+                    "sha256": seed_file_sha256,
+                    "validated_sources": dict(validated_sources),
+                },
+                "artifact_scope": artifact_scope,
+                "seed_schedule": {
+                    "configured_paired_seed_count": int(len(scheduled_paired_seeds)),
+                    "requested_paired_seed_count": len(paired_seeds),
+                    "expanded_beyond_seed_file": len(paired_seeds) > int(len(scheduled_paired_seeds)),
+                },
+                "paired_seed_count": len(paired_seeds),
+                "paired_seeds": list(paired_seeds),
+                "protocol": {
+                    "seat_swap": bool(evaluation.seat_swap),
+                    "eval_device": str(requested_eval_device),
+                    "eval_inference_mode": bool(evaluation.eval_inference_mode),
+                    "eval_sampling_algorithm": evaluation.eval_sampling_algorithm,
+                    "eval_assert_sorted_legal_ids": bool(evaluation.eval_assert_sorted_legal_ids),
+                },
+                "focal_policy": {
+                    "policy_id": focal_policy_id,
+                    "update_count": update_count,
+                    "policy_version": policy_version,
+                    "checkpoint_path": _json_relative_path(checkpoint_path, root=run_dir),
+                },
+                "opponent_policy": {
+                    "policy_id": opponent_spec.policy_id,
+                    "display_name": opponent_spec.display_name,
+                },
+                "parallel_seed_blocks": [
+                    {
+                        "block_index": int(block_result["block_index"]),
+                        "paired_seed_items": [
+                            {"pair_index": int(pair_index), "seed": int(seed)}
+                            for pair_index, seed in cast(tuple[tuple[int, int], ...], block_result["paired_seed_items"])
+                        ],
+                        "worker_index": int(block_result["worker_index"]),
+                        "worker_device": str(block_result["worker_device"]),
+                    }
+                    for block_result in opponent_blocks
+                ],
+            }
+            _write_json(matchup_dir / "seed_usage.json", seed_usage_payload)
+            write_episodes_jsonl(matchup_dir / "episodes.jsonl", records)
+            matchup_payload = build_matchup_export(
+                records,
+                stop_rules=evaluation.stop_rules,
+                max_paired_seeds=len(paired_seeds),
+                scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
+                sample_count=1000,
+                seed=_periodic_dev_eval_bootstrap_seed(update_count=update_count, policy_version=policy_version),
+            )
+            seat_diagnostics = build_seat_advantage_diagnostics(records)
+            matchup_payload["seat_diagnostics"] = seat_diagnostics
+            matchup_payload["evaluation_context"] = {
+                "artifact_scope": artifact_scope,
+                "update_count": update_count,
+                "policy_version": policy_version,
+                "checkpoint_path": _json_relative_path(checkpoint_path, root=run_dir),
+                "matchup_dir": _json_relative_path(matchup_dir, root=run_dir),
+                "episodes_path": _json_relative_path(matchup_dir / "episodes.jsonl", root=run_dir),
+                "seed_usage_path": _json_relative_path(matchup_dir / "seed_usage.json", root=run_dir),
+                "anchor_display_name": opponent_spec.display_name,
+            }
+            block_wall_clock_seconds = [float(block_result["wall_clock_seconds"]) for block_result in opponent_blocks]
+            matchup_wall_clock_seconds = max(block_wall_clock_seconds) if block_wall_clock_seconds else 0.0
+            matchup_payload["evaluation_runtime"] = {
+                "wall_clock_seconds": matchup_wall_clock_seconds,
+                "games_per_sec": float(len(records) / matchup_wall_clock_seconds)
+                if matchup_wall_clock_seconds > 0.0
+                else 0.0,
+                "game_count": int(len(records)),
+                "persistent_env_reuse": True,
+                "seed_block_count": int(len(opponent_blocks)),
+                "batched_model_inference": bool(
+                    batched_inference_enabled
+                ),
+                "serial_worker_wall_clock_seconds_sum": float(sum(block_wall_clock_seconds)),
+                "runner_counters": _sum_periodic_dev_eval_counter_payloads(
+                    [cast(Mapping[str, Any], block_result["runner_counters"]) for block_result in opponent_blocks]
+                ),
+            }
+            write_matchup_summary_json(matchup_dir / "matchup_summary.json", matchup_payload)
+            write_matchup_summary_csv(matchup_dir / "matchup_summary.csv", matchup_payload)
+            write_matchup_diagnostics_json(
+                matchup_dir / "diagnostics.json",
+                seat_diagnostics,
+            )
+            matchup_results.append(
+                {
+                    "policy_id": opponent_spec.policy_id,
+                    "display_name": opponent_spec.display_name,
+                    "matchup_dir": matchup_dir,
+                    "episodes_path": matchup_dir / "episodes.jsonl",
+                    "matchup_payload": matchup_payload,
+                }
+            )
     else:
-        worker_devices = (requested_eval_device,)
         matchup_results = _run_periodic_dev_eval_matchups_for_opponents(
             stack=stack,
             contract=contract,
@@ -4562,7 +7056,8 @@ def _run_periodic_dev_eval_for_checkpoint(
             seed_file=seed_file,
             seed_file_sha256=seed_file_sha256,
             opponent_specs=resolved_opponent_specs,
-            eval_device_override=requested_eval_device,
+            eval_device_override=worker_devices[0],
+            batched_inference_override=batched_inference_enabled,
         )
 
     spec_order = {spec.display_name: index for index, spec in enumerate(resolved_opponent_specs)}
@@ -4582,20 +7077,63 @@ def _run_periodic_dev_eval_for_checkpoint(
     if primary_summary is None:
         raise RuntimeError("Periodic dev eval did not produce any matchup summaries")
 
-    aggregate_score = sum(anchor_scores.values()) / max(1, len(anchor_scores))
+    unweighted_aggregate_score = sum(anchor_scores.values()) / max(1, len(anchor_scores))
+    anchor_weight_config = _periodic_dev_eval_anchor_weight_map(stack)
+    aggregate_score, aggregate_anchor_weights, aggregate_weight_sum = _weighted_dev_eval_aggregate(
+        anchor_scores,
+        anchor_weights=anchor_weight_config,
+    )
     summary_payload = dict(primary_summary)
+    total_eval_wall_clock_seconds = max(0.0, time.perf_counter() - eval_started)
+    total_eval_games = sum(
+        int(cast(dict[str, Any], result["matchup_payload"]).get("evaluation_runtime", {}).get("game_count", 0))
+        for result in matchup_results
+    )
     summary_payload.update(
         {
             "policy_id": focal_policy_id,
             "update_count": update_count,
             "policy_version": policy_version,
             "aggregate_score": aggregate_score,
+            "unweighted_aggregate_score": unweighted_aggregate_score,
             "anchor_scores": anchor_scores,
+            "anchor_seat_diagnostics": {
+                str(result["display_name"]): cast(dict[str, Any], result["matchup_payload"]).get("seat_diagnostics", {})
+                for result in matchup_results
+            },
+            "aggregate_weighting": {
+                "version": "periodic_dev_eval_anchor_weights_v1",
+                "anchor_weights": aggregate_anchor_weights,
+                "configured_anchor_weights": dict(anchor_weight_config),
+                "total_weight": float(aggregate_weight_sum),
+                "default_weight": 1.0,
+            },
             "anchors": anchor_payloads,
             "periodic_dev_eval_parallel": {
                 "enabled": effective_parallel_workers > 1,
                 "worker_count": int(max(1, effective_parallel_workers)),
                 "worker_devices": list(worker_devices[: max(1, effective_parallel_workers)]),
+                "job_count": int(len(seed_block_jobs)),
+                "batched_inference_enabled": bool(
+                    batched_inference_enabled
+                ),
+                "seed_block_sharding_enabled": any(
+                    int(result["matchup_payload"].get("evaluation_runtime", {}).get("seed_block_count", 1)) > 1
+                    for result in matchup_results
+                ),
+            },
+            "periodic_dev_eval_runtime": {
+                "wall_clock_seconds": total_eval_wall_clock_seconds,
+                "games_per_sec": float(total_eval_games / total_eval_wall_clock_seconds)
+                if total_eval_wall_clock_seconds > 0.0
+                else 0.0,
+                "game_count": int(total_eval_games),
+                "persistent_env_reuse": True,
+            },
+            "evaluation_surface": {
+                "kind": "fast_batched_screen" if batched_inference_enabled else "canonical_scalar",
+                "authoritative": not batched_inference_enabled,
+                "batched_inference_enabled": bool(batched_inference_enabled),
             },
         }
     )
@@ -4603,7 +7141,10 @@ def _run_periodic_dev_eval_for_checkpoint(
     return summary_payload
 
 
-def _run_async_periodic_dev_eval_worker(request: AsyncPeriodicDevEvalRequest) -> dict[str, Any]:
+def _run_async_periodic_dev_eval_worker(
+    request: AsyncPeriodicDevEvalRequest,
+    process_pool_executor: ProcessPoolExecutor | None = None,
+) -> dict[str, Any]:
     contract = load_verified_simulator_contract(request.stack.root, expected_spec_hash=request.spec_hash256)
     effective_eval_device = request.eval_device_override
     effective_worker_devices = (
@@ -4635,6 +7176,7 @@ def _run_async_periodic_dev_eval_worker(request: AsyncPeriodicDevEvalRequest) ->
         artifact_dir_name=request.artifact_dir_name,
         artifact_scope=request.artifact_scope,
         paired_seeds_override=request.paired_seeds,
+        process_pool_executor=process_pool_executor,
     )
 
 
@@ -4654,6 +7196,8 @@ def _run_periodic_dev_eval(
     paired_seeds_override: Sequence[int] | None = None,
     persist_summary: bool = True,
     update_stall_monitor: bool = True,
+    batched_inference_override: bool | None = None,
+    process_pool_executor: ProcessPoolExecutor | None = None,
 ) -> dict[str, Any]:
     if learner.model is None:
         raise RuntimeError("Periodic dev eval requires an attached learner model")
@@ -4680,10 +7224,10 @@ def _run_periodic_dev_eval(
         artifact_dir_name=artifact_dir_name,
         artifact_scope=artifact_scope,
         paired_seeds_override=paired_seeds_override,
+        batched_inference_override=batched_inference_override,
+        process_pool_executor=process_pool_executor,
     )
-    if persist_summary:
-        _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=summary_payload)
-    if update_stall_monitor:
+    if update_stall_monitor and _dev_eval_is_authoritative(summary_payload):
         stall_monitor = _update_stall_monitor(
             stack=stack,
             training_paths=training_paths,
@@ -4705,6 +7249,10 @@ def _run_periodic_dev_eval(
                     f"truncation_rate={float(stall_monitor['worst_truncation_rate']):.3f} "
                     f"consecutive={int(stall_monitor['consecutive_trigger_count'])}"
                 )
+    if persist_summary and _dev_eval_is_authoritative(summary_payload):
+        _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=summary_payload)
+    elif persist_summary:
+        _persist_periodic_dev_eval_fast_screen(training_paths=training_paths, payload=summary_payload)
     return summary_payload
 
 
@@ -4723,31 +7271,32 @@ def _process_completed_periodic_dev_eval(
     spec_hash256: str,
     last_rollback_update: int | None,
     tensorboard_logger: TensorBoardLogger | None,
+    process_pool_executor: ProcessPoolExecutor | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    summary_payload = pending_eval.future.result()
     try:
-        _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=summary_payload)
-        stall_monitor = _update_stall_monitor(
-            stack=stack,
-            training_paths=training_paths,
-            update_count=int(summary_payload["update_count"]),
-            summary_payload=summary_payload,
-        )
-        if stall_monitor is not None:
-            summary_payload["stall_monitor"] = stall_monitor
-            _write_json(
-                artifacts.run_dir / "eval" / "dev_eval" / f"update_{int(summary_payload['update_count'])}" / "summary.json",
-                summary_payload,
+        summary_payload = pending_eval.future.result()
+        if _dev_eval_is_authoritative(summary_payload):
+            stall_monitor = _update_stall_monitor(
+                stack=stack,
+                training_paths=training_paths,
+                update_count=int(summary_payload["update_count"]),
+                summary_payload=summary_payload,
             )
-            if bool(stall_monitor.get("stall_risk", False)):
-                print(
-                    "Stall monitor warning: "
-                    f"update={int(summary_payload['update_count'])} worst_anchor={stall_monitor['worst_anchor']} "
-                    f"stall_rate={float(stall_monitor['worst_stall_rate']):.3f} "
-                    f"no_progress_rate={float(stall_monitor['worst_no_progress_timeout_rate']):.3f} "
-                    f"truncation_rate={float(stall_monitor['worst_truncation_rate']):.3f} "
-                    f"consecutive={int(stall_monitor['consecutive_trigger_count'])}"
+            if stall_monitor is not None:
+                summary_payload["stall_monitor"] = stall_monitor
+                _write_json(
+                    artifacts.run_dir / "eval" / "dev_eval" / f"update_{int(summary_payload['update_count'])}" / "summary.json",
+                    summary_payload,
                 )
+                if bool(stall_monitor.get("stall_risk", False)):
+                    print(
+                        "Stall monitor warning: "
+                        f"update={int(summary_payload['update_count'])} worst_anchor={stall_monitor['worst_anchor']} "
+                        f"stall_rate={float(stall_monitor['worst_stall_rate']):.3f} "
+                        f"no_progress_rate={float(stall_monitor['worst_no_progress_timeout_rate']):.3f} "
+                        f"truncation_rate={float(stall_monitor['worst_truncation_rate']):.3f} "
+                        f"consecutive={int(stall_monitor['consecutive_trigger_count'])}"
+                    )
         effective_summary = summary_payload
         tracker_before_dev_eval = _load_checkpoint_tracker(training_paths)
         existing_best_record = tracker_before_dev_eval.get("best")
@@ -4756,7 +7305,7 @@ def _process_completed_periodic_dev_eval(
         confirmatory_request = _confirmatory_dev_eval_request(
             stack=stack,
             existing_best_record=cast(Mapping[str, Any] | None, existing_best_record),
-            dev_eval_summary=summary_payload,
+            dev_eval_summary=effective_summary,
         )
         if confirmatory_request is not None:
             seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = _periodic_dev_eval_schedule(stack)
@@ -4784,6 +7333,8 @@ def _process_completed_periodic_dev_eval(
                 artifact_dir_name="dev_eval_confirmatory",
                 artifact_scope="periodic_dev_eval_confirmatory",
                 paired_seeds_override=confirmatory_pairs,
+                batched_inference_override=False,
+                process_pool_executor=process_pool_executor,
             )
             print(
                 "Confirmatory dev eval: "
@@ -4793,6 +7344,10 @@ def _process_completed_periodic_dev_eval(
                 f"seed_file={seed_file.name}"
             )
             _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=effective_summary)
+        elif _dev_eval_is_authoritative(effective_summary):
+            _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=effective_summary)
+        else:
+            _persist_periodic_dev_eval_fast_screen(training_paths=training_paths, payload=effective_summary)
 
         tracker_payload = _publish_best_checkpoint_from_dev_eval(
             stack=stack,
@@ -4828,6 +7383,19 @@ def _process_completed_periodic_dev_eval(
         if tensorboard_logger is not None:
             tensorboard_logger.log_periodic_dev_eval(effective_summary, step=int(effective_summary["update_count"]))
             tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(effective_summary["update_count"]))
+        audit_request = _maybe_request_b2_disagreement_audit(
+            stack=stack,
+            training_paths=training_paths,
+            artifacts=artifacts,
+            dev_eval_summary=effective_summary,
+        )
+        if audit_request is not None:
+            print(
+                "B2 disagreement audit requested: "
+                f"update={int(audit_request['update_count'])} "
+                f"reasons={','.join(cast(list[str], audit_request['trigger_reasons']))} "
+                f"episodes={audit_request['episodes_path']}"
+            )
         return effective_summary, guard_event
     finally:
         _unpin_snapshot_ids(
@@ -4873,32 +7441,38 @@ def _run_async_promotion_gate_worker(request: AsyncPromotionGateRequest) -> dict
         for policy_id, _display_name, _opponent_model, heuristic_policy in opponents
         if heuristic_policy is not None
     }
-    result = run_promotion_gate(
+    runner = _PromotionGateRunner(
         stack=request.stack,
-        run_dir=request.run_dir / "eval" / "promotion_gate" / f"update_{request.update_count}",
         focal_policy_id=request.candidate_policy_id,
-        anchor_policy_ids=request.anchor_policy_ids,
-        runner=_PromotionGateRunner(
-            stack=request.stack,
-            focal_policy_id=request.candidate_policy_id,
-            focal_model=focal_model,
-            anchor_models=anchor_models,
-            heuristic_policies=heuristic_policies,
-            observation_dim=observation_dim,
-            action_dim=action_dim,
-            pass_action_id=int(contract.spec_bundle["action"]["pass_action_id"]),
-            artifact_dir=request.run_dir / "eval" / "promotion_gate" / f"update_{request.update_count}",
-            require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
-            eval_device=(evaluation.eval_device if request.eval_device_override is None else request.eval_device_override),
-        ),
-        run_id256=request.run_id256,
-        config_hash256=request.config_hash256,
-        spec_hash256=request.spec_hash256,
-        bootstrap_seed=_promotion_gate_bootstrap_seed(
-            update_count=request.update_count,
-            policy_version=request.policy_version,
-        ),
+        focal_model=focal_model,
+        anchor_models=anchor_models,
+        heuristic_policies=heuristic_policies,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        pass_action_id=int(contract.spec_bundle["action"]["pass_action_id"]),
+        artifact_dir=request.run_dir / "eval" / "promotion_gate" / f"update_{request.update_count}",
+        require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
+        eval_device=(evaluation.eval_device if request.eval_device_override is None else request.eval_device_override),
     )
+    try:
+        result = run_promotion_gate(
+            stack=request.stack,
+            run_dir=request.run_dir / "eval" / "promotion_gate" / f"update_{request.update_count}",
+            focal_policy_id=request.candidate_policy_id,
+            anchor_policy_ids=request.anchor_policy_ids,
+            runner=runner,
+            run_id256=request.run_id256,
+            config_hash256=request.config_hash256,
+            spec_hash256=request.spec_hash256,
+            bootstrap_seed=_promotion_gate_bootstrap_seed(
+                update_count=request.update_count,
+                policy_version=request.policy_version,
+            ),
+        )
+    finally:
+        close_runner = getattr(runner, "close", None)
+        if callable(close_runner):
+            close_runner()
     return {
         "candidate_policy_id": request.candidate_policy_id,
         "update_count": int(request.update_count),
@@ -4921,9 +7495,11 @@ def _run_parallel_promotion_gate_anchor_worker(
     run_id256: str,
     config_hash256: str,
     spec_hash256: str,
-    anchor_specs: Sequence[tuple[int, PeriodicDevEvalOpponentSpec]],
+    seed_block_jobs: Sequence[PromotionGateSeedBlockJob],
     eval_device_override: str,
 ) -> list[dict[str, Any]]:
+    if not seed_block_jobs:
+        return []
     contract = load_verified_simulator_contract(stack.root, expected_spec_hash=spec_hash256)
     evaluation = _validate_periodic_dev_eval_contract(stack)
     observation_dim, action_dim = _spec_dimensions(contract)
@@ -4939,7 +7515,7 @@ def _run_parallel_promotion_gate_anchor_worker(
         observation_spec=observation_spec,
         spec_bundle=spec_bundle,
     )
-    ordered_specs = [spec for _index, spec in anchor_specs]
+    ordered_specs = list({(job.anchor_index, job.anchor_spec): job.anchor_spec for job in seed_block_jobs}.values())
     opponents = _materialize_periodic_dev_eval_opponents(
         stack=stack,
         contract=contract,
@@ -4982,48 +7558,38 @@ def _run_parallel_promotion_gate_anchor_worker(
         require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
         eval_device=eval_device_override,
     )
-    episodes_dir = run_dir / "eval" / "promotion_gate" / f"update_{update_count}" / "promotion_gate_episodes"
     worker_payloads: list[dict[str, Any]] = []
-    for anchor_index, anchor_spec in anchor_specs:
-        anchor = PromotionGateAnchor(name=anchor_spec.display_name, policy_id=anchor_spec.policy_id)
-        matchup = run_seat_swapped_matchup(
-            focal_policy_id=candidate_policy_id,
-            opponent_policy_id=anchor.policy_id,
-            paired_seeds=paired_seeds,
-            runner=runner,
-            episodes_path=episodes_dir / f"{anchor_index:02d}_{_slug_policy_id(anchor.name)}.jsonl",
-            run_id256=run_id256,
-            config_hash256=config_hash256,
-            spec_hash256=spec_hash256,
-        )
-        pair_scores = [float(score) for score in paired_seed_scores(matchup.records, scheme="S0")]
-        truncated_games = sum(1 for record in matchup.records if record.truncated)
-        anchor_result = PromotionGateAnchorResult(
-            anchor_name=anchor.name,
-            opponent_policy_id=anchor.policy_id,
-            episodes_path=_relative_path_text(matchup.episodes_path, root=run_dir),
-            matchup_summary=matchup.summary,
-            truncation=PromotionGateRate(
-                numerator=int(truncated_games),
-                denominator=int(len(matchup.records)),
-                rate=(float(truncated_games) / float(len(matchup.records))) if matchup.records else 0.0,
-            ),
-            posterior=PromotionGatePosterior.from_scores(
-                pair_scores,
-                sample_count=1000,
-                seed=_promotion_gate_bootstrap_seed(update_count=update_count, policy_version=policy_version),
-            ),
-        )
-        worker_payloads.append(
-            {
-                "anchor_index": int(anchor_index),
-                "anchor": anchor,
-                "anchor_result": anchor_result,
-                "pair_scores": pair_scores,
-                "truncated_games": int(truncated_games),
-                "total_games": int(len(matchup.records)),
-            }
-        )
+    try:
+        for job in seed_block_jobs:
+            scheduled_games = _periodic_dev_eval_schedule_for_seed_items(
+                focal_policy_id=candidate_policy_id,
+                opponent_policy_id=job.anchor_spec.policy_id,
+                paired_seed_items=job.paired_seed_items,
+            )
+            records = tuple(
+                record_completed_game(
+                    scheduled_game=scheduled_game,
+                    result=runner.run_game(scheduled_game),
+                    run_id256=run_id256,
+                    config_hash256=config_hash256,
+                    spec_hash256=spec_hash256,
+                )
+                for scheduled_game in scheduled_games
+            )
+            worker_payloads.append(
+                {
+                    "anchor_index": int(job.anchor_index),
+                    "block_index": int(job.block_index),
+                    "anchor_policy_id": job.anchor_spec.policy_id,
+                    "anchor_display_name": job.anchor_spec.display_name,
+                    "paired_seed_items": tuple(job.paired_seed_items),
+                    "records": records,
+                }
+            )
+    finally:
+        close_runner = getattr(runner, "close", None)
+        if callable(close_runner):
+            close_runner()
     return worker_payloads
 
 
@@ -5048,20 +7614,32 @@ def _run_parallel_snapshot_promotion_gate(
     evaluation = _validate_periodic_dev_eval_contract(stack)
     ordered_anchors = resolve_promotion_gate_anchors(stack, anchor_policy_ids)
     configured_parallel_workers = max(1, int(getattr(league.promotion_gate, "parallel_workers", 1)))
-    effective_parallel_workers = min(configured_parallel_workers, len(anchor_specs))
+    seed_file = resolve_promotion_gate_seed_file(stack)
+    paired_seeds = parse_seed_file(seed_file)
+    if len(paired_seeds) != int(league.promotion_gate_paired_seeds):
+        raise RuntimeError(
+            f"Promotion gate expected {int(league.promotion_gate_paired_seeds)} paired seeds in {seed_file}, "
+            f"found {len(paired_seeds)}"
+        )
+    seed_block_jobs = _build_promotion_gate_seed_block_jobs(
+        anchor_specs=anchor_specs,
+        paired_seeds=paired_seeds,
+        configured_parallel_workers=configured_parallel_workers,
+    )
+    effective_parallel_workers = min(configured_parallel_workers, max(1, len(seed_block_jobs)))
     worker_devices = _resolved_promotion_gate_worker_devices(
         stack=stack,
         parallel_workers=max(1, effective_parallel_workers),
         explicit_worker_devices=tuple(getattr(league.promotion_gate, "parallel_worker_devices", ())),
         eval_device=str(evaluation.eval_device),
     )
-    anchor_shards = _shard_promotion_gate_anchor_specs(
-        anchor_specs=anchor_specs,
+    job_shards = _shard_promotion_gate_seed_block_jobs(
+        jobs=seed_block_jobs,
         shard_count=max(1, effective_parallel_workers),
     )
     worker_payloads: list[dict[str, Any]] = []
     ctx = mp.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=len(anchor_shards), mp_context=ctx) as executor:
+    with ProcessPoolExecutor(max_workers=len(job_shards), mp_context=ctx) as executor:
         futures = [
             executor.submit(
                 _run_parallel_promotion_gate_anchor_worker,
@@ -5074,24 +7652,55 @@ def _run_parallel_snapshot_promotion_gate(
                 run_id256=run_id256,
                 config_hash256=config_hash256,
                 spec_hash256=spec_hash256,
-                anchor_specs=tuple(shard),
+                seed_block_jobs=tuple(shard),
                 eval_device_override=worker_devices[shard_index],
             )
-            for shard_index, shard in enumerate(anchor_shards)
+            for shard_index, shard in enumerate(job_shards)
         ]
         for future in futures:
             worker_payloads.extend(future.result())
-    worker_payloads.sort(key=lambda payload: int(payload["anchor_index"]))
-    anchor_results = [cast(PromotionGateAnchorResult, payload["anchor_result"]) for payload in worker_payloads]
+    worker_payloads.sort(key=lambda payload: (int(payload["anchor_index"]), int(payload["block_index"])))
+    records_by_anchor_index: dict[int, list[EvalGameRecord]] = {index: [] for index in range(len(anchor_specs))}
+    for payload in worker_payloads:
+        records_by_anchor_index[int(payload["anchor_index"])].extend(
+            cast(Sequence[EvalGameRecord], payload["records"])
+        )
+
+    episodes_dir = artifacts.run_dir / "eval" / "promotion_gate" / f"update_{update_count}" / "promotion_gate_episodes"
+    anchor_results: list[PromotionGateAnchorResult] = []
     all_pair_scores: list[float] = []
     total_truncated_games = 0
     total_games = 0
-    for payload in worker_payloads:
-        all_pair_scores.extend(float(score) for score in cast(Sequence[float], payload["pair_scores"]))
-        total_truncated_games += int(payload["truncated_games"])
-        total_games += int(payload["total_games"])
-    seed_file = resolve_promotion_gate_seed_file(stack)
-    paired_seeds = parse_seed_file(seed_file)
+    for anchor_index, anchor in enumerate(ordered_anchors):
+        records = sorted(
+            records_by_anchor_index.get(anchor_index, []),
+            key=lambda record: (int(record.pair_index), int(record.swap_index), int(record.episode_index)),
+        )
+        episodes_path = episodes_dir / f"{anchor_index:02d}_{_slug_policy_id(anchor.name)}.jsonl"
+        write_episodes_jsonl(episodes_path, records)
+        pair_scores = [float(score) for score in paired_seed_scores(records, scheme="S0")]
+        truncated_games = sum(1 for record in records if record.truncated)
+        anchor_result = PromotionGateAnchorResult(
+            anchor_name=anchor.name,
+            opponent_policy_id=anchor.policy_id,
+            episodes_path=_relative_path_text(episodes_path, root=artifacts.run_dir),
+            matchup_summary=summarize_game_records(records),
+            truncation=PromotionGateRate(
+                numerator=int(truncated_games),
+                denominator=int(len(records)),
+                rate=(float(truncated_games) / float(len(records))) if records else 0.0,
+            ),
+            posterior=PromotionGatePosterior.from_scores(
+                pair_scores,
+                sample_count=1000,
+                seed=_promotion_gate_bootstrap_seed(update_count=update_count, policy_version=policy_version),
+            ),
+        )
+        anchor_results.append(anchor_result)
+        all_pair_scores.extend(pair_scores)
+        total_truncated_games += int(truncated_games)
+        total_games += int(len(records))
+
     result = build_promotion_gate_result(
         stack=stack,
         run_dir=artifacts.run_dir / "eval" / "promotion_gate" / f"update_{update_count}",
@@ -5119,8 +7728,8 @@ def _process_completed_promotion_gate(
     artifacts: RunArtifacts,
     training_paths: TrainingPaths,
 ) -> bool:
-    payload = pending_gate.future.result()
     try:
+        payload = pending_gate.future.result()
         if bool(payload["passed"]):
             registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
             registry = SnapshotRegistry.load(registry_path)
@@ -5141,9 +7750,20 @@ def _process_completed_promotion_gate(
         reason_codes = ",".join(
             str(reason.get("code", "unknown")) for reason in cast(list[dict[str, Any]], payload["reasons"])
         ) or "unknown"
+        registry_path = training_paths.snapshots_dir / REGISTRY_FILENAME
+        registry = SnapshotRegistry.load(registry_path)
+        candidate_policy_id = str(payload["candidate_policy_id"])
+        if registry.has_snapshot(candidate_policy_id):
+            registry.reject_snapshot(candidate_policy_id)
+            _save_snapshot_registry_with_retention(
+                stack=stack,
+                training_paths=training_paths,
+                run_dir=artifacts.run_dir,
+                registry=registry,
+            )
         print(
             "Promotion gate failed: "
-            f"update={int(payload['update_count'])} candidate={str(payload['candidate_policy_id'])} "
+            f"update={int(payload['update_count'])} candidate={candidate_policy_id} "
             f"reasons={reason_codes}"
         )
         return False
@@ -5193,6 +7813,7 @@ def _run_snapshot_promotion_gate(
     candidate_policy_id: str,
     update_count: int,
     league_reference_update: int | None,
+    league_eval_warmup_gate_open: bool,
     policy_version: int,
     run_id256: str,
     config_hash256: str,
@@ -5207,6 +7828,12 @@ def _run_snapshot_promotion_gate(
             "Promotion gate skipped during league warmup: "
             f"update={update_count} effective_update={reference_update} threshold={int(league.warmup.first_updates)} "
             f"candidate={candidate_policy_id}"
+        )
+        return None
+    if bool(getattr(league.warmup, "eval_gate_enabled", False)) and not bool(league_eval_warmup_gate_open):
+        print(
+            "Promotion gate skipped during league eval warmup gate: "
+            f"update={update_count} effective_update={reference_update} candidate={candidate_policy_id}"
         )
         return None
     if learner.model is None:
@@ -5268,6 +7895,13 @@ def _run_snapshot_promotion_gate(
             return True
 
         reason_codes = ",".join(str(reason.get("code", "unknown")) for reason in result.reasons) or "unknown"
+        registry.reject_snapshot(candidate_policy_id)
+        _save_snapshot_registry_with_retention(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=artifacts.run_dir,
+            registry=registry,
+        )
         print(f"Promotion gate failed: update={update_count} candidate={candidate_policy_id} reasons={reason_codes}")
         return False
     anchor_models = {
@@ -5340,20 +7974,25 @@ def _run_snapshot_promotion_gate(
         require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
         eval_device=evaluation.eval_device,
     )
-    result = run_promotion_gate(
-        stack=stack,
-        run_dir=artifacts.run_dir / "eval" / "promotion_gate" / f"update_{update_count}",
-        focal_policy_id=candidate_policy_id,
-        anchor_policy_ids=anchor_policy_ids,
-        runner=runner,
-        run_id256=run_id256,
-        config_hash256=config_hash256,
-        spec_hash256=spec_hash256,
-        bootstrap_seed=_promotion_gate_bootstrap_seed(
-            update_count=update_count,
-            policy_version=policy_version,
-        ),
-    )
+    try:
+        result = run_promotion_gate(
+            stack=stack,
+            run_dir=artifacts.run_dir / "eval" / "promotion_gate" / f"update_{update_count}",
+            focal_policy_id=candidate_policy_id,
+            anchor_policy_ids=anchor_policy_ids,
+            runner=runner,
+            run_id256=run_id256,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+            bootstrap_seed=_promotion_gate_bootstrap_seed(
+                update_count=update_count,
+                policy_version=policy_version,
+            ),
+        )
+    finally:
+        close_runner = getattr(runner, "close", None)
+        if callable(close_runner):
+            close_runner()
     if result.passed:
         registry.add_champion(candidate_policy_id)
         _save_snapshot_registry_with_retention(
@@ -5370,6 +8009,13 @@ def _run_snapshot_promotion_gate(
         return True
 
     reason_codes = ",".join(str(reason.get("code", "unknown")) for reason in result.reasons) or "unknown"
+    registry.reject_snapshot(candidate_policy_id)
+    _save_snapshot_registry_with_retention(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=artifacts.run_dir,
+        registry=registry,
+    )
     print(f"Promotion gate failed: update={update_count} candidate={candidate_policy_id} reasons={reason_codes}")
     return False
 
@@ -5382,6 +8028,7 @@ def _run_minimal_training(
     num_envs: int,
     unroll_length: int,
     max_updates: int,
+    max_wall_clock_minutes: float | None,
     profile: str,
     device: torch.device,
     seed: int,
@@ -5392,10 +8039,15 @@ def _run_minimal_training(
     runtime_mode: QueueRuntimeMode,
     b1_baseline_run_dir: Path | None,
     seed_snapshot_run_dir: Path | None = None,
+    seed_snapshot_run_dir_auto_inferred: bool = False,
     profile_timers: bool = False,
     torch_profiler: bool = False,
     resume_checkpoint_path: Path | None = None,
+    resume_allow_config_mismatch: bool = False,
+    resume_reset_optimizer: bool = False,
     tensorboard_logger: TensorBoardLogger | None = None,
+    resolved_topology: ResolvedTrainingTopology | None = None,
+    distributed_context: DistributedContext | None = None,
 ) -> dict[str, float]:
     _configure_torch_threads(stack)
     torch.manual_seed(seed)
@@ -5409,8 +8061,13 @@ def _run_minimal_training(
     experiment_role = _experiment_role(stack)
     if training_config is None or model_config is None or environment_config is None or rewards_config is None:
         raise RuntimeError("The locked stack is missing training, model, environment, or rewards config")
+    main_residual_policy_enabled = bool(
+        getattr(getattr(training_config, "main_residual_policy", None), "enabled", False)
+    )
 
     training_paths = _training_paths(artifacts.run_dir)
+    ddp_context = DistributedContext(enabled=False) if distributed_context is None else distributed_context
+    rank0 = (not ddp_context.enabled) or ddp_context.is_rank0
     pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
     algorithm = str(training_config.algorithm).strip()
     _validate_algorithm_model_contract(
@@ -5418,13 +8075,22 @@ def _run_minimal_training(
         recurrent_core=model_config.recurrent_core,
         encoder_kind=model_config.encoder_kind,
     )
-    model = build_policy_value_model(
+    model = _maybe_build_main_residual_model(
+        stack=stack,
         observation_dim=observation_dim,
-        config=model_config,
         action_dim=action_dim,
         observation_spec=contract.spec_bundle.get("observation"),
         spec_bundle=contract.spec_bundle,
-    ).to(device)
+        device=device,
+    )
+    if model is None:
+        model = build_policy_value_model(
+            observation_dim=observation_dim,
+            config=model_config,
+            action_dim=action_dim,
+            observation_spec=contract.spec_bundle.get("observation"),
+            spec_bundle=contract.spec_bundle,
+        ).to(device)
     compiled_model = _maybe_compile_learner_model(
         model=model,
         training_config=training_config,
@@ -5438,8 +8104,11 @@ def _run_minimal_training(
         training_paths=training_paths,
         pass_action_id=pass_action_id,
         checkpoint_interval_updates=checkpoint_interval_updates,
+        gradient_sync=(None if not ddp_context.enabled else lambda: average_gradients(model, context=ddp_context)),
+        artifact_writes_enabled=rank0,
     )
     resume_state = None
+    resume_dev_eval_summary: dict[str, Any] | None = None
     if resume_checkpoint_path is not None:
         resume_state = _restore_learner_from_checkpoint(
             checkpoint_path=resume_checkpoint_path,
@@ -5448,6 +8117,8 @@ def _run_minimal_training(
             device=device,
             expected_spec_hash256=spec_hash256,
             algorithm=algorithm,
+            restore_optimizer_state=not bool(resume_reset_optimizer),
+            allow_config_hash_mismatch=resume_allow_config_mismatch,
         )
         print(
             "Resumed learner state: "
@@ -5455,38 +8126,111 @@ def _run_minimal_training(
             f"update={resume_state.update_count} "
             f"policy_version={resume_state.policy_version}"
         )
+        if rank0:
+            seeded_best_record = _seed_checkpoint_tracker_from_resume_best(
+                stack=stack,
+                training_paths=training_paths,
+                artifacts=artifacts,
+                resume_checkpoint_path=resume_state.checkpoint_path,
+            )
+            if seeded_best_record is not None:
+                print(
+                    "Seeded checkpoint best alias from resumed dev-eval best: "
+                    f"update={int(seeded_best_record['update_count'])} "
+                    f"metric={float(seeded_best_record['metric_value']):.4f}"
+                )
+        resume_dev_eval_summary = _load_resume_checkpoint_dev_eval_summary(
+            stack=stack,
+            resume_checkpoint_path=resume_state.checkpoint_path,
+            update_count=int(resume_state.update_count),
+            allow_config_hash_mismatch=resume_allow_config_mismatch,
+        )
+        if rank0 and resume_dev_eval_summary is not None:
+            print(
+                "Seeded resume dev-eval summary: "
+                f"update={int(resume_state.update_count)} "
+                f"aggregate={float(_dev_eval_aggregate_score(resume_dev_eval_summary) or 0.0):.4f}"
+            )
 
     config_hash256 = compute_config_hash256(stack)
-    _ensure_noleague_baseline_anchor(
-        stack=stack,
-        training_paths=training_paths,
-        run_dir=artifacts.run_dir,
+    if rank0:
+        _ensure_noleague_baseline_anchor(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=artifacts.run_dir,
+            learner=learner,
+            device=device,
+            config_hash256=config_hash256,
+            spec_hash256=spec_hash256,
+            baseline_run_dir=b1_baseline_run_dir,
+            permit_current_run_alias=_is_noleague_baseline_role(experiment_role),
+            update=int(learner.update_count),
+        )
+    distributed_barrier(ddp_context)
+    _attach_reference_policy_model_if_configured(
         learner=learner,
+        training_config=training_config,
+        training_paths=training_paths,
+        model_config=model_config,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        observation_spec=cast(dict[str, Any] | None, contract.spec_bundle.get("observation")),
+        spec_bundle=cast(dict[str, Any], contract.spec_bundle),
         device=device,
-        config_hash256=config_hash256,
-        spec_hash256=spec_hash256,
-        baseline_run_dir=b1_baseline_run_dir,
-        permit_current_run_alias=_is_noleague_baseline_role(experiment_role),
-        update=int(learner.update_count),
     )
-    if seed_snapshot_run_dir is not None:
+    imported_resume_league_policy_ids: tuple[str, ...] = ()
+    if rank0 and resume_state is not None:
+        imported_resume_league_policy_ids = tuple(
+            _import_resume_league_snapshot_pool(
+                stack=stack,
+                training_paths=training_paths,
+                run_dir=artifacts.run_dir,
+                resume_checkpoint_path=resume_state.checkpoint_path,
+                max_update=int(resume_state.update_count),
+                expected_model_state_dict=learner.model.state_dict(),
+            )
+        )
+    seed_snapshot_max_update = _seed_snapshot_import_max_update(
+        resume_state=resume_state,
+        seed_snapshot_run_dir=seed_snapshot_run_dir,
+        seed_snapshot_run_dir_auto_inferred=seed_snapshot_run_dir_auto_inferred,
+    )
+    if rank0 and seed_snapshot_run_dir is not None:
         _import_seed_snapshot_pool(
             stack=stack,
             training_paths=training_paths,
             run_dir=artifacts.run_dir,
             seed_snapshot_run_dir=seed_snapshot_run_dir,
+            max_update=seed_snapshot_max_update,
+            exclude_source_policy_ids=imported_resume_league_policy_ids,
             expected_model_state_dict=learner.model.state_dict(),
             expected_config_canonical=canonical_config_dict(stack),
             expected_spec_hash256=spec_hash256,
         )
+    if seed_snapshot_run_dir is not None or resume_state is not None:
+        distributed_barrier(ddp_context)
     runtime_config = build_runtime_config(
         stack=stack,
-        num_envs=num_envs,
+        num_envs=shard_env_count(global_num_envs=num_envs, world_size=ddp_context.world_size, rank=ddp_context.rank)
+        if ddp_context.enabled
+        else num_envs,
         unroll_length=unroll_length,
         profile=profile,
-        seed=seed,
+        seed=rank_seed(seed, rank=ddp_context.rank) if ddp_context.enabled else seed,
         pass_action_id=pass_action_id,
         runtime_mode=runtime_mode,
+        resolved_actor_count=None if resolved_topology is None else max(1, int(resolved_topology.actor_count) // max(1, int(ddp_context.world_size))),
+        resolved_envs_per_actor=None if resolved_topology is None else int(resolved_topology.envs_per_actor),
+        resolved_batch_unrolls_per_update=(
+            None
+            if resolved_topology is None
+            else max(1, int(resolved_topology.batch_unrolls_per_update) // max(1, int(ddp_context.world_size)))
+        ),
+        resolved_queue_capacity_unrolls=(
+            None
+            if resolved_topology is None
+            else max(1, int(resolved_topology.queue_capacity_unrolls) // max(1, int(ddp_context.world_size)))
+        ),
     )
     runtime = QueueRuntime(
         stack=stack,
@@ -5499,15 +8243,31 @@ def _run_minimal_training(
         run_dir=artifacts.run_dir,
         performance_log_path=training_paths.performance_log_path,
         learner_device=device,
+        initial_learner_update=int(learner.update_count),
     )
+    if int(learner.update_count) > 0:
+        runtime.maybe_publish_snapshot(
+            learner_model=model,
+            learner_update_count=int(learner.update_count),
+            force=True,
+        )
     actor_torch_threads = _central_runtime_actor_torch_threads(stack, runtime)
     learner_torch_threads = None if stack.config.system is None else int(stack.config.system.learner_torch_threads)
     latest_metrics: dict[str, float] = {}
     last_checkpoint_guard_rollback_update: int | None = None
-    last_dev_eval_summary: Mapping[str, Any] | None = None
-    last_dev_eval_update_count: int | None = None
+    last_dev_eval_summary: Mapping[str, Any] | None = resume_dev_eval_summary
+    last_dev_eval_update_count: int | None = (
+        int(resume_state.update_count) if resume_state is not None and resume_dev_eval_summary is not None else None
+    )
+    league_eval_warmup_gate_status = _sync_runtime_league_eval_warmup_gate(
+        runtime=runtime,
+        stack=stack,
+        dev_eval_summary=last_dev_eval_summary,
+    )
+    league_eval_warmup_gate_open = bool(league_eval_warmup_gate_status["open"])
     collect_batch_prefetch_enabled = bool(getattr(training_config, "collect_batch_prefetch_enabled", False))
     start_time = time.time()
+    max_wall_clock_seconds = _wall_clock_budget_seconds(max_wall_clock_minutes)
     profiler, profiler_context, profiler_trace_dir = _build_training_profiler(
         enabled=bool(torch_profiler),
         run_dir=artifacts.run_dir,
@@ -5519,6 +8279,8 @@ def _run_minimal_training(
         else None
     )
     async_periodic_dev_eval_enabled = bool(
+        rank0
+        and
         stack.config.evaluation is not None
         and getattr(stack.config.evaluation, "async_periodic_dev_eval_enabled", False)
     )
@@ -5529,6 +8291,8 @@ def _run_minimal_training(
             thread_name_prefix="async-periodic-dev-eval",
         )
     async_promotion_gate_enabled = bool(
+        rank0
+        and
         stack.config.league is not None
         and stack.config.league.promotion_gate_enabled
         and bool(getattr(stack.config.league.promotion_gate, "async_enabled", False))
@@ -5538,6 +8302,7 @@ def _run_minimal_training(
         async_promotion_gate_executor = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"))
     pending_promotion_gate: PendingPromotionGate | None = None
     pending_periodic_dev_eval: PendingPeriodicDevEval | None = None
+    periodic_dev_eval_process_pool: ProcessPoolExecutor | None = None
     prefetched_runtime_batch: Any | None = None
     early_cutoff_payload: Mapping[str, Any] | None = None
     with profiler_context:
@@ -5587,10 +8352,17 @@ def _run_minimal_training(
                         spec_hash256=spec_hash256,
                         last_rollback_update=last_checkpoint_guard_rollback_update,
                         tensorboard_logger=tensorboard_logger,
+                        process_pool_executor=periodic_dev_eval_process_pool,
                     )
                     pending_periodic_dev_eval = None
                     last_dev_eval_summary = completed_summary
                     last_dev_eval_update_count = int(completed_summary["update_count"])
+                    league_eval_warmup_gate_status = _sync_runtime_league_eval_warmup_gate(
+                        runtime=runtime,
+                        stack=stack,
+                        dev_eval_summary=completed_summary,
+                    )
+                    league_eval_warmup_gate_open = bool(league_eval_warmup_gate_status["open"])
                     anchor_keys = sorted(cast(dict[str, Any], completed_summary["anchor_scores"]).keys())
                     opponent_fragment = f" opponent={_slug_policy_id(anchor_keys[0])}" if anchor_keys else ""
                     print(
@@ -5599,6 +8371,12 @@ def _run_minimal_training(
                         f"aggregate={completed_summary['aggregate_score']:.4f} "
                         f"anchors={','.join(anchor_keys)}"
                     )
+                    if bool(league_eval_warmup_gate_status.get("enabled", False)):
+                        print(
+                            "League eval warmup gate: "
+                            f"open={league_eval_warmup_gate_open} "
+                            f"reasons={','.join(cast(list[str], league_eval_warmup_gate_status.get('reasons', [])))}"
+                        )
                     if guard_event is not None:
                         last_checkpoint_guard_rollback_update = int(learner.update_count)
                         pending_promotion_gate = _drop_stale_pending_promotion_gate(
@@ -5648,6 +8426,21 @@ def _run_minimal_training(
                         stop_requested = True
                 if stop_requested:
                     break
+                if _wall_clock_budget_reached(start_time=start_time, max_wall_clock_seconds=max_wall_clock_seconds):
+                    elapsed_seconds = time.time() - start_time
+                    latest_metrics.update(
+                        {
+                            "wall_clock_budget_reached": 1.0,
+                            "wall_clock_budget_seconds": float(max_wall_clock_seconds),
+                            "wall_clock_budget_elapsed_seconds": float(elapsed_seconds),
+                        }
+                    )
+                    print(
+                        "Wall clock budget reached: "
+                        f"elapsed={elapsed_seconds:.2f}s "
+                        f"budget={float(max_wall_clock_seconds):.2f}s"
+                    )
+                    break
                 guidance_schedule_metrics = _apply_guidance_schedule_for_next_update(
                     learner=learner,
                     model=model,
@@ -5658,6 +8451,7 @@ def _run_minimal_training(
                     _entropy_coef_for_next_update(training_config, update_count=int(learner.update_count) + 1)
                 )
                 upcoming_update_count = int(learner.update_count) + 1
+                batch_wait_started = time.perf_counter()
                 if prefetched_runtime_batch is not None:
                     runtime_batch = prefetched_runtime_batch
                     prefetched_runtime_batch = None
@@ -5672,6 +8466,7 @@ def _run_minimal_training(
                             training_config=training_config,
                             rewards_config=rewards_config,
                         )
+                learner_idle_wait_for_batch_ms = (time.perf_counter() - batch_wait_started) * 1000.0
                 prefetch_future: Future[Any] | None = None
                 should_prefetch_next_batch = (
                     prefetch_executor is not None
@@ -5688,12 +8483,50 @@ def _run_minimal_training(
                         rewards_config=rewards_config,
                         actor_torch_threads=actor_torch_threads,
                     )
+                learner_update_started = time.perf_counter()
                 with _profile_block(profile_timers, "learner_update"), _torch_num_threads_scope(learner_torch_threads):
                     latest_metrics = learner.update(runtime_batch.learner_batch)
+                learner_update_ms = (time.perf_counter() - learner_update_started) * 1000.0
+                learner_idle_wait_for_prefetch_ms = 0.0
                 if prefetch_future is not None:
+                    prefetch_wait_started = time.perf_counter()
                     with _profile_block(profile_timers, "collect_update_batch_prefetch_join"):
                         prefetched_runtime_batch = prefetch_future.result()
+                    learner_idle_wait_for_prefetch_ms = (time.perf_counter() - prefetch_wait_started) * 1000.0
+                latest_metrics.update(runtime_batch.runtime_metrics)
                 latest_metrics.update(guidance_schedule_metrics)
+                latest_metrics.update(
+                    {
+                        "learner_idle_wait_for_batch_ms": learner_idle_wait_for_batch_ms,
+                        "learner_idle_wait_for_prefetch_ms": learner_idle_wait_for_prefetch_ms,
+                        "learner_update_ms": learner_update_ms,
+                        "distributed_rank": float(ddp_context.rank),
+                        "distributed_world_size": float(ddp_context.world_size),
+                        "async_periodic_dev_eval_overlap_active": 1.0
+                        if pending_periodic_dev_eval is not None
+                        else 0.0,
+                        "async_promotion_gate_overlap_active": 1.0
+                        if pending_promotion_gate is not None
+                        else 0.0,
+                    }
+                )
+                if ddp_context.enabled:
+                    local_batch_env_steps = float(latest_metrics.get("batch_env_steps", 0.0))
+                    global_batch_env_steps = all_reduce_float(local_batch_env_steps, context=ddp_context, op="sum")
+                    global_total_samples = all_reduce_float(
+                        float(getattr(learner, "total_samples_processed", 0)),
+                        context=ddp_context,
+                        op="sum",
+                    )
+                    elapsed_for_global = max(time.time() - start_time, 1e-6)
+                    latest_metrics.update(
+                        {
+                            "distributed_global_batch_env_steps": global_batch_env_steps,
+                            "distributed_global_total_samples_processed": global_total_samples,
+                            "distributed_global_samples_per_sec": global_total_samples / elapsed_for_global,
+                            "distributed_local_batch_env_steps": local_batch_env_steps,
+                        }
+                    )
                 with _profile_block(profile_timers, "runtime_snapshot_publish"):
                     latest_metrics.update(
                         runtime.maybe_publish_snapshot(
@@ -5701,20 +8534,25 @@ def _run_minimal_training(
                             learner_update_count=int(learner.update_count),
                         )
                     )
-                _write_scalars_record(
-                    scalars_path=training_paths.scalars_path,
-                    learner=learner,
-                    metrics=latest_metrics,
-                    start_time=start_time,
+                latest_metrics["snapshot_publish_reload_ms"] = float(
+                    latest_metrics.get("snapshot_publish_latency_ms", 0.0)
+                    + latest_metrics.get("snapshot_apply_latency_ms", 0.0)
                 )
-                if tensorboard_logger is not None:
+                if rank0:
+                    _write_scalars_record(
+                        scalars_path=training_paths.scalars_path,
+                        learner=learner,
+                        metrics=latest_metrics,
+                        start_time=start_time,
+                    )
+                if rank0 and tensorboard_logger is not None:
                     tensorboard_logger.log_training_step(
                         update_count=int(learner.update_count),
                         policy_version=int(learner.get_policy_version()),
                         wall_clock_seconds=time.time() - start_time,
                         metrics=latest_metrics,
                     )
-                if learner.update_count % checkpoint_interval_updates == 0:
+                if rank0 and learner.update_count % checkpoint_interval_updates == 0:
                     ckpt_path = training_paths.checkpoints_dir / f"checkpoint_{learner.update_count}.pt"
                     _write_checkpoint(
                         checkpoint_path=ckpt_path,
@@ -5741,38 +8579,43 @@ def _run_minimal_training(
                     if tensorboard_logger is not None:
                         tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
 
-                    if learner.model is None:
-                        raise RuntimeError("Cannot persist a snapshot registry entry without a learner model")
-                    candidate_policy_id = _persist_snapshot_registry_entry(
-                        stack=stack,
-                        training_paths=training_paths,
-                        run_dir=artifacts.run_dir,
-                        checkpoint_path=ckpt_path,
-                        model_state_dict=learner.model.state_dict(),
-                        config_hash256=config_hash256,
-                        device=device,
-                        update=int(learner.update_count),
-                        policy_version=int(learner.get_policy_version()),
-                        model=learner.model,
-                    )
-                    defer_noleague_baseline_alias_refresh = _should_defer_noleague_baseline_alias_refresh(
-                        stack=stack,
-                        experiment_role=experiment_role,
-                        update_count=int(learner.update_count),
-                    )
-                    if _is_noleague_baseline_role(experiment_role) and not defer_noleague_baseline_alias_refresh:
-                        _ensure_noleague_baseline_anchor(
+                    if main_residual_policy_enabled:
+                        latest_metrics["main_residual_snapshot_registry_skipped"] = 1.0
+                    else:
+                        if learner.model is None:
+                            raise RuntimeError("Cannot persist a snapshot registry entry without a learner model")
+                        candidate_policy_id = _persist_snapshot_registry_entry(
                             stack=stack,
                             training_paths=training_paths,
                             run_dir=artifacts.run_dir,
-                            learner=learner,
-                            device=device,
+                            checkpoint_path=ckpt_path,
+                            model_state_dict=learner.model.state_dict(),
                             config_hash256=config_hash256,
-                            permit_current_run_alias=True,
-                            source_checkpoint_path=ckpt_path,
+                            device=device,
                             update=int(learner.update_count),
+                            policy_version=int(learner.get_policy_version()),
+                            model=learner.model,
                         )
-                    runtime.refresh_opponent_pool()
+                        defer_noleague_baseline_alias_refresh = _should_defer_noleague_baseline_alias_refresh(
+                            stack=stack,
+                            experiment_role=experiment_role,
+                            update_count=int(learner.update_count),
+                        )
+                        if _is_noleague_baseline_role(experiment_role) and not defer_noleague_baseline_alias_refresh:
+                            _ensure_noleague_baseline_anchor(
+                                stack=stack,
+                                training_paths=training_paths,
+                                run_dir=artifacts.run_dir,
+                                learner=learner,
+                                device=device,
+                                config_hash256=config_hash256,
+                                permit_current_run_alias=True,
+                                source_checkpoint_path=ckpt_path,
+                                update=int(learner.update_count),
+                            )
+                        runtime.refresh_opponent_pool()
+                    if main_residual_policy_enabled:
+                        continue
                     if async_promotion_gate_enabled:
                         if async_promotion_gate_executor is None:
                             raise RuntimeError("async promotion gate is enabled but the worker pool was not created")
@@ -5800,6 +8643,10 @@ def _run_minimal_training(
                             and league.enabled
                             and league.promotion_gate_enabled
                             and reference_update >= int(league.warmup.first_updates)
+                            and (
+                                not bool(getattr(league.warmup, "eval_gate_enabled", False))
+                                or bool(league_eval_warmup_gate_open)
+                            )
                         ):
                             registry = SnapshotRegistry.load(training_paths.snapshots_dir / REGISTRY_FILENAME)
                             anchor_policy_ids, anchor_specs, pinned_anchor_snapshot_ids = _resolve_promotion_gate_anchor_specs(
@@ -5846,11 +8693,18 @@ def _run_minimal_training(
                                 f"anchors={','.join(anchor_policy_ids.keys())}"
                             )
                         elif league is not None and league.enabled and league.promotion_gate_enabled:
-                            print(
-                                "Promotion gate skipped during league warmup: "
-                                f"update={int(learner.update_count)} effective_update={reference_update} "
-                                f"threshold={int(league.warmup.first_updates)} candidate={candidate_policy_id}"
-                            )
+                            if reference_update < int(league.warmup.first_updates):
+                                print(
+                                    "Promotion gate skipped during league warmup: "
+                                    f"update={int(learner.update_count)} effective_update={reference_update} "
+                                    f"threshold={int(league.warmup.first_updates)} candidate={candidate_policy_id}"
+                                )
+                            else:
+                                print(
+                                    "Promotion gate skipped during league eval warmup gate: "
+                                    f"update={int(learner.update_count)} effective_update={reference_update} "
+                                    f"candidate={candidate_policy_id}"
+                                )
                     else:
                         promotion_passed = _run_snapshot_promotion_gate(
                             stack=stack,
@@ -5865,6 +8719,7 @@ def _run_minimal_training(
                                 if "league_effective_update" not in latest_metrics
                                 else int(latest_metrics["league_effective_update"])
                             ),
+                            league_eval_warmup_gate_open=league_eval_warmup_gate_open,
                             policy_version=int(learner.get_policy_version()),
                             run_id256=run_id256,
                             config_hash256=config_hash256,
@@ -5873,7 +8728,7 @@ def _run_minimal_training(
                         if promotion_passed:
                             runtime.refresh_opponent_pool()
 
-                if _should_run_periodic_dev_eval(stack, update_count=int(learner.update_count)):
+                if rank0 and _should_run_periodic_dev_eval(stack, update_count=int(learner.update_count)):
                     defer_noleague_baseline_alias_refresh = _should_defer_noleague_baseline_alias_refresh(
                         stack=stack,
                         experiment_role=experiment_role,
@@ -5905,6 +8760,7 @@ def _run_minimal_training(
                                 spec_hash256=spec_hash256,
                                 last_rollback_update=last_checkpoint_guard_rollback_update,
                                 tensorboard_logger=tensorboard_logger,
+                                process_pool_executor=periodic_dev_eval_process_pool,
                             )
                             pending_periodic_dev_eval = None
                             last_dev_eval_summary = completed_summary
@@ -5937,6 +8793,10 @@ def _run_minimal_training(
                             run_dir=artifacts.run_dir,
                             snapshot_ids=pinned_snapshot_ids,
                         )
+                        async_eval_device = _resolve_async_periodic_dev_eval_device(
+                            stack=stack,
+                            learner_device=device,
+                        )
                         request = AsyncPeriodicDevEvalRequest(
                             stack=stack,
                             checkpoint_path=checkpoint_path,
@@ -5951,7 +8811,7 @@ def _run_minimal_training(
                             artifact_scope="periodic_dev_eval",
                             paired_seeds=tuple(_periodic_dev_eval_schedule(stack)[2]),
                             opponents=tuple(opponent_specs),
-                            eval_device_override=None,
+                            eval_device_override=async_eval_device,
                             parallel_workers=max(
                                 1,
                                 int(
@@ -5991,10 +8851,19 @@ def _run_minimal_training(
                                 learner_device=device,
                             ),
                         )
+                        if (
+                            periodic_dev_eval_process_pool is None
+                            and int(request.parallel_workers) > 1
+                        ):
+                            periodic_dev_eval_process_pool = ProcessPoolExecutor(
+                                max_workers=int(request.parallel_workers),
+                                mp_context=mp.get_context("spawn"),
+                            )
                         pending_periodic_dev_eval = PendingPeriodicDevEval(
                             future=async_periodic_dev_eval_executor.submit(
                                 _run_async_periodic_dev_eval_worker,
                                 request,
+                                periodic_dev_eval_process_pool,
                             ),
                             request=request,
                             pinned_snapshot_ids=tuple(newly_pinned_snapshot_ids),
@@ -6020,6 +8889,15 @@ def _run_minimal_training(
                                 update=int(learner.update_count),
                             )
                     else:
+                        if (
+                            periodic_dev_eval_process_pool is None
+                            and stack.config.evaluation is not None
+                            and int(getattr(stack.config.evaluation, "periodic_dev_eval_parallel_workers", 1)) > 1
+                        ):
+                            periodic_dev_eval_process_pool = ProcessPoolExecutor(
+                                max_workers=int(stack.config.evaluation.periodic_dev_eval_parallel_workers),
+                                mp_context=mp.get_context("spawn"),
+                            )
                         summary_payload = _run_periodic_dev_eval(
                             stack=stack,
                             contract=contract,
@@ -6030,6 +8908,7 @@ def _run_minimal_training(
                             run_id256=run_id256,
                             config_hash256=config_hash256,
                             spec_hash256=spec_hash256,
+                            process_pool_executor=periodic_dev_eval_process_pool,
                         )
                         anchor_keys = sorted(cast(dict[str, Any], summary_payload["anchor_scores"]).keys())
                         opponent_fragment = f" opponent={_slug_policy_id(anchor_keys[0])}" if anchor_keys else ""
@@ -6047,7 +8926,7 @@ def _run_minimal_training(
                         confirmatory_request = _confirmatory_dev_eval_request(
                             stack=stack,
                             existing_best_record=cast(Mapping[str, Any] | None, existing_best_record),
-                            dev_eval_summary=summary_payload,
+                            dev_eval_summary=effective_summary,
                         )
                         if confirmatory_request is not None:
                             seed_file, _validated_sources, base_paired_seeds, seed_file_sha256 = (
@@ -6076,6 +8955,8 @@ def _run_minimal_training(
                                 paired_seeds_override=confirmatory_pairs,
                                 persist_summary=False,
                                 update_stall_monitor=False,
+                                batched_inference_override=False,
+                                process_pool_executor=periodic_dev_eval_process_pool,
                             )
                             print(
                                 "Confirmatory dev eval: "
@@ -6084,8 +8965,24 @@ def _run_minimal_training(
                                 f"reasons={','.join(cast(list[str], confirmatory_request['reasons']))} "
                                 f"seed_file={seed_file.name}"
                             )
+                        if _dev_eval_is_authoritative(effective_summary):
+                            _persist_periodic_dev_eval_summary(training_paths=training_paths, payload=effective_summary)
+                        else:
+                            _persist_periodic_dev_eval_fast_screen(training_paths=training_paths, payload=effective_summary)
                         last_dev_eval_summary = effective_summary
                         last_dev_eval_update_count = int(learner.update_count)
+                        league_eval_warmup_gate_status = _sync_runtime_league_eval_warmup_gate(
+                            runtime=runtime,
+                            stack=stack,
+                            dev_eval_summary=effective_summary,
+                        )
+                        league_eval_warmup_gate_open = bool(league_eval_warmup_gate_status["open"])
+                        if bool(league_eval_warmup_gate_status.get("enabled", False)):
+                            print(
+                                "League eval warmup gate: "
+                                f"open={league_eval_warmup_gate_open} "
+                                f"reasons={','.join(cast(list[str], league_eval_warmup_gate_status.get('reasons', [])))}"
+                            )
                         ckpt_path = _ensure_current_checkpoint(
                             training_paths=training_paths,
                             learner=learner,
@@ -6156,6 +9053,20 @@ def _run_minimal_training(
                         if tensorboard_logger is not None:
                             tensorboard_logger.log_periodic_dev_eval(effective_summary, step=int(learner.update_count))
                             tensorboard_logger.log_checkpoint_tracker(tracker_payload, step=int(learner.update_count))
+                        audit_request = _maybe_request_b2_disagreement_audit(
+                            stack=stack,
+                            training_paths=training_paths,
+                            artifacts=artifacts,
+                            dev_eval_summary=effective_summary,
+                        )
+                        if audit_request is not None:
+                            latest_metrics["b2_disagreement_audit_requested"] = 1.0
+                            print(
+                                "B2 disagreement audit requested: "
+                                f"update={int(audit_request['update_count'])} "
+                                f"reasons={','.join(cast(list[str], audit_request['trigger_reasons']))} "
+                                f"episodes={audit_request['episodes_path']}"
+                            )
                         early_cutoff_payload = _update_early_cutoff(
                             stack=stack,
                             training_paths=training_paths,
@@ -6211,6 +9122,7 @@ def _run_minimal_training(
                     spec_hash256=spec_hash256,
                     last_rollback_update=last_checkpoint_guard_rollback_update,
                     tensorboard_logger=tensorboard_logger,
+                    process_pool_executor=periodic_dev_eval_process_pool,
                 )
                 pending_periodic_dev_eval = None
                 last_dev_eval_summary = completed_summary
@@ -6231,6 +9143,8 @@ def _run_minimal_training(
                 async_promotion_gate_executor.shutdown(wait=True, cancel_futures=False)
             if async_periodic_dev_eval_executor is not None:
                 async_periodic_dev_eval_executor.shutdown(wait=True, cancel_futures=False)
+            if periodic_dev_eval_process_pool is not None:
+                periodic_dev_eval_process_pool.shutdown(wait=True, cancel_futures=False)
             runtime.close()
 
     if profiler is not None and profiler_trace_dir is not None:
@@ -6238,7 +9152,7 @@ def _run_minimal_training(
         profiler.export_chrome_trace(str(trace_path))
         print(f"Wrote torch profiler trace: {trace_path}")
 
-    if _is_noleague_baseline_role(experiment_role):
+    if rank0 and _is_noleague_baseline_role(experiment_role):
         _ensure_noleague_baseline_anchor(
             stack=stack,
             training_paths=training_paths,
@@ -6252,6 +9166,8 @@ def _run_minimal_training(
 
     if not latest_metrics:
         raise RuntimeError("The canonical single-node run finished without producing learner metrics")
+    if not rank0:
+        return latest_metrics
     final_checkpoint_path = _ensure_current_checkpoint(
         training_paths=training_paths,
         learner=learner,
@@ -6327,6 +9243,40 @@ def main() -> None:
     parser.add_argument("--unroll-length", type=int, default=4, help="Tiny rollout length for the smoke run")
     parser.add_argument("--max-updates", type=int, default=1, help="Number of learner updates to run")
     parser.add_argument(
+        "--autoscale",
+        action="store_true",
+        help="Resolve training topology from training.scaling and the selected hardware profile",
+    )
+    parser.add_argument(
+        "--autoscale-dry-run",
+        action="store_true",
+        help="Print resolved scaling topology and exit before writing run artifacts",
+    )
+    parser.add_argument(
+        "--hardware-profile",
+        type=str,
+        default="local",
+        help="Autoscale hardware profile: local, uc1-l40-3, uc1-l40-4, 8gpu-l40, or gpu<N>",
+    )
+    parser.add_argument(
+        "--ddp",
+        action="store_true",
+        help="Enable torch.distributed learner gradient averaging; intended for torchrun",
+    )
+    parser.add_argument(
+        "--ddp-backend",
+        type=str,
+        default="auto",
+        choices=("auto", "nccl", "gloo"),
+        help="torch.distributed backend for --ddp or WORLD_SIZE>1",
+    )
+    parser.add_argument(
+        "--max-wall-clock-minutes",
+        type=float,
+        default=None,
+        help="Optional wall-clock budget in minutes; the run stops cleanly between updates when the budget is reached",
+    )
+    parser.add_argument(
         "--runtime-mode",
         type=str,
         default="train_ordered",
@@ -6388,12 +9338,29 @@ def main() -> None:
         default="",
         help="Checkpoint path or alias (`latest`/`best`) to restore before continuing training",
     )
+    parser.add_argument(
+        "--resume-allow-config-mismatch",
+        action="store_true",
+        help=(
+            "Allow loading a checkpoint whose config hash differs from the current stack. "
+            "Spec hash and algorithm are still checked; use only for explicit research continuations."
+        ),
+    )
+    parser.add_argument(
+        "--resume-reset-optimizer",
+        action="store_true",
+        help="Load checkpoint model weights and counters but start with a fresh optimizer and grad scaler state.",
+    )
     args = parser.parse_args()
     run_label = _resolve_run_label(parser, args.run_label, args.run_id_alias)
 
     num_envs = _require_positive_int("--num-envs", args.num_envs)
     unroll_length = _require_positive_int("--unroll-length", args.unroll_length)
     max_updates = _require_positive_int("--max-updates", args.max_updates)
+    max_wall_clock_minutes = _require_positive_optional_float(
+        "--max-wall-clock-minutes",
+        args.max_wall_clock_minutes,
+    )
     stack = load_stack_config(args.stack_config)
     stack = apply_stack_overrides(stack, parse_override_tokens(args.config_override))
     stack = _apply_training_flag_overrides(
@@ -6412,6 +9379,16 @@ def main() -> None:
         resume_from=str(args.resume_from),
         resume_run_dir=resume_run_dir,
     )
+    seed_snapshot_run_dir = (
+        args.seed_snapshot_run_dir.resolve()
+        if args.seed_snapshot_run_dir is not None
+        else _infer_seed_snapshot_run_dir_from_resume_checkpoint(
+            stack=stack,
+            resume_checkpoint_path=resume_checkpoint_path,
+            resume_run_dir=resume_run_dir,
+        )
+    )
+    seed_snapshot_run_dir_auto_inferred = args.seed_snapshot_run_dir is None and seed_snapshot_run_dir is not None
     if public_demo_enabled and (resume_run_dir is not None or resume_checkpoint_path is not None):
         parser.error("Public demo mode does not support checkpoint resume")
     if public_demo_enabled:
@@ -6432,8 +9409,49 @@ def main() -> None:
         actual=config_hash256,
     )
 
+    ddp_context = distributed_context_from_env(force=bool(args.ddp), backend=str(args.ddp_backend))
+    if ddp_context.enabled and torch.cuda.is_available() and int(torch.cuda.device_count()) > 0:
+        torch.cuda.set_device(int(ddp_context.local_rank) % int(torch.cuda.device_count()))
+    ddp_context = init_process_group_if_needed(ddp_context)
+    rank0 = (not ddp_context.enabled) or ddp_context.is_rank0
+    resolved_topology: ResolvedTrainingTopology | None = None
+    if bool(args.autoscale or args.autoscale_dry_run):
+        resolved_topology = _resolve_autoscale_topology(
+            stack=stack,
+            hardware_profile_name=str(args.hardware_profile),
+            runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
+        )
+        if not ddp_context.enabled and str(resolved_topology.resolved_learner_parallelism) == "ddp":
+            if args.autoscale_dry_run:
+                pass
+            else:
+                parser.error(
+                    "autoscale resolved a multi-GPU DDP topology; launch with torchrun/--ddp or use --autoscale-dry-run"
+                )
+        if args.autoscale_dry_run:
+            if rank0:
+                print(
+                    json.dumps(
+                        {
+                            "format": "autoscale_training_topology_v1",
+                            "hardware_profile": str(args.hardware_profile),
+                            "runtime_mode": str(args.runtime_mode),
+                            "scaling_request": _scaling_request_from_config(training_config).to_dict()
+                            if hasattr(_scaling_request_from_config(training_config), "to_dict")
+                            else _scaling_request_from_config(training_config).__dict__,
+                            "resolved_topology": resolved_topology.to_dict(),
+                            "distributed": ddp_context.to_dict(),
+                        },
+                        sort_keys=True,
+                        indent=2,
+                    )
+                )
+            destroy_process_group_if_initialized()
+            return
+        num_envs = int(resolved_topology.total_envs)
+
     git_commit = _git_commit()
-    start_nonce = _start_nonce()
+    start_nonce = int(broadcast_object(_start_nonce() if rank0 else None, context=ddp_context))
     manifest_dict: dict[str, Any] | None = None
     if resume_run_dir is None:
         run_id256 = compute_run_id256(spec_hash256, config_hash256, git_commit or None, start_nonce)
@@ -6471,7 +9489,16 @@ def main() -> None:
     print(spec_bundle_message + f"compat={simulator_info.get('compatibility_hash', '')} sha256={spec_hash256}")
     print(f"Loaded stack config with {len(stack.components)} components")
 
-    device = _resolve_device(stack, args.device)
+    if ddp_context.enabled:
+        device_override = str(args.device).strip().lower()
+        if device_override and device_override != "auto":
+            device = torch.device(device_override)
+        elif torch.cuda.is_available() and int(torch.cuda.device_count()) > 0:
+            device = torch.device(f"cuda:{int(ddp_context.local_rank) % int(torch.cuda.device_count())}")
+        else:
+            device = torch.device("cpu")
+    else:
+        device = _resolve_device(stack, args.device)
     profile = _resolve_runtime_profile(stack, args.profile)
     seed = _resolve_seed(stack, args.seed)
     actor_device_layout = _manifest_actor_device_layout(
@@ -6483,6 +9510,7 @@ def main() -> None:
         pass_action_id=int(spec_bundle["action"]["pass_action_id"]),
         runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
         learner_device=device,
+        resolved_topology=resolved_topology,
     )
     policy_set_selection, policy_set_selection_details = _resolve_policy_set_selection(
         stack,
@@ -6511,81 +9539,115 @@ def main() -> None:
         policy_set_selection_details=policy_set_selection_details,
     )
     if resume_run_dir is None:
-        artifacts = write_run_artifacts(
-            stack.root / "runs",
-            manifest,
-            run_label=run_label or None,
-        )
+        if rank0:
+            artifacts = write_run_artifacts(
+                stack.root / "runs",
+                manifest,
+                run_label=run_label or None,
+            )
+            run_dir_text = artifacts.run_dir.as_posix()
+        else:
+            run_dir_text = ""
+        run_dir_text = str(broadcast_object(run_dir_text, context=ddp_context))
+        if not rank0:
+            artifacts = _run_artifacts_from_existing_run_dir(Path(run_dir_text))
+        distributed_barrier(ddp_context)
     else:
         artifacts = _run_artifacts_from_existing_run_dir(resume_run_dir)
-    run_summary_payload = _load_json_object(artifacts.run_summary_path, label="run summary")
-    run_summary_payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(args.runtime_mode)
-    run_summary_payload["policy_set_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
-    if training_config is not None:
-        run_summary_payload["training_controls"] = {
-            "profile_timers": bool(training_config.profile_timers),
-            "torch_profiler": bool(training_config.torch_profiler),
-            "structured_metrics_mode": str(training_config.structured_metrics_mode),
-            "teacher_aux_mode": str(training_config.teacher_aux_mode),
-            "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
-        }
-    if args.b1_baseline_run_dir is not None:
-        run_summary_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
-    if args.seed_snapshot_run_dir is not None:
-        run_summary_payload["seed_snapshot_run_dir"] = args.seed_snapshot_run_dir.resolve().as_posix()
-    if resume_checkpoint_path is not None:
-        run_summary_payload["resume"] = {
-            "enabled": True,
-            "resume_run_dir": None if resume_run_dir is None else resume_run_dir.as_posix(),
-            "resume_checkpoint_path": resume_checkpoint_path.as_posix(),
-        }
-    _write_json(artifacts.run_summary_path, run_summary_payload)
+    tensorboard_logger: TensorBoardLogger | None = None
+    if rank0:
+        run_summary_payload = _load_json_object(artifacts.run_summary_path, label="run summary")
+        run_summary_payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(args.runtime_mode)
+        run_summary_payload["policy_set_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
+        run_summary_payload["distributed"] = ddp_context.to_dict()
+        if resolved_topology is not None:
+            run_summary_payload["autoscale_topology"] = resolved_topology.to_dict()
+        if training_config is not None:
+            run_summary_payload["training_controls"] = {
+                "profile_timers": bool(training_config.profile_timers),
+                "torch_profiler": bool(training_config.torch_profiler),
+                "structured_metrics_mode": str(training_config.structured_metrics_mode),
+                "teacher_aux_mode": str(training_config.teacher_aux_mode),
+                "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
+                "heuristic_native_rollout_enabled": bool(training_config.heuristic_native_rollout_enabled),
+                "heuristic_native_rollout_profile": str(training_config.heuristic_native_rollout_profile),
+                "heuristic_native_rollout_profiles": list(training_config.heuristic_native_rollout_profiles),
+                "heuristic_native_rollout_profile_mode": str(training_config.heuristic_native_rollout_profile_mode),
+                "max_wall_clock_minutes": None if max_wall_clock_minutes is None else float(max_wall_clock_minutes),
+            }
+        if args.b1_baseline_run_dir is not None:
+            run_summary_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
+        if seed_snapshot_run_dir is not None:
+            run_summary_payload["seed_snapshot_run_dir"] = seed_snapshot_run_dir.as_posix()
+            run_summary_payload["seed_snapshot_run_dir_auto_inferred"] = seed_snapshot_run_dir_auto_inferred
+        run_summary_payload["stack_config_path"] = args.stack_config.resolve().as_posix()
+        if resume_checkpoint_path is not None:
+            run_summary_payload["resume"] = {
+                "enabled": True,
+                "resume_run_dir": None if resume_run_dir is None else resume_run_dir.as_posix(),
+                "resume_checkpoint_path": resume_checkpoint_path.as_posix(),
+                "reset_optimizer": bool(args.resume_reset_optimizer),
+            }
+        _write_json(artifacts.run_summary_path, run_summary_payload)
 
-    determinism_payload = _load_json_object(artifacts.determinism_report_path, label="determinism report")
-    determinism_payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(args.runtime_mode)
-    determinism_payload["policy_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
-    if training_config is not None:
-        determinism_payload["training_controls"] = {
-            "profile_timers": bool(training_config.profile_timers),
-            "torch_profiler": bool(training_config.torch_profiler),
-            "structured_metrics_mode": str(training_config.structured_metrics_mode),
-            "teacher_aux_mode": str(training_config.teacher_aux_mode),
-            "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
-        }
-    if args.b1_baseline_run_dir is not None:
-        determinism_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
-    if args.seed_snapshot_run_dir is not None:
-        determinism_payload["seed_snapshot_run_dir"] = args.seed_snapshot_run_dir.resolve().as_posix()
-    if resume_checkpoint_path is not None:
-        determinism_payload["resume_checkpoint_path"] = resume_checkpoint_path.as_posix()
-    _write_json(artifacts.determinism_report_path, determinism_payload)
+        determinism_payload = _load_json_object(artifacts.determinism_report_path, label="determinism report")
+        determinism_payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(args.runtime_mode)
+        determinism_payload["policy_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
+        determinism_payload["distributed"] = ddp_context.to_dict()
+        if resolved_topology is not None:
+            determinism_payload["autoscale_topology"] = resolved_topology.to_dict()
+        if training_config is not None:
+            determinism_payload["training_controls"] = {
+                "profile_timers": bool(training_config.profile_timers),
+                "torch_profiler": bool(training_config.torch_profiler),
+                "structured_metrics_mode": str(training_config.structured_metrics_mode),
+                "teacher_aux_mode": str(training_config.teacher_aux_mode),
+                "fixed_opponent_backend": str(training_config.fixed_opponent_backend),
+                "heuristic_native_rollout_enabled": bool(training_config.heuristic_native_rollout_enabled),
+                "heuristic_native_rollout_profile": str(training_config.heuristic_native_rollout_profile),
+                "heuristic_native_rollout_profiles": list(training_config.heuristic_native_rollout_profiles),
+                "heuristic_native_rollout_profile_mode": str(training_config.heuristic_native_rollout_profile_mode),
+            }
+        if args.b1_baseline_run_dir is not None:
+            determinism_payload["b1_baseline_run_dir"] = args.b1_baseline_run_dir.resolve().as_posix()
+        if seed_snapshot_run_dir is not None:
+            determinism_payload["seed_snapshot_run_dir"] = seed_snapshot_run_dir.as_posix()
+            determinism_payload["seed_snapshot_run_dir_auto_inferred"] = seed_snapshot_run_dir_auto_inferred
+        if resume_checkpoint_path is not None:
+            determinism_payload["resume_checkpoint_path"] = resume_checkpoint_path.as_posix()
+            determinism_payload["resume_reset_optimizer"] = bool(args.resume_reset_optimizer)
+        _write_json(artifacts.determinism_report_path, determinism_payload)
 
-    environment_payload = _load_json_object(artifacts.environment_path, label="environment manifest")
-    environment_payload["cwd"] = stack.root.as_posix()
-    environment_payload["argv"] = sys.argv
-    environment_payload["hardware"] = manifest.hardware
-    if resume_checkpoint_path is not None:
-        environment_payload["resume_checkpoint_path"] = resume_checkpoint_path.as_posix()
-    _write_json(artifacts.environment_path, environment_payload)
-    tensorboard_logger = TensorBoardLogger(artifacts.layout.tensorboard_dir)
-    if not tensorboard_logger.enabled:
-        unavailable_reason = tensorboard_unavailable_reason()
-        print(
-            "TensorBoard logging is disabled: "
-            + ("SummaryWriter unavailable" if unavailable_reason is None else unavailable_reason),
-            file=sys.stderr,
-        )
-    else:
-        tensorboard_logger.log_run_context(
-            manifest=manifest.to_dict(),
-            environment=environment_payload,
-            run_summary=run_summary_payload,
-            determinism_report=determinism_payload,
-        )
-    if resume_run_dir is None:
-        print(f"Wrote manifest: {artifacts.manifest_path}")
-    else:
-        print(f"Resuming existing run directory: {artifacts.run_dir}")
+        environment_payload = _load_json_object(artifacts.environment_path, label="environment manifest")
+        environment_payload["cwd"] = stack.root.as_posix()
+        environment_payload["argv"] = sys.argv
+        environment_payload["hardware"] = manifest.hardware
+        environment_payload["distributed"] = ddp_context.to_dict()
+        if resolved_topology is not None:
+            environment_payload["autoscale_topology"] = resolved_topology.to_dict()
+        if resume_checkpoint_path is not None:
+            environment_payload["resume_checkpoint_path"] = resume_checkpoint_path.as_posix()
+            environment_payload["resume_reset_optimizer"] = bool(args.resume_reset_optimizer)
+        _write_json(artifacts.environment_path, environment_payload)
+        tensorboard_logger = TensorBoardLogger(artifacts.layout.tensorboard_dir)
+        if not tensorboard_logger.enabled:
+            unavailable_reason = tensorboard_unavailable_reason()
+            print(
+                "TensorBoard logging is disabled: "
+                + ("SummaryWriter unavailable" if unavailable_reason is None else unavailable_reason),
+                file=sys.stderr,
+            )
+        else:
+            tensorboard_logger.log_run_context(
+                manifest=manifest.to_dict(),
+                environment=environment_payload,
+                run_summary=run_summary_payload,
+                determinism_report=determinism_payload,
+            )
+        if resume_run_dir is None:
+            print(f"Wrote manifest: {artifacts.manifest_path}")
+        else:
+            print(f"Resuming existing run directory: {artifacts.run_dir}")
 
     try:
         if public_demo_enabled:
@@ -6636,6 +9698,7 @@ def main() -> None:
             num_envs=num_envs,
             unroll_length=unroll_length,
             max_updates=max_updates,
+            max_wall_clock_minutes=max_wall_clock_minutes,
             profile=profile,
             device=device,
             seed=seed,
@@ -6645,11 +9708,16 @@ def main() -> None:
             spec_hash256=spec_hash256,
             runtime_mode=cast(QueueRuntimeMode, args.runtime_mode),
             b1_baseline_run_dir=None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve(),
-            seed_snapshot_run_dir=None if args.seed_snapshot_run_dir is None else args.seed_snapshot_run_dir.resolve(),
+            seed_snapshot_run_dir=seed_snapshot_run_dir,
+            seed_snapshot_run_dir_auto_inferred=seed_snapshot_run_dir_auto_inferred,
             profile_timers=profile_timers,
             torch_profiler=torch_profiler,
             resume_checkpoint_path=resume_checkpoint_path,
+            resume_allow_config_mismatch=bool(args.resume_allow_config_mismatch),
+            resume_reset_optimizer=bool(args.resume_reset_optimizer),
             tensorboard_logger=tensorboard_logger,
+            resolved_topology=resolved_topology,
+            distributed_context=ddp_context,
         )
         print(
             "Completed canonical single-node training run: "
@@ -6667,7 +9735,9 @@ def main() -> None:
                 f"consecutive_stall_evals={int(metrics.get('early_cutoff_consecutive_stall_evals', 0.0))}"
             )
     finally:
-        tensorboard_logger.close()
+        if tensorboard_logger is not None:
+            tensorboard_logger.close()
+        destroy_process_group_if_initialized()
 
 
 if __name__ == "__main__":

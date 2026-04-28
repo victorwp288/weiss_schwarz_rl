@@ -1,0 +1,14 @@
+schema_version: 2
+description: very-low-LR B1-init bridge with seed-import PFSP exclusion and B1 reference imitation disabled to test whether residual BC is capping B1 exploitation
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_b1init_devtargetsharp_actorparity3_shift450_vlowlr_noseedpfsp_frontierweighted_seedpool_lag10_evalgated_lowlr_evalguard_localpromo.yaml
+training:
+  reference_policy_top_action_bc_coef: 0.0
+  reference_policy_top_action_bc_final_coef: 0.0
+  reference_policy_top_action_family_bc_coef: 0.0
+  reference_policy_top_action_family_bc_final_coef: 0.0
+  structured_aux:
+    teacher_public_heuristic_coef: 0.03
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_heuristic_start_updates: 450
+    teacher_public_heuristic_end_updates: 600
+    teacher_public_main_move_coef: 0.03

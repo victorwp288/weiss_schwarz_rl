@@ -1,0 +1,8 @@
+schema_version: 2
+description: structured_v2 local preset
+extends: local.yaml
+model:
+  encoder_kind: structured_v2
+training:
+  algorithm: structured_v2
+

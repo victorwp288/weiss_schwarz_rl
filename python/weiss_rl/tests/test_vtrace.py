@@ -359,6 +359,14 @@ def test_impala_learner_logging_persists_returned_loss_metrics(tmp_path: Path) -
     assert record["kl_divergence"] is None
     assert record["custom_metrics"]["vtrace_batch_metrics_available"] == 0.0
     assert record["custom_metrics"]["vtrace_rho_p95"] == pytest.approx(update_metrics["vtrace_rho_p95"])
+    assert record["custom_metrics"]["behavior_action_bc_loss"] == pytest.approx(
+        update_metrics["behavior_action_bc_loss"]
+    )
+    assert record["custom_metrics"]["behavior_action_bc_coef"] == pytest.approx(
+        update_metrics["behavior_action_bc_coef"]
+    )
+    assert record["custom_metrics"]["reward_abs_mean"] == pytest.approx(update_metrics["reward_abs_mean"])
+    assert record["custom_metrics"]["target_abs_mean"] == pytest.approx(update_metrics["target_abs_mean"])
 
 
 def test_impala_learner_forward_time_major_matches_manual_seat_aware_rollout() -> None:

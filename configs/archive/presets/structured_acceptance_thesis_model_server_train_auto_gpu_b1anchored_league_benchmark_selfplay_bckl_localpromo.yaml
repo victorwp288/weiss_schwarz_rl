@@ -1,0 +1,11 @@
+schema_version: 2
+description: reduced-size B1-anchored model-policy league with behavior-action BC constraint
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_selfplay_localpromo.yaml
+training:
+  behavior_action_bc_coef: 0.15
+  optimizer:
+    learning_rate: 0.00001
+  exploration:
+    entropy_coef: 0.025
+    entropy_anneal_to: 0.015
+    entropy_anneal_steps_updates: 300000

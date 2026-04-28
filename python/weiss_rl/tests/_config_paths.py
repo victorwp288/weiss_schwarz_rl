@@ -8,8 +8,8 @@ def repo_root() -> Path:
 
 
 def canonical_stack_config_path() -> Path:
-    return repo_root() / "configs" / "presets" / "typed_thesis_locked.yaml"
+    return repo_root() / "configs" / "thesis_locked.yaml"
 
 
 def baseline_stack_config_path(name: str) -> Path:
-    return repo_root() / "configs" / "presets" / "baselines" / name
+    return repo_root() / "configs" / "baselines" / name

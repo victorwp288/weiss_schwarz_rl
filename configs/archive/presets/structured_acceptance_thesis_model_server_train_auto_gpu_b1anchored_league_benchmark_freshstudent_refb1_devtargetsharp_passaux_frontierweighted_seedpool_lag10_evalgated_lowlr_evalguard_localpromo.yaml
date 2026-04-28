@@ -1,0 +1,19 @@
+schema_version: 2
+description: reduced-size eval-gated league bridge with direct pass suppression on teacher development rows
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_devtargetsharp_frontierweighted_seedpool_lag10_evalgated_lowlr_evalguard_localpromo.yaml
+training:
+  structured_aux:
+    teacher_development_pass_suppression_coef: 0.35
+    teacher_public_heuristic_coef: 0.20
+    teacher_public_heuristic_final_coef: 0.08
+    teacher_public_heuristic_start_updates: 180
+    teacher_public_heuristic_end_updates: 420
+    teacher_public_heuristic_temperature: 8.0
+    teacher_public_main_move_coef: 0.12
+league:
+  warmup:
+    eval_gate_min_aggregate_score: 0.66
+    eval_gate_min_anchor_scores:
+      B1 NoLeague baseline: 0.5625
+      B3 HeuristicPublicAggro: 0.70
+      Previous recent snapshot: 0.5625

@@ -1,0 +1,24 @@
+schema_version: 2
+description: B1 S1 branch with the two-label frozen-B1 residual candidate available as an explicit hard-negative opponent lane
+extends: pass3_b1_s1_retrain_from_u450_true_rawdistill.yaml
+training:
+  diverse_opponent_actor_count: 1
+  diverse_model_actor_count: 1
+  diverse_opponent_policy_ids:
+    - b1_residual_2label_conservative_a01_l2
+  residual_opponent_policies:
+    - policy_id: b1_residual_2label_conservative_a01_l2
+      role: b1_exploiter_candidate
+      base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+      residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_residual_adoption_probe_2label_conservative_a01_l2_20260427/residual_state.pt
+      public_heuristic_bias_scale: 1.0
+league:
+  sampling:
+    hard_negative_mix_fraction: 0.0
+  promotion:
+    enabled: false
+evaluation:
+  periodic_dev_eval_interval_updates: 0
+curriculum:
+  checkpoint_guard:
+    enabled: false

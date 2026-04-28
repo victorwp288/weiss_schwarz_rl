@@ -1,0 +1,27 @@
+schema_version: 2
+description: full-size B1 no-league low-LR continuation phase for the main thesis model
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_noleague.yaml
+model:
+  public_heuristic_logit_bias_profile: aggressive
+  public_heuristic_logit_bias_scale: 3.0
+training:
+  train_on_heuristic_actor_rows: true
+  diverse_opponent_actor_count: 0
+  diverse_model_actor_count: 0
+  heuristic_native_rollout_enabled: true
+  heuristic_actor_hidden_state_tracking: false
+  heuristic_native_rollout_profile: aggressive
+  optimizer:
+    learning_rate: 0.00005
+  structured_aux:
+    teacher_family_coef: 0.2
+    teacher_slot_coef: 0.1
+    teacher_action_coef: 0.1
+    teacher_attack_type_coef: 0.05
+    teacher_public_heuristic_profiles:
+      - aggressive
+    teacher_public_heuristic_label_profile: aggressive
+    teacher_public_heuristic_coef: 0.1
+    teacher_public_heuristic_final_coef: 0.1
+    teacher_public_heuristic_temperature: 8.0
+    teacher_public_main_move_coef: 0.1

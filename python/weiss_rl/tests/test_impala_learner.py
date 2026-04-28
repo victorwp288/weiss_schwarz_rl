@@ -76,6 +76,35 @@ class TinyPolicyValueModel(nn.Module):
         return logits, values, next_hidden
 
 
+class BiasScaleTinyPolicyValueModel(TinyPolicyValueModel):
+    def __init__(self, observation_dim: int = 2, action_dim: int = 2) -> None:
+        super().__init__(observation_dim=observation_dim, action_dim=action_dim)
+        self.learner_bias_scale = 3.0
+        self.actor_bias_scale = 3.0
+
+    def set_public_heuristic_logit_bias_scale(
+        self,
+        value: float,
+        *,
+        actor_value: float | None = None,
+    ) -> None:
+        self.learner_bias_scale = float(value)
+        self.actor_bias_scale = float(value if actor_value is None else actor_value)
+
+    def get_public_heuristic_logit_bias_scale(self, *, scoring_mode: str = "learner") -> float:
+        return float(self.actor_bias_scale if scoring_mode == "actor" else self.learner_bias_scale)
+
+    def forward(
+        self,
+        obs: torch.Tensor,
+        hidden_state: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        logits, values, next_hidden = super().forward(obs, hidden_state)
+        logits = logits.clone()
+        logits[:, 0] = logits[:, 0] + float(self.learner_bias_scale)
+        return logits, values, next_hidden
+
+
 class SeatAwareTinyPolicyValueModel(nn.Module):
     def __init__(self, observation_dim: int = 2, action_dim: int = 2) -> None:
         super().__init__()
@@ -299,6 +328,7 @@ class FactorizedStructuredTeacherModel(nn.Module):
         self.public_student_calls = 0
         self.public_target_calls = 0
         self.public_target_profiles: list[str] = []
+        self.public_target_candidate_counts: list[int] = []
 
     def forward_trunk_sequence_seat_aware(
         self,
@@ -352,6 +382,7 @@ class FactorizedStructuredTeacherModel(nn.Module):
         self.public_target_calls += 1
         self.public_target_profiles.append(str(scoring_profile))
         ids = torch.as_tensor(legal_actions.ids, dtype=torch.long)
+        self.public_target_candidate_counts.append(int(ids.shape[0]))
         logits = torch.full((int(ids.shape[0]),), -6.0, dtype=self.bias.dtype, device=self.bias.device)
         if str(scoring_profile) == "aggressive":
             logits = torch.where(ids == 5, self.bias + 4.5, logits)
@@ -682,6 +713,312 @@ def test_impala_learner_packed_legal_actions_match_dense_mask_loss() -> None:
     assert dense_metrics == pytest.approx(packed_metrics)
 
 
+def test_impala_learner_behavior_action_bc_coef_adds_behavior_nll() -> None:
+    torch.manual_seed(7)
+    base_model = TinyPolicyValueModel(action_dim=2)
+    bc_model = TinyPolicyValueModel(action_dim=2)
+    bc_model.load_state_dict(base_model.state_dict())
+    base_learner = ImpalaLearner(model=base_model, pass_action_id=1, behavior_action_bc_coef=0.0)
+    bc_learner = ImpalaLearner(model=bc_model, pass_action_id=1, behavior_action_bc_coef=0.25)
+
+    batch = _simple_training_batch()
+    base_loss, base_metrics = base_learner._loss_and_metrics(batch)
+    bc_loss, bc_metrics = bc_learner._loss_and_metrics(batch)
+
+    assert base_metrics["behavior_action_bc_coef"] == pytest.approx(0.0)
+    assert bc_metrics["behavior_action_bc_coef"] == pytest.approx(0.25)
+    assert bc_metrics["behavior_action_bc_loss"] > 0.0
+    assert bc_metrics["behavior_action_bc_loss"] == pytest.approx(base_metrics["behavior_action_bc_loss"])
+    assert float(bc_loss.detach()) == pytest.approx(
+        float(base_loss.detach()) + (0.25 * bc_metrics["behavior_action_bc_loss"])
+    )
+
+
+def test_impala_learner_policy_loss_coef_can_disable_rl_policy_loss() -> None:
+    torch.manual_seed(33)
+    active_model = TinyPolicyValueModel(action_dim=2)
+    disabled_model = TinyPolicyValueModel(action_dim=2)
+    disabled_model.load_state_dict(active_model.state_dict())
+    active_learner = ImpalaLearner(
+        model=active_model,
+        pass_action_id=1,
+        policy_loss_coef=1.0,
+        value_loss_coef=0.0,
+        entropy_coef=0.0,
+    )
+    disabled_learner = ImpalaLearner(
+        model=disabled_model,
+        pass_action_id=1,
+        policy_loss_coef=0.0,
+        value_loss_coef=0.0,
+        entropy_coef=0.0,
+    )
+
+    batch = _simple_training_batch()
+    active_loss, active_metrics = active_learner._loss_and_metrics(batch)
+    disabled_loss, disabled_metrics = disabled_learner._loss_and_metrics(batch)
+
+    assert active_metrics["policy_loss_coef"] == pytest.approx(1.0)
+    assert disabled_metrics["policy_loss_coef"] == pytest.approx(0.0)
+    assert active_metrics["policy_loss"] != pytest.approx(0.0)
+    assert float(active_loss.detach()) == pytest.approx(active_metrics["policy_loss"])
+    assert float(disabled_loss.detach()) == pytest.approx(0.0, abs=1.0e-7)
+
+
+def test_impala_learner_reference_policy_top_action_bc_coef_adds_reference_nll() -> None:
+    torch.manual_seed(11)
+    base_model = TinyPolicyValueModel(action_dim=2)
+    refbc_model = TinyPolicyValueModel(action_dim=2)
+    reference_model = TinyPolicyValueModel(action_dim=2)
+    refbc_model.load_state_dict(base_model.state_dict())
+    reference_model.load_state_dict(base_model.state_dict())
+    base_learner = ImpalaLearner(model=base_model, pass_action_id=1, reference_policy_top_action_bc_coef=0.0)
+    refbc_learner = ImpalaLearner(
+        model=refbc_model,
+        pass_action_id=1,
+        reference_policy_model=reference_model,
+        reference_policy_top_action_bc_coef=0.4,
+    )
+
+    batch = _simple_training_batch()
+    base_loss, base_metrics = base_learner._loss_and_metrics(batch)
+    refbc_loss, refbc_metrics = refbc_learner._loss_and_metrics(batch)
+
+    assert base_metrics["reference_policy_top_action_bc_coef"] == pytest.approx(0.0)
+    assert refbc_metrics["reference_policy_top_action_bc_coef"] == pytest.approx(0.4)
+    assert refbc_metrics["reference_policy_top_action_bc_loss"] > 0.0
+    assert float(refbc_loss.detach()) == pytest.approx(
+        float(base_loss.detach()) + (0.4 * refbc_metrics["reference_policy_top_action_bc_loss"])
+    )
+
+
+def test_impala_learner_raw_b1_distill_uses_zero_bias_and_restores_scales() -> None:
+    torch.manual_seed(21)
+    student_model = BiasScaleTinyPolicyValueModel(action_dim=2)
+    reference_model = BiasScaleTinyPolicyValueModel(action_dim=2)
+    reference_model.load_state_dict(student_model.state_dict())
+    student_model.set_public_heuristic_logit_bias_scale(1.0, actor_value=1.5)
+    reference_model.set_public_heuristic_logit_bias_scale(2.0, actor_value=2.5)
+    learner = ImpalaLearner(
+        model=student_model,
+        pass_action_id=1,
+        reference_policy_model=reference_model,
+        raw_b1_distill_coef=0.5,
+        raw_b1_distill_teacher_bias_scale=0.0,
+        raw_b1_distill_student_bias_scale=0.0,
+    )
+
+    _loss, metrics = learner._loss_and_metrics(_simple_training_batch())
+
+    assert metrics["raw_b1_distill_coef"] == pytest.approx(0.5)
+    assert metrics["raw_b1_distill_loss"] == pytest.approx(0.0, abs=1.0e-6)
+    assert metrics["raw_b1_top1_match"] == pytest.approx(1.0)
+    assert student_model.get_public_heuristic_logit_bias_scale(scoring_mode="learner") == pytest.approx(1.0)
+    assert student_model.get_public_heuristic_logit_bias_scale(scoring_mode="actor") == pytest.approx(1.5)
+    assert reference_model.get_public_heuristic_logit_bias_scale(scoring_mode="learner") == pytest.approx(2.0)
+    assert reference_model.get_public_heuristic_logit_bias_scale(scoring_mode="actor") == pytest.approx(2.5)
+
+
+def test_impala_learner_raw_b1_distill_penalizes_perturbed_student_raw_logits() -> None:
+    torch.manual_seed(22)
+    student_model = BiasScaleTinyPolicyValueModel(action_dim=2)
+    reference_model = BiasScaleTinyPolicyValueModel(action_dim=2)
+    reference_model.load_state_dict(student_model.state_dict())
+    with torch.no_grad():
+        student_model.policy.bias[0] += 3.0
+        student_model.policy.bias[1] -= 3.0
+    learner = ImpalaLearner(
+        model=student_model,
+        pass_action_id=1,
+        reference_policy_model=reference_model,
+        raw_b1_distill_coef=0.5,
+        raw_b1_distill_teacher_bias_scale=0.0,
+        raw_b1_distill_student_bias_scale=0.0,
+    )
+
+    _loss, metrics = learner._loss_and_metrics(_simple_training_batch())
+
+    assert metrics["raw_b1_distill_loss"] > 0.0
+    assert metrics["raw_b1_kl"] == pytest.approx(metrics["raw_b1_distill_loss"])
+
+
+def test_impala_learner_counterfactual_positive_aux_uses_tensor_labels(tmp_path: Path) -> None:
+    label_dir = tmp_path / "cf_labels"
+    state_dir = label_dir / "states"
+    state_dir.mkdir(parents=True)
+    torch.save(
+        {
+            "obs": torch.tensor([1.0, 0.0]),
+            "actor_seat": torch.tensor(0),
+            "legal_ids": torch.tensor([0, 1], dtype=torch.long),
+            "baseline_action_id": torch.tensor(0),
+            "positive_action_id": torch.tensor(1),
+            "label_weight": torch.tensor(1.0),
+        },
+        state_dir / "cf_000000.pt",
+    )
+    (label_dir / "counterfactual_labels.jsonl").write_text(
+        json.dumps({"label_id": "cf_000000", "tensor_ref": "states/cf_000000.pt"}) + "\n",
+        encoding="utf-8",
+    )
+    model = TinyPolicyValueModel(action_dim=2)
+    with torch.no_grad():
+        model.policy.weight.zero_()
+        model.policy.bias[:] = torch.tensor([2.0, -2.0])
+    learner = ImpalaLearner(
+        model=model,
+        pass_action_id=1,
+        counterfactual_positive_label_dirs=(str(label_dir),),
+        counterfactual_positive_coef=1.0,
+        counterfactual_positive_margin_coef=0.5,
+        counterfactual_positive_margin=1.0,
+    )
+
+    _loss, metrics = learner._loss_and_metrics(_simple_training_batch())
+
+    assert metrics["counterfactual_positive_label_count"] == pytest.approx(1.0)
+    assert metrics["counterfactual_positive_ce_loss"] > 3.0
+    assert metrics["counterfactual_positive_margin_loss"] > 0.0
+    assert metrics["counterfactual_positive_top1_match"] == pytest.approx(0.0)
+
+
+def test_impala_learner_b1_opponent_reference_bc_uses_b1_mask_only() -> None:
+    torch.manual_seed(111)
+    base_model = TinyPolicyValueModel(action_dim=2)
+    b1bc_model = TinyPolicyValueModel(action_dim=2)
+    reference_model = TinyPolicyValueModel(action_dim=2)
+    b1bc_model.load_state_dict(base_model.state_dict())
+    reference_model.load_state_dict(base_model.state_dict())
+    base_learner = ImpalaLearner(model=base_model, pass_action_id=1, reference_policy_model=reference_model)
+    b1bc_learner = ImpalaLearner(
+        model=b1bc_model,
+        pass_action_id=1,
+        reference_policy_model=reference_model,
+        b1_opponent_reference_policy_top_action_bc_coef=0.6,
+    )
+    batch = _simple_training_batch()
+    batch["b1_opponent_mask"] = np.asarray([[True], [False]], dtype=np.bool_)
+
+    base_loss, _base_metrics = base_learner._loss_and_metrics(batch)
+    b1bc_loss, b1bc_metrics = b1bc_learner._loss_and_metrics(batch)
+
+    assert b1bc_metrics["b1_opponent_reference_policy_top_action_bc_coef"] == pytest.approx(0.6)
+    assert b1bc_metrics["b1_opponent_reference_policy_top_action_bc_row_fraction"] == pytest.approx(0.5)
+    assert b1bc_metrics["b1_opponent_reference_policy_top_action_bc_loss"] > 0.0
+    assert float(b1bc_loss.detach()) == pytest.approx(
+        float(base_loss.detach()) + (0.6 * b1bc_metrics["b1_opponent_reference_policy_top_action_bc_loss"])
+    )
+
+
+def test_impala_learner_b1_second_seat_positive_advantage_policy_aux_uses_target_rows_only() -> None:
+    torch.manual_seed(113)
+    base_model = SeatAwareTinyPolicyValueModel(action_dim=2)
+    aux_model = SeatAwareTinyPolicyValueModel(action_dim=2)
+    aux_model.load_state_dict(base_model.state_dict())
+    base_learner = ImpalaLearner(model=base_model, pass_action_id=1)
+    aux_learner = ImpalaLearner(
+        model=aux_model,
+        pass_action_id=1,
+        b1_second_seat_positive_advantage_policy_coef=0.7,
+    )
+    batch = _simple_training_batch()
+    batch["b1_opponent_mask"] = np.asarray([[True], [True]], dtype=np.bool_)
+    batch["actor"] = np.asarray([[1], [0]], dtype=np.int64)
+    batch["vtrace_result"] = VTraceTargets(
+        vs=np.zeros((2, 1), dtype=np.float32),
+        pg_advantages=np.asarray([[2.0], [-3.0]], dtype=np.float32),
+        rhos=np.ones((2, 1), dtype=np.float32),
+    )
+
+    base_loss, _base_metrics = base_learner._loss_and_metrics(batch)
+    aux_loss, aux_metrics = aux_learner._loss_and_metrics(batch)
+
+    assert aux_metrics["b1_second_seat_positive_advantage_policy_coef"] == pytest.approx(0.7)
+    assert aux_metrics["b1_second_seat_positive_advantage_row_fraction"] == pytest.approx(0.5)
+    assert aux_metrics["b1_second_seat_positive_advantage_mean"] == pytest.approx(2.0)
+    assert aux_metrics["b1_second_seat_positive_advantage_policy_loss"] > 0.0
+    assert float(aux_loss.detach()) == pytest.approx(
+        float(base_loss.detach()) + (0.7 * aux_metrics["b1_second_seat_positive_advantage_policy_loss"])
+    )
+
+
+def test_impala_learner_b1_second_seat_reference_avoidance_subtracts_reference_nll() -> None:
+    torch.manual_seed(117)
+    base_model = SeatAwareTinyPolicyValueModel(action_dim=2)
+    avoid_model = SeatAwareTinyPolicyValueModel(action_dim=2)
+    reference_model = TinyPolicyValueModel(action_dim=2)
+    avoid_model.load_state_dict(base_model.state_dict())
+    base_learner = ImpalaLearner(
+        model=base_model,
+        pass_action_id=1,
+        reference_policy_model=reference_model,
+    )
+    avoid_learner = ImpalaLearner(
+        model=avoid_model,
+        pass_action_id=1,
+        reference_policy_model=reference_model,
+        b1_second_seat_reference_top_action_avoidance_coef=0.25,
+    )
+    batch = _simple_training_batch()
+    batch["b1_opponent_mask"] = np.asarray([[True], [True]], dtype=np.bool_)
+    batch["actor"] = np.asarray([[1], [0]], dtype=np.int64)
+
+    base_loss, _base_metrics = base_learner._loss_and_metrics(batch)
+    avoid_loss, avoid_metrics = avoid_learner._loss_and_metrics(batch)
+
+    assert avoid_metrics["b1_second_seat_reference_top_action_avoidance_coef"] == pytest.approx(0.25)
+    assert avoid_metrics["b1_second_seat_reference_top_action_avoidance_row_fraction"] == pytest.approx(0.5)
+    assert avoid_metrics["b1_second_seat_reference_top_action_avoidance_loss"] > 0.0
+    assert float(avoid_loss.detach()) == pytest.approx(
+        float(base_loss.detach()) - (0.25 * avoid_metrics["b1_second_seat_reference_top_action_avoidance_loss"])
+    )
+
+
+def test_impala_learner_reference_policy_family_bc_coef_adds_reference_family_nll() -> None:
+    action_catalog = _structured_metric_catalog()
+    torch.manual_seed(12)
+    base_model = TinyStructuredTeacherModel(action_catalog)
+    family_model = TinyStructuredTeacherModel(action_catalog)
+    reference_model = TinyStructuredTeacherModel(action_catalog)
+    family_model.load_state_dict(base_model.state_dict())
+    reference_model.load_state_dict(base_model.state_dict())
+    with torch.no_grad():
+        for model in (base_model, family_model, reference_model):
+            model.policy.weight.zero_()
+            model.policy.bias.zero_()
+            model.value.weight.zero_()
+            model.value.bias.zero_()
+        reference_model.policy.bias[0] = 4.0
+        family_model.policy.bias[5] = 4.0
+        base_model.policy.bias[5] = 4.0
+
+    base_learner = ImpalaLearner(
+        model=base_model,
+        pass_action_id=action_catalog.pass_action_id,
+        reference_policy_model=reference_model,
+        reference_policy_top_action_family_bc_coef=0.0,
+    )
+    family_learner = ImpalaLearner(
+        model=family_model,
+        pass_action_id=action_catalog.pass_action_id,
+        reference_policy_model=reference_model,
+        reference_policy_top_action_family_bc_coef=0.7,
+    )
+    batch = _simple_training_batch()
+    batch["legal_mask"] = np.ones((2, 1, action_catalog.action_space_size), dtype=np.uint8)
+    batch["actions"] = np.asarray([[action_catalog.pass_action_id], [action_catalog.pass_action_id]], dtype=np.int64)
+
+    base_loss, base_metrics = base_learner._loss_and_metrics(batch)
+    family_loss, family_metrics = family_learner._loss_and_metrics(batch)
+
+    assert base_metrics["reference_policy_top_action_family_bc_coef"] == pytest.approx(0.0)
+    assert family_metrics["reference_policy_top_action_family_bc_coef"] == pytest.approx(0.7)
+    assert family_metrics["reference_policy_top_action_family_bc_loss"] > 0.0
+    assert float(family_loss.detach()) == pytest.approx(
+        float(base_loss.detach()) + (0.7 * family_metrics["reference_policy_top_action_family_bc_loss"])
+    )
+
+
 def test_summarize_structured_policy_metrics_reports_mainmove_pressure() -> None:
     action_catalog = _structured_metric_catalog()
     main_move_02_action = next(
@@ -982,6 +1319,64 @@ def test_compute_structured_teacher_auxiliary_metrics_supports_factorized_public
     assert aligned_metrics["teacher_public_heuristic_loss"] < misaligned_metrics["teacher_public_heuristic_loss"]
     assert (
         aligned_metrics["teacher_public_heuristic_top1_mass"] > misaligned_metrics["teacher_public_heuristic_top1_mass"]
+    )
+
+
+def test_compute_structured_teacher_auxiliary_metrics_suppresses_pass_on_development_rows() -> None:
+    action_catalog = _teacher_aux_catalog()
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    legal_mask = torch.zeros((1, 1, action_catalog.action_space_size), dtype=torch.bool)
+    legal_mask[0, 0, [0, 5, action_catalog.pass_action_id]] = True
+    packed_ids, packed_offsets = _packed_ids_from_mask(legal_mask.numpy().astype(np.uint8, copy=False))
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    teacher_kwargs = {
+        "logits": None,
+        "legal_mask": None,
+        "teacher_family": torch.tensor([[family_index["main_play_character"]]], dtype=torch.long),
+        "teacher_slot": torch.tensor([[0]], dtype=torch.long),
+        "teacher_attack_type": torch.tensor([[-1]], dtype=torch.long),
+        "teacher_action": torch.tensor([[0]], dtype=torch.long),
+        "teacher_valid": torch.tensor([[True]], dtype=torch.bool),
+        "loss_mask": torch.ones((1, 1), dtype=torch.float32),
+        "action_catalog": action_catalog,
+        "family_coef": 0.0,
+        "slot_coef": 0.0,
+        "attack_type_coef": 0.0,
+        "action_coef": 0.0,
+        "same_family_action_coef": 0.0,
+        "development_pass_suppression_coef": 1.0,
+        "packed_ids": torch.as_tensor(packed_ids, dtype=torch.long),
+        "packed_offsets": torch.as_tensor(packed_offsets, dtype=torch.long),
+        "packed_meta": torch.as_tensor(packed_meta, dtype=torch.long),
+    }
+
+    pass_heavy_view = _packed_structured_legal_view(
+        logits=torch.tensor([0.0, 0.0, 4.0], dtype=torch.float32),
+        packed_ids=torch.as_tensor(packed_ids, dtype=torch.long),
+        packed_offsets=torch.as_tensor(packed_offsets, dtype=torch.long),
+        packed_meta=torch.as_tensor(packed_meta, dtype=torch.long),
+    )
+    pass_low_view = _packed_structured_legal_view(
+        logits=torch.tensor([4.0, 3.0, -4.0], dtype=torch.float32),
+        packed_ids=torch.as_tensor(packed_ids, dtype=torch.long),
+        packed_offsets=torch.as_tensor(packed_offsets, dtype=torch.long),
+        packed_meta=torch.as_tensor(packed_meta, dtype=torch.long),
+    )
+
+    pass_heavy_loss, pass_heavy_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        packed_view=pass_heavy_view,
+        **teacher_kwargs,
+    )
+    pass_low_loss, pass_low_metrics, _ = compute_structured_teacher_auxiliary_metrics(
+        packed_view=pass_low_view,
+        **teacher_kwargs,
+    )
+
+    assert float(pass_heavy_loss.detach()) > float(pass_low_loss.detach())
+    assert pass_heavy_metrics["teacher_development_pass_suppression_selected_fraction"] == pytest.approx(1.0)
+    assert (
+        pass_heavy_metrics["teacher_development_pass_probability"]
+        > pass_low_metrics["teacher_development_pass_probability"]
     )
 
 
@@ -1537,6 +1932,49 @@ def test_impala_learner_auxiliary_update_uses_factorized_public_heuristic_teache
     assert metrics["teacher_public_heuristic_loss"] > 0.0
 
 
+def test_impala_learner_public_heuristic_targets_only_configured_teacher_family_rows() -> None:
+    action_catalog = _teacher_aux_catalog()
+    learner = ImpalaLearner(
+        model=FactorizedStructuredTeacherModel(action_catalog),
+        teacher_public_heuristic_coef=1.0,
+        teacher_public_heuristic_temperature=1.0,
+        teacher_public_heuristic_families=("main_play_character",),
+    )
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    row_ids = np.asarray([0, 5, action_catalog.pass_action_id], dtype=np.uint32)
+    packed_ids = np.concatenate([row_ids, row_ids]).astype(np.uint32, copy=False)
+    packed_offsets = np.asarray([0, 3, 6], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0], [0.0, 1.0]]], dtype=np.float32),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0, 0]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((2, 2, 1), dtype=np.float32),
+        "teacher_family": np.asarray(
+            [[family_index["main_play_character"], family_index["attack"]]],
+            dtype=np.int64,
+        ),
+        "teacher_slot": np.asarray([[0, 0]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1, 0]], dtype=np.int64),
+        "teacher_action": np.asarray([[0, 5]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True, True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True, True]], dtype=np.bool_),
+    }
+
+    metrics = learner.auxiliary_update(batch)
+
+    model = learner.model
+    assert isinstance(model, FactorizedStructuredTeacherModel)
+    assert model.public_target_calls == 1
+    assert model.public_target_candidate_counts == [3]
+    assert metrics["teacher_public_heuristic_supported_fraction"] == pytest.approx(1.0)
+    assert metrics["teacher_public_heuristic_selected_fraction"] == pytest.approx(0.5)
+    assert metrics["teacher_public_heuristic_teacher_valid_coverage"] == pytest.approx(0.5)
+    assert metrics["teacher_public_heuristic_loss"] > 0.0
+
+
 def test_impala_learner_auxiliary_update_averages_multiple_public_heuristic_profiles() -> None:
     action_catalog = _teacher_aux_catalog()
     learner = ImpalaLearner(
@@ -1661,6 +2099,49 @@ def test_impala_learner_mixed_precision_flag_disables_amp_on_cpu() -> None:
     assert learner._grad_scaler is None
 
 
+def test_impala_learner_optimizer_backend_foreach_is_live() -> None:
+    learner = ImpalaLearner(model=TinyPolicyValueModel(action_dim=2), optimizer_backend="foreach")
+
+    optimizer = learner._optimizer_for_step()
+
+    assert isinstance(optimizer, torch.optim.Adam)
+    assert optimizer.defaults["foreach"] is True
+
+
+def test_impala_learner_calls_gradient_sync_hook_during_update() -> None:
+    calls: list[str] = []
+    learner = ImpalaLearner(
+        model=TinyPolicyValueModel(action_dim=2),
+        gradient_sync=lambda: calls.append("sync"),
+        profile_timers=True,
+    )
+
+    metrics = learner.update(_simple_training_batch())
+
+    assert calls == ["sync"]
+    assert metrics["timer_learner_gradient_sync_ms"] >= 0.0
+
+
+def test_impala_learner_rejects_unknown_optimizer_backend() -> None:
+    with pytest.raises(ValueError, match="optimizer_backend"):
+        ImpalaLearner(model=TinyPolicyValueModel(action_dim=2), optimizer_backend="mystery")
+
+
+def test_impala_learner_amp_skips_gradient_scan_on_finite_norm(monkeypatch: pytest.MonkeyPatch) -> None:
+    learner = ImpalaLearner(model=TinyPolicyValueModel(action_dim=2))
+    learner._grad_scaler = FakeGradScaler(scale=8.0)
+
+    def fail_collect(self: ImpalaLearner, _grad_norm: torch.Tensor) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+        raise AssertionError("steady-state AMP should not scan every parameter gradient")
+
+    monkeypatch.setattr(ImpalaLearner, "_collect_nonfinite_gradients", fail_collect)
+
+    metrics = learner.update(_simple_training_batch())
+
+    assert metrics["amp_grad_overflow"] == 0.0
+    assert metrics["loss_scale"] == pytest.approx(8.0)
+
+
 def test_impala_learner_uses_compiled_forward_model_when_provided() -> None:
     base_model = TinyPolicyValueModel(action_dim=2)
     compiled_proxy = ForwardProxyModel(base_model)
@@ -1674,8 +2155,14 @@ def test_impala_learner_uses_compiled_forward_model_when_provided() -> None:
 
 def test_impala_learner_auxiliary_update_optimizes_teacher_only_loss() -> None:
     action_catalog = _teacher_aux_catalog()
+    model = TinyStructuredTeacherModel(action_catalog)
+    with torch.no_grad():
+        model.policy.weight.zero_()
+        model.policy.bias.zero_()
+        model.policy.bias[0] = 2.0
+        model.policy.bias[11] = 2.0
     learner = ImpalaLearner(
-        model=TinyStructuredTeacherModel(action_catalog),
+        model=model,
         teacher_family_coef=0.5,
         teacher_slot_coef=0.25,
         teacher_attack_type_coef=0.1,
@@ -2057,6 +2544,118 @@ def test_impala_learner_restricts_packed_policy_scoring_to_train_rows() -> None:
     assert float(context["vtrace_rhos"][1, 0]) == pytest.approx(1.0)
     assert float(context["vtrace_rhos"][0, 0]) > 1.0
     assert metrics["policy_train_fraction"] == pytest.approx(0.5)
+
+
+def test_impala_learner_restricts_packed_scoring_with_teacher_aux_active() -> None:
+    action_catalog = _teacher_aux_catalog()
+    model = TrunkStructuredTeacherModel(action_catalog)
+    learner = ImpalaLearner(
+        model=model,
+        profile_timers=True,
+        structured_metrics_mode="off",
+        teacher_family_coef=0.5,
+        teacher_slot_coef=0.25,
+        teacher_action_coef=0.2,
+        pass_action_id=action_catalog.pass_action_id,
+        vtrace_rho_bar=10.0,
+        vtrace_c_bar=10.0,
+    )
+    learner._active_timing_metrics = {}
+    family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    attack_type_index = {name: index for index, name in enumerate(action_catalog.attack_type_names)}
+    packed_ids = np.asarray(
+        [0, 5, action_catalog.pass_action_id, 10, 11, 12, action_catalog.pass_action_id], dtype=np.uint32
+    )
+    packed_offsets = np.asarray([0, 3, 7], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]], [[0.25, -0.5]]], dtype=np.float32),
+        "actions": np.asarray([[0], [11]], dtype=np.int64),
+        "legal_actions": LegalActionBatch.from_packed(
+            packed_ids,
+            packed_offsets,
+            meta=packed_meta,
+            action_space=action_catalog.action_space_size,
+        ),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0], [1]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "rewards": np.zeros((2, 1), dtype=np.float32),
+        "discounts": np.ones((2, 1), dtype=np.float32),
+        "behavior_logp": np.asarray([[-2.0], [-3.0]], dtype=np.float32),
+        "bootstrap_value": np.zeros((1,), dtype=np.float32),
+        "teacher_family": np.asarray(
+            [[family_index["main_play_character"]], [family_index["attack"]]],
+            dtype=np.int64,
+        ),
+        "teacher_slot": np.asarray([[0], [0]], dtype=np.int64),
+        "teacher_attack_type": np.asarray([[-1], [attack_type_index["direct"]]], dtype=np.int64),
+        "teacher_action": np.asarray([[0], [11]], dtype=np.int64),
+        "teacher_valid": np.asarray([[True], [True]], dtype=np.bool_),
+        "policy_train_mask": np.asarray([[True], [False]], dtype=np.bool_),
+    }
+
+    loss, metrics, context = learner._loss_and_metrics_with_context(batch)
+
+    assert float(loss.detach()) != 0.0
+    assert model.scorer_calls == 1
+    assert model.scorer_row_count == 1
+    assert model.scorer_candidate_count == 3
+    assert learner._active_timing_metrics["packed_candidate_train_rows"] == pytest.approx(1.0)
+    assert learner._active_timing_metrics["packed_candidate_train_count"] == pytest.approx(3.0)
+    assert float(context["vtrace_rhos"][1, 0]) == pytest.approx(1.0)
+    assert metrics["teacher_active_fraction"] == pytest.approx(0.5)
+    assert metrics["policy_train_fraction"] == pytest.approx(0.5)
+
+
+def test_impala_learner_keeps_all_packed_rows_for_structured_summary_metrics() -> None:
+    action_catalog = _teacher_aux_catalog()
+    model = TrunkStructuredTeacherModel(action_catalog)
+    learner = ImpalaLearner(
+        model=model,
+        profile_timers=True,
+        structured_metrics_mode="sampled",
+        teacher_aux_mode="off",
+        pass_action_id=action_catalog.pass_action_id,
+    )
+    learner.update_count = 10
+    learner._active_timing_metrics = {}
+    packed_ids = np.asarray(
+        [0, 5, action_catalog.pass_action_id, 10, 11, 12, action_catalog.pass_action_id], dtype=np.uint32
+    )
+    packed_offsets = np.asarray([0, 3, 7], dtype=np.uint32)
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    batch = {
+        "obs": np.asarray([[[1.0, 0.0]], [[0.25, -0.5]]], dtype=np.float32),
+        "actions": np.asarray([[5], [11]], dtype=np.int64),
+        "legal_actions": LegalActionBatch.from_packed(
+            packed_ids,
+            packed_offsets,
+            meta=packed_meta,
+            action_space=action_catalog.action_space_size,
+        ),
+        "legal_ids": packed_ids,
+        "legal_offsets": packed_offsets,
+        "legal_action_meta": packed_meta,
+        "to_play_seat": np.asarray([[0], [1]], dtype=np.int64),
+        "initial_hidden_state": np.zeros((1, 2, 1), dtype=np.float32),
+        "vtrace_result": VTraceTargets(
+            vs=np.zeros((2, 1), dtype=np.float32),
+            pg_advantages=np.ones((2, 1), dtype=np.float32),
+            rhos=np.ones((2, 1), dtype=np.float32),
+        ),
+        "policy_train_mask": np.asarray([[True], [False]], dtype=np.bool_),
+    }
+
+    _loss, metrics = learner._loss_and_metrics(batch)
+
+    assert model.scorer_calls == 1
+    assert model.scorer_row_count == 2
+    assert model.scorer_candidate_count == 7
+    assert "structured_pass_mass" in metrics
+    assert "packed_candidate_train_rows" not in learner._active_timing_metrics
 
 
 def test_impala_learner_auxiliary_update_uses_factorized_teacher_path() -> None:

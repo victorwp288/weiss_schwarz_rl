@@ -1,0 +1,6 @@
+schema_version: 2
+description: Pass 3 B1 exploit probe that concentrates B1-opponent training on the hard focal seat
+extends: pass3_b1reward3.yaml
+league:
+  sampling:
+    noleague_baseline_force_focal_seat: 1

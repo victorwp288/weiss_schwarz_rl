@@ -35,7 +35,7 @@ def test_parse_override_tokens_reads_grouped_json_values() -> None:
 
 
 def test_apply_stack_overrides_updates_grouped_fields() -> None:
-    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_thesis_locked.yaml")
+    stack = load_stack_config(_repo_root() / "configs" / "thesis_locked.yaml")
 
     updated = apply_stack_overrides(
         stack,
@@ -58,7 +58,7 @@ def test_apply_stack_overrides_updates_grouped_fields() -> None:
 
 
 def test_apply_stack_overrides_rejects_unknown_fields() -> None:
-    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_thesis_locked.yaml")
+    stack = load_stack_config(_repo_root() / "configs" / "thesis_locked.yaml")
 
     with pytest.raises(ValueError, match="unknown field"):
         apply_stack_overrides(stack, {"training.optimizer.mystery_knob": 1})
@@ -66,7 +66,7 @@ def test_apply_stack_overrides_rejects_unknown_fields() -> None:
 
 def test_apply_stack_overrides_updates_preserved_canonical_payload(tmp_path: Path) -> None:
     repo_root = _repo_root()
-    stack = load_stack_config(repo_root / "configs" / "presets" / "typed_local.yaml")
+    stack = load_stack_config(repo_root / "configs" / "local.yaml")
     (tmp_path / "configs").mkdir()
     artifact_path = tmp_path / "runs" / "example_run" / "config_canonical.json"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,3 +77,4 @@ def test_apply_stack_overrides_updates_preserved_canonical_payload(tmp_path: Pat
 
     assert canonical_config_dict(updated)["config"]["rewards"]["discount"]["gamma"] == pytest.approx(0.5)
     assert compute_config_hash256(updated) != compute_config_hash256(loaded)
+

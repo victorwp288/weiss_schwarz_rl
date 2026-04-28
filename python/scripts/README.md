@@ -15,17 +15,17 @@ If you are doing an ad-hoc local invocation without installing the package, use 
 
 The frozen thesis-facing stack surface is:
 
-- `configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml`
-- `configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml`
-- `configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml`
+- `configs/main_impala_league_server.yaml`
+- `configs/baselines/noleague_impala.yaml`
+- `configs/main_eval.yaml`
 
 The wrapper exposes the main recipe as `thesis-model-auto-gpu`, so the shortest current commands are:
 
 ```bash
 uv run python python/scripts/thesis_run.py --list-presets
-uv run python python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml --run-label b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/train.py --stack-config configs/baselines/noleague_impala.yaml --run-label b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
 uv run python python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label thesis_model_seed1 --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 400 --skip-compare
-uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml --run-dir runs/<run_dir>
+uv run python python/scripts/eval.py --stack-config configs/main_eval.yaml --run-dir runs/<run_dir>
 uv run python python/scripts/play_vs_model.py --run-dir runs/<run_dir>
 ```
 
@@ -54,7 +54,7 @@ make train-min
 # or, when you want a low-level simulator-backed smoke on the canonical stack
 make train-inline-smoke
 # or directly
-PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.py --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml --run-label m3_08_smoke --device cpu
+PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.py --stack-config configs/main_impala_league_server.yaml --run-label m3_08_smoke --device cpu
 ```
 
 What it does today:
@@ -85,7 +85,7 @@ Resume support:
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml \
+  --stack-config configs/main_impala_league_server.yaml \
   --resume-run-dir runs/my_locked_run \
   --resume-from latest \
   --max-updates 200
@@ -100,15 +100,15 @@ tensorboard --logdir runs/<run>/tensorboard
 ```
 
 The same entrypoint also supports the shipped baseline stacks:
-- `configs/presets/baselines/noleague_impala.yaml`
-- `configs/presets/baselines/norecurrence_impala.yaml`
-- `configs/presets/baselines/ppo_lite.yaml`
+- `configs/baselines/noleague_impala.yaml`
+- `configs/baselines/norecurrence_impala.yaml`
+- `configs/baselines/ppo_lite.yaml`
 
 Public-safe toy/demo staging:
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml \
+  --stack-config configs/main_impala_league_server.yaml \
   --public-demo \
   --run-label toy_public_demo
 ```
@@ -122,14 +122,14 @@ Evaluation reporting and contract-check entrypoint.
 Contract-only smoke check:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml
+uv run python python/scripts/eval.py --stack-config configs/main_eval.yaml
 ```
 
 Summary export from an existing episodes file:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml \
+  --stack-config configs/main_eval.yaml \
   --episodes-jsonl runs/some_eval/episodes.jsonl \
   --summary-json runs/some_eval/summary.json \
   --summary-csv runs/some_eval/summary.csv \
@@ -156,7 +156,7 @@ Public-safe toy/demo eval:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml \
+  --stack-config configs/main_eval.yaml \
   --public-demo \
   --run-dir runs/toy_public_demo
 ```
@@ -223,7 +223,7 @@ Compare two policies on the recorded states from a deterministic replay bundle.
 ```bash
 uv run python python/scripts/replay_inspector.py \
   --bundle runs/some_run/replays/regression/replay_deadbeef.zip \
-  --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml \
+  --stack-config configs/main_impala_league_server.yaml \
   --run-dir runs/some_run \
   --policy-a policy_000123 \
   --policy-b policy_000456 \
@@ -308,8 +308,8 @@ Single-node launcher for multi-seed and multi-stack runs. It round-robins jobs a
 ```bash
 uv run python python/scripts/launch_experiments.py \
   --group-label baseline_suite \
-  --stack-config configs/presets/baselines/noleague_impala.yaml \
-  --stack-config configs/presets/baselines/ppo_lite.yaml \
+  --stack-config configs/baselines/noleague_impala.yaml \
+  --stack-config configs/baselines/ppo_lite.yaml \
   --seed 1 \
   --seed 2 \
   --device cuda:0 \
@@ -363,3 +363,4 @@ uv run python python/scripts/make_figures.py \
   --final-eval-dir runs/toy_public_demo/eval/final_eval \
   --out-dir runs/toy_public_demo/figures
 ```
+

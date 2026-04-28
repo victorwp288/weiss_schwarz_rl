@@ -30,7 +30,7 @@ sync:
 ifeq ($(UV),)
 	@$(PY_SYS) -m venv $(VENV) || (echo "Failed to create venv. On Debian/Ubuntu install python3-venv." && exit 1)
 	@$(PY_VENV) -m pip install -q --upgrade pip
-	@$(PY_VENV) -m pip install -q --extra-index-url https://download.pytorch.org/whl/cu124 -e ".[dev]"
+	@$(PY_VENV) -m pip install -q --extra-index-url https://download.pytorch.org/whl/cu128 -e ".[dev]"
 else
 	@uv sync --extra dev
 endif
@@ -40,7 +40,7 @@ sync-sim:
 ifeq ($(UV),)
 	@$(PY_SYS) -m venv $(VENV) || (echo "Failed to create venv. On Debian/Ubuntu install python3-venv." && exit 1)
 	@$(PY_VENV) -m pip install -q --upgrade pip
-	@$(PY_VENV) -m pip install -q --extra-index-url https://download.pytorch.org/whl/cu124 -e ".[dev,sim]"
+	@$(PY_VENV) -m pip install -q --extra-index-url https://download.pytorch.org/whl/cu128 -e ".[dev,sim]"
 else
 	@uv sync --extra dev --extra sim
 endif
@@ -107,12 +107,12 @@ train-min:
 	@$(PYRUN) python/scripts/train.py --stack-config configs/stack_smoke.yaml
 
 train-inline-smoke:
-	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml --run-label m3_08_smoke --device cpu
+	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) python/scripts/train.py --stack-config configs/main_impala_league_server.yaml --run-label m3_08_smoke --device cpu
 
 toy-public-e2e:
 	@rm -rf runs/toy_public_demo_ci
-	@$(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml --public-demo --run-label toy_public_demo_ci
-	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml --public-demo --run-dir runs/toy_public_demo_ci
+	@$(PYRUN) python/scripts/train.py --stack-config configs/main_impala_league_server.yaml --public-demo --run-label toy_public_demo_ci
+	@$(PYRUN) python/scripts/eval.py --stack-config configs/main_eval.yaml --public-demo --run-dir runs/toy_public_demo_ci
 	@$(PYRUN) python/scripts/make_figures.py --public-demo --final-eval-dir runs/toy_public_demo_ci/eval/final_eval --out-dir runs/toy_public_demo_ci/figures
 
 artifact-hygiene:
@@ -120,7 +120,7 @@ artifact-hygiene:
 	@$(PYRUN) python/scripts/artifact_scan.py --artifact-root runs/toy_public_demo_ci
 
 eval-dev:
-	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml
+	@$(PYRUN) python/scripts/eval.py --stack-config configs/main_eval.yaml
 
 figures:
 	@test -n "$(RUN_DIR)" || { echo "Usage: make figures RUN_DIR=runs/<run_dir> [FIG_ID=seat_bias] [FORMATS=\"pdf png\"]" >&2; exit 1; }
@@ -129,3 +129,4 @@ figures:
 clean:
 	@find . -type d -name '__pycache__' -prune -exec rm -rf {} +
 	@rm -rf .ruff_cache .mypy_cache
+

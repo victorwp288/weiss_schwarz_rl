@@ -204,6 +204,22 @@ class TensorBoardLogger:
             if metric_value is not None:
                 self._log_scalar(f"{prefix}/metric_value", metric_value, step)
             self.log_text(f"{prefix}/record", dict(record), step=step)
+        secondary = tracker.get("secondary")
+        if isinstance(secondary, Mapping):
+            for alias, record in sorted(secondary.items()):
+                if not isinstance(record, Mapping):
+                    continue
+                prefix = f"checkpoint/secondary/{_tag_part(str(alias))}"
+                update_count = _as_scalar(record.get("update_count"))
+                policy_version = _as_scalar(record.get("policy_version"))
+                metric_value = _as_scalar(record.get("metric_value"))
+                if update_count is not None:
+                    self._log_scalar(f"{prefix}/update_count", update_count, step)
+                if policy_version is not None:
+                    self._log_scalar(f"{prefix}/policy_version", policy_version, step)
+                if metric_value is not None:
+                    self._log_scalar(f"{prefix}/metric_value", metric_value, step)
+                self.log_text(f"{prefix}/record", dict(record), step=step)
         self._logged_checkpoint_tracker_payloads.add(dedupe_key)
 
     def log_periodic_dev_eval(self, summary_payload: Mapping[str, Any], *, step: int) -> None:

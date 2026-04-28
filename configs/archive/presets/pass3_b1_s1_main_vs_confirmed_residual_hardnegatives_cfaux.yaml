@@ -1,0 +1,19 @@
+schema_version: 2
+description: B1 S1 main-policy branch with confirmed residual hard negatives and direct counterfactual positive CE
+extends: pass3_b1_s1_main_vs_confirmed_residual_hardnegatives.yaml
+training:
+  counterfactual_positive:
+    enabled: true
+    label_dirs:
+      - runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427
+      - runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_mainmove_no_pass_p8_t20_a2_stop1_20260427
+      - runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude2_p8_t80_a8_stop5_20260428
+      - runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_nonpass_exclude6_p16_t120_a8_stop3_20260428
+      - runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude7_p16_t100_a4_stop3_20260428
+    coef: 1.0
+    final_coef: 0.5
+    start_updates: 450
+    end_updates: 470
+    margin_coef: 0.2
+    margin: 1.0
+    max_labels: 10

@@ -443,6 +443,14 @@ def _method_from_config(config_root: dict[str, Any]) -> tuple[str, str]:
     recurrent_core = str(model_config.get("recurrent_core", "gru"))
     encoder_kind = str(model_config.get("encoder_kind", "mlp"))
 
+    if experiment_role == "ablation_teacher_fade_no_tactical_bias" or (
+        _looks_like_teacher_fade_ablation(model_config=model_config, training_config=training_config)
+        and _looks_like_no_tactical_bias_ablation(model_config=model_config)
+    ):
+        return (
+            "thesis_ablation_teacher_fade_no_tactical_bias",
+            "Thesis ablation: teacher fade + no tactical bias",
+        )
     if experiment_role == "ablation_teacher_fade" or _looks_like_teacher_fade_ablation(
         model_config=model_config,
         training_config=training_config,
@@ -460,6 +468,11 @@ def _method_from_config(config_root: dict[str, Any]) -> tuple[str, str]:
         return "thesis_ablation_teacher_fade_no_league", "Thesis ablation: teacher fade no league"
     if experiment_role == "baseline_noleague_ablation_no_tactical_bias":
         return "thesis_ablation_no_tactical_bias_no_league", "Thesis ablation: no tactical bias no league"
+    if experiment_role == "baseline_noleague_ablation_teacher_fade_no_tactical_bias":
+        return (
+            "thesis_ablation_teacher_fade_no_tactical_bias_no_league",
+            "Thesis ablation: teacher fade + no tactical bias no league",
+        )
     if algorithm == "ppo_lite_masked_v1":
         return "ppo_lite", "PPO-lite"
     if experiment_role == "baseline_noleague":

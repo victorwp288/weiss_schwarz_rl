@@ -1,0 +1,9 @@
+schema_version: 2
+description: no-league baseline aligned to the thesis-model server training surface
+extends: ../structured_acceptance_thesis_model_server_train_auto_gpu.yaml
+experiment:
+  role: baseline_noleague
+training:
+  heuristic_native_rollout_profile: aggressive
+league:
+  enabled: false

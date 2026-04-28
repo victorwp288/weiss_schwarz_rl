@@ -1,0 +1,8 @@
+schema_version: 2
+description: very-low-LR B1-init bridge that keeps B1 family-level rails but removes exact top-action reference BC to test within-family B1 exploitation
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_b1init_devtargetsharp_actorparity3_shift450_vlowlr_noseedpfsp_frontierweighted_seedpool_lag10_evalgated_lowlr_evalguard_localpromo.yaml
+training:
+  reference_policy_top_action_bc_coef: 0.0
+  reference_policy_top_action_bc_final_coef: 0.0
+  reference_policy_top_action_family_bc_coef: 0.30
+  reference_policy_top_action_family_bc_final_coef: 0.12

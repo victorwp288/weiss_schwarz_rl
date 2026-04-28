@@ -1,0 +1,19 @@
+schema_version: 2
+description: reduced-size fresh league student with low actor-policy lag and explicit B1 seed-pool warmup pressure
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_fade_frontierweighted_lowlr_evalguard_localpromo.yaml
+training:
+  checkpointing:
+    actor_reload_interval_updates: 10
+league:
+  pool:
+    recent_size: 32
+    champion_size: 8
+  sampling:
+    heuristic_public_mix_fraction: 0.30
+    heuristic_public_final_mix_fraction: 0.20
+    heuristic_public_variant_mix_fraction: 0.20
+    heuristic_public_variant_final_mix_fraction: 0.20
+    noleague_baseline_mix_fraction: 0.20
+    warmup_snapshot_mix_fraction: 0.35
+  warmup:
+    first_updates: 120

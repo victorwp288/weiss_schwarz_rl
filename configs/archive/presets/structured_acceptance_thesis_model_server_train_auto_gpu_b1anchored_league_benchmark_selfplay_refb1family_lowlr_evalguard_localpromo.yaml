@@ -1,0 +1,5 @@
+schema_version: 2
+description: reduced-size B1-anchored low-LR league with extra frozen-B1 family-level distillation for play-vs-move stability
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_selfplay_refb1strong_lowlr_evalguard_localpromo.yaml
+training:
+  reference_policy_top_action_family_bc_coef: 0.75

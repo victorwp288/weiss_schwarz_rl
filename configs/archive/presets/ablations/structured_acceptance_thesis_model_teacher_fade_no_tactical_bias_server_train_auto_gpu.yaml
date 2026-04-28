@@ -1,0 +1,19 @@
+schema_version: 2
+description: thesis-model server training preset with teacher fade and no tactical public-bias shaping combined
+extends: ../structured_acceptance_thesis_model_server_train_auto_gpu.yaml
+experiment:
+  role: ablation_teacher_fade_no_tactical_bias
+model:
+  public_heuristic_logit_bias_scale: 1.0
+  public_heuristic_logit_bias_start_updates: 40
+  public_heuristic_logit_bias_end_updates: 140
+  public_heuristic_logit_bias_final_scale: 1.0
+  public_heuristic_logit_bias_families: []
+training:
+  actor_heuristic_start_updates: 40
+  actor_heuristic_end_updates: 140
+  actor_heuristic_final_fraction: 0.25
+  structured_aux:
+    teacher_public_heuristic_start_updates: 40
+    teacher_public_heuristic_end_updates: 140
+    teacher_public_heuristic_final_coef: 0.0

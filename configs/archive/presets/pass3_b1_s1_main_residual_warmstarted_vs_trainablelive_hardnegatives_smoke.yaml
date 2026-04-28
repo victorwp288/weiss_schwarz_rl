@@ -1,0 +1,12 @@
+schema_version: 2
+description: Warmstarted identity-preserving B1 main residual smoke from confirmed trainable-live B1 exploiter
+extends: pass3_b1_s1_main_residual_vs_trainablelive_hardnegatives_smoke.yaml
+training:
+  main_residual_policy:
+    enabled: true
+    base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+    initial_residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_residual_adoption_probe_rush_trainlive_mine1_20260428a/residual_state.pt
+    public_heuristic_bias_scale: 1.0
+    hidden_dim: 256
+    alpha: 0.1
+    residual_mode: plain

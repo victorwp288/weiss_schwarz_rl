@@ -4,14 +4,14 @@ This is the frozen training and evaluation surface for the thesis-model run.
 
 ## Canonical presets
 
-- `configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml`
+- `configs/main_impala_league_server.yaml`
   - frozen tiny248 thesis training recipe
   - current recommended server run surface
-- `configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml`
+- `configs/baselines/noleague_impala.yaml`
   - matching `baseline_noleague` prerequisite for the frozen thesis model
-- `configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml`
+- `configs/main_eval.yaml`
   - frozen thesis-model eval surface, including the richer final anchor set
-- `configs/presets/structured_acceptance_thesis_model_multideck_auto_gpu.yaml`
+- `configs/ablations/multideck.yaml`
   - separate multideck branch, not the frozen single-deck thesis model
 
 ## Baseline prerequisite
@@ -22,7 +22,7 @@ Bootstrap that baseline once with the matching model/environment surface:
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml \
+  --stack-config configs/baselines/noleague_impala.yaml \
   --run-label b1_anchor_thesis_model_seed1 \
   --num-envs 2048 \
   --unroll-length 64 \
@@ -60,7 +60,7 @@ Run the richer final thesis evaluation on an existing run:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml \
+  --stack-config configs/main_eval.yaml \
   --run-dir runs/<run_dir>
 ```
 
@@ -68,7 +68,7 @@ Parallel eval on a multi-GPU box:
 
 ```bash
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml \
+  --stack-config configs/main_eval.yaml \
   --run-dir runs/<run_dir> \
   --parallel-workers 2 \
   --parallel-worker-device cuda:0 \
@@ -133,3 +133,4 @@ uv run python python/scripts/thesis_run.py --preset thesis-model-multideck --run
 - Run at least `2-3` seeded confirmations on the university server.
 - Use `structured_acceptance_thesis_model_eval_auto_gpu.yaml` for the final reported evaluation bundle of the frozen thesis model.
 - Keep one multideck/generalization run in the final study, even if the main reported frontier stays single-deck, because it makes the thesis story much stronger on robustness.
+

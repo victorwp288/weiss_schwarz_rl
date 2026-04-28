@@ -14,6 +14,7 @@ import pytest
 import torch
 
 import weiss_rl.model as model_module
+import weiss_rl.runtime as runtime_module
 from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.eval.policy_set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
@@ -44,6 +45,7 @@ from weiss_rl.runtime import (
     build_runtime_config,
     resolve_actor_device_layout,
 )
+from weiss_rl.residual_policy import FrozenStoredLogitResidual, LiveFrozenB1Residual, TrainableLiveFrozenB1Residual
 
 
 def _make_runtime_unroll(
@@ -74,6 +76,7 @@ def _make_runtime_unroll(
         final_hidden_state=np.zeros((1, 1), dtype=np.float32),
         episode_seed=np.zeros((1, 1), dtype=np.uint64),
         policy_train_mask=np.ones((1, 1), dtype=np.bool_),
+        b1_opponent_mask=np.zeros((1, 1), dtype=np.bool_),
         behavior_logits=None,
         counters=counters,
     )
@@ -657,6 +660,25 @@ def _teacher_test_catalog() -> ActionCatalog:
     )
 
 
+def _teacher_mulligan_test_catalog() -> ActionCatalog:
+    return ActionCatalog.from_spec_bundle(
+        {
+            "action": {
+                "action_encoding_version": 1,
+                "action_space_size": 7,
+                "pass_action_id": 6,
+                "constants": [["MAX_HAND", 5], ["MAX_STAGE", 5], ["ATTACK_SLOT_COUNT", 3]],
+                "families": [
+                    {"name": "mulligan_confirm", "base": 0, "count": 1},
+                    {"name": "mulligan_select", "base": 1, "count": 5},
+                    {"name": "pass", "base": 6, "count": 1},
+                ],
+                "attack_type_encoding": [["frontal", 0], ["direct", 1], ["side", 2]],
+            }
+        }
+    )
+
+
 def test_select_pending_unrolls_train_ordered_keeps_same_behavior_version() -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
@@ -741,6 +763,34 @@ def test_split_focal_actor_rows_forces_model_policy_on_diverse_model_lane() -> N
     assert heuristic_rows.size == 0
 
 
+def test_actor_id_force_model_policy_lane_uses_global_actor_id() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._diverse_model_actor_count = 2
+
+    assert QueueRuntime._actor_id_force_model_policy_lane(runtime, 0)
+    assert QueueRuntime._actor_id_force_model_policy_lane(runtime, 1)
+    assert not QueueRuntime._actor_id_force_model_policy_lane(runtime, 2)
+
+
+def test_split_focal_actor_rows_rejects_mixed_impala_without_hidden_tracking() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._teacher_policy = object()
+    runtime_any._active_actor_heuristic_fraction = lambda: 0.5
+    runtime_any._actor_behavior_values_required = False
+    runtime_any._heuristic_actor_hidden_state_tracking = False
+
+    with pytest.raises(RuntimeError, match="mixed heuristic/model actor rows require"):
+        QueueRuntime._split_focal_actor_rows(
+            runtime,
+            actor=cast(Any, SimpleNamespace(force_model_policy_lane=False)),
+            focal_indices=np.asarray([0, 2, 4, 6], dtype=np.int64),
+            rng=np.random.default_rng(7),
+        )
+
+
 def test_policy_train_mask_for_actor_can_exclude_pure_heuristic_lane() -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
@@ -755,6 +805,32 @@ def test_policy_train_mask_for_actor_can_exclude_pure_heuristic_lane() -> None:
     )
 
     npt.assert_array_equal(mask, np.asarray([False, False, False, False], dtype=np.bool_))
+
+
+def test_policy_train_mask_for_actor_excludes_only_known_heuristic_rows() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._train_on_heuristic_actor_rows = False
+    runtime_any._actor_policy_backend = "heuristic_public"
+    runtime_any._active_actor_heuristic_fraction = lambda: 0.75
+    counters = {
+        "policy_train_model_rows": 0,
+        "policy_train_heuristic_rows": 0,
+        "policy_excluded_heuristic_rows": 0,
+    }
+
+    mask = QueueRuntime._policy_train_mask_for_actor(
+        runtime,
+        actor=cast(Any, SimpleNamespace(force_model_policy_lane=False)),
+        focal_rows=np.asarray([True, True, False, True, True], dtype=np.bool_),
+        model_focal_indices=np.asarray([1, 2, 4], dtype=np.int64),
+        counters=counters,
+    )
+
+    npt.assert_array_equal(mask, np.asarray([False, True, False, False, True], dtype=np.bool_))
+    assert counters["policy_train_model_rows"] == 2
+    assert counters["policy_train_heuristic_rows"] == 0
+    assert counters["policy_excluded_heuristic_rows"] == 2
 
 
 def test_reset_done_rows_fallback_reinitializes_full_actor_state() -> None:
@@ -1171,6 +1247,261 @@ def test_handle_collector_commands_tracks_update_and_refreshes_pool() -> None:
     assert len(refresh_calls) == 2
 
 
+def test_runtime_snapshot_opponent_load_restores_model_guidance_payload(tmp_path: Path, monkeypatch) -> None:
+    class _FakeModel:
+        def __init__(self) -> None:
+            self.learner_scale = -1.0
+            self.actor_scale = -1.0
+            self.loaded_state: dict[str, Any] | None = None
+            self.evaluated = 0
+
+        def to(self, _device: torch.device) -> _FakeModel:
+            return self
+
+        def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+            self.loaded_state = dict(state_dict)
+
+        def set_public_heuristic_logit_bias_scale(
+            self,
+            value: float,
+            *,
+            actor_value: float | None = None,
+        ) -> None:
+            self.learner_scale = float(value)
+            if actor_value is not None:
+                self.actor_scale = float(actor_value)
+
+        def eval(self) -> _FakeModel:
+            self.evaluated += 1
+            return self
+
+    built_models: list[_FakeModel] = []
+
+    def fake_build_policy_value_model(**_kwargs: Any) -> _FakeModel:
+        model = _FakeModel()
+        built_models.append(model)
+        return model
+
+    monkeypatch.setattr(runtime_module, "build_policy_value_model", fake_build_policy_value_model)
+    snapshot_path = tmp_path / "training" / "snapshots" / "policy_000001" / "weights.pt"
+    snapshot_path.parent.mkdir(parents=True)
+    torch.save(
+        {
+            "model_state_dict": {"w": torch.tensor([1.0])},
+            "public_heuristic_logit_bias_scale": 3.0,
+            "public_heuristic_actor_logit_bias_scale": 1.0,
+        },
+        snapshot_path,
+    )
+
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._run_dir = tmp_path
+    runtime_any.stack = SimpleNamespace(config=SimpleNamespace(model=SimpleNamespace()))
+    runtime_any.observation_dim = 4
+    runtime_any.action_dim = 5
+    runtime_any._observation_spec = None
+    runtime_any._spec_bundle = None
+    runtime_any._device = torch.device("cpu")
+
+    loaded = QueueRuntime._load_snapshot_model(
+        runtime,
+        "training/snapshots/policy_000001/weights.pt",
+    )
+
+    assert loaded is built_models[0]
+    assert loaded.loaded_state is not None
+    assert loaded.learner_scale == pytest.approx(3.0)
+    assert loaded.actor_scale == pytest.approx(1.0)
+    assert loaded.evaluated == 1
+
+
+def test_load_residual_opponent_model_wraps_frozen_base(tmp_path: Path) -> None:
+    class DummyBase(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(1))
+            self.learner_scale: float | None = None
+            self.actor_scale: float | None = None
+
+        def set_public_heuristic_logit_bias_scale(self, value: float, *, scoring_mode: str = "learner") -> None:
+            if scoring_mode == "learner":
+                self.learner_scale = float(value)
+            elif scoring_mode == "actor":
+                self.actor_scale = float(value)
+
+        def initial_seat_hidden(
+            self,
+            batch_size: int,
+            *,
+            device: torch.device | None = None,
+            dtype: torch.dtype | None = None,
+        ):
+            return torch.zeros((batch_size, 1), device=device, dtype=dtype or torch.float32)
+
+        def forward_seat_aware(self, obs, acting_seat, seat_hidden_state=None, *, scoring_mode="learner"):
+            return (
+                torch.zeros((obs.shape[0], 5), device=obs.device),
+                torch.zeros((obs.shape[0],), device=obs.device),
+                self.initial_seat_hidden(obs.shape[0], device=obs.device),
+            )
+
+    base_path = tmp_path / "base.pt"
+    base_path.write_bytes(b"base")
+    residual_path = tmp_path / "residual_state.pt"
+    residual = FrozenStoredLogitResidual(obs_dim=4, action_dim=5, hidden_dim=8, alpha=0.1)
+    torch.save(
+        {
+            "obs_dim": 4,
+            "action_dim": 5,
+            "hidden_dim": 8,
+            "alpha": 0.1,
+            "model_state_dict": residual.state_dict(),
+        },
+        residual_path,
+    )
+    base_model = DummyBase()
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._run_dir = tmp_path
+    runtime_any._device = torch.device("cpu")
+    runtime_any._load_snapshot_model_from_path = lambda path, display_path=None: base_model
+
+    loaded = QueueRuntime._load_residual_opponent_model(
+        runtime,
+        SimpleNamespace(
+            policy_id="b1_residual_test",
+            base_snapshot_path="base.pt",
+            residual_state_path="residual_state.pt",
+            public_heuristic_bias_scale=1.0,
+        ),
+    )
+
+    assert isinstance(loaded, LiveFrozenB1Residual)
+    assert base_model.learner_scale == pytest.approx(1.0)
+    assert base_model.actor_scale == pytest.approx(1.0)
+    assert all(not parameter.requires_grad for parameter in loaded.base_model.parameters())
+
+
+def test_trainable_live_residual_freezes_base_but_keeps_residual_gradients() -> None:
+    class DummyBase(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(1))
+
+        def initial_seat_hidden(
+            self,
+            batch_size: int,
+            *,
+            device: torch.device | None = None,
+            dtype: torch.dtype | None = None,
+        ):
+            return torch.zeros((batch_size, 1), device=device, dtype=dtype or torch.float32)
+
+        def forward_seat_aware(
+            self,
+            obs,
+            acting_seat,
+            seat_hidden_state=None,
+            *,
+            scoring_mode="learner",
+            legal_actions=None,
+        ):
+            logits = torch.zeros((obs.shape[0], 5), device=obs.device) + self.weight
+            return (
+                logits,
+                torch.zeros((obs.shape[0],), device=obs.device),
+                self.initial_seat_hidden(obs.shape[0], device=obs.device),
+            )
+
+    base_model = DummyBase()
+    residual = FrozenStoredLogitResidual(obs_dim=4, action_dim=5, hidden_dim=8, alpha=0.1)
+    wrapper = TrainableLiveFrozenB1Residual(base_model=base_model, residual_probe=residual)
+    obs = torch.ones((1, 4))
+    hidden = wrapper.initial_seat_hidden(1)
+    logits, _value, _next_hidden = wrapper.forward_seat_aware(obs, torch.tensor([0]), hidden)
+    loss = torch.nn.functional.cross_entropy(logits, torch.tensor([2]))
+    loss.backward()
+    wrapper.set_public_heuristic_logit_bias_scale(1.0, actor_value=1.0)
+    legal_logits, _value, _next_hidden = wrapper.forward_seat_aware(
+        obs,
+        torch.tensor([0]),
+        hidden,
+        legal_actions=object(),
+    )
+
+    assert all(not parameter.requires_grad for parameter in wrapper.base_model.parameters())
+    assert base_model.weight.grad is None
+    assert legal_logits.shape == (1, 5)
+    assert wrapper.get_public_heuristic_logit_bias_scale(scoring_mode="learner") == pytest.approx(0.0)
+    residual_grads = [parameter.grad for parameter in wrapper.residual_probe.parameters() if parameter.requires_grad]
+    assert any(grad is not None and torch.any(grad != 0) for grad in residual_grads)
+
+
+def test_configured_resident_opponent_policy_ids_include_residual_specs() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._heuristic_public_reserved_envs_per_actor = 0
+    runtime_any._noleague_baseline_reserved_envs_per_actor = 0
+    runtime_any._opponent_heuristic_policies = {}
+    runtime_any._active_heuristic_public_variant_mix_fraction = lambda: 0.0
+    runtime_any._active_noleague_baseline_mix_fraction = lambda: 0.0
+    runtime_any._residual_opponent_policy_specs = (SimpleNamespace(policy_id="b1_residual_test"),)
+
+    assert QueueRuntime._configured_resident_opponent_policy_ids(runtime) == ("b1_residual_test",)
+
+
+def test_diverse_opponent_actor_count_minus_one_marks_all_actor_ids_diverse() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._diverse_opponent_actor_count = -1
+    runtime_any._diverse_model_actor_count = 0
+
+    assert QueueRuntime._actor_id_is_diverse_lane(runtime, 0) is True
+    assert QueueRuntime._actor_id_is_diverse_lane(runtime, 999) is True
+    assert QueueRuntime._actor_id_force_model_policy_lane(runtime, 0) is False
+
+
+def test_build_actor_state_uses_minus_one_diverse_lane_sentinel(monkeypatch) -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any.config = SimpleNamespace(base_seed=1, envs_per_actor=2)
+    runtime_any._device = torch.device("cpu")
+    runtime_any._compile_actor_inference = False
+    runtime_any._shared_actor_model = None
+    runtime_any._shared_compiled_actor_model = None
+    runtime_any._current_learner_update = 0
+    runtime_any._diverse_opponent_actor_count = -1
+    runtime_any._diverse_model_actor_count = 0
+    runtime_any._fixed_opponent_policy_slots = lambda: None
+    runtime_any._assign_episode_roles = lambda *_args, **_kwargs: None
+
+    class _FakeEnv:
+        def reset(self, *, seed: int | None = None) -> Any:
+            return SimpleNamespace(seed=seed)
+
+    class _FakeModel:
+        def to(self, _device: torch.device) -> _FakeModel:
+            return self
+
+        def eval(self) -> None:
+            return None
+
+        def initial_seat_hidden(self, env_count: int, *, device: torch.device) -> torch.Tensor:
+            return torch.zeros((env_count, 1), device=device)
+
+    runtime_any._build_env = lambda **_kwargs: (_FakeEnv(), "i16_legal_ids")
+
+    def fake_compile(model: Any, *, enabled: bool) -> None:
+        return None
+
+    monkeypatch.setattr(runtime_module, "_maybe_compile_runtime_actor_model", fake_compile)
+    actor = QueueRuntime._build_actor_state(runtime, model=_FakeModel(), actor_id=37)
+
+    assert actor.diverse_opponent_lane is True
+    assert actor.force_model_policy_lane is False
+
+
 def test_refresh_opponent_pool_excludes_fixed_b1_anchor(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     registry_path = run_dir / "training" / "snapshots" / "registry.json"
@@ -1380,6 +1711,57 @@ def test_refresh_opponent_pool_keeps_small_recent_reservoir_when_promotion_gate_
     }
 
 
+def test_refresh_opponent_pool_excludes_rejected_recent_when_promotion_gate_enabled(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    registry_path = run_dir / "training" / "snapshots" / "registry.json"
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="policy_000007",
+        update=7,
+        weights_sha256="7" * 64,
+        path="training/snapshots/policy_000007/weights.pt",
+    )
+    registry.add_snapshot(
+        policy_id="policy_000008",
+        update=8,
+        weights_sha256="8" * 64,
+        path="training/snapshots/policy_000008/weights.pt",
+    )
+    registry.add_champion("policy_000007")
+    registry.reject_snapshot("policy_000008")
+    registry.save(registry_path)
+
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._registry_path = registry_path
+    runtime_any._league_config = SimpleNamespace(
+        snapshot_pool_recent_size=8,
+        snapshot_pool_champion_size=2,
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.2,
+        promotion_gate_enabled=True,
+        promotion=SimpleNamespace(gate=SimpleNamespace(guardrails=SimpleNamespace(max_truncation_rate=0.05))),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_sampler = None
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_model_locks = {}
+    runtime_any._pfsp_pool_size = 0
+    runtime_any._pfsp_quarantined_opponents = 0
+    runtime_any._load_snapshot_model = lambda path: f"loaded::{path}"
+
+    QueueRuntime.refresh_opponent_pool(runtime)
+
+    assert runtime_any._opponent_champion_ids == ("policy_000007",)
+    assert runtime_any._opponent_recent_ids == ()
+    assert runtime_any._opponent_candidate_ids == ("policy_000007",)
+    assert runtime_any._opponent_models == {
+        "policy_000007": "loaded::training/snapshots/policy_000007/weights.pt",
+    }
+
+
 def test_refresh_opponent_pool_uses_probationary_recent_pool_before_first_champion(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     registry_path = run_dir / "training" / "snapshots" / "registry.json"
@@ -1432,11 +1814,14 @@ def test_refresh_opponent_pool_uses_probationary_recent_pool_before_first_champi
     QueueRuntime.refresh_opponent_pool(runtime)
 
     assert runtime_any._opponent_champion_ids == ()
-    assert runtime_any._opponent_recent_ids == ("policy_000008",)
-    assert runtime_any._opponent_candidate_ids == ("policy_000008",)
-    assert runtime_any._pfsp_pool_size == 1
-    assert runtime_any._pfsp_recent_pool_size == 1
-    assert runtime_any._opponent_models == {"policy_000008": "loaded::training/snapshots/policy_000008/weights.pt"}
+    assert runtime_any._opponent_recent_ids == ("policy_000007", "policy_000008")
+    assert runtime_any._opponent_candidate_ids == ("policy_000007", "policy_000008")
+    assert runtime_any._pfsp_pool_size == 2
+    assert runtime_any._pfsp_recent_pool_size == 2
+    assert runtime_any._opponent_models == {
+        "policy_000007": "loaded::training/snapshots/policy_000007/weights.pt",
+        "policy_000008": "loaded::training/snapshots/policy_000008/weights.pt",
+    }
 
 
 def test_refresh_opponent_pool_keeps_models_for_inflight_stale_assignments(tmp_path: Path) -> None:
@@ -1726,6 +2111,250 @@ def test_refresh_opponent_pool_keeps_small_recent_reservoir_when_champions_exist
     }
 
 
+def test_refresh_opponent_pool_can_exclude_seed_imports_after_pfsp_handoff(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    registry_path = run_dir / "training" / "snapshots" / "registry.json"
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="seed_source_policy_000450",
+        update=450,
+        weights_sha256="a" * 64,
+        path="training/snapshots/seed_source_policy_000450/weights.pt",
+        source_kind="seed_import",
+    )
+    registry.add_snapshot(
+        policy_id="policy_000480",
+        update=480,
+        weights_sha256="b" * 64,
+        path="training/snapshots/policy_000480/weights.pt",
+    )
+    registry.add_snapshot(
+        policy_id="policy_000500",
+        update=500,
+        weights_sha256="c" * 64,
+        path="training/snapshots/policy_000500/weights.pt",
+    )
+    registry.add_champion("seed_source_policy_000450")
+    registry.save(registry_path)
+
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._registry_path = registry_path
+    runtime_any._effective_learner_update = 530
+    runtime_any._league_eval_warmup_gate_open = True
+    runtime_any._league_config = SimpleNamespace(
+        snapshot_pool_recent_size=8,
+        snapshot_pool_champion_size=4,
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.2,
+        promotion_gate_enabled=True,
+        warmup=SimpleNamespace(first_updates=520, eval_gate_enabled=True),
+        sampling=SimpleNamespace(
+            exclude_seed_snapshots_from_pfsp=True,
+            hard_negative_min_samples=16,
+            hard_negative_max_win_rate=0.45,
+        ),
+        promotion=SimpleNamespace(gate=SimpleNamespace(guardrails=SimpleNamespace(max_truncation_rate=0.05))),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_sampler = None
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_model_locks = {}
+    runtime_any._pfsp_pool_size = 0
+    runtime_any._pfsp_quarantined_opponents = 0
+    runtime_any._pfsp_champion_pool_size = 0
+    runtime_any._pfsp_recent_pool_size = 0
+    runtime_any._pfsp_hard_negative_pool_size = 0
+    runtime_any._load_snapshot_model = lambda path: f"loaded::{path}"
+
+    QueueRuntime.refresh_opponent_pool(runtime)
+
+    assert runtime_any._opponent_champion_ids == ()
+    assert runtime_any._opponent_recent_ids == ("policy_000480", "policy_000500")
+    assert runtime_any._opponent_candidate_ids == ("policy_000480", "policy_000500")
+    assert "seed_source_policy_000450" not in runtime_any._opponent_models
+
+
+def test_refresh_opponent_pool_keeps_seed_imports_before_pfsp_handoff(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    registry_path = run_dir / "training" / "snapshots" / "registry.json"
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="seed_source_policy_000450",
+        update=450,
+        weights_sha256="a" * 64,
+        path="training/snapshots/seed_source_policy_000450/weights.pt",
+        source_kind="seed_import",
+    )
+    registry.add_snapshot(
+        policy_id="policy_000480",
+        update=480,
+        weights_sha256="b" * 64,
+        path="training/snapshots/policy_000480/weights.pt",
+    )
+    registry.save(registry_path)
+
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._registry_path = registry_path
+    runtime_any._effective_learner_update = 500
+    runtime_any._league_eval_warmup_gate_open = False
+    runtime_any._league_config = SimpleNamespace(
+        snapshot_pool_recent_size=8,
+        snapshot_pool_champion_size=4,
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.2,
+        promotion_gate_enabled=True,
+        warmup=SimpleNamespace(first_updates=520, eval_gate_enabled=True),
+        sampling=SimpleNamespace(
+            exclude_seed_snapshots_from_pfsp=True,
+            hard_negative_min_samples=16,
+            hard_negative_max_win_rate=0.45,
+        ),
+        promotion=SimpleNamespace(gate=SimpleNamespace(guardrails=SimpleNamespace(max_truncation_rate=0.05))),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_sampler = None
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_model_locks = {}
+    runtime_any._pfsp_pool_size = 0
+    runtime_any._pfsp_quarantined_opponents = 0
+    runtime_any._pfsp_champion_pool_size = 0
+    runtime_any._pfsp_recent_pool_size = 0
+    runtime_any._pfsp_hard_negative_pool_size = 0
+    runtime_any._load_snapshot_model = lambda path: f"loaded::{path}"
+
+    QueueRuntime.refresh_opponent_pool(runtime)
+
+    assert runtime_any._opponent_recent_ids == ("policy_000480",)
+    assert runtime_any._opponent_warmup_snapshot_ids == ("seed_source_policy_000450",)
+    assert runtime_any._pfsp_warmup_snapshot_pool_size == 1
+    assert "seed_source_policy_000450" in runtime_any._opponent_models
+
+
+def test_refresh_opponent_pool_never_treats_seed_history_as_active_champion_or_recent(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    registry_path = run_dir / "training" / "snapshots" / "registry.json"
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="seed_source_policy_000450",
+        update=450,
+        weights_sha256="a" * 64,
+        path="training/snapshots/seed_source_policy_000450/weights.pt",
+        source_kind="seed_import",
+    )
+    registry.add_snapshot(
+        policy_id="policy_000480",
+        update=480,
+        weights_sha256="b" * 64,
+        path="training/snapshots/policy_000480/weights.pt",
+        source_kind="league_import",
+    )
+    registry.add_champion("seed_source_policy_000450")
+    registry.save(registry_path)
+
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._registry_path = registry_path
+    runtime_any._effective_learner_update = 530
+    runtime_any._league_eval_warmup_gate_open = True
+    runtime_any._league_config = SimpleNamespace(
+        snapshot_pool_recent_size=8,
+        snapshot_pool_champion_size=4,
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.2,
+        promotion_gate_enabled=True,
+        warmup=SimpleNamespace(first_updates=520, eval_gate_enabled=True),
+        sampling=SimpleNamespace(
+            exclude_seed_snapshots_from_pfsp=True,
+            hard_negative_min_samples=16,
+            hard_negative_max_win_rate=0.45,
+        ),
+        promotion=SimpleNamespace(gate=SimpleNamespace(guardrails=SimpleNamespace(max_truncation_rate=0.05))),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_sampler = None
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_model_locks = {}
+    runtime_any._pfsp_pool_size = 0
+    runtime_any._pfsp_quarantined_opponents = 0
+    runtime_any._pfsp_champion_pool_size = 0
+    runtime_any._pfsp_recent_pool_size = 0
+    runtime_any._pfsp_hard_negative_pool_size = 0
+    runtime_any._load_snapshot_model = lambda path: f"loaded::{path}"
+
+    QueueRuntime.refresh_opponent_pool(runtime)
+
+    assert runtime_any._opponent_champion_ids == ()
+    assert runtime_any._opponent_recent_ids == ("policy_000480",)
+    assert runtime_any._opponent_warmup_snapshot_ids == ()
+    assert runtime_any._opponent_candidate_ids == ("policy_000480",)
+
+
+def test_refresh_opponent_pool_keeps_champions_out_of_recent_lane(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    registry_path = run_dir / "training" / "snapshots" / "registry.json"
+    registry = SnapshotRegistry()
+    for update in (780, 800, 820, 840, 860):
+        registry.add_snapshot(
+            policy_id=f"policy_{update:06d}",
+            update=update,
+            weights_sha256=f"{update:064x}"[-64:],
+            path=f"training/snapshots/policy_{update:06d}/weights.pt",
+        )
+    for update in (800, 820, 840, 860):
+        registry.add_champion(f"policy_{update:06d}")
+    registry.save(registry_path)
+
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._registry_path = registry_path
+    runtime_any._league_config = SimpleNamespace(
+        snapshot_pool_recent_size=8,
+        snapshot_pool_champion_size=4,
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.2,
+        promotion_gate_enabled=True,
+        promotion=SimpleNamespace(gate=SimpleNamespace(guardrails=SimpleNamespace(max_truncation_rate=0.05))),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_sampler = None
+    runtime_any._opponent_candidate_ids = ()
+    runtime_any._opponent_models = {}
+    runtime_any._opponent_model_locks = {}
+    runtime_any._pfsp_pool_size = 0
+    runtime_any._pfsp_quarantined_opponents = 0
+    runtime_any._pfsp_champion_pool_size = 0
+    runtime_any._pfsp_recent_pool_size = 0
+    runtime_any._pfsp_hard_negative_pool_size = 0
+    runtime_any._load_snapshot_model = lambda path: f"loaded::{path}"
+
+    QueueRuntime.refresh_opponent_pool(runtime)
+
+    assert runtime_any._opponent_champion_ids == (
+        "policy_000800",
+        "policy_000820",
+        "policy_000840",
+        "policy_000860",
+    )
+    assert runtime_any._opponent_recent_ids == ("policy_000780",)
+    assert runtime_any._pfsp_recent_pool_size == 1
+    assert runtime_any._opponent_candidate_ids == (
+        "policy_000800",
+        "policy_000820",
+        "policy_000840",
+        "policy_000860",
+        "policy_000780",
+    )
+
+
 def test_refresh_opponent_pool_demotes_stale_champions(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     registry_path = run_dir / "training" / "snapshots" / "registry.json"
@@ -1827,6 +2456,52 @@ def test_sample_opponent_policy_ids_can_force_hard_negative_bucket() -> None:
     assert runtime_any._pfsp_last_hard_negative_envs == 4
     assert runtime_any._pfsp_last_recent_envs == 0
     assert runtime_any._pfsp_last_heuristic_public_envs == 0
+
+
+def test_opponent_sampling_weights_reassign_inactive_league_mass_to_recent() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._current_learner_update = 780
+    runtime_any._effective_learner_update = 780
+    runtime_any._opponent_candidate_ids = ("policy_recent",)
+    runtime_any._opponent_recent_ids = ("policy_recent",)
+    runtime_any._opponent_champion_ids = ()
+    runtime_any._opponent_hard_negative_ids = ()
+    runtime_any._opponent_heuristic_policies = {
+        HEURISTIC_PUBLIC_POLICY_ID: object(),
+        HEURISTIC_PUBLIC_AGGRO_POLICY_ID: object(),
+        HEURISTIC_PUBLIC_CONTROL_POLICY_ID: object(),
+    }
+    runtime_any._opponent_models = {"policy_recent": object()}
+    runtime_any._league_config = SimpleNamespace(
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.0,
+        sampling=SimpleNamespace(
+            heuristic_public_start_updates=0,
+            heuristic_public_mix_fraction=0.25,
+            heuristic_public_final_mix_fraction=0.25,
+            heuristic_public_mix_end_updates=400,
+            heuristic_public_variant_mix_fraction=0.25,
+            heuristic_public_variant_final_mix_fraction=0.25,
+            heuristic_public_variant_mix_end_updates=400,
+            noleague_baseline_mix_fraction=0.25,
+            noleague_baseline_mix_end_updates=400,
+            champion_mix_fraction=0.25,
+            hard_negative_mix_fraction=0.20,
+        ),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._pfsp_sampling_ready = lambda: True
+
+    metrics = QueueRuntime._opponent_sampling_group_weight_metrics(runtime)
+
+    assert metrics["pfsp_sampling_weight_heuristic_public"] == pytest.approx(0.25)
+    assert metrics["pfsp_sampling_weight_heuristic_public_variant"] == pytest.approx(0.25)
+    assert metrics["pfsp_sampling_weight_recent"] == pytest.approx(0.5)
+    assert metrics["pfsp_sampling_weight_champion"] == pytest.approx(0.0)
+    assert metrics["pfsp_sampling_weight_hard_negative"] == pytest.approx(0.0)
+    assert metrics["pfsp_sampling_weight_noleague_baseline"] == pytest.approx(0.0)
 
 
 def test_sample_opponent_policy_ids_can_force_heuristic_public_bucket_before_pfsp_ready() -> None:
@@ -2027,6 +2702,62 @@ def test_sample_opponent_policy_ids_can_force_warmup_snapshot_bucket_before_pfsp
     assert runtime_any._pfsp_last_warmup_snapshot_envs == 4
 
 
+def test_sample_opponent_policy_ids_can_use_configured_mirror_lane_after_pfsp_ready() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._pfsp_last_warmup_snapshot_envs = 0
+    runtime_any._opponent_candidate_ids = ("recent_a",)
+    runtime_any._opponent_hard_negative_ids = ()
+    runtime_any._opponent_champion_ids = ()
+    runtime_any._opponent_recent_ids = ("recent_a",)
+    runtime_any._opponent_heuristic_policies = {}
+    runtime_any._league_config = SimpleNamespace(
+        pfsp_power=2.0,
+        pfsp_epsilon_uniform=0.0,
+        sampling=SimpleNamespace(
+            heuristic_public_start_updates=0,
+            heuristic_public_mix_fraction=0.0,
+            heuristic_public_variant_mix_fraction=0.0,
+            noleague_baseline_mix_fraction=0.0,
+            noleague_baseline_mix_end_updates=-1,
+            warmup_snapshot_mix_fraction=0.0,
+            mirror_mix_fraction=1.0,
+            champion_mix_fraction=0.0,
+            hard_negative_mix_fraction=0.0,
+        ),
+    )
+    runtime_any._outcomes = OnlineOutcomeTracker(window_size=128)
+    runtime_any._opponent_models = {"recent_a": object()}
+    runtime_any._pfsp_sampling_ready = lambda: True
+    runtime_any._league_reference_update = lambda: 100
+
+    sampled = QueueRuntime._sample_opponent_policy_ids(
+        runtime,
+        count=4,
+        rng=np.random.default_rng(7),
+    )
+
+    assert sampled == (
+        _MIRROR_OPPONENT_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+    )
+    assert runtime_any._pfsp_last_mirror_envs == 4
+    assert runtime_any._pfsp_last_recent_envs == 0
+    metrics = QueueRuntime._opponent_sampling_group_weight_metrics(runtime)
+    assert metrics["pfsp_sampling_weight_mirror"] == pytest.approx(1.0)
+    assert metrics["pfsp_sampling_weight_recent"] == pytest.approx(0.0)
+
+
 def test_active_heuristic_public_mix_fraction_linearly_anneals_with_update() -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
@@ -2111,7 +2842,31 @@ def test_active_warmup_snapshot_mix_fraction_turns_off_after_league_warmup() -> 
     assert QueueRuntime._active_warmup_snapshot_mix_fraction(runtime) == pytest.approx(0.0)
 
 
-def test_assign_episode_roles_uses_snapshot_only_on_diverse_warmup_lane() -> None:
+def test_eval_gated_warmup_keeps_snapshot_lane_and_blocks_pfsp_after_update_threshold() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_enabled = True
+    runtime_any._league_config = SimpleNamespace(
+        warmup=SimpleNamespace(first_updates=5, eval_gate_enabled=True),
+        sampling=SimpleNamespace(warmup_snapshot_mix_fraction=0.4),
+    )
+    runtime_any._opponent_sampler = object()
+    runtime_any._opponent_candidate_ids = ("seed_a",)
+    runtime_any._opponent_models = {"seed_a": object()}
+    runtime_any._current_learner_update = 5
+    runtime_any._effective_learner_update = 5
+    runtime_any._league_eval_warmup_gate_open = False
+
+    assert QueueRuntime._active_warmup_snapshot_mix_fraction(runtime) == pytest.approx(0.4)
+    assert QueueRuntime._pfsp_sampling_ready(runtime) is False
+
+    runtime_any._league_eval_warmup_gate_open = True
+
+    assert QueueRuntime._active_warmup_snapshot_mix_fraction(runtime) == pytest.approx(0.0)
+    assert QueueRuntime._pfsp_sampling_ready(runtime) is True
+
+
+def test_assign_episode_roles_uses_weighted_sampler_on_diverse_warmup_lane() -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
     runtime_any._pfsp_last_sampled_envs = 0
@@ -2127,8 +2882,8 @@ def test_assign_episode_roles_uses_snapshot_only_on_diverse_warmup_lane() -> Non
     runtime_any._pfsp_sampling_ready = lambda: False
     runtime_any._active_warmup_snapshot_mix_fraction = lambda: 0.5
     runtime_any._opponent_candidate_ids = ("seed_recent_a", "seed_recent_b")
-    runtime_any._sample_warmup_snapshot_policy_ids = lambda *, count, rng: ("seed_recent_a",) * count
-    runtime_any._sample_opponent_policy_ids = lambda *, count, rng: ("unexpected",) * count
+    runtime_any._sample_warmup_snapshot_policy_ids = lambda *, count, rng: ("unexpected",) * count
+    runtime_any._sample_opponent_policy_ids = lambda *, count, rng: (_NOLEAGUE_BASELINE_POLICY_ID,) * count
     runtime_any._fixed_opponent_policy_is_active = lambda policy_id: False
 
     actor = cast(
@@ -2152,7 +2907,59 @@ def test_assign_episode_roles_uses_snapshot_only_on_diverse_warmup_lane() -> Non
         initial=False,
     )
 
-    assert actor.opponent_policy_id_by_env.tolist() == ["seed_recent_a", "seed_recent_a"]
+    assert actor.opponent_policy_id_by_env.tolist() == [
+        _NOLEAGUE_BASELINE_POLICY_ID,
+        _NOLEAGUE_BASELINE_POLICY_ID,
+    ]
+
+
+def test_assign_episode_roles_can_force_b1_baseline_focal_seat() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._pfsp_last_warmup_snapshot_envs = 0
+    runtime_any._league_enabled = True
+    runtime_any._league_config = SimpleNamespace(
+        sampling=SimpleNamespace(noleague_baseline_force_focal_seat=1)
+    )
+    runtime_any._sample_opponent_policy_ids = lambda *, count, rng: (
+        _NOLEAGUE_BASELINE_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+    )
+    runtime_any._fixed_opponent_policy_is_active = lambda policy_id: False
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            actor_id=0,
+            rng=np.random.default_rng(7),
+            focal_seat_by_env=np.asarray([0, 1], dtype=np.int64),
+            opponent_policy_id_by_env=np.asarray(
+                [_MIRROR_OPPONENT_POLICY_ID, _MIRROR_OPPONENT_POLICY_ID], dtype=object
+            ),
+            fixed_opponent_policy_id_by_env=None,
+            diverse_opponent_lane=True,
+        ),
+    )
+
+    QueueRuntime._assign_episode_roles(
+        runtime,
+        actor,
+        np.asarray([True, True], dtype=np.bool_),
+        initial=False,
+    )
+
+    assert actor.opponent_policy_id_by_env.tolist() == [
+        _NOLEAGUE_BASELINE_POLICY_ID,
+        _MIRROR_OPPONENT_POLICY_ID,
+    ]
+    assert actor.focal_seat_by_env.tolist() == [1, 0]
 
 
 def test_sample_opponent_policy_ids_respects_heuristic_public_mix_anneal_end_update() -> None:
@@ -2366,6 +3173,56 @@ def test_assign_episode_roles_prioritizes_fixed_anchor_lanes() -> None:
     assert runtime_any._pfsp_last_heuristic_public_envs == 1
     assert runtime_any._pfsp_last_noleague_baseline_envs == 1
     assert runtime_any._pfsp_last_recent_envs == 2
+
+
+def test_assign_episode_roles_cycles_fixed_diverse_opponent_policy_ids() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._diverse_opponent_policy_ids = (
+        "B3 HeuristicPublicAggro",
+        "B4 HeuristicPublicControl",
+    )
+    runtime_any._opponent_heuristic_policies = {
+        "B3 HeuristicPublicAggro": object(),
+        "B4 HeuristicPublicControl": object(),
+    }
+    runtime_any._opponent_models = {}
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_heuristic_public_variant_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._pfsp_last_warmup_snapshot_envs = 0
+
+    actor = cast(
+        Any,
+        SimpleNamespace(
+            actor_id=0,
+            diverse_opponent_lane=True,
+            rng=np.random.default_rng(7),
+            focal_seat_by_env=np.asarray([0, 1, 0, 1], dtype=np.int64),
+            opponent_policy_id_by_env=np.asarray(["old0", "old1", "old2", "old3"], dtype=object),
+            fixed_opponent_policy_id_by_env=None,
+        ),
+    )
+
+    QueueRuntime._assign_episode_roles(
+        runtime, actor, np.asarray([True, True, True, True], dtype=np.bool_), initial=True
+    )
+
+    assigned = actor.opponent_policy_id_by_env.tolist()
+    assert sorted(assigned) == [
+        "B3 HeuristicPublicAggro",
+        "B3 HeuristicPublicAggro",
+        "B4 HeuristicPublicControl",
+        "B4 HeuristicPublicControl",
+    ]
+    assert runtime_any._pfsp_last_sampled_envs == 4
+    assert runtime_any._pfsp_last_heuristic_public_variant_envs == 4
+    assert runtime_any._pfsp_last_mirror_envs == 0
 
 
 def test_overwrite_central_outputs_with_opponents_only_touches_non_mirror_rows() -> None:
@@ -3024,6 +3881,50 @@ def test_build_learner_batch_does_not_double_apply_truncation_reward() -> None:
     assert batch["discounts"][:, 0].tolist() == pytest.approx([0.99, 0.0])
 
 
+def test_build_learner_batch_can_penalize_pass_with_nonpass_available() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any.action_dim = 3
+    runtime_any.config = SimpleNamespace(pass_action_id=0)
+    unroll = replace(
+        _make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=0),
+        obs=np.zeros((3, 1, 1), dtype=np.float32),
+        actions=np.array([[0], [0], [1]], dtype=np.int64),
+        rewards=np.zeros((3, 1), dtype=np.float32),
+        terminated=np.zeros((3, 1), dtype=np.bool_),
+        truncated=np.zeros((3, 1), dtype=np.bool_),
+        to_play_seat=np.zeros((3, 1), dtype=np.int64),
+        behavior_logp=np.zeros((3, 1), dtype=np.float32),
+        values=np.zeros((3, 1), dtype=np.float32),
+        policy_train_mask=np.array([[True], [False], [True]], dtype=np.bool_),
+        legal_actions=LegalActionBatch.from_mask(
+            np.array(
+                [
+                    [[True, True, False]],
+                    [[True, True, False]],
+                    [[True, True, False]],
+                ],
+                dtype=np.bool_,
+            )
+        ),
+        bootstrap_value=np.zeros((1,), dtype=np.float32),
+        initial_hidden_state=np.zeros((1, 1), dtype=np.float32),
+    )
+
+    batch = QueueRuntime._build_learner_batch(
+        runtime,
+        [unroll],
+        gamma=0.99,
+        truncation_reward=0.0,
+        truncation_bootstrap_value=True,
+        pass_with_nonpass_penalty=0.05,
+        vtrace_rho_bar=1.0,
+        vtrace_c_bar=1.0,
+    )
+
+    assert batch["rewards"][:, 0].tolist() == pytest.approx([-0.05, 0.0, 0.0])
+
+
 def test_build_learner_batch_preserves_teacher_labels() -> None:
     runtime = object.__new__(QueueRuntime)
     runtime_any = cast(Any, runtime)
@@ -3228,10 +4129,16 @@ def test_runtime_metrics_report_window_and_cumulative_env_step_rates(monkeypatch
     assert metrics["actor_env_steps_per_sec_cumulative"] == pytest.approx(13.5)
     assert metrics["policy_version_lag_p50"] == pytest.approx(0.5)
     assert metrics["league_effective_update"] == pytest.approx(3.0)
+    assert metrics["league_raw_effective_update"] == pytest.approx(3.0)
     assert metrics["league_update_lag"] == pytest.approx(2.0)
     assert metrics["actor_heuristic_fraction_active"] == pytest.approx(0.55)
     assert metrics["heuristic_public_mix_fraction_active"] == pytest.approx(0.55)
+    assert metrics["noleague_baseline_reward_scale_active"] == pytest.approx(1.0)
+    assert metrics["noleague_baseline_force_focal_seat_active"] == pytest.approx(-1.0)
     assert metrics["pfsp_quarantined_opponents"] == pytest.approx(1.0)
+    assert metrics["pfsp_sampling_ready"] == pytest.approx(0.0)
+    assert metrics["pfsp_candidate_model_count"] == pytest.approx(0.0)
+    assert metrics["pfsp_sampling_weight_mirror"] == pytest.approx(1.0)
     assert metrics["pfsp_champion_pool_size"] == pytest.approx(1.0)
     assert metrics["pfsp_heuristic_public_envs"] == pytest.approx(2.0)
     assert metrics["pfsp_noleague_baseline_envs"] == pytest.approx(1.0)
@@ -3245,6 +4152,74 @@ def test_runtime_metrics_report_window_and_cumulative_env_step_rates(monkeypatch
     assert metrics["collector_max_consecutive_main_moves"] == pytest.approx(2.0)
     assert runtime_any._runtime_last_metrics_time == pytest.approx(110.0)
     assert runtime_any._runtime_cumulative_env_steps == 135
+
+
+def test_apply_opponent_reward_scale_targets_b1_baseline_rows() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._league_config = SimpleNamespace(
+        sampling=SimpleNamespace(noleague_baseline_reward_scale=3.0)
+    )
+    actor = SimpleNamespace(
+        opponent_policy_id_by_env=np.asarray(
+            [_NOLEAGUE_BASELINE_POLICY_ID, "mirror", _NOLEAGUE_BASELINE_POLICY_ID],
+            dtype=object,
+        )
+    )
+    rewards = np.asarray([1.0, -2.0, 0.5], dtype=np.float32)
+
+    shaped = QueueRuntime._apply_opponent_reward_scale(runtime, cast(Any, actor), rewards)
+
+    assert shaped.tolist() == pytest.approx([3.0, -2.0, 1.5])
+    assert rewards.tolist() == pytest.approx([1.0, -2.0, 0.5])
+
+
+def test_runtime_metrics_fall_back_to_current_update_for_league_reference_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    runtime_any._runtime_start = 100.0
+    runtime_any._runtime_last_metrics_time = 108.0
+    runtime_any._runtime_cumulative_env_steps = 0
+    runtime_any._last_published_snapshot_version = 5
+    runtime_any._current_learner_update = 5
+    runtime_any._effective_learner_update = 0
+    runtime_any._league_config = SimpleNamespace(
+        sampling=SimpleNamespace(
+            heuristic_public_mix_fraction=1.0,
+            heuristic_public_mix_end_updates=5,
+            heuristic_public_final_mix_fraction=0.25,
+        )
+    )
+    runtime_any._actor_heuristic_fraction = 1.0
+    runtime_any._actor_heuristic_end_updates = 5
+    runtime_any._actor_heuristic_final_fraction = 0.25
+    runtime_any._pfsp_pool_size = 0
+    runtime_any._pfsp_quarantined_opponents = 0
+    runtime_any._pfsp_champion_pool_size = 0
+    runtime_any._pfsp_recent_pool_size = 0
+    runtime_any._pfsp_hard_negative_pool_size = 0
+    runtime_any._pfsp_last_sampled_envs = 0
+    runtime_any._pfsp_last_mirror_envs = 0
+    runtime_any._pfsp_last_heuristic_public_envs = 0
+    runtime_any._pfsp_last_noleague_baseline_envs = 0
+    runtime_any._pfsp_last_champion_envs = 0
+    runtime_any._pfsp_last_recent_envs = 0
+    runtime_any._pfsp_last_hard_negative_envs = 0
+    runtime_any._pfsp_epoch = 0
+
+    monkeypatch.setattr("weiss_rl.runtime.time.time", lambda: 110.0)
+    metrics = QueueRuntime._runtime_metrics(
+        runtime,
+        [_make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=5)],
+        occupancy_samples=[0.5],
+    )
+
+    assert metrics["league_effective_update"] == pytest.approx(5.0)
+    assert metrics["league_raw_effective_update"] == pytest.approx(0.0)
+    assert metrics["league_update_lag"] == pytest.approx(0.0)
+    assert metrics["pfsp_sampling_weight_mirror"] == pytest.approx(1.0)
 
 
 def test_resolve_actor_topology_keeps_ordered_runtime_strict_layout() -> None:
@@ -3854,8 +4829,8 @@ def test_fill_pending_unrolls_spills_shared_slots_when_target_exceeds_capacity(
 
     runtime_any._collector_result_queue = _ResultQueue(
         [
-            {"actor_id": 0, "slot_id": 0, "unroll_seq": 1, "behavior_policy_version": 1},
-            {"actor_id": 0, "slot_id": 0, "unroll_seq": 2, "behavior_policy_version": 1},
+            {"actor_id": 0, "slot_id": 0, "unroll_seq": 1, "behavior_policy_version": 1, "unroll_hash": "0:1:1"},
+            {"actor_id": 0, "slot_id": 0, "unroll_seq": 2, "behavior_policy_version": 1, "unroll_hash": "0:2:1"},
         ]
     )
     runtime_any._use_shared_collector_transport = True
@@ -3878,6 +4853,39 @@ def test_fill_pending_unrolls_spills_shared_slots_when_target_exceeds_capacity(
     assert all(not isinstance(item, _SharedPendingUnroll) for item in runtime_any._pending_unrolls)
     assert copied_payloads == [(0, 0), (0, 0)]
     assert freed_slots == [0, 0]
+
+
+def test_fill_pending_unrolls_keeps_shared_views_when_target_fits_capacity() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+
+    class _ResultQueue:
+        def __init__(self, payloads: list[dict[str, Any]]) -> None:
+            self._payloads = deque(payloads)
+
+        def get(self) -> dict[str, Any]:
+            return self._payloads.popleft()
+
+    runtime_any._collector_result_queue = _ResultQueue(
+        [
+            {"actor_id": 0, "slot_id": 0, "unroll_seq": 1, "behavior_policy_version": 1, "unroll_hash": "0:1:1"},
+            {"actor_id": 1, "slot_id": 0, "unroll_seq": 2, "behavior_policy_version": 1, "unroll_hash": "1:2:1"},
+        ]
+    )
+    runtime_any._use_shared_collector_transport = True
+    runtime_any._collector_shared_slots = {0: (object(),), 1: (object(),)}
+    runtime_any._collector_free_queues = [queue.Queue(), queue.Queue()]
+    runtime_any._pending_unrolls = deque()
+    runtime_any.config = SimpleNamespace(queue_capacity_unrolls=8)
+    runtime_any._profile_timers = False
+
+    occupancy_samples: list[float] = []
+    runtime._fill_pending_unrolls(target_count=2, occupancy_samples=occupancy_samples)
+
+    assert len(runtime_any._pending_unrolls) == 2
+    assert all(isinstance(item, _SharedPendingUnroll) for item in runtime_any._pending_unrolls)
+    assert runtime_any._collector_free_queues[0].empty()
+    assert runtime_any._collector_free_queues[1].empty()
 
 
 def test_fill_pending_unrolls_waits_for_diverse_lane_payloads_when_quota_enabled() -> None:
@@ -4015,6 +5023,7 @@ def test_shared_collector_slot_round_trip_preserves_packed_unroll_payload() -> N
             final_hidden_state=np.arange(16, 32, dtype=np.float32).reshape(2, 2, 4),
             episode_seed=np.array([[5, 6], [7, 8]], dtype=np.uint64),
             policy_train_mask=np.array([[True, False], [True, True]], dtype=np.bool_),
+            b1_opponent_mask=np.array([[True, False], [False, True]], dtype=np.bool_),
             teacher_family=np.array([[1, 2], [3, -1]], dtype=np.int32),
             teacher_slot=np.array([[0, -1], [2, -1]], dtype=np.int32),
             teacher_move_source=np.array([[-1, 1], [0, -1]], dtype=np.int32),
@@ -4103,6 +5112,7 @@ def test_shared_pending_unroll_keeps_shared_views_until_release() -> None:
             final_hidden_state=np.arange(16, 32, dtype=np.float32).reshape(2, 2, 4),
             episode_seed=np.array([[5, 6], [7, 8]], dtype=np.uint64),
             policy_train_mask=np.array([[True, False], [True, True]], dtype=np.bool_),
+            b1_opponent_mask=np.array([[True, False], [False, True]], dtype=np.bool_),
             teacher_family=np.array([[1, 2], [3, -1]], dtype=np.int32),
             teacher_slot=np.array([[0, -1], [2, -1]], dtype=np.int32),
             teacher_move_source=np.array([[-1, 1], [0, -1]], dtype=np.int32),
@@ -4278,7 +5288,7 @@ def test_teacher_labels_from_ids_cover_public_decision_kinds_beyond_tactical_sub
         QueueRuntime._teacher_labels_from_ids(
             runtime,
             focal_rows=np.asarray([True, True, True, True], dtype=np.bool_),
-            decision_kind=np.asarray([1, 5, 8, 0], dtype=np.int32),
+            decision_kind=np.asarray([1, 5, 8, -1], dtype=np.int32),
             obs_step=np.zeros((4, 4), dtype=np.float32),
             legal_ids=legal_ids,
             legal_offsets=legal_offsets,
@@ -4299,3 +5309,62 @@ def test_teacher_labels_from_ids_cover_public_decision_kinds_beyond_tactical_sub
     assert teacher_attack_type.tolist() == [-1, 1, -1, -1]
     assert teacher_action.tolist() == [0, 14, 39, -1]
     assert counters["teacher_tactical_row_count"] == 3
+
+
+def test_teacher_labels_from_ids_cover_mulligan_decision_kind_zero() -> None:
+    runtime = object.__new__(QueueRuntime)
+    runtime_any = cast(Any, runtime)
+    action_catalog = _teacher_mulligan_test_catalog()
+    runtime_any._teacher_guidance_enabled = True
+    runtime_any._teacher_policy = object()
+    runtime_any._teacher_action_catalog = action_catalog
+    runtime_any._teacher_family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+    runtime_any._teacher_attack_type_index = {}
+    runtime_any._heuristic_public_actions_from_ids = lambda **kwargs: np.asarray(
+        [
+            int(kwargs["legal_ids"][int(kwargs["legal_offsets"][row_index])])
+            for row_index in np.asarray(kwargs["row_indices"], dtype=np.int64).tolist()
+        ],
+        dtype=np.int64,
+    )
+
+    legal_ids = np.asarray([0, 1, 2, 6], dtype=np.uint32)
+    legal_offsets = np.asarray([0, 1, 3, 4], dtype=np.uint32)
+    counters = {"teacher_tactical_row_count": 0}
+
+    teacher_family, teacher_slot, teacher_move_source, teacher_attack_type, teacher_action, teacher_valid = (
+        QueueRuntime._teacher_labels_from_ids(
+            runtime,
+            focal_rows=np.asarray([True, True, True], dtype=np.bool_),
+            decision_kind=np.asarray([0, 0, -1], dtype=np.int32),
+            obs_step=np.zeros((3, 4), dtype=np.float32),
+            legal_ids=legal_ids,
+            legal_offsets=legal_offsets,
+            legal_action_meta=None,
+            counters=counters,
+        )
+    )
+
+    assert teacher_valid.tolist() == [True, True, False]
+    assert teacher_family.tolist() == [
+        runtime_any._teacher_family_index["mulligan_confirm"],
+        runtime_any._teacher_family_index["mulligan_select"],
+        -1,
+    ]
+    assert teacher_slot.tolist() == [-1, -1, -1]
+    assert teacher_move_source.tolist() == [-1, -1, -1]
+    assert teacher_attack_type.tolist() == [-1, -1, -1]
+    assert teacher_action.tolist() == [0, 1, -1]
+    assert counters["teacher_tactical_row_count"] == 2
+
+
+def test_public_teacher_rows_cover_mulligan_and_public_decision_kinds() -> None:
+    runtime = object.__new__(QueueRuntime)
+
+    rows = QueueRuntime._public_teacher_rows(
+        runtime,
+        focal_rows=np.asarray([True, True, True, False, True], dtype=np.bool_),
+        decision_kind=np.asarray([0, 1, 8, 5, -1], dtype=np.int32),
+    )
+
+    assert rows.tolist() == [0, 1, 2]

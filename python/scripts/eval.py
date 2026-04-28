@@ -170,8 +170,8 @@ def _resolve_selection_inputs_from_manifest(
 
 def _default_dev_eval_summaries_path(layout: ArtifactLayout) -> Path | None:
     for candidate in (
-        layout.training_logs_dir / "dev_eval_summaries.json",
         layout.training_logs_dir / "periodic_dev_eval_summaries.json",
+        layout.training_logs_dir / "dev_eval_summaries.json",
     ):
         if candidate.is_file():
             return candidate
@@ -219,10 +219,7 @@ def _authoritative_manifest_policy_selection(
     if _policy_selection_mode(selection_details) == "explicit_cli":
         return None
 
-    has_completed_eval_artifacts = bool(
-        layout.final_eval_summary_json().is_file() or _run_summary_marks_canonical_eval_completed(layout)
-    )
-    if not has_completed_eval_artifacts:
+    if not _run_summary_marks_canonical_eval_completed(layout):
         return None
 
     selection_details.setdefault("mode", "manifest_policy_set_selection")
@@ -248,9 +245,17 @@ def _resolve_policy_ids_for_run(
     resolved_snapshot_registry: Path | None = (
         snapshot_registry_path or manifest_snapshot_registry or (layout.training_snapshots_dir / "registry.json")
     )
+    if snapshot_registry_path is not None and not snapshot_registry_path.is_file():
+        raise FileNotFoundError(f"Explicit snapshot registry path does not exist: {snapshot_registry_path}")
+    if manifest_snapshot_registry is not None and not manifest_snapshot_registry.is_file():
+        raise FileNotFoundError(f"Manifest snapshot registry path does not exist: {manifest_snapshot_registry}")
     if resolved_snapshot_registry is None or not resolved_snapshot_registry.is_file():
         resolved_snapshot_registry = None
     resolved_dev_eval = dev_eval_summaries_path or manifest_dev_eval
+    if dev_eval_summaries_path is not None and not dev_eval_summaries_path.is_file():
+        raise FileNotFoundError(f"Explicit dev eval summaries path does not exist: {dev_eval_summaries_path}")
+    if manifest_dev_eval is not None and not manifest_dev_eval.is_file():
+        raise FileNotFoundError(f"Manifest dev eval summaries path does not exist: {manifest_dev_eval}")
     if resolved_dev_eval is None or not resolved_dev_eval.is_file():
         resolved_dev_eval = _default_dev_eval_summaries_path(layout)
 
@@ -409,16 +414,35 @@ def _resolved_parallel_worker_devices(
     normalized_explicit = tuple(device.strip() for device in explicit_worker_devices if device.strip())
     if normalized_explicit:
         device_pool = normalized_explicit
+        _validate_parallel_worker_device_pool(device_pool, source="parallel_worker_devices")
     else:
         normalized_eval_device = str(eval_device).strip().lower()
-        if normalized_eval_device == "cuda:auto" and torch.cuda.is_available():
+        if normalized_eval_device in {"auto", "cuda:auto"} and torch.cuda.is_available():
             device_count = torch.cuda.device_count()
             device_pool = tuple(f"cuda:{index}" for index in range(device_count)) or ("cuda:auto",)
-        elif normalized_eval_device.startswith("cuda:"):
-            device_pool = (str(eval_device).strip(),)
+        elif normalized_eval_device in {"auto", "cuda:auto"}:
+            device_pool = ("cpu",)
         else:
             device_pool = (str(eval_device).strip() or "cpu",)
+            _validate_parallel_worker_device_pool(device_pool, source="eval_device")
     return tuple(device_pool[index % len(device_pool)] for index in range(parallel_workers))
+
+
+def _validate_parallel_worker_device_pool(device_pool: Sequence[str], *, source: str) -> None:
+    for device_text in device_pool:
+        try:
+            device = torch.device(str(device_text).strip())
+        except (RuntimeError, ValueError) as exc:
+            raise ValueError(f"{source} contains invalid device {device_text!r}") from exc
+        if device.type != "cuda":
+            continue
+        if not torch.cuda.is_available():
+            raise ValueError(f"{source} requested CUDA device {device_text!r}, but CUDA is not available")
+        device_count = int(torch.cuda.device_count())
+        if device.index is not None and device.index >= device_count:
+            raise ValueError(
+                f"{source} requested CUDA device {device_text!r}, but only {device_count} CUDA device(s) are available"
+            )
 
 
 def _shard_matchup_specs(
@@ -500,24 +524,30 @@ def _run_final_eval_matchup_worker(
         replay_capture_rate=float(replay_capture_rate),
         regression_capture_count=int(regression_capture_count),
         eval_device=eval_device,
+        spec_bundle=contract.spec_bundle if isinstance(contract.spec_bundle, dict) else None,
     )
-    return [
-        run_final_eval_matchup(
-            output_dir=output_dir,
-            matchup_spec=matchup_spec,
-            paired_seeds=paired_seeds,
-            stage1_paired_seeds=stage1_paired_seeds,
-            max_paired_seeds=max_paired_seeds,
-            stop_rules=stop_rules,
-            runner=runner,
-            run_id256=run_id256,
-            config_hash256=config_hash256,
-            spec_hash256=spec_hash256,
-            scheme=scheme,
-            sample_count=sample_count,
-        )
-        for matchup_spec in matchup_specs
-    ]
+    try:
+        return [
+            run_final_eval_matchup(
+                output_dir=output_dir,
+                matchup_spec=matchup_spec,
+                paired_seeds=paired_seeds,
+                stage1_paired_seeds=stage1_paired_seeds,
+                max_paired_seeds=max_paired_seeds,
+                stop_rules=stop_rules,
+                runner=runner,
+                run_id256=run_id256,
+                config_hash256=config_hash256,
+                spec_hash256=spec_hash256,
+                scheme=scheme,
+                sample_count=sample_count,
+            )
+            for matchup_spec in matchup_specs
+        ]
+    finally:
+        close_runner = getattr(runner, "close", None)
+        if callable(close_runner):
+            close_runner()
 
 
 def _run_parallel_final_eval(
@@ -844,27 +874,33 @@ def _run_canonical_eval_pipeline(
                 replay_capture_rate=float(evaluation.replay_capture_rate_eval),
                 regression_capture_count=int(evaluation.regression_capture_count),
                 eval_device=evaluation.eval_device,
+                spec_bundle=contract.spec_bundle if isinstance(contract.spec_bundle, dict) else None,
             )
-            final_eval_payload = run_final_eval(
-                output_dir=layout.final_eval_dir,
-                runner=runner,
-                paired_seeds=all_paired_seeds,
-                stage1_paired_seeds=resolved_stage1,
-                max_paired_seeds=resolved_max,
-                stop_rules=evaluation.stop_rules,
-                run_id256=run_id256,
-                config_hash256=str(manifest["config_hash256"]),
-                spec_hash256=str(manifest["spec_hash256"]),
-                scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
-                sample_count=int(bootstrap_samples),
-                policy_ids=resolved_policy_ids,
-                snapshot_registry_path=resolved_registry_path,
-                dev_eval_summaries_path=resolved_dev_eval_path,
-                selection_config=evaluation.final_policy_set_selection,
-                final_policy_set_size=int(evaluation.final_policy_set_size),
-                metadata=final_eval_metadata,
-                seed_file_path=seed_file_path,
-            )
+            try:
+                final_eval_payload = run_final_eval(
+                    output_dir=layout.final_eval_dir,
+                    runner=runner,
+                    paired_seeds=all_paired_seeds,
+                    stage1_paired_seeds=resolved_stage1,
+                    max_paired_seeds=resolved_max,
+                    stop_rules=evaluation.stop_rules,
+                    run_id256=run_id256,
+                    config_hash256=str(manifest["config_hash256"]),
+                    spec_hash256=str(manifest["spec_hash256"]),
+                    scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
+                    sample_count=int(bootstrap_samples),
+                    policy_ids=resolved_policy_ids,
+                    snapshot_registry_path=resolved_registry_path,
+                    dev_eval_summaries_path=resolved_dev_eval_path,
+                    selection_config=evaluation.final_policy_set_selection,
+                    final_policy_set_size=int(evaluation.final_policy_set_size),
+                    metadata=final_eval_metadata,
+                    seed_file_path=seed_file_path,
+                )
+            finally:
+                close_runner = getattr(runner, "close", None)
+                if callable(close_runner):
+                    close_runner()
 
         metagame_payload: dict[str, Any] | None = None
         if not skip_metagame:

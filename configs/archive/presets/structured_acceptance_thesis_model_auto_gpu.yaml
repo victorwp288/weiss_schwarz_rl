@@ -23,6 +23,8 @@ training:
   fixed_opponent_backend: simulator_native
   actor_policy_backend: heuristic_public
   actor_heuristic_fraction: 1.0
+  heuristic_native_rollout_enabled: true
+  heuristic_actor_hidden_state_tracking: false
   structured_aux:
     teacher_public_heuristic_coef: 0.10
     teacher_public_heuristic_final_coef: 0.10
@@ -49,13 +51,6 @@ evaluation:
   async_periodic_dev_eval_enabled: true
   periodic_dev_eval_interval_updates: 10
   periodic_dev_eval_parallel_workers: 6
-  periodic_dev_eval_parallel_worker_devices:
-    - cuda:0
-    - cuda:1
-    - cuda:2
-    - cuda:0
-    - cuda:1
-    - cuda:2
 league:
   sampling:
     heuristic_public_start_updates: 0
@@ -78,13 +73,6 @@ league:
         - Previous recent snapshot
     gate:
       parallel_workers: 6
-      parallel_worker_devices:
-        - cuda:0
-        - cuda:1
-        - cuda:2
-        - cuda:0
-        - cuda:1
-        - cuda:2
 curriculum:
   stall_monitor:
     enabled: false

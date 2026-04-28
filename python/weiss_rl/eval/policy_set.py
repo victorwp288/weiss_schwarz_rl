@@ -151,7 +151,10 @@ def select_final_policy_set_deterministic_v1(
         _append_unique(selected, RANDOM_LEGAL_POLICY_ID)
     if config.include_no_league_baseline_b1:
         _append_unique(selected, NO_LEAGUE_POLICY_ID)
-    if config.include_heuristic_public_b2_if_exists and HEURISTIC_PUBLIC_POLICY_ID in normalized_summaries:
+    if config.include_heuristic_public_b2_if_exists and _dev_eval_mentions_policy_or_anchor(
+        normalized_summaries,
+        HEURISTIC_PUBLIC_POLICY_ID,
+    ):
         _append_unique(selected, HEURISTIC_PUBLIC_POLICY_ID)
 
     if config.include_final_champion_snapshot:
@@ -211,9 +214,20 @@ def _configured_anchor_policy_ids(
 ) -> tuple[str, ...]:
     anchor_policy_ids = list(config.fixed_anchor_set_v1.required)
     anchor_policy_ids.extend(
-        policy_id for policy_id in config.fixed_anchor_set_v1.optional_if_available if policy_id in dev_eval_summaries
+        policy_id
+        for policy_id in config.fixed_anchor_set_v1.optional_if_available
+        if _dev_eval_mentions_policy_or_anchor(dev_eval_summaries, policy_id)
     )
     return tuple(anchor_policy_ids)
+
+
+def _dev_eval_mentions_policy_or_anchor(
+    dev_eval_summaries: Mapping[str, DevEvalPolicySummary],
+    policy_id: str,
+) -> bool:
+    if policy_id in dev_eval_summaries:
+        return True
+    return any(policy_id in summary.anchor_scores for summary in dev_eval_summaries.values())
 
 
 def _find_closest_snapshot(

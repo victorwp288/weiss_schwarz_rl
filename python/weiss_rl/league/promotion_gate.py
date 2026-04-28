@@ -356,7 +356,10 @@ def _decision_reasons(
         )
 
     max_anchor_loss_prob = league.promotion_gate.guardrails.max_prob_anchor_loss_below_0_45
+    target_min_anchor_scores = dict(getattr(league.promotion_gate, "target_min_anchor_scores", {}) or {})
+    observed_anchor_names: set[str] = set()
     for anchor in anchor_results:
+        observed_anchor_names.add(anchor.anchor_name)
         if anchor.posterior.prob_lt_guardrail >= max_anchor_loss_prob:
             reasons.append(
                 {
@@ -365,6 +368,26 @@ def _decision_reasons(
                     "max_allowed": max_anchor_loss_prob,
                     "observed": anchor.posterior.prob_lt_guardrail,
                     "threshold": _PROMOTION_LOSS_THRESHOLD,
+                }
+            )
+        target_min_score = target_min_anchor_scores.get(anchor.anchor_name)
+        if target_min_score is not None and anchor.posterior.mean < float(target_min_score):
+            reasons.append(
+                {
+                    "anchor_name": anchor.anchor_name,
+                    "code": "anchor_target_floor_missed",
+                    "observed": anchor.posterior.mean,
+                    "required_gte": float(target_min_score),
+                }
+            )
+
+    for anchor_name, target_min_score in target_min_anchor_scores.items():
+        if anchor_name not in observed_anchor_names:
+            reasons.append(
+                {
+                    "anchor_name": anchor_name,
+                    "code": "anchor_target_floor_missing",
+                    "required_gte": float(target_min_score),
                 }
             )
 

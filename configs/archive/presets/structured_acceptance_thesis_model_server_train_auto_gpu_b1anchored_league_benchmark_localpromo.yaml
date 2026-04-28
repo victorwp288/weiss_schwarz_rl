@@ -1,0 +1,25 @@
+schema_version: 2
+description: reduced-size B1-anchored league preset with internally consistent local promotion seeds
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark.yaml
+seed_sets:
+  dev_eval: configs/seeds/local_dev_eval_seeds.txt
+  promotion_gate: configs/seeds/local_promotion_eval_seeds.txt
+  report_eval: configs/seeds/report_eval_seeds.txt
+league:
+  promotion:
+    paired_seeds: 8
+    seed_file: configs/seeds/local_promotion_eval_seeds.txt
+    gate:
+      parallel_workers: 6
+evaluation:
+  seed_files:
+    dev_eval: configs/seeds/local_dev_eval_seeds.txt
+    promotion_gate: configs/seeds/local_promotion_eval_seeds.txt
+    report_eval: configs/seeds/report_eval_seeds.txt
+  periodic_dev_eval_interval_updates: 0
+  periodic_dev_eval_paired_seeds: 8
+reproducibility:
+  seed_files:
+    dev_eval: configs/seeds/local_dev_eval_seeds.txt
+    promotion_gate: configs/seeds/local_promotion_eval_seeds.txt
+    report_eval: configs/seeds/report_eval_seeds.txt

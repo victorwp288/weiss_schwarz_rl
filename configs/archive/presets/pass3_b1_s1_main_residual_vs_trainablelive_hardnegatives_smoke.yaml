@@ -1,0 +1,59 @@
+schema_version: 2
+description: Identity-preserving B1 main residual smoke against confirmed trainable-live residual hard negatives
+extends: pass3_b1_s1_main_vs_confirmed_residual_hardnegatives_cfaux.yaml
+training:
+  main_residual_policy:
+    enabled: true
+    base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+    public_heuristic_bias_scale: 1.0
+    hidden_dim: 256
+    alpha: 0.1
+    residual_mode: plain
+  optimizer:
+    learning_rate: 0.0003
+    value_loss_coef: 0.0
+  precision:
+    mixed_precision: false
+  policy_loss_coef: 1.0
+  raw_b1_distill:
+    enabled: false
+    coef: 0.0
+    final_coef: 0.0
+  counterfactual_positive:
+    coef: 3.0
+    final_coef: 2.0
+    start_updates: 0
+    end_updates: 20
+    margin_coef: 0.3
+    margin: 1.5
+    max_labels: 10
+  structured_aux:
+    teacher_family_coef: 0.0
+    teacher_slot_coef: 0.0
+    teacher_move_source_coef: 0.0
+    teacher_attack_type_coef: 0.0
+    teacher_action_coef: 0.0
+    teacher_same_family_action_coef: 0.0
+    teacher_public_heuristic_coef: 0.0
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_main_move_coef: 0.0
+  structured_warmstart:
+    enabled: false
+  teacher_aux:
+    mode: "off"
+  checkpointing:
+    checkpoint_interval_updates: 5
+    snapshot_interval_updates: 5
+    actor_reload_interval_updates: 5
+league:
+  sampling:
+    noleague_baseline_mix_fraction: 0.35
+    heuristic_public_mix_fraction: 0.10
+    heuristic_public_variant_mix_fraction: 0.10
+    mirror_mix_fraction: 0.10
+    hard_negative_mix_fraction: 0.0
+evaluation:
+  periodic_dev_eval_interval_updates: 0
+curriculum:
+  checkpoint_guard:
+    enabled: false

@@ -1,0 +1,60 @@
+schema_version: 2
+description: Pass 3 B1 restart from u450 with common low-bias S1 actor/learner parity and raw-body preservation by gate
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_selfplay_localpromo.yaml
+model:
+  public_heuristic_logit_bias_profile: aggressive
+  public_heuristic_logit_bias_scale: 1.0
+  public_heuristic_actor_logit_bias_scale: 1.0
+  public_heuristic_logit_bias_start_updates: 450
+  public_heuristic_logit_bias_end_updates: -1
+  public_heuristic_logit_bias_final_scale: 1.0
+training:
+  behavior_action_bc_coef: 0.0
+  reference_policy_id: b1_noleague_baseline
+  reference_policy_top_action_bc_coef: 0.0
+  reference_policy_top_action_bc_final_coef: 0.0
+  reference_policy_top_action_bc_start_updates: 450
+  reference_policy_top_action_bc_end_updates: 520
+  reference_policy_top_action_family_bc_coef: 0.03
+  reference_policy_top_action_family_bc_final_coef: 0.0
+  reference_policy_top_action_family_bc_start_updates: 450
+  reference_policy_top_action_family_bc_end_updates: 520
+  optimizer:
+    learning_rate: 0.00001
+  exploration:
+    entropy_coef: 0.04
+    entropy_anneal_to: 0.02
+    entropy_anneal_steps_updates: 300000
+  structured_aux:
+    teacher_family_coef: 0.05
+    teacher_slot_coef: 0.025
+    teacher_action_coef: 0.025
+    teacher_attack_type_coef: 0.01
+    teacher_public_heuristic_coef: 0.0
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_main_move_coef: 0.0
+league:
+  sampling:
+    heuristic_public_mix_fraction: 0.10
+    heuristic_public_final_mix_fraction: 0.10
+    heuristic_public_mix_end_updates: -1
+    heuristic_public_variant_mix_fraction: 0.15
+    heuristic_public_variant_final_mix_fraction: 0.15
+    heuristic_public_variant_mix_end_updates: -1
+    noleague_baseline_mix_fraction: 0.50
+    noleague_baseline_mix_end_updates: -1
+    noleague_baseline_reward_scale: 1.0
+    noleague_baseline_force_focal_seat: -1
+    warmup_snapshot_mix_fraction: 0.0
+    exclude_seed_snapshots_from_pfsp: true
+    mirror_mix_fraction: 0.25
+    champion_mix_fraction: 0.0
+    hard_negative_mix_fraction: 0.0
+  promotion:
+    enabled: false
+evaluation:
+  periodic_dev_eval_interval_updates: 0
+  periodic_dev_eval_paired_seeds: 8
+curriculum:
+  checkpoint_guard:
+    enabled: false

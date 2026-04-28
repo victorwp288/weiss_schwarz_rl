@@ -46,7 +46,7 @@ def test_thesis_run_wrapper_dry_run_writes_plan(tmp_path: Path) -> None:
 
 def test_thesis_run_wrapper_defaults_to_thesis_model_preset_when_stack_config_is_omitted(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
-    (repo_root / "configs" / "presets").mkdir(parents=True, exist_ok=True)
+    (repo_root / "configs").mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
         [
@@ -68,9 +68,9 @@ def test_thesis_run_wrapper_defaults_to_thesis_model_preset_when_stack_config_is
     summary_path = repo_root / "runs" / "_wrapper_plans" / "default_preset_run.json"
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["preset"] == "thesis-model-auto-gpu"
-    assert payload["stack_config"].endswith("configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml")
+    assert payload["stack_config"].endswith("configs/main_impala_league_server.yaml")
     assert payload["eval_preset"] == "thesis-model-eval-auto-gpu"
-    assert payload["eval_stack_config"].endswith("configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml")
+    assert payload["eval_stack_config"].endswith("configs/main_eval.yaml")
     assert len(payload["steps"]) == 2
 
 
@@ -149,7 +149,7 @@ def test_thesis_run_wrapper_resolves_relative_config_paths_against_repo_root(tmp
 
 def test_thesis_run_wrapper_defaults_to_multideck_eval_surface_for_multideck_preset(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
-    (repo_root / "configs" / "presets" / "ablations").mkdir(parents=True, exist_ok=True)
+    (repo_root / "configs" / "ablations").mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
         [
@@ -176,7 +176,7 @@ def test_thesis_run_wrapper_defaults_to_multideck_eval_surface_for_multideck_pre
     assert payload["preset"] == "thesis-model-multideck"
     assert payload["eval_preset"] == "thesis-model-multideck-eval-auto-gpu"
     assert payload["eval_stack_config"].endswith(
-        "configs/presets/structured_acceptance_thesis_model_multideck_eval_auto_gpu.yaml"
+        "configs/ablations/multideck_eval.yaml"
     )
 
 
@@ -184,7 +184,7 @@ def test_thesis_run_wrapper_defaults_to_gpu_eval_surface_for_thesis_model_auto_g
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
-    (repo_root / "configs" / "presets" / "ablations").mkdir(parents=True, exist_ok=True)
+    (repo_root / "configs" / "ablations").mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
         [
@@ -210,33 +210,271 @@ def test_thesis_run_wrapper_defaults_to_gpu_eval_surface_for_thesis_model_auto_g
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["preset"] == "thesis-model-auto-gpu"
     assert payload["eval_preset"] == "thesis-model-eval-auto-gpu"
-    assert payload["eval_stack_config"].endswith("configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml")
+    assert payload["eval_stack_config"].endswith("configs/main_eval.yaml")
+
+
+def test_thesis_run_wrapper_defaults_to_gpu_eval_surface_for_server_train_preset(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "configs" / "ablations").mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            "--repo-root",
+            str(repo_root),
+            "--preset",
+            "thesis-model-server-train",
+            "--run-label",
+            "thesis_model_server_train_default_eval",
+            "--dry-run",
+            "--skip-compare",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    summary_path = repo_root / "runs" / "_wrapper_plans" / "thesis_model_server_train_default_eval.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["preset"] == "thesis-model-server-train"
+    assert payload["eval_preset"] == "thesis-model-eval-auto-gpu"
+    assert payload["stack_config"].endswith(
+        "configs/main_impala_league_server.yaml"
+    )
+    assert payload["eval_stack_config"].endswith("configs/main_eval.yaml")
+
+
+def test_thesis_run_wrapper_defaults_b1_anchor_benchmark_to_matching_eval_surface(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "configs" / "baselines").mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            "--repo-root",
+            str(repo_root),
+            "--preset",
+            "b1-anchor-benchmark",
+            "--run-label",
+            "b1_anchor_benchmark_default_eval",
+            "--dry-run",
+            "--skip-compare",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    summary_path = repo_root / "runs" / "_wrapper_plans" / "b1_anchor_benchmark_default_eval.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["preset"] == "b1-anchor-benchmark"
+    assert payload["eval_preset"] == "b1-anchor-benchmark-eval-auto-gpu"
+    assert payload["stack_config"].endswith(
+        "configs/baselines/noleague_benchmark.yaml"
+    )
+    assert payload["eval_stack_config"].endswith(
+        "configs/baselines/noleague_benchmark_eval.yaml"
+    )
+
+
+def test_thesis_run_wrapper_defaults_b1_anchor_phase_presets_to_matching_eval_surface(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "configs" / "baselines").mkdir(parents=True, exist_ok=True)
+
+    for preset, expected_train_suffix in (
+        (
+            "b1-anchor-benchmark-warmup",
+            "configs/baselines/noleague_benchmark_warmup.yaml",
+        ),
+        (
+            "b1-anchor-benchmark-lowlr-continuation",
+            "configs/baselines/noleague_benchmark_lowlr_continuation.yaml",
+        ),
+    ):
+        run_label = f"{preset.replace('-', '_')}_default_eval"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+                "--repo-root",
+                str(repo_root),
+                "--preset",
+                preset,
+                "--run-label",
+                run_label,
+                "--dry-run",
+                "--skip-compare",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        summary_path = repo_root / "runs" / "_wrapper_plans" / f"{run_label}.json"
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        assert payload["preset"] == preset
+        assert payload["eval_preset"] == "b1-anchor-benchmark-eval-auto-gpu"
+        assert payload["stack_config"].endswith(expected_train_suffix)
+        assert payload["eval_stack_config"].endswith(
+            "configs/baselines/noleague_benchmark_eval.yaml"
+        )
+
+
+def test_thesis_run_wrapper_defaults_fullsize_b1_and_b1anchored_league_presets_to_main_eval_surface(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "configs" / "baselines").mkdir(parents=True, exist_ok=True)
+
+    for preset, expected_train_suffix in (
+        (
+            "b1-anchor-fullsize-warmup",
+            "configs/baselines/noleague_fullsize_warmup.yaml",
+        ),
+        (
+            "b1-anchor-fullsize-lowlr-continuation",
+            "configs/baselines/noleague_fullsize_lowlr_continuation.yaml",
+        ),
+        (
+            "thesis-model-server-train-b1anchored",
+            "configs/main_impala_league_server.yaml",
+        ),
+        (
+            "thesis-model-server-train-b1anchored-refb1strong-lowlr",
+            "configs/main_impala_league_server.yaml",
+        ),
+    ):
+        run_label = f"{preset.replace('-', '_')}_default_eval"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+                "--repo-root",
+                str(repo_root),
+                "--preset",
+                preset,
+                "--run-label",
+                run_label,
+                "--dry-run",
+                "--skip-compare",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        summary_path = repo_root / "runs" / "_wrapper_plans" / f"{run_label}.json"
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        assert payload["preset"] == preset
+        assert payload["eval_preset"] == "thesis-model-eval-auto-gpu"
+        assert payload["stack_config"].endswith(expected_train_suffix)
+        assert payload["eval_stack_config"].endswith("configs/main_eval.yaml")
+
+
+def test_thesis_run_wrapper_defaults_b1anchored_benchmark_league_to_benchmark_eval_surface(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "configs" / "baselines").mkdir(parents=True, exist_ok=True)
+
+    for preset, expected_train_suffix in (
+        (
+            "thesis-model-server-train-b1anchored-benchmark",
+            "configs/main_impala_league_server.yaml",
+        ),
+        (
+            "thesis-model-server-train-b1anchored-benchmark-localpromo",
+            "configs/main_impala_league_server.yaml",
+        ),
+        (
+            "thesis-model-server-train-b1anchored-benchmark-selfplay-localpromo",
+            "configs/main_impala_league_server.yaml",
+        ),
+        (
+            "thesis-model-server-train-b1anchored-benchmark-selfplay-bckl-localpromo",
+            "configs/main_impala_league_server.yaml",
+        ),
+        (
+            "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-localpromo",
+            "configs/main_impala_league_server.yaml",
+        ),
+        (
+            "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-evalguard-localpromo",
+            "configs/main_impala_league_server.yaml",
+        ),
+        (
+            "thesis-model-server-train-b1anchored-benchmark-modelbridge-localpromo",
+            "configs/main_impala_league_server.yaml",
+        ),
+    ):
+        run_label = f"{preset.replace('-', '_')}_default_eval"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+                "--repo-root",
+                str(repo_root),
+                "--preset",
+                preset,
+                "--run-label",
+                run_label,
+                "--dry-run",
+                "--skip-compare",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        summary_path = repo_root / "runs" / "_wrapper_plans" / f"{run_label}.json"
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        assert payload["preset"] == preset
+        assert payload["eval_preset"] == "b1-anchor-benchmark-eval-auto-gpu"
+        assert payload["stack_config"].endswith(expected_train_suffix)
+        assert payload["eval_stack_config"].endswith(
+            "configs/baselines/noleague_benchmark_eval.yaml"
+        )
 
 
 def test_thesis_run_wrapper_defaults_ablations_to_matching_eval_surfaces(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
-    (repo_root / "configs" / "presets" / "ablations").mkdir(parents=True, exist_ok=True)
+    (repo_root / "configs" / "ablations").mkdir(parents=True, exist_ok=True)
 
     for preset, expected_eval_preset, expected_suffix in (
         (
             "ablate-teacher-fade",
             "ablate-teacher-fade-eval-auto-gpu",
-            "configs/presets/ablations/structured_acceptance_thesis_model_teacher_fade_eval_auto_gpu.yaml",
+            "configs/ablations/teacher_fade_eval.yaml",
         ),
         (
             "ablate-no-tactical-bias",
             "ablate-no-tactical-bias-eval-auto-gpu",
-            "configs/presets/ablations/structured_acceptance_thesis_model_no_tactical_bias_eval_auto_gpu.yaml",
+            "configs/ablations/no_tactical_bias_eval.yaml",
+        ),
+        (
+            "ablate-teacher-fade-no-tactical-bias",
+            "ablate-teacher-fade-no-tactical-bias-eval-auto-gpu",
+            "configs/ablations/teacher_fade_no_tactical_bias_eval.yaml",
         ),
         (
             "ablate-no-b1-cutoff",
             "ablate-no-b1-cutoff-eval-auto-gpu",
-            "configs/presets/ablations/structured_acceptance_thesis_model_no_b1_cutoff_eval_auto_gpu.yaml",
+            "configs/ablations/no_b1_cutoff_eval.yaml",
         ),
         (
             "ablate-reward-shaping",
             "ablate-reward-shaping-eval-auto-gpu",
-            "configs/presets/ablations/structured_acceptance_thesis_model_reward_shaping_eval_auto_gpu.yaml",
+            "configs/ablations/reward_shaping_eval.yaml",
         ),
     ):
         run_label = f"{preset}_default_eval"
@@ -284,9 +522,12 @@ def test_thesis_run_wrapper_lists_named_presets_without_run_label(tmp_path: Path
 
     assert result.returncode == 0, result.stderr
     assert "thesis-model-auto-gpu:" in result.stdout
+    assert "thesis-model-server-train:" in result.stdout
+    assert "b1-anchor-benchmark:" in result.stdout
     assert "thesis-model-multideck:" in result.stdout
     assert "ablate-teacher-fade:" in result.stdout
     assert "ablate-no-tactical-bias:" in result.stdout
+    assert "ablate-teacher-fade-no-tactical-bias:" in result.stdout
     assert "ablate-no-b1-cutoff:" in result.stdout
     assert "ablate-reward-shaping:" in result.stdout
 
@@ -329,6 +570,43 @@ def test_thesis_run_wrapper_passes_b1_baseline_run_dir_to_train_and_eval(tmp_pat
     assert str(baseline_run_dir) in payload["steps"][1]["command"]
 
 
+def test_thesis_run_wrapper_passes_seed_snapshot_run_dir_to_train_only(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "configs").mkdir(parents=True, exist_ok=True)
+    stack_config = repo_root / "configs" / "stack.yaml"
+    stack_config.write_text("components: []\nconfig: {}\n", encoding="utf-8")
+    seed_run_dir = repo_root / "runs" / "league_seed_pool"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            "--repo-root",
+            str(repo_root),
+            "--stack-config",
+            str(stack_config),
+            "--run-label",
+            "seedpool_passthrough",
+            "--seed-snapshot-run-dir",
+            str(seed_run_dir),
+            "--dry-run",
+            "--skip-compare",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    summary_path = repo_root / "runs" / "_wrapper_plans" / "seedpool_passthrough.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["seed_snapshot_run_dir"] == seed_run_dir.resolve().as_posix()
+    assert "--seed-snapshot-run-dir" in payload["steps"][0]["command"]
+    assert str(seed_run_dir) in payload["steps"][0]["command"]
+    assert "--seed-snapshot-run-dir" not in payload["steps"][1]["command"]
+
+
 def test_thesis_run_wrapper_skips_compare_without_explicit_comparison_targets(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     (repo_root / "configs").mkdir(parents=True, exist_ok=True)
@@ -358,3 +636,38 @@ def test_thesis_run_wrapper_skips_compare_without_explicit_comparison_targets(tm
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert len(payload["steps"]) == 2
     assert all(step["command"][1] != "python/scripts/compare_runs.py" for step in payload["steps"])
+
+
+def test_thesis_run_wrapper_forwards_max_wall_clock_minutes_to_train(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "configs").mkdir(parents=True, exist_ok=True)
+    stack_config = repo_root / "configs" / "stack.yaml"
+    stack_config.write_text("components: []\nconfig: {}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            "--repo-root",
+            str(repo_root),
+            "--stack-config",
+            str(stack_config),
+            "--run-label",
+            "wall_clock_passthrough",
+            "--max-wall-clock-minutes",
+            "7.5",
+            "--dry-run",
+            "--skip-compare",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    summary_path = repo_root / "runs" / "_wrapper_plans" / "wall_clock_passthrough.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["max_wall_clock_minutes"] == 7.5
+    assert "--max-wall-clock-minutes" in payload["steps"][0]["command"]
+    assert "7.5" in payload["steps"][0]["command"]

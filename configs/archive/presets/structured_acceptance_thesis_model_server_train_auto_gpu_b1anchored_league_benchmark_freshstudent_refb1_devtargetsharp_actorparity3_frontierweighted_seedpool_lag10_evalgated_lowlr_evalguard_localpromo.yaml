@@ -1,0 +1,7 @@
+schema_version: 2
+description: eval-gated league bridge with learner/actor public heuristic bias parity at the current strong tactical scale
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_devtargetsharp_frontierweighted_seedpool_lag10_evalgated_lowlr_evalguard_localpromo.yaml
+model:
+  public_heuristic_logit_bias_scale: 3.0
+  public_heuristic_actor_logit_bias_scale: 3.0
+  public_heuristic_logit_bias_final_scale: 3.0

@@ -1,0 +1,11 @@
+schema_version: 2
+description: eval-gated low-lag seed-pool league student with stronger B1 baseline and B1 seed-snapshot warmup pressure
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_hold_frontierweighted_seedpool_lag10_evalgated_lowlr_evalguard_localpromo.yaml
+league:
+  sampling:
+    heuristic_public_mix_fraction: 0.15
+    heuristic_public_final_mix_fraction: 0.15
+    heuristic_public_variant_mix_fraction: 0.15
+    heuristic_public_variant_final_mix_fraction: 0.15
+    noleague_baseline_mix_fraction: 0.35
+    warmup_snapshot_mix_fraction: 0.55

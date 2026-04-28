@@ -15,7 +15,7 @@ The repo now supports three useful lanes:
 
 - `configs/stack_smoke.yaml` with `make train-min` is the explicit scaffold-only path. It proves config loading, simulator provenance capture, and run-manifest writing, but it does not claim thesis-grade training.
 - `python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` is the frozen simulator-backed thesis path once the dedicated B1 anchor exists.
-- `configs/presets/typed_thesis_locked.yaml` and `configs/presets/typed_local.yaml` remain available as lower-level legacy/compatibility stack surfaces.
+- `configs/thesis_locked.yaml` and `configs/local.yaml` remain available as lower-level legacy/compatibility stack surfaces.
 - `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline.
 
 The full runtime modes are described in `runtime_modes.md`; this page stays focused on the quickest honest onboarding path.
@@ -110,7 +110,7 @@ Requirements:
 Run:
 
 ```bash
-uv run python python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_thesis_model_auto_gpu_noleague.yaml --run-label b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/train.py --stack-config configs/baselines/noleague_impala.yaml --run-label b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
 uv run python python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label thesis_model_seed1 --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 400 --skip-compare
 uv run python python/scripts/make_figures.py --run-dir runs/thesis_model_seed1
 ```
@@ -137,7 +137,7 @@ You should see fields like `run_id256`, `spec_hash256`, `config_hash256`, `simul
 These are the follow-up checks for the other top-level entrypoints:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml
+uv run python python/scripts/eval.py --stack-config configs/main_eval.yaml
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
 uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
 uv run python python/scripts/verify_repo.py
@@ -155,12 +155,12 @@ This path is intentionally synthetic. It exists so CI and public readers can exe
 
 ```bash
 uv run python python/scripts/train.py \
-  --stack-config configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml \
+  --stack-config configs/main_impala_league_server.yaml \
   --public-demo \
   --run-label toy_public_demo
 
 uv run python python/scripts/eval.py \
-  --stack-config configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml \
+  --stack-config configs/main_eval.yaml \
   --public-demo \
   --run-dir runs/toy_public_demo
 
@@ -223,3 +223,4 @@ When picking the repo back up later, start here:
 `--stack-config` not found or YAML load error
 - Cause: wrong working directory or incorrect config path.
 - Fix: run from repo root and verify the config file exists.
+

@@ -35,6 +35,7 @@ training:
     batch_unrolls_per_update: 128
   optimizer:
     name: Adam
+    backend: auto
     learning_rate: 0.0002
     grad_norm_clip: 40.0
     value_loss_coef: 0.5
@@ -47,6 +48,19 @@ training:
     compile_learner: false
     compile_actor_inference: false
     masking_math_float32: true
+  scaling:
+    learner_parallelism: auto
+    learner_gpu_count: auto
+    actor_topology: auto
+    target_envs_per_gpu: 512
+    min_envs_per_actor: 32
+    max_envs_per_actor: 64
+    max_actor_process_count: 64
+    reserve_cpu_cores: 4
+    learner_cpu_cores_per_gpu: 2
+    queue_depth_multiplier: 2
+    ram_queue_fraction: 0.25
+    vram_fraction: 0.85
   checkpointing:
     checkpoint_interval_updates: 50000
     snapshot_interval_updates: 100000

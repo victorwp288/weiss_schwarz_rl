@@ -27,7 +27,7 @@ class SweepPreset:
 _PRESETS = {
     "noleague_impala_compact": SweepPreset(
         preset_id="noleague_impala_compact",
-        stack_config="configs/presets/baselines/noleague_impala.yaml",
+        stack_config="configs/baselines/noleague_impala.yaml",
         candidates=(
             SweepCandidate(
                 candidate_id="impala_lr1p5e4_ent2e2",
@@ -65,7 +65,7 @@ _PRESETS = {
     ),
     "norecurrence_compact": SweepPreset(
         preset_id="norecurrence_compact",
-        stack_config="configs/presets/baselines/norecurrence_impala_noleague.yaml",
+        stack_config="configs/baselines/norecurrence_noleague.yaml",
         candidates=(
             SweepCandidate(
                 candidate_id="ff_lr1p5e4_ent2e2",
@@ -103,7 +103,7 @@ _PRESETS = {
     ),
     "ppo_compact": SweepPreset(
         preset_id="ppo_compact",
-        stack_config="configs/presets/baselines/ppo_lite.yaml",
+        stack_config="configs/baselines/ppo_lite.yaml",
         candidates=(
             SweepCandidate(
                 candidate_id="ppo_lr1e4_clip02_ent5e3_ep4",

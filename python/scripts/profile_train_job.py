@@ -25,9 +25,11 @@ def main() -> None:
     parser.add_argument("--stack-config", required=True, help="Stack config path forwarded to train.py.")
     parser.add_argument("--device", default=None)
     parser.add_argument("--profile", default=None)
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--num-envs", type=int, default=None)
     parser.add_argument("--unroll-length", type=int, default=None)
     parser.add_argument("--max-updates", type=int, default=None)
+    parser.add_argument("--max-wall-clock-minutes", type=float, default=None)
     parser.add_argument("--runtime-mode", default=None)
     parser.add_argument("--sample-interval-seconds", type=float, default=2.0)
     parser.add_argument(
@@ -66,12 +68,16 @@ def main() -> None:
         command.extend(["--device", args.device])
     if args.profile:
         command.extend(["--profile", args.profile])
+    if args.seed is not None:
+        command.extend(["--seed", str(args.seed)])
     if args.num_envs is not None:
         command.extend(["--num-envs", str(args.num_envs)])
     if args.unroll_length is not None:
         command.extend(["--unroll-length", str(args.unroll_length)])
     if args.max_updates is not None:
         command.extend(["--max-updates", str(args.max_updates)])
+    if args.max_wall_clock_minutes is not None:
+        command.extend(["--max-wall-clock-minutes", str(args.max_wall_clock_minutes)])
     if args.runtime_mode:
         command.extend(["--runtime-mode", args.runtime_mode])
     for override in args.config_override or []:

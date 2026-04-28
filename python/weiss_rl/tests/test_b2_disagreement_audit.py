@@ -145,8 +145,16 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
             "pair_index": 0,
             "swap_index": 0,
             "episode_seed": 42,
+            "focal_seat": 0,
+            "outcome": "W",
             "replay_key64": "1111",
-            "summary": {"max_total_variation": 0.6, "mean_total_variation": 0.2},
+            "summary": {
+                "max_total_variation": 0.6,
+                "mean_total_variation": 0.2,
+                "policy_a_matches_policy_b_top_action_rate": 0.5,
+                "policy_a_matches_policy_b_top_action_family_rate": 0.75,
+                "policy_a_mean_probability_on_policy_b_top_action": 0.2,
+            },
             "compared_steps": 10,
             "inspected_step_count": 4,
             "family_pair_counts": [
@@ -185,6 +193,16 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
                     "count": 1,
                 },
             ],
+            "mismatched_action_label_pair_counts": [
+                {
+                    "policy_a_action_label": "attack(slot=0, attack_type=direct)",
+                    "policy_b_action_label": "pass",
+                    "count": 2,
+                }
+            ],
+            "mismatched_family_pair_counts": [
+                {"policy_a_family": "attack", "policy_b_family": "pass", "count": 2}
+            ],
             "policy_a_action_label_counts": [
                 {"action_label": "attack(slot=0, attack_type=direct)", "count": 3},
                 {"action_label": "clock_from_hand(hand_index=0)", "count": 1},
@@ -202,8 +220,16 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
             "pair_index": 1,
             "swap_index": 1,
             "episode_seed": 7,
+            "focal_seat": 1,
+            "outcome": "L",
             "replay_key64": "2222",
-            "summary": {"max_total_variation": 0.9, "mean_total_variation": 0.4},
+            "summary": {
+                "max_total_variation": 0.9,
+                "mean_total_variation": 0.4,
+                "policy_a_matches_policy_b_top_action_rate": 0.25,
+                "policy_a_matches_policy_b_top_action_family_rate": 0.5,
+                "policy_a_mean_probability_on_policy_b_top_action": 0.3,
+            },
             "compared_steps": 20,
             "inspected_step_count": 5,
             "family_pair_counts": [
@@ -241,6 +267,22 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
                     "count": 1,
                 },
             ],
+            "mismatched_action_label_pair_counts": [
+                {
+                    "policy_a_action_label": "attack(slot=0, attack_type=direct)",
+                    "policy_b_action_label": "pass",
+                    "count": 2,
+                },
+                {
+                    "policy_a_action_label": "main_move(from_slot=0, to_slot=2)",
+                    "policy_b_action_label": "pass",
+                    "count": 2,
+                },
+            ],
+            "mismatched_family_pair_counts": [
+                {"policy_a_family": "attack", "policy_b_family": "pass", "count": 2},
+                {"policy_a_family": "main_move", "policy_b_family": "pass", "count": 2},
+            ],
             "policy_a_action_label_counts": [
                 {"action_label": "attack(slot=0, attack_type=direct)", "count": 3},
                 {"action_label": "main_move(from_slot=0, to_slot=2)", "count": 2},
@@ -256,6 +298,7 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
     summary = module._aggregate_audit_summary(
         source=source,
         policy_id="learner",
+        opponent_policy_id="B2 HeuristicPublic",
         episodes_jsonl=tmp_path / "source.jsonl",
         run_dir=tmp_path / "source_run",
         output_run_dir=tmp_path / "output_run",
@@ -281,11 +324,47 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
         "policy_b_action_label": "pass",
         "count": 4,
     }
+    assert summary["top_mismatched_action_label_pairs"][0] == {
+        "policy_a_action_label": "attack(slot=0, attack_type=direct)",
+        "policy_b_action_label": "pass",
+        "count": 4,
+    }
+    assert summary["top_mismatched_family_pairs"][0] == {
+        "policy_a_family": "attack",
+        "policy_b_family": "pass",
+        "count": 4,
+    }
     assert summary["top_policy_a_action_labels"][0] == {
         "action_label": "attack(slot=0, attack_type=direct)",
         "count": 6,
     }
     assert summary["top_policy_b_action_labels"][0] == {"action_label": "pass", "count": 6}
+    assert summary["outcome_counts"] == [{"outcome": "L", "count": 1}, {"outcome": "W", "count": 1}]
+    assert summary["seat_outcome_counts"] == [
+        {"focal_seat": 0, "outcome": "W", "count": 1},
+        {"focal_seat": 1, "outcome": "L", "count": 1},
+    ]
+    assert summary["variation_by_outcome"][0]["outcome"] == "L"
+    assert summary["variation_by_outcome"][0]["mean_total_variation"] == pytest.approx(0.4)
+    assert summary["policy_alignment_by_outcome"][0]["outcome"] == "L"
+    assert summary["policy_alignment_by_outcome"][0]["policy_a_matches_policy_b_top_action_rate"] == pytest.approx(
+        0.25
+    )
+    assert summary["policy_alignment_by_outcome"][1]["policy_a_mean_probability_on_policy_b_top_action"] == (
+        pytest.approx(0.2)
+    )
+    assert summary["top_family_pairs_by_seat_outcome"][1]["focal_seat"] == 1
+    assert summary["top_family_pairs_by_seat_outcome"][1]["outcome"] == "L"
+    assert summary["top_family_pairs_by_seat_outcome"][1]["top_items"][0] == {
+        "policy_a_family": "attack",
+        "policy_b_family": "pass",
+        "count": 2,
+    }
+    assert summary["top_mismatched_action_label_pairs_by_seat_outcome"][1]["top_items"][0] == {
+        "policy_a_action_label": "attack(slot=0, attack_type=direct)",
+        "policy_b_action_label": "pass",
+        "count": 2,
+    }
     assert summary["max_total_variation"] == pytest.approx(0.9)
     assert summary["mean_total_variation"] == pytest.approx((0.2 * 10 + 0.4 * 20) / 30)
 

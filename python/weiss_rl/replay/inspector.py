@@ -47,6 +47,7 @@ def inspect_replay_bundle(
     top_k: int = 10,
     top_actions: int = 5,
     env_factory: ReplayEnvFactory | None = None,
+    allow_snapshot_config_hash_mismatch: bool = False,
 ) -> dict[str, Any]:
     if top_k < 0:
         raise ValueError("top_k must be >= 0")
@@ -81,6 +82,7 @@ def inspect_replay_bundle(
             run_dir=resolved_run_dir,
             registry=registry,
             run_spec_bundle=run_spec_bundle,
+            allow_snapshot_config_hash_mismatch=allow_snapshot_config_hash_mismatch,
         )
         policy_b_loaded = _load_policy(
             spec=policy_b,
@@ -90,6 +92,7 @@ def inspect_replay_bundle(
             run_dir=resolved_run_dir,
             registry=registry,
             run_spec_bundle=run_spec_bundle,
+            allow_snapshot_config_hash_mismatch=allow_snapshot_config_hash_mismatch,
         )
 
         device = torch.device("cpu")
@@ -288,6 +291,7 @@ def _load_policy(
     run_dir: Path | None,
     registry: SnapshotRegistry | None,
     run_spec_bundle: dict[str, Any] | None,
+    allow_snapshot_config_hash_mismatch: bool = False,
 ) -> LoadedReplayPolicy:
     normalized_spec = str(spec).strip()
     heuristic_profile = heuristic_public_profile_name_for_policy_id(normalized_spec)
@@ -313,7 +317,11 @@ def _load_policy(
 
     expected_config_hash256 = compute_config_hash256(stack)
     observed_config_hash256 = str(payload.get("config_hash256", "")).strip()
-    if observed_config_hash256 and observed_config_hash256 != expected_config_hash256:
+    if (
+        observed_config_hash256
+        and observed_config_hash256 != expected_config_hash256
+        and not bool(allow_snapshot_config_hash_mismatch)
+    ):
         raise RuntimeError(
             f"Snapshot config hash mismatch for {weights_path}: "
             f"expected {expected_config_hash256}, observed {observed_config_hash256}"

@@ -1,0 +1,5 @@
+schema_version: 2
+description: Pass 3 stronger B1 second-seat positive-advantage auxiliary probe with reference rails kept
+extends: pass3_b1seat1_heavy_reward5_lr2e5.yaml
+training:
+  b1_second_seat_positive_advantage_policy_coef: 10.0

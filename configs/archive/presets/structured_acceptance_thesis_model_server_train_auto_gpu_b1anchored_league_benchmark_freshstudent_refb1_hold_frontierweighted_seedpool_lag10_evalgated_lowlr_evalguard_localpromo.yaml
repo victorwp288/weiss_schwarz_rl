@@ -1,0 +1,12 @@
+schema_version: 2
+description: reduced-size low-lag seed-pool league student with eval-gated PFSP transition on the B1/B3 frontier
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_hold_frontierweighted_seedpool_lag10_warmup200_lowlr_evalguard_localpromo.yaml
+league:
+  warmup:
+    first_updates: 120
+    eval_gate_enabled: true
+    eval_gate_min_aggregate_score: 0.60
+    eval_gate_min_anchor_scores:
+      B1 NoLeague baseline: 0.50
+      B3 HeuristicPublicAggro: 0.65
+      Previous recent snapshot: 0.50

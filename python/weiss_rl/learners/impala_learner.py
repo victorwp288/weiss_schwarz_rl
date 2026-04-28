@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -297,43 +297,49 @@ def _packed_soft_target_cross_entropy(
     *,
     target_logits: Tensor,
     temperature: float,
+    row_mask: Tensor | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]:
     if temperature <= 0.0:
         raise ValueError("public heuristic temperature must be > 0")
     flat_target_logits = target_logits.reshape(-1).to(device=packed_view.logits.device, dtype=packed_view.logits.dtype)
     if int(flat_target_logits.shape[0]) != int(packed_view.logits.shape[0]):
         raise ValueError("public heuristic target logits must align 1:1 with packed logits")
-    scaled_target_logits = flat_target_logits / float(temperature)
-    target_row_log_z = _segment_logsumexp(scaled_target_logits, packed_view.row_indices, packed_view.row_count)
+    row_indices = packed_view.row_indices.to(dtype=torch.long)
+    if row_mask is None:
+        candidate_mask = torch.ones_like(row_indices, dtype=torch.bool, device=packed_view.logits.device)
+    else:
+        row_mask = row_mask.reshape(-1).to(device=packed_view.logits.device, dtype=torch.bool)
+        if int(row_mask.shape[0]) != int(packed_view.row_count):
+            raise ValueError("public heuristic row mask must align 1:1 with packed rows")
+        candidate_mask = row_mask.index_select(0, row_indices)
+    selected_rows = row_indices[candidate_mask]
+    selected_target_logits = flat_target_logits[candidate_mask]
+    selected_student_logits = packed_view.logits[candidate_mask]
+    selected_student_log_z = packed_view.row_log_z.index_select(0, selected_rows)
+
+    scaled_target_logits = selected_target_logits / float(temperature)
+    target_row_log_z = _segment_logsumexp(scaled_target_logits, selected_rows, packed_view.row_count)
     target_log_probs = scaled_target_logits - target_row_log_z.index_select(
-        0, packed_view.row_indices.to(dtype=torch.long)
+        0, selected_rows
     )
     target_probs = torch.exp(target_log_probs)
-    student_log_probs = packed_view.logits - packed_view.row_log_z.index_select(
-        0, packed_view.row_indices.to(dtype=torch.long)
-    )
+    student_log_probs = selected_student_logits - selected_student_log_z
 
     row_cross_entropy = torch.zeros(
         (packed_view.row_count,), dtype=packed_view.logits.dtype, device=packed_view.logits.device
     )
-    row_cross_entropy.scatter_add_(
-        0,
-        packed_view.row_indices.to(dtype=torch.long),
-        -(target_probs * student_log_probs),
-    )
+    if selected_rows.numel() > 0:
+        row_cross_entropy.scatter_add_(0, selected_rows, -(target_probs * student_log_probs))
 
     row_target_entropy = torch.zeros(
         (packed_view.row_count,), dtype=packed_view.logits.dtype, device=packed_view.logits.device
     )
-    row_target_entropy.scatter_add_(
-        0,
-        packed_view.row_indices.to(dtype=torch.long),
-        -(target_probs * target_log_probs),
-    )
+    if selected_rows.numel() > 0:
+        row_target_entropy.scatter_add_(0, selected_rows, -(target_probs * target_log_probs))
 
-    student_top_logits = _segment_max(packed_view.logits, packed_view.row_indices, packed_view.row_count)
-    student_top_mask = packed_view.logits >= (
-        student_top_logits.index_select(0, packed_view.row_indices.to(dtype=torch.long)) - 1.0e-6
+    student_top_logits = _segment_max(selected_student_logits, selected_rows, packed_view.row_count)
+    student_top_mask = selected_student_logits >= (
+        student_top_logits.index_select(0, selected_rows) - 1.0e-6
     )
     row_student_top_mass = torch.zeros(
         (packed_view.row_count,), dtype=packed_view.logits.dtype, device=packed_view.logits.device
@@ -341,10 +347,209 @@ def _packed_soft_target_cross_entropy(
     if bool(student_top_mask.any().item()):
         row_student_top_mass.scatter_add_(
             0,
-            packed_view.row_indices[student_top_mask].to(dtype=torch.long),
+            selected_rows[student_top_mask],
             target_probs[student_top_mask],
         )
     return row_cross_entropy, row_student_top_mass, row_target_entropy
+
+
+def _packed_soft_target_group_probs(
+    packed_view: _PackedStructuredLegalView,
+    *,
+    target_logits: Tensor,
+    temperature: float,
+    row_mask: Tensor,
+    group_ids: Tensor,
+    group_count: int,
+    candidate_mask: Tensor | None = None,
+) -> tuple[Tensor, Tensor]:
+    if temperature <= 0.0:
+        raise ValueError("public heuristic temperature must be > 0")
+    group_count = int(group_count)
+    flat_target_logits = target_logits.reshape(-1).to(device=packed_view.logits.device, dtype=packed_view.logits.dtype)
+    if int(flat_target_logits.shape[0]) != int(packed_view.logits.shape[0]):
+        raise ValueError("public heuristic target logits must align 1:1 with packed logits")
+    row_mask = row_mask.reshape(-1).to(device=packed_view.logits.device, dtype=torch.bool)
+    if int(row_mask.shape[0]) != int(packed_view.row_count):
+        raise ValueError("public heuristic row mask must align 1:1 with packed rows")
+    selected = row_mask.index_select(0, packed_view.row_indices.to(dtype=torch.long))
+    if candidate_mask is not None:
+        selected = selected & candidate_mask.to(device=packed_view.logits.device, dtype=torch.bool)
+    selected = selected & (group_ids.to(device=packed_view.logits.device) >= 0)
+    out = torch.zeros(
+        (packed_view.row_count, max(group_count, 0)),
+        dtype=packed_view.logits.dtype,
+        device=packed_view.logits.device,
+    )
+    row_has = torch.zeros((packed_view.row_count,), dtype=torch.bool, device=packed_view.logits.device)
+    if group_count <= 0 or not bool(selected.any().item()):
+        return out, row_has
+
+    selected_rows = packed_view.row_indices[selected].to(dtype=torch.long)
+    selected_target_logits = flat_target_logits[selected] / float(temperature)
+    target_row_log_z = _segment_logsumexp(selected_target_logits, selected_rows, packed_view.row_count)
+    finite_rows = torch.isfinite(target_row_log_z)
+    if not bool(finite_rows.any().item()):
+        return out, row_has
+    target_log_probs = selected_target_logits - target_row_log_z.index_select(0, selected_rows)
+    target_probs = torch.exp(target_log_probs)
+    out = _segment_group_sum(
+        target_probs,
+        selected_rows,
+        group_ids[selected].to(device=packed_view.logits.device, dtype=torch.long),
+        row_count=packed_view.row_count,
+        group_count=group_count,
+    )
+    row_has = finite_rows
+    return out, row_has
+
+
+def _soft_group_cross_entropy(group_log_probs: Tensor, target_probs: Tensor) -> Tensor:
+    target_probs = target_probs.to(device=group_log_probs.device, dtype=group_log_probs.dtype)
+    safe_log_probs = torch.where(target_probs > 0.0, group_log_probs, torch.zeros_like(group_log_probs))
+    return -(target_probs * safe_log_probs).sum(dim=1)
+
+
+def _public_main_move_auxiliary_loss(
+    *,
+    packed_view: _PackedStructuredLegalView,
+    public_heuristic_target_logits: Tensor,
+    flat_loss_mask: Tensor,
+    flat_teacher_valid: Tensor,
+    active_rows: Tensor,
+    family_names: tuple[str, ...],
+    move_source_log_probs: Tensor | None,
+    move_slot_log_probs: Tensor | None,
+    temperature: float,
+    zero: Tensor,
+) -> tuple[Tensor, dict[str, float]]:
+    metrics = {
+        "teacher_public_heuristic_target_main_play_character_mass": 0.0,
+        "teacher_public_heuristic_target_main_move_mass": 0.0,
+        "teacher_public_heuristic_target_attack_mass": 0.0,
+        "teacher_public_heuristic_target_pass_mass": 0.0,
+        "teacher_public_main_move_selected_fraction": 0.0,
+        "teacher_public_main_move_source_accuracy": 0.0,
+        "teacher_public_main_move_slot_accuracy": 0.0,
+        "teacher_public_main_move_source_loss": 0.0,
+        "teacher_public_main_move_slot_loss": 0.0,
+        "teacher_public_main_move_supported_fraction": 0.0,
+        "teacher_public_main_move_loss": 0.0,
+    }
+    family_index = {name: index for index, name in enumerate(family_names)}
+    row_mask = packed_view.row_has_candidates & flat_teacher_valid & active_rows
+    if not bool(row_mask.any().item()):
+        return zero, metrics
+
+    family_probs, _family_rows = _packed_soft_target_group_probs(
+        packed_view,
+        target_logits=public_heuristic_target_logits,
+        temperature=float(temperature),
+        row_mask=row_mask,
+        group_ids=packed_view.family_ids,
+        group_count=len(family_names),
+    )
+    row_weights = flat_loss_mask[row_mask]
+    if float(row_weights.sum().item()) > 0.0:
+        for family_name, metric_name in (
+            ("main_play_character", "teacher_public_heuristic_target_main_play_character_mass"),
+            ("main_move", "teacher_public_heuristic_target_main_move_mass"),
+            ("attack", "teacher_public_heuristic_target_attack_mass"),
+            ("pass", "teacher_public_heuristic_target_pass_mass"),
+        ):
+            family_id = int(family_index.get(family_name, -1))
+            if family_id >= 0:
+                metrics[metric_name] = float(_weighted_mean(family_probs[row_mask, family_id], row_weights).item())
+
+    move_family_id = int(family_index.get("main_move", -1))
+    if move_family_id < 0 or move_source_log_probs is None or move_slot_log_probs is None:
+        return zero, metrics
+
+    move_candidate_mask = packed_view.family_ids == move_family_id
+    move_counts = _segment_group_sum(
+        torch.ones_like(packed_view.logits),
+        packed_view.row_indices,
+        packed_view.family_ids,
+        row_count=packed_view.row_count,
+        group_count=len(family_names),
+    )[:, move_family_id]
+    main_move_mass = family_probs[:, move_family_id]
+    move_rows = row_mask & (move_counts > 0.0) & (main_move_mass > 1.0e-6)
+    active_total = float(active_rows.float().sum().item())
+    if active_total > 0.0:
+        metrics["teacher_public_main_move_selected_fraction"] = float(move_rows.float().sum().item() / active_total)
+    if not bool(move_rows.any().item()):
+        return zero, metrics
+
+    source_group_count = int(move_source_log_probs.shape[-1])
+    slot_group_count = int(move_slot_log_probs.shape[-1])
+    source_targets, source_has = _packed_soft_target_group_probs(
+        packed_view,
+        target_logits=public_heuristic_target_logits,
+        temperature=float(temperature),
+        row_mask=move_rows,
+        group_ids=packed_view.arg0,
+        group_count=source_group_count,
+        candidate_mask=move_candidate_mask,
+    )
+    slot_targets, slot_has = _packed_soft_target_group_probs(
+        packed_view,
+        target_logits=public_heuristic_target_logits,
+        temperature=float(temperature),
+        row_mask=move_rows,
+        group_ids=packed_view.arg1,
+        group_count=slot_group_count,
+        candidate_mask=move_candidate_mask,
+    )
+    effective_weights = flat_loss_mask * main_move_mass.detach()
+    loss_terms: list[Tensor] = []
+    weight_terms: list[Tensor] = []
+    supported_weight = 0.0
+    candidate_weight = float(effective_weights[move_rows].sum().item())
+
+    source_supported = move_rows & source_has
+    source_loss = _soft_group_cross_entropy(move_source_log_probs, source_targets)
+    source_supported = source_supported & torch.isfinite(source_loss)
+    if bool(source_supported.any().item()):
+        weights = effective_weights[source_supported]
+        losses = source_loss[source_supported]
+        loss_terms.append(losses)
+        weight_terms.append(weights)
+        supported_weight += float(weights.sum().item())
+        source_metric_loss = _weighted_mean(losses, weights)
+        metrics["teacher_public_main_move_source_loss"] = float(source_metric_loss.detach().item())
+        metrics["teacher_public_main_move_source_accuracy"] = float(
+            ((move_source_log_probs[source_supported].argmax(dim=1) == source_targets[source_supported].argmax(dim=1)).float() * weights)
+            .sum()
+            .item()
+            / max(float(weights.sum().item()), 1.0)
+        )
+
+    slot_supported = move_rows & slot_has
+    slot_loss = _soft_group_cross_entropy(move_slot_log_probs, slot_targets)
+    slot_supported = slot_supported & torch.isfinite(slot_loss)
+    if bool(slot_supported.any().item()):
+        weights = effective_weights[slot_supported]
+        losses = slot_loss[slot_supported]
+        loss_terms.append(losses)
+        weight_terms.append(weights)
+        supported_weight += float(weights.sum().item())
+        slot_metric_loss = _weighted_mean(losses, weights)
+        metrics["teacher_public_main_move_slot_loss"] = float(slot_metric_loss.detach().item())
+        metrics["teacher_public_main_move_slot_accuracy"] = float(
+            ((move_slot_log_probs[slot_supported].argmax(dim=1) == slot_targets[slot_supported].argmax(dim=1)).float() * weights)
+            .sum()
+            .item()
+            / max(float(weights.sum().item()), 1.0)
+        )
+
+    if candidate_weight > 0.0:
+        metrics["teacher_public_main_move_supported_fraction"] = float(supported_weight / max(candidate_weight * 2.0, 1.0e-8))
+    if not loss_terms:
+        return zero, metrics
+    loss = _weighted_mean(torch.cat(loss_terms, dim=0), torch.cat(weight_terms, dim=0)).to(dtype=zero.dtype)
+    metrics["teacher_public_main_move_loss"] = float(loss.detach().item())
+    return loss, metrics
 
 
 def _nonfinite_indices(values: Tensor | np.ndarray) -> np.ndarray:
@@ -633,6 +838,8 @@ def compute_structured_teacher_auxiliary_metrics(
     same_family_action_coef: float,
     move_source_coef: float = 0.0,
     public_heuristic_coef: float = 0.0,
+    public_main_move_coef: float = 0.0,
+    development_pass_suppression_coef: float = 0.0,
     public_heuristic_temperature: float = 32.0,
     public_heuristic_families: tuple[str, ...] = (),
     public_heuristic_target_logits: Tensor | None = None,
@@ -683,8 +890,24 @@ def compute_structured_teacher_auxiliary_metrics(
         "teacher_same_family_action_supported_fraction": 0.0,
         "teacher_public_heuristic_loss": 0.0,
         "teacher_public_heuristic_supported_fraction": 0.0,
+        "teacher_public_heuristic_selected_fraction": 0.0,
+        "teacher_public_heuristic_teacher_valid_coverage": 0.0,
         "teacher_public_heuristic_top1_mass": 0.0,
         "teacher_public_heuristic_target_entropy": 0.0,
+        "teacher_public_heuristic_target_main_play_character_mass": 0.0,
+        "teacher_public_heuristic_target_main_move_mass": 0.0,
+        "teacher_public_heuristic_target_attack_mass": 0.0,
+        "teacher_public_heuristic_target_pass_mass": 0.0,
+        "teacher_public_main_move_selected_fraction": 0.0,
+        "teacher_public_main_move_source_accuracy": 0.0,
+        "teacher_public_main_move_slot_accuracy": 0.0,
+        "teacher_public_main_move_source_loss": 0.0,
+        "teacher_public_main_move_slot_loss": 0.0,
+        "teacher_public_main_move_supported_fraction": 0.0,
+        "teacher_public_main_move_loss": 0.0,
+        "teacher_development_pass_suppression_loss": 0.0,
+        "teacher_development_pass_suppression_selected_fraction": 0.0,
+        "teacher_development_pass_probability": 0.0,
         "teacher_aux_loss": 0.0,
     }
 
@@ -1030,7 +1253,8 @@ def compute_structured_teacher_auxiliary_metrics(
             and public_heuristic_target_logits is not None
             and float(public_heuristic_coef) != 0.0
         ):
-            public_rows = packed_view.row_has_candidates & flat_teacher_valid
+            public_candidate_rows = packed_view.row_has_candidates & flat_teacher_valid & active_rows
+            public_rows = public_candidate_rows
             if public_heuristic_family_ids:
                 public_rows = public_rows & torch.isin(
                     flat_teacher_family,
@@ -1040,11 +1264,22 @@ def compute_structured_teacher_auxiliary_metrics(
                         dtype=flat_teacher_family.dtype,
                     ),
                 )
+            active_total = float(active_rows.float().sum().item())
+            valid_total = float(public_candidate_rows.float().sum().item())
+            if active_total > 0.0:
+                metrics["teacher_public_heuristic_selected_fraction"] = float(
+                    public_rows.float().sum().item() / active_total
+                )
+            if valid_total > 0.0:
+                metrics["teacher_public_heuristic_teacher_valid_coverage"] = float(
+                    public_rows.float().sum().item() / valid_total
+                )
             if bool(public_rows.any().item()):
                 row_cross_entropy, row_student_top_mass, row_target_entropy = _packed_soft_target_cross_entropy(
                     packed_view,
                     target_logits=public_heuristic_target_logits,
                     temperature=float(public_heuristic_temperature),
+                    row_mask=public_rows,
                 )
                 public_weights = flat_loss_mask[public_rows]
                 if float(public_weights.sum().item()) > 0.0:
@@ -1061,6 +1296,50 @@ def compute_structured_teacher_auxiliary_metrics(
                     ).to(dtype=value_dtype)
                     metrics["teacher_public_heuristic_loss"] = float(public_heuristic_loss.detach().item())
 
+        public_main_move_loss = zero
+        if packed_view is not None and public_heuristic_target_logits is not None:
+            public_main_move_loss, public_main_move_metrics = _public_main_move_auxiliary_loss(
+                packed_view=packed_view,
+                public_heuristic_target_logits=public_heuristic_target_logits,
+                flat_loss_mask=flat_loss_mask,
+                flat_teacher_valid=flat_teacher_valid,
+                active_rows=active_rows,
+                family_names=family_names,
+                move_source_log_probs=move_source_log_probs,
+                move_slot_log_probs=move_slot_log_probs,
+                temperature=float(public_heuristic_temperature),
+                zero=zero,
+            )
+            metrics.update(public_main_move_metrics)
+
+        development_pass_suppression_loss = zero
+        if float(development_pass_suppression_coef) != 0.0:
+            pass_family_id = int(family_index.get("pass", -1))
+            development_rows = active_rows & flat_teacher_valid & (
+                (flat_teacher_family == play_family_id) | (flat_teacher_family == move_family_id)
+            )
+            if pass_family_id >= 0 and bool(development_rows.any().item()):
+                pass_log_probs = family_log_probs[development_rows, pass_family_id]
+                supported = torch.isfinite(pass_log_probs)
+                if bool(supported.any().item()):
+                    row_weight = flat_loss_mask[development_rows][supported]
+                    pass_probs = torch.exp(pass_log_probs[supported]).clamp(max=1.0 - 1.0e-6)
+                    development_pass_suppression_loss = _weighted_mean(
+                        -torch.log1p(-pass_probs),
+                        row_weight,
+                    ).to(dtype=value_dtype)
+                    active_total = float(active_rows.float().sum().item())
+                    if active_total > 0.0:
+                        metrics["teacher_development_pass_suppression_selected_fraction"] = float(
+                            development_rows.float().sum().item() / active_total
+                        )
+                    metrics["teacher_development_pass_probability"] = float(
+                        _weighted_mean(pass_probs.detach(), row_weight).item()
+                    )
+                    metrics["teacher_development_pass_suppression_loss"] = float(
+                        development_pass_suppression_loss.detach().item()
+                    )
+
         total_aux = (
             family_loss * float(family_coef)
             + slot_loss * float(slot_coef)
@@ -1069,6 +1348,8 @@ def compute_structured_teacher_auxiliary_metrics(
             + action_loss * float(action_coef)
             + same_family_action_loss * float(same_family_action_coef)
             + public_heuristic_loss * float(public_heuristic_coef)
+            + public_main_move_loss * float(public_main_move_coef)
+            + development_pass_suppression_loss * float(development_pass_suppression_coef)
         )
         metrics["teacher_aux_loss"] = float(total_aux.detach().item())
         return total_aux, metrics, context
@@ -1104,9 +1385,10 @@ def compute_structured_teacher_auxiliary_metrics(
         metrics = dict(empty_metrics)
         metrics["teacher_valid_fraction"] = float(flat_teacher_valid.float().mean().item())
         context: dict[str, Tensor] = {}
+        active_rows = flat_loss_mask > 0.0
 
         family_loss = zero
-        family_rows = packed_view.row_has_candidates & flat_teacher_valid & (flat_teacher_family >= 0)
+        family_rows = packed_view.row_has_candidates & active_rows & flat_teacher_valid & (flat_teacher_family >= 0)
         family_log_probs = _packed_group_log_probs(
             packed_view,
             group_ids=packed_view.family_ids,
@@ -1141,7 +1423,7 @@ def compute_structured_teacher_auxiliary_metrics(
         attack_family_id = int(family_index.get("attack", -1))
         _record_teacher_family_coverage(
             metrics,
-            active_rows=flat_loss_mask > 0.0,
+            active_rows=active_rows,
             flat_teacher_family_local=flat_teacher_family,
             flat_teacher_valid_local=flat_teacher_valid,
             play_family_id_local=play_family_id,
@@ -1436,7 +1718,8 @@ def compute_structured_teacher_auxiliary_metrics(
 
         public_heuristic_loss = zero
         if public_heuristic_target_logits is not None and float(public_heuristic_coef) != 0.0:
-            public_rows = packed_view.row_has_candidates & flat_teacher_valid
+            public_candidate_rows = packed_view.row_has_candidates & flat_teacher_valid & active_rows
+            public_rows = public_candidate_rows
             if public_heuristic_family_ids:
                 public_rows = public_rows & torch.isin(
                     flat_teacher_family,
@@ -1446,11 +1729,22 @@ def compute_structured_teacher_auxiliary_metrics(
                         dtype=flat_teacher_family.dtype,
                     ),
                 )
+            active_total = float(active_rows.float().sum().item())
+            valid_total = float(public_candidate_rows.float().sum().item())
+            if active_total > 0.0:
+                metrics["teacher_public_heuristic_selected_fraction"] = float(
+                    public_rows.float().sum().item() / active_total
+                )
+            if valid_total > 0.0:
+                metrics["teacher_public_heuristic_teacher_valid_coverage"] = float(
+                    public_rows.float().sum().item() / valid_total
+                )
             if bool(public_rows.any().item()):
                 row_cross_entropy, row_student_top_mass, row_target_entropy = _packed_soft_target_cross_entropy(
                     packed_view,
                     target_logits=public_heuristic_target_logits,
                     temperature=float(public_heuristic_temperature),
+                    row_mask=public_rows,
                 )
                 public_weights = flat_loss_mask[public_rows]
                 if float(public_weights.sum().item()) > 0.0:
@@ -1467,6 +1761,65 @@ def compute_structured_teacher_auxiliary_metrics(
                     ).to(dtype=value_dtype)
                     metrics["teacher_public_heuristic_loss"] = float(public_heuristic_loss.detach().item())
 
+        public_main_move_loss = zero
+        if packed_view is not None and public_heuristic_target_logits is not None:
+            packed_move_source_log_probs = None
+            packed_move_slot_log_probs = None
+            if move_family_id >= 0:
+                packed_move_source_log_probs = _packed_group_log_probs(
+                    packed_view,
+                    group_ids=packed_view.arg0,
+                    group_count=max(int(action_catalog.max_stage), 1),
+                    candidate_mask=packed_view.family_ids == move_family_id,
+                )
+                packed_move_slot_log_probs = _packed_group_log_probs(
+                    packed_view,
+                    group_ids=packed_view.arg1,
+                    group_count=max(int(action_catalog.max_stage), 1),
+                    candidate_mask=packed_view.family_ids == move_family_id,
+                )
+            public_main_move_loss, public_main_move_metrics = _public_main_move_auxiliary_loss(
+                packed_view=packed_view,
+                public_heuristic_target_logits=public_heuristic_target_logits,
+                flat_loss_mask=flat_loss_mask,
+                flat_teacher_valid=flat_teacher_valid,
+                active_rows=active_rows,
+                family_names=family_names,
+                move_source_log_probs=packed_move_source_log_probs,
+                move_slot_log_probs=packed_move_slot_log_probs,
+                temperature=float(public_heuristic_temperature),
+                zero=zero,
+            )
+            metrics.update(public_main_move_metrics)
+
+        development_pass_suppression_loss = zero
+        if float(development_pass_suppression_coef) != 0.0:
+            pass_family_id = int(family_index.get("pass", -1))
+            development_rows = family_rows & (
+                (flat_teacher_family == play_family_id) | (flat_teacher_family == move_family_id)
+            )
+            if pass_family_id >= 0 and bool(development_rows.any().item()):
+                pass_log_probs = family_log_probs[development_rows, pass_family_id]
+                supported = torch.isfinite(pass_log_probs)
+                if bool(supported.any().item()):
+                    row_weight = flat_loss_mask[development_rows][supported]
+                    pass_probs = torch.exp(pass_log_probs[supported]).clamp(max=1.0 - 1.0e-6)
+                    development_pass_suppression_loss = _weighted_mean(
+                        -torch.log1p(-pass_probs),
+                        row_weight,
+                    ).to(dtype=value_dtype)
+                    active_total = float(active_rows.float().sum().item())
+                    if active_total > 0.0:
+                        metrics["teacher_development_pass_suppression_selected_fraction"] = float(
+                            development_rows.float().sum().item() / active_total
+                        )
+                    metrics["teacher_development_pass_probability"] = float(
+                        _weighted_mean(pass_probs.detach(), row_weight).item()
+                    )
+                    metrics["teacher_development_pass_suppression_loss"] = float(
+                        development_pass_suppression_loss.detach().item()
+                    )
+
         total_aux = (
             family_loss * float(family_coef)
             + slot_loss * float(slot_coef)
@@ -1475,6 +1828,8 @@ def compute_structured_teacher_auxiliary_metrics(
             + action_loss * float(action_coef)
             + same_family_action_loss * float(same_family_action_coef)
             + public_heuristic_loss * float(public_heuristic_coef)
+            + public_main_move_loss * float(public_main_move_coef)
+            + development_pass_suppression_loss * float(development_pass_suppression_coef)
         )
         metrics["teacher_aux_loss"] = float(total_aux.detach().item())
         context["teacher_aux_loss"] = total_aux.detach()
@@ -2209,6 +2564,7 @@ class ImpalaLearner:
     value_loss_coef: float = 0.5
     entropy_coef: float = 0.01
     grad_norm_clip: float = 40.0
+    optimizer_backend: str = "auto"
     mixed_precision: bool = False
     checkpoint_dir: Path | None = None
     fault_dir: Path | None = None
@@ -2225,14 +2581,36 @@ class ImpalaLearner:
     teacher_action_coef: float = 0.0
     teacher_same_family_action_coef: float = 0.0
     teacher_public_heuristic_coef: float = 0.0
+    teacher_public_main_move_coef: float = 0.0
+    teacher_development_pass_suppression_coef: float = 0.0
     teacher_public_heuristic_temperature: float = 32.0
     teacher_public_heuristic_families: tuple[str, ...] = field(default_factory=tuple)
     teacher_public_heuristic_profiles: tuple[str, ...] = field(default_factory=tuple)
     teacher_public_heuristic_profile_mode: str = "mixture"
     teacher_public_heuristic_profiles_end_updates: int = -1
+    policy_loss_coef: float = 1.0
+    behavior_action_bc_coef: float = 0.0
+    reference_policy_top_action_bc_coef: float = 0.0
+    b1_opponent_reference_policy_top_action_bc_coef: float = 0.0
+    b1_second_seat_positive_advantage_policy_coef: float = 0.0
+    b1_second_seat_reference_top_action_avoidance_coef: float = 0.0
+    reference_policy_top_action_family_bc_coef: float = 0.0
+    reference_policy_model: nn.Module | None = None
+    raw_b1_distill_coef: float = 0.0
+    raw_b1_distill_teacher_bias_scale: float = 0.0
+    raw_b1_distill_student_bias_scale: float = 0.0
+    raw_b1_distill_top_k: int = 16
+    raw_b1_distill_temperature: float = 1.5
+    raw_b1_distill_top_action_ce_coef: float = 0.0
+    counterfactual_positive_label_dirs: tuple[str, ...] = field(default_factory=tuple)
+    counterfactual_positive_coef: float = 0.0
+    counterfactual_positive_margin_coef: float = 0.0
+    counterfactual_positive_margin: float = 1.0
+    counterfactual_positive_max_labels: int = 0
     profile_timers: bool = False
     structured_metrics_mode: str = "full"
     teacher_aux_mode: str = "always"
+    gradient_sync: Callable[[], None] | None = None
 
     update_count: int = field(default=0, init=False)
     policy_version: int = field(default=0, init=False)
@@ -2245,12 +2623,14 @@ class ImpalaLearner:
     _amp_device_type: str = field(default="cpu", init=False)
     _grad_scaler: torch.amp.GradScaler | None = field(default=None, init=False)
     _active_timing_metrics: dict[str, float] | None = field(default=None, init=False)
+    _counterfactual_positive_records: tuple[dict[str, Any], ...] = field(default_factory=tuple, init=False)
 
     def __post_init__(self) -> None:
         if self.logs_dir:
             self.logger = TrainingLogger(self.logs_dir, start_time=self.start_time)
         self.structured_metrics_mode = str(self.structured_metrics_mode).strip().lower()
         self.teacher_aux_mode = str(self.teacher_aux_mode).strip().lower()
+        self.optimizer_backend = str(self.optimizer_backend).strip().lower()
         self.teacher_public_heuristic_profiles = _normalize_public_heuristic_profiles(
             self.teacher_public_heuristic_profiles
         )
@@ -2261,10 +2641,35 @@ class ImpalaLearner:
             raise ValueError("structured_metrics_mode must be one of: off, sampled, full")
         if self.teacher_aux_mode not in {"off", "warmstart_only", "always"}:
             raise ValueError("teacher_aux_mode must be one of: off, warmstart_only, always")
+        if self.optimizer_backend not in {"auto", "default", "foreach", "fused"}:
+            raise ValueError("optimizer_backend must be one of: auto, default, foreach, fused")
+        if int(self.counterfactual_positive_max_labels) < 0:
+            raise ValueError("counterfactual_positive_max_labels must be >= 0")
+        self._counterfactual_positive_records = self._load_counterfactual_positive_records(
+            self.counterfactual_positive_label_dirs,
+            max_labels=int(self.counterfactual_positive_max_labels),
+        )
         self._refresh_acceleration_state()
 
     def set_entropy_coef(self, value: float) -> None:
         self.entropy_coef = float(value)
+
+    def set_reference_policy_bc_coefs(
+        self,
+        *,
+        top_action: float | None = None,
+        top_action_family: float | None = None,
+    ) -> None:
+        if top_action is not None:
+            self.reference_policy_top_action_bc_coef = float(top_action)
+        if top_action_family is not None:
+            self.reference_policy_top_action_family_bc_coef = float(top_action_family)
+
+    def set_raw_b1_distill_coef(self, value: float) -> None:
+        self.raw_b1_distill_coef = float(value)
+
+    def set_counterfactual_positive_coef(self, value: float) -> None:
+        self.counterfactual_positive_coef = float(value)
 
     def set_teacher_aux_coefs(
         self,
@@ -2276,6 +2681,8 @@ class ImpalaLearner:
         action: float | None = None,
         same_family_action: float | None = None,
         public_heuristic: float | None = None,
+        public_main_move: float | None = None,
+        development_pass_suppression: float | None = None,
         public_heuristic_temperature: float | None = None,
         public_heuristic_families: tuple[str, ...] | None = None,
         public_heuristic_profiles: tuple[str, ...] | None = None,
@@ -2296,6 +2703,10 @@ class ImpalaLearner:
             self.teacher_same_family_action_coef = float(same_family_action)
         if public_heuristic is not None:
             self.teacher_public_heuristic_coef = float(public_heuristic)
+        if public_main_move is not None:
+            self.teacher_public_main_move_coef = float(public_main_move)
+        if development_pass_suppression is not None:
+            self.teacher_development_pass_suppression_coef = float(development_pass_suppression)
         if public_heuristic_temperature is not None:
             self.teacher_public_heuristic_temperature = float(public_heuristic_temperature)
         if public_heuristic_families is not None:
@@ -2408,11 +2819,17 @@ class ImpalaLearner:
             else:
                 loss.backward()
             self._record_timing_ms("learner_backward", time.perf_counter() - backward_started)
+            sync_started = time.perf_counter()
+            self._sync_gradients_if_needed()
+            self._record_timing_ms("learner_gradient_sync", time.perf_counter() - sync_started)
             grad_norm = clip_grad_norm_(self.model.parameters(), self.grad_norm_clip)
             optimizer_started = time.perf_counter()
             if self._grad_scaler is not None:
-                bad_gradients, grad_norm_tensor = self._collect_nonfinite_gradients(grad_norm)
-                gradients_finite = not bad_gradients and bool(torch.isfinite(grad_norm_tensor).all().item())
+                grad_norm_tensor = torch.as_tensor(grad_norm)
+                gradients_finite = bool(torch.isfinite(grad_norm_tensor).all().item())
+                bad_gradients: dict[str, Tensor] = {}
+                if not gradients_finite:
+                    bad_gradients, grad_norm_tensor = self._collect_nonfinite_gradients(grad_norm)
                 if gradients_finite:
                     self._grad_scaler.step(optimizer)
                     self._grad_scaler.update()
@@ -2489,11 +2906,17 @@ class ImpalaLearner:
         else:
             loss.backward()
         self._record_timing_ms("learner_backward", time.perf_counter() - backward_started)
+        sync_started = time.perf_counter()
+        self._sync_gradients_if_needed()
+        self._record_timing_ms("learner_gradient_sync", time.perf_counter() - sync_started)
         grad_norm = clip_grad_norm_(self.model.parameters(), self.grad_norm_clip)
         optimizer_started = time.perf_counter()
         if self._grad_scaler is not None:
-            bad_gradients, grad_norm_tensor = self._collect_nonfinite_gradients(grad_norm)
-            gradients_finite = not bad_gradients and bool(torch.isfinite(grad_norm_tensor).all().item())
+            grad_norm_tensor = torch.as_tensor(grad_norm)
+            gradients_finite = bool(torch.isfinite(grad_norm_tensor).all().item())
+            bad_gradients: dict[str, Tensor] = {}
+            if not gradients_finite:
+                bad_gradients, grad_norm_tensor = self._collect_nonfinite_gradients(grad_norm)
             if gradients_finite:
                 self._grad_scaler.step(optimizer)
             else:
@@ -2518,6 +2941,766 @@ class ImpalaLearner:
     def _loss_and_metrics(self, batch: Any) -> tuple[Tensor, dict[str, float]]:
         loss, metrics, _ = self._loss_and_metrics_with_context(batch)
         return loss, metrics
+
+    def _evaluate_factorized_model_time_major(
+        self,
+        forward_model: Any,
+        batch: Any,
+        *,
+        obs: Tensor,
+        packed_legal: tuple[Tensor, Tensor, Tensor | None],
+        actions: Tensor | None,
+    ) -> Any | None:
+        if not self._should_use_factorized_legal_policy(forward_model, packed_legal=packed_legal):
+            return None
+        expected_shape = obs.shape[:2]
+        batch_size = int(obs.shape[1])
+        acting_seat = self._prepare_acting_seat_batch(
+            _batch_value(batch, "to_play_seat"),
+            actor=_batch_value(batch, "actor"),
+            expected_shape=expected_shape,
+        )
+        if acting_seat is None:
+            return None
+        return forward_model.evaluate_factorized_sequence_packed_seat_aware(
+            obs,
+            acting_seat,
+            self._prepare_seat_hidden_state(
+                _batch_value(batch, "initial_hidden_state"),
+                batch_size=batch_size,
+                like=obs,
+            ),
+            legal_actions=self._packed_legal_action_view(packed_legal),
+            actions=actions,
+        )
+
+    def _packed_top_action_ids(
+        self,
+        packed_scores: Tensor,
+        packed_ids: Tensor,
+        packed_offsets: Tensor,
+    ) -> Tensor:
+        ids = packed_ids.to(device=packed_scores.device, dtype=torch.long)
+        offsets = packed_offsets.to(device=packed_scores.device, dtype=torch.long)
+        row_count = max(int(offsets.numel()) - 1, 0)
+        if row_count == 0:
+            return torch.zeros((0,), dtype=torch.long, device=packed_scores.device)
+        scores = packed_scores.reshape(-1)
+        widths = offsets[1:] - offsets[:-1]
+        row_indices = torch.repeat_interleave(
+            torch.arange(row_count, device=packed_scores.device, dtype=torch.long),
+            widths,
+        )
+        if scores.numel() == 0:
+            return torch.full((row_count,), -1, dtype=torch.long, device=packed_scores.device)
+        best_scores = scores.new_full((row_count,), -torch.inf)
+        best_scores.scatter_reduce_(0, row_indices, scores, reduce="amax", include_self=True)
+        positions = torch.arange(scores.numel(), device=packed_scores.device, dtype=torch.long)
+        sentinel = torch.full_like(positions, scores.numel())
+        best_positions = torch.full((row_count,), scores.numel(), device=packed_scores.device, dtype=torch.long)
+        candidate_positions = torch.where(scores == best_scores.index_select(0, row_indices), positions, sentinel)
+        best_positions.scatter_reduce_(0, row_indices, candidate_positions, reduce="amin", include_self=True)
+        valid_rows = best_positions < scores.numel()
+        safe_positions = torch.clamp(best_positions, max=max(scores.numel() - 1, 0))
+        top_ids = ids.index_select(0, safe_positions)
+        return torch.where(valid_rows, top_ids, torch.full_like(top_ids, -1))
+
+    def _action_family_ids_tensor(self, *, action_dim: int, device: torch.device) -> Tensor | None:
+        action_catalog = getattr(self.model, "action_catalog", None)
+        if not isinstance(action_catalog, ActionCatalog):
+            return None
+        if int(action_catalog.action_space_size) != int(action_dim):
+            return None
+        family_index = {family.name: index for index, family in enumerate(action_catalog.families)}
+        family_ids = [
+            int(family_index[action_catalog.decode(action_id).family])
+            for action_id in range(int(action_catalog.action_space_size))
+        ]
+        return torch.as_tensor(family_ids, device=device, dtype=torch.long)
+
+    def _family_log_probs_from_dense_logits(
+        self,
+        *,
+        logits: Tensor,
+        legal_mask: Tensor,
+        action_family_ids: Tensor,
+    ) -> Tensor:
+        flat_logits = logits.reshape(-1, logits.shape[-1])
+        flat_mask = legal_mask.to(device=logits.device, dtype=torch.bool).reshape(-1, logits.shape[-1])
+        masked_logits = torch.where(flat_mask, flat_logits, torch.full_like(flat_logits, -torch.inf))
+        action_log_probs = torch.log_softmax(masked_logits, dim=-1)
+        family_count = int(action_family_ids.max().item()) + 1 if action_family_ids.numel() else 0
+        family_log_probs = action_log_probs.new_full((flat_logits.shape[0], family_count), -torch.inf)
+        for family_id in range(family_count):
+            family_mask = action_family_ids == int(family_id)
+            if bool(family_mask.any().item()):
+                family_log_probs[:, family_id] = torch.logsumexp(action_log_probs[:, family_mask], dim=-1)
+        return family_log_probs.reshape(*logits.shape[:2], family_count)
+
+    def _set_public_heuristic_bias_scale_if_supported(self, model: Any, value: float) -> tuple[float, float] | None:
+        get_bias_scale = getattr(model, "get_public_heuristic_logit_bias_scale", None)
+        set_bias_scale = getattr(model, "set_public_heuristic_logit_bias_scale", None)
+        if not callable(get_bias_scale) or not callable(set_bias_scale):
+            return None
+        previous = (
+            float(get_bias_scale(scoring_mode="learner")),
+            float(get_bias_scale(scoring_mode="actor")),
+        )
+        set_bias_scale(float(value), actor_value=float(value))
+        return previous
+
+    def _restore_public_heuristic_bias_scale_if_supported(
+        self,
+        model: Any,
+        previous: tuple[float, float] | None,
+    ) -> None:
+        if previous is None:
+            return
+        set_bias_scale = getattr(model, "set_public_heuristic_logit_bias_scale", None)
+        if callable(set_bias_scale):
+            set_bias_scale(float(previous[0]), actor_value=float(previous[1]))
+
+    def _packed_raw_distill_kl_and_metrics(
+        self,
+        *,
+        student_logits: Tensor,
+        teacher_logits: Tensor,
+        packed_ids: Tensor,
+        packed_offsets: Tensor,
+        loss_mask: Tensor,
+    ) -> tuple[Tensor, dict[str, Tensor]]:
+        if student_logits.ndim != 1 or teacher_logits.ndim != 1:
+            raise ValueError("raw B1 distill packed logits must be 1D")
+        if int(student_logits.numel()) != int(teacher_logits.numel()):
+            raise ValueError("raw B1 distill student/teacher packed logits must align")
+        ids = packed_ids.reshape(-1).to(device=student_logits.device, dtype=torch.long)
+        offsets = packed_offsets.reshape(-1).to(device=student_logits.device, dtype=torch.long)
+        if int(offsets.numel()) != int(loss_mask.numel()) + 1:
+            raise ValueError("raw B1 distill packed offsets must align with the loss mask rows")
+        if int(offsets[-1].item()) != int(ids.numel()) or int(ids.numel()) != int(student_logits.numel()):
+            raise ValueError("raw B1 distill packed ids, offsets, and logits must align")
+
+        row_count = int(offsets.numel()) - 1
+        widths = offsets[1:] - offsets[:-1]
+        row_indices = torch.repeat_interleave(
+            torch.arange(row_count, device=student_logits.device, dtype=torch.long),
+            widths,
+        )
+        zero = student_logits.new_zeros(())
+        if row_count <= 0 or int(student_logits.numel()) == 0:
+            return zero, {
+                "raw_b1_distill_row_fraction": zero,
+                "raw_b1_top1_match": zero,
+                "raw_b1_topk_overlap": zero,
+                "raw_b1_family_match": zero,
+                "raw_b1_kl": zero,
+                "raw_b1_top_action_ce": zero,
+                "raw_b1_top_action_ce": zero,
+            }
+
+        temperature = max(float(self.raw_b1_distill_temperature), 1.0e-6)
+        scaled_student = student_logits / temperature
+        scaled_teacher = teacher_logits.detach() / temperature
+        student_log_z = _segment_logsumexp(scaled_student, row_indices, row_count)
+        teacher_log_z = _segment_logsumexp(scaled_teacher, row_indices, row_count)
+        student_logp = scaled_student - student_log_z.index_select(0, row_indices)
+        teacher_logp = scaled_teacher - teacher_log_z.index_select(0, row_indices)
+        teacher_probs = torch.exp(teacher_logp)
+        row_kl_terms = teacher_probs * (teacher_logp - student_logp)
+        row_kl = torch.zeros((row_count,), dtype=student_logits.dtype, device=student_logits.device)
+        row_kl.scatter_add_(0, row_indices, row_kl_terms)
+
+        flat_mask = loss_mask.reshape(-1).to(device=student_logits.device, dtype=student_logits.dtype)
+        active_mask = flat_mask * (widths > 0).to(device=student_logits.device, dtype=student_logits.dtype)
+        denominator = torch.clamp(active_mask.sum(), min=1.0)
+        kl_loss = (row_kl * active_mask).sum() / denominator
+        loss = kl_loss
+        teacher_top_actions = self._packed_top_action_ids(teacher_logits.detach(), ids, offsets)
+        top_action_ce = student_logits.new_zeros(())
+        if float(self.raw_b1_distill_top_action_ce_coef) != 0.0:
+            teacher_top_logp = _packed_selected_action_logp(
+                scaled_student,
+                ids,
+                offsets,
+                teacher_top_actions,
+                pass_action_id=self.pass_action_id,
+                strict=False,
+            )
+            valid_teacher_top = torch.isfinite(teacher_top_logp).to(dtype=student_logits.dtype, device=student_logits.device)
+            ce_mask = active_mask * valid_teacher_top
+            ce_denominator = torch.clamp(ce_mask.sum(), min=1.0)
+            top_action_ce = -(
+                torch.where(ce_mask > 0.0, teacher_top_logp, torch.zeros_like(teacher_top_logp)) * ce_mask
+            ).sum() / ce_denominator
+            loss = loss + (float(self.raw_b1_distill_top_action_ce_coef) * top_action_ce)
+
+        with torch.no_grad():
+            student_top_actions = self._packed_top_action_ids(student_logits.detach(), ids, offsets)
+            valid_top = (active_mask > 0.0) & (teacher_top_actions >= 0) & (student_top_actions >= 0)
+            top_denominator = torch.clamp(valid_top.to(dtype=student_logits.dtype).sum(), min=1.0)
+            top1_match = (
+                ((teacher_top_actions == student_top_actions) & valid_top).to(dtype=student_logits.dtype).sum()
+                / top_denominator
+            )
+            row_fraction = active_mask.sum() / torch.clamp(torch.as_tensor(row_count, device=student_logits.device, dtype=student_logits.dtype), min=1.0)
+            action_family_ids = self._action_family_ids_tensor(
+                action_dim=int(getattr(getattr(self.model, "action_catalog", None), "action_space_size", 0)),
+                device=student_logits.device,
+            )
+            if action_family_ids is None:
+                family_match = zero
+            else:
+                safe_teacher = torch.clamp(teacher_top_actions, min=0, max=action_family_ids.numel() - 1)
+                safe_student = torch.clamp(student_top_actions, min=0, max=action_family_ids.numel() - 1)
+                teacher_family = action_family_ids.index_select(0, safe_teacher)
+                student_family = action_family_ids.index_select(0, safe_student)
+                family_match = (
+                    ((teacher_family == student_family) & valid_top).to(dtype=student_logits.dtype).sum()
+                    / top_denominator
+                )
+            top_k = max(1, int(self.raw_b1_distill_top_k))
+            overlap_sum = student_logits.new_zeros(())
+            overlap_rows = 0
+            valid_rows = torch.nonzero(active_mask > 0.0, as_tuple=False).squeeze(1)
+            for row_tensor in valid_rows[:2048]:
+                row = int(row_tensor.item())
+                start = int(offsets[row].item())
+                end = int(offsets[row + 1].item())
+                width = max(end - start, 0)
+                if width <= 0:
+                    continue
+                k = min(top_k, width)
+                teacher_order = torch.topk(teacher_logits[start:end].detach(), k=k).indices
+                student_order = torch.topk(student_logits[start:end].detach(), k=k).indices
+                teacher_ids = set(int(value) for value in ids[start:end].index_select(0, teacher_order).tolist())
+                student_ids = set(int(value) for value in ids[start:end].index_select(0, student_order).tolist())
+                overlap_sum = overlap_sum + (len(teacher_ids & student_ids) / float(k))
+                overlap_rows += 1
+            topk_overlap = (
+                overlap_sum / float(overlap_rows)
+                if overlap_rows > 0
+                else student_logits.new_zeros(())
+            )
+
+        return loss, {
+            "raw_b1_distill_row_fraction": row_fraction.detach(),
+            "raw_b1_top1_match": top1_match.detach(),
+            "raw_b1_topk_overlap": topk_overlap.detach(),
+            "raw_b1_family_match": family_match.detach(),
+            "raw_b1_kl": kl_loss.detach(),
+            "raw_b1_top_action_ce": top_action_ce.detach(),
+        }
+
+    def _dense_raw_distill_kl_and_metrics(
+        self,
+        *,
+        student_logits: Tensor,
+        teacher_logits: Tensor,
+        legal_mask: Tensor,
+        loss_mask: Tensor,
+    ) -> tuple[Tensor, dict[str, Tensor]]:
+        mask = legal_mask.to(device=student_logits.device, dtype=torch.bool)
+        if student_logits.shape != teacher_logits.shape or student_logits.shape != mask.shape:
+            raise ValueError("raw B1 distill dense logits and legal mask must align")
+        temperature = max(float(self.raw_b1_distill_temperature), 1.0e-6)
+        masked_student = torch.where(mask, student_logits / temperature, torch.full_like(student_logits, -torch.inf))
+        masked_teacher = torch.where(
+            mask,
+            teacher_logits.detach() / temperature,
+            torch.full_like(teacher_logits, -torch.inf),
+        )
+        student_logp = torch.log_softmax(masked_student, dim=-1)
+        teacher_logp = torch.log_softmax(masked_teacher, dim=-1)
+        teacher_probs = torch.exp(teacher_logp)
+        row_kl = torch.where(mask, teacher_probs * (teacher_logp - student_logp), torch.zeros_like(student_logits)).sum(
+            dim=-1
+        )
+        active_mask = loss_mask.to(device=student_logits.device, dtype=student_logits.dtype) * mask.any(dim=-1).to(
+            dtype=student_logits.dtype
+        )
+        denominator = torch.clamp(active_mask.sum(), min=1.0)
+        kl_loss = (row_kl * active_mask).sum() / denominator
+        loss = kl_loss
+        with torch.no_grad():
+            teacher_top = masked_teacher.argmax(dim=-1)
+            student_top = masked_student.argmax(dim=-1)
+            valid = active_mask > 0.0
+            valid_denom = torch.clamp(valid.to(dtype=student_logits.dtype).sum(), min=1.0)
+            top1_match = ((teacher_top == student_top) & valid).to(dtype=student_logits.dtype).sum() / valid_denom
+        top_action_ce = student_logits.new_zeros(())
+        if float(self.raw_b1_distill_top_action_ce_coef) != 0.0:
+            student_logp_selected = student_logp.gather(-1, teacher_top.unsqueeze(-1)).squeeze(-1)
+            top_action_ce = -(
+                torch.where(active_mask > 0.0, student_logp_selected, torch.zeros_like(student_logp_selected))
+                * active_mask
+            ).sum() / denominator
+            loss = loss + (float(self.raw_b1_distill_top_action_ce_coef) * top_action_ce)
+        return loss, {
+            "raw_b1_distill_row_fraction": active_mask.sum()
+            / torch.clamp(torch.as_tensor(active_mask.numel(), device=student_logits.device, dtype=student_logits.dtype), min=1.0),
+            "raw_b1_top1_match": top1_match.detach(),
+            "raw_b1_topk_overlap": top1_match.detach(),
+            "raw_b1_family_match": top1_match.detach(),
+            "raw_b1_kl": kl_loss.detach(),
+            "raw_b1_top_action_ce": top_action_ce.detach(),
+        }
+
+    def _raw_b1_distill_loss_and_metrics(
+        self,
+        batch: Any,
+        *,
+        obs: Tensor,
+        loss_mask: Tensor,
+        packed_legal: tuple[Tensor, Tensor, Tensor | None] | None,
+        legal_mask: Tensor | None,
+    ) -> tuple[Tensor, dict[str, Tensor]]:
+        zero = loss_mask.new_zeros(())
+        if self.reference_policy_model is None or float(self.raw_b1_distill_coef) == 0.0:
+            return zero, {
+                "raw_b1_distill_row_fraction": zero,
+                "raw_b1_top1_match": zero,
+                "raw_b1_topk_overlap": zero,
+                "raw_b1_family_match": zero,
+                "raw_b1_kl": zero,
+                "raw_b1_top_action_ce": zero,
+            }
+        teacher_model = self.reference_policy_model
+        student_model = self.model
+        if student_model is None:
+            return zero, {
+                "raw_b1_distill_row_fraction": zero,
+                "raw_b1_top1_match": zero,
+                "raw_b1_topk_overlap": zero,
+                "raw_b1_family_match": zero,
+                "raw_b1_kl": zero,
+            }
+        teacher_previous = self._set_public_heuristic_bias_scale_if_supported(
+            teacher_model,
+            float(self.raw_b1_distill_teacher_bias_scale),
+        )
+        student_previous = self._set_public_heuristic_bias_scale_if_supported(
+            student_model,
+            float(self.raw_b1_distill_student_bias_scale),
+        )
+        try:
+            if packed_legal is not None:
+                legal_actions = self._packed_legal_action_view(packed_legal)
+                with torch.no_grad():
+                    teacher_forward = self._forward_time_major(
+                        obs,
+                        initial_hidden_state=_batch_value(batch, "initial_hidden_state"),
+                        to_play_seat=_batch_value(batch, "to_play_seat"),
+                        actor=_batch_value(batch, "actor"),
+                        legal_actions=legal_actions,
+                        policy_train_mask=loss_mask,
+                        forward_model_override=teacher_model,
+                    )
+                student_forward = self._forward_time_major(
+                    obs,
+                    initial_hidden_state=_batch_value(batch, "initial_hidden_state"),
+                    to_play_seat=_batch_value(batch, "to_play_seat"),
+                    actor=_batch_value(batch, "actor"),
+                    legal_actions=legal_actions,
+                    policy_train_mask=loss_mask,
+                    forward_model_override=student_model,
+                )
+                if teacher_forward.packed_logits is None or student_forward.packed_logits is None:
+                    return zero, {
+                        "raw_b1_distill_row_fraction": zero,
+                        "raw_b1_top1_match": zero,
+                        "raw_b1_topk_overlap": zero,
+                        "raw_b1_family_match": zero,
+                        "raw_b1_kl": zero,
+                        "raw_b1_top_action_ce": zero,
+                    }
+                return self._packed_raw_distill_kl_and_metrics(
+                    student_logits=student_forward.packed_logits,
+                    teacher_logits=teacher_forward.packed_logits,
+                    packed_ids=packed_legal[0],
+                    packed_offsets=packed_legal[1],
+                    loss_mask=loss_mask,
+                )
+            if legal_mask is None:
+                return zero, {
+                    "raw_b1_distill_row_fraction": zero,
+                    "raw_b1_top1_match": zero,
+                        "raw_b1_topk_overlap": zero,
+                        "raw_b1_family_match": zero,
+                        "raw_b1_kl": zero,
+                        "raw_b1_top_action_ce": zero,
+                }
+            with torch.no_grad():
+                teacher_forward = self._forward_time_major(
+                    obs,
+                    initial_hidden_state=_batch_value(batch, "initial_hidden_state"),
+                    to_play_seat=_batch_value(batch, "to_play_seat"),
+                    actor=_batch_value(batch, "actor"),
+                    legal_actions=_batch_value(batch, "legal_actions"),
+                    policy_train_mask=loss_mask,
+                    forward_model_override=teacher_model,
+                )
+            student_forward = self._forward_time_major(
+                obs,
+                initial_hidden_state=_batch_value(batch, "initial_hidden_state"),
+                to_play_seat=_batch_value(batch, "to_play_seat"),
+                actor=_batch_value(batch, "actor"),
+                legal_actions=_batch_value(batch, "legal_actions"),
+                policy_train_mask=loss_mask,
+                forward_model_override=student_model,
+            )
+            if teacher_forward.logits is None or student_forward.logits is None:
+                return zero, {
+                    "raw_b1_distill_row_fraction": zero,
+                    "raw_b1_top1_match": zero,
+                    "raw_b1_topk_overlap": zero,
+                    "raw_b1_family_match": zero,
+                    "raw_b1_kl": zero,
+                    "raw_b1_top_action_ce": zero,
+                }
+            return self._dense_raw_distill_kl_and_metrics(
+                student_logits=student_forward.logits,
+                teacher_logits=teacher_forward.logits,
+                legal_mask=legal_mask,
+                loss_mask=loss_mask,
+            )
+        finally:
+            self._restore_public_heuristic_bias_scale_if_supported(student_model, student_previous)
+            self._restore_public_heuristic_bias_scale_if_supported(teacher_model, teacher_previous)
+
+    def _load_counterfactual_positive_records(
+        self,
+        label_dirs: tuple[str, ...],
+        *,
+        max_labels: int = 0,
+    ) -> tuple[dict[str, Any], ...]:
+        records: list[dict[str, Any]] = []
+        for raw_dir in label_dirs:
+            label_dir = Path(raw_dir)
+            labels_path = label_dir / "counterfactual_labels.jsonl"
+            if not labels_path.is_file():
+                raise FileNotFoundError(f"counterfactual positive label file not found: {labels_path}")
+            with labels_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    row = json.loads(stripped)
+                    tensor_ref = row.get("tensor_ref")
+                    if not isinstance(tensor_ref, str) or not tensor_ref:
+                        continue
+                    tensor_path = label_dir / tensor_ref
+                    if not tensor_path.is_file():
+                        raise FileNotFoundError(f"counterfactual positive tensor not found: {tensor_path}")
+                    loaded = torch.load(tensor_path, map_location="cpu", weights_only=False)
+                    if not isinstance(loaded, Mapping):
+                        raise TypeError(f"counterfactual tensor must load as a mapping: {tensor_path}")
+                    obs = torch.as_tensor(loaded["obs"], dtype=torch.float32).detach().cpu()
+                    legal_ids = torch.as_tensor(loaded["legal_ids"], dtype=torch.long).detach().cpu().reshape(-1)
+                    positive_action_id = int(torch.as_tensor(loaded["positive_action_id"]).item())
+                    baseline_action_id = int(torch.as_tensor(loaded.get("baseline_action_id", positive_action_id)).item())
+                    actor_seat = int(torch.as_tensor(loaded.get("actor_seat", row.get("target_seat", 0))).item())
+                    if positive_action_id not in set(int(value) for value in legal_ids.tolist()):
+                        raise ValueError(
+                            f"counterfactual positive action {positive_action_id} is not legal in {tensor_path}"
+                        )
+                    label_weight = float(
+                        torch.as_tensor(loaded.get("label_weight", row.get("label_weight", 1.0))).item()
+                    )
+                    records.append(
+                        {
+                            "obs": obs,
+                            "legal_ids": legal_ids,
+                            "positive_action_id": positive_action_id,
+                            "baseline_action_id": baseline_action_id,
+                            "actor_seat": actor_seat,
+                            "label_weight": max(label_weight, 0.0),
+                            "source_path": tensor_path.as_posix(),
+                        }
+                    )
+                    if max_labels > 0 and len(records) >= max_labels:
+                        return tuple(records)
+        return tuple(records)
+
+    def _counterfactual_positive_loss_and_metrics(self) -> tuple[Tensor, dict[str, Tensor]]:
+        reference = self._model_parameter()
+        zero = reference.new_zeros(())
+        records = self._counterfactual_positive_records
+        if float(self.counterfactual_positive_coef) == 0.0 or not records:
+            return zero, {
+                "counterfactual_positive_ce_loss": zero,
+                "counterfactual_positive_margin_loss": zero,
+                "counterfactual_positive_label_count": zero,
+                "counterfactual_positive_weight_mean": zero,
+                "counterfactual_positive_prob_mean": zero,
+                "counterfactual_positive_top1_match": zero,
+                "counterfactual_positive_logit_margin_mean": zero,
+            }
+        obs = torch.stack(
+            [record["obs"].to(device=reference.device, dtype=reference.dtype) for record in records],
+            dim=0,
+        )
+        actor_seat = torch.as_tensor(
+            [int(record["actor_seat"]) for record in records],
+            device=reference.device,
+            dtype=torch.long,
+        )
+        forward_model = self.compiled_model if self.compiled_model is not None else self.model
+        supports_seat_aware = bool(
+            hasattr(forward_model, "forward_seat_aware")
+            or hasattr(forward_model, "forward_sequence_seat_aware")
+            or hasattr(forward_model, "forward_trunk_sequence_seat_aware")
+        )
+        forward = self._forward_time_major(
+            obs.unsqueeze(0),
+            to_play_seat=actor_seat.unsqueeze(0) if supports_seat_aware else None,
+        )
+        if forward.logits is None:
+            raise ValueError("counterfactual positive auxiliary requires dense logits from the learner model")
+        logits = forward.logits.squeeze(0)
+        if logits.ndim != 2:
+            raise ValueError(f"counterfactual positive logits must be 2D, got {tuple(logits.shape)}")
+        action_dim = int(logits.shape[-1])
+        legal_mask = torch.zeros((len(records), action_dim), device=logits.device, dtype=torch.bool)
+        positive_ids: list[int] = []
+        baseline_ids: list[int] = []
+        weights: list[float] = []
+        for row_index, record in enumerate(records):
+            legal_ids = record["legal_ids"].to(device=logits.device, dtype=torch.long)
+            if bool((legal_ids < 0).any().item()) or bool((legal_ids >= action_dim).any().item()):
+                raise ValueError("counterfactual positive legal_ids are outside the model action space")
+            legal_mask[row_index, legal_ids] = True
+            positive_ids.append(int(record["positive_action_id"]))
+            baseline_ids.append(int(record["baseline_action_id"]))
+            weights.append(float(record["label_weight"]))
+        positive = torch.as_tensor(positive_ids, device=logits.device, dtype=torch.long)
+        baseline = torch.as_tensor(baseline_ids, device=logits.device, dtype=torch.long)
+        label_weights = torch.as_tensor(weights, device=logits.device, dtype=logits.dtype).clamp_min(0.0)
+        denominator = torch.clamp(label_weights.sum(), min=1.0)
+        masked_logits = logits.masked_fill(~legal_mask, torch.finfo(logits.dtype).min)
+        log_probs = torch.log_softmax(masked_logits, dim=-1)
+        row_indices = torch.arange(len(records), device=logits.device)
+        positive_logp = log_probs[row_indices, positive]
+        ce_loss = -((positive_logp * label_weights).sum() / denominator)
+        positive_logits = logits[row_indices, positive]
+        baseline_logits = logits[row_indices, baseline]
+        margin_gap = positive_logits - baseline_logits
+        margin_loss = torch.relu(float(self.counterfactual_positive_margin) - margin_gap)
+        margin_loss = (margin_loss * label_weights).sum() / denominator
+        total = ce_loss + (float(self.counterfactual_positive_margin_coef) * margin_loss)
+        positive_prob = torch.exp(positive_logp)
+        top1 = masked_logits.argmax(dim=-1)
+        metrics = {
+            "counterfactual_positive_ce_loss": ce_loss.detach(),
+            "counterfactual_positive_margin_loss": margin_loss.detach(),
+            "counterfactual_positive_label_count": reference.new_tensor(float(len(records))),
+            "counterfactual_positive_weight_mean": label_weights.mean().detach(),
+            "counterfactual_positive_prob_mean": ((positive_prob * label_weights).sum() / denominator).detach(),
+            "counterfactual_positive_top1_match": (
+                ((top1 == positive).to(dtype=logits.dtype) * label_weights).sum() / denominator
+            ).detach(),
+            "counterfactual_positive_logit_margin_mean": (
+                (margin_gap * label_weights).sum() / denominator
+            ).detach(),
+        }
+        return total, metrics
+
+    def _reference_policy_top_action_bc_losses(
+        self,
+        batch: Any,
+        *,
+        obs: Tensor,
+        loss_mask: Tensor,
+        forward_model: Any,
+        packed_legal: tuple[Tensor, Tensor, Tensor | None] | None,
+        legal_mask: Tensor | None,
+        logits: Tensor | None,
+        packed_logits: Tensor | None,
+        exact_loss_enabled: bool | None = None,
+        family_loss_enabled: bool | None = None,
+    ) -> tuple[Tensor, Tensor]:
+        zero = loss_mask.new_zeros(())
+        exact_coef = float(self.reference_policy_top_action_bc_coef)
+        family_coef = float(self.reference_policy_top_action_family_bc_coef)
+        exact_enabled = exact_coef != 0.0 if exact_loss_enabled is None else bool(exact_loss_enabled)
+        family_enabled = family_coef != 0.0 if family_loss_enabled is None else bool(family_loss_enabled)
+        if self.reference_policy_model is None or (not exact_enabled and not family_enabled):
+            return zero, zero
+        reference_model = self.reference_policy_model
+        reference_top_actions: Tensor | None = None
+        current_reference_family_logp: Tensor | None = None
+        if packed_legal is not None:
+            with torch.no_grad():
+                reference_result = self._evaluate_factorized_model_time_major(
+                    reference_model,
+                    batch,
+                    obs=obs,
+                    packed_legal=packed_legal,
+                    actions=None,
+                )
+                if reference_result is not None:
+                    reference_top_actions = getattr(reference_result, "top_action_ids", None)
+                if reference_top_actions is None:
+                    reference_forward = self._forward_time_major(
+                        obs,
+                        initial_hidden_state=_batch_value(batch, "initial_hidden_state"),
+                        to_play_seat=_batch_value(batch, "to_play_seat"),
+                        actor=_batch_value(batch, "actor"),
+                        legal_actions=_batch_value(batch, "legal_actions"),
+                        policy_train_mask=None,
+                        forward_model_override=reference_model,
+                    )
+                    if reference_forward.packed_logits is not None:
+                        reference_top_actions = self._packed_top_action_ids(
+                            reference_forward.packed_logits,
+                            packed_legal[0],
+                            packed_legal[1],
+                        ).reshape(obs.shape[:2])
+                    elif reference_forward.logits is not None:
+                        reference_legal_mask = self._resolve_legal_mask(
+                            batch,
+                            expected_shape=obs.shape[:2],
+                            action_dim=reference_forward.logits.shape[-1],
+                        )
+                        masked_ref_logits = torch.where(
+                            reference_legal_mask.to(device=reference_forward.logits.device, dtype=torch.bool),
+                            reference_forward.logits,
+                            torch.full_like(reference_forward.logits, -torch.inf),
+                        )
+                        reference_top_actions = masked_ref_logits.argmax(dim=-1)
+            if reference_top_actions is None:
+                return zero, zero
+            reference_top_actions = reference_top_actions.to(device=obs.device, dtype=torch.long)
+            safe_reference_actions = torch.clamp(reference_top_actions, min=0)
+            current_reference_logp: Tensor | None = None
+            current_factorized_result = self._evaluate_factorized_model_time_major(
+                forward_model,
+                batch,
+                obs=obs,
+                packed_legal=packed_legal,
+                actions=safe_reference_actions,
+            )
+            if current_factorized_result is not None:
+                current_reference_logp = getattr(current_factorized_result, "action_logp", None)
+                current_family_log_probs = getattr(current_factorized_result, "family_log_probs", None)
+                model_action_dim = getattr(getattr(self.model, "action_catalog", None), "action_space_size", 0)
+                action_family_ids = self._action_family_ids_tensor(
+                    action_dim=int(model_action_dim),
+                    device=obs.device,
+                )
+                if current_family_log_probs is not None and action_family_ids is not None:
+                    safe_family_targets = action_family_ids.index_select(
+                        0, torch.clamp(safe_reference_actions.reshape(-1), max=action_family_ids.numel() - 1)
+                    ).reshape_as(safe_reference_actions)
+                    current_reference_family_logp = current_family_log_probs.gather(
+                        -1, safe_family_targets.unsqueeze(-1)
+                    ).squeeze(-1)
+            elif packed_logits is not None:
+                current_reference_logp, _entropy = _packed_scores_action_logp_and_entropy(
+                    packed_logits,
+                    packed_legal[0],
+                    packed_legal[1],
+                    safe_reference_actions,
+                    pass_action_id=self.pass_action_id,
+                )
+            elif logits is not None:
+                current_reference_logp, _entropy = _packed_action_logp_and_entropy(
+                    logits,
+                    packed_legal[0],
+                    packed_legal[1],
+                    safe_reference_actions,
+                    pass_action_id=self.pass_action_id,
+                )
+            if (
+                family_enabled
+                and current_reference_family_logp is None
+                and packed_legal[2] is not None
+                and (packed_logits is not None or logits is not None)
+            ):
+                action_catalog = getattr(self.model, "action_catalog", None)
+                action_family_ids = self._action_family_ids_tensor(
+                    action_dim=int(getattr(action_catalog, "action_space_size", 0)),
+                    device=obs.device,
+                )
+                packed_view = _packed_structured_legal_view(
+                    logits=packed_logits if packed_logits is not None else logits,
+                    packed_ids=packed_legal[0],
+                    packed_offsets=packed_legal[1],
+                    packed_meta=packed_legal[2],
+                )
+                if (
+                    action_family_ids is not None
+                    and packed_view is not None
+                    and isinstance(action_catalog, ActionCatalog)
+                ):
+                    current_family_log_probs = _packed_group_log_probs(
+                        packed_view,
+                        group_ids=packed_view.family_ids,
+                        group_count=len(action_catalog.families),
+                    ).reshape(*obs.shape[:2], len(action_catalog.families))
+                    safe_family_targets = action_family_ids.index_select(
+                        0, torch.clamp(safe_reference_actions.reshape(-1), max=action_family_ids.numel() - 1)
+                    ).reshape_as(safe_reference_actions)
+                    current_reference_family_logp = current_family_log_probs.gather(
+                        -1, safe_family_targets.unsqueeze(-1)
+                    ).squeeze(-1)
+            if current_reference_logp is None:
+                return zero, zero
+            valid_mask = (reference_top_actions >= 0).to(device=loss_mask.device, dtype=loss_mask.dtype)
+        else:
+            if legal_mask is None or logits is None:
+                return zero, zero
+            with torch.no_grad():
+                flat_obs = obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2])
+                ref_logits, _ref_values, _ref_hidden = reference_model(flat_obs, None)
+                ref_logits = ref_logits.reshape(logits.shape)
+                masked_ref_logits = torch.where(
+                    legal_mask.to(device=ref_logits.device, dtype=torch.bool),
+                    ref_logits,
+                    torch.full_like(ref_logits, -torch.inf),
+                )
+                reference_top_actions = masked_ref_logits.argmax(dim=-1).to(device=obs.device, dtype=torch.long)
+            current_reference_logp, _entropy = _masked_action_logp_and_entropy(
+                logits,
+                legal_mask,
+                reference_top_actions,
+                pass_action_id=self.pass_action_id,
+            )
+            if family_enabled:
+                action_family_ids = self._action_family_ids_tensor(action_dim=logits.shape[-1], device=logits.device)
+                if action_family_ids is not None:
+                    current_family_log_probs = self._family_log_probs_from_dense_logits(
+                        logits=logits,
+                        legal_mask=legal_mask,
+                        action_family_ids=action_family_ids,
+                    )
+                    safe_family_targets = action_family_ids.index_select(
+                        0, torch.clamp(reference_top_actions.reshape(-1), max=action_family_ids.numel() - 1)
+                    ).reshape_as(reference_top_actions)
+                    current_reference_family_logp = current_family_log_probs.gather(
+                        -1, safe_family_targets.unsqueeze(-1)
+                    ).squeeze(-1)
+            valid_mask = torch.isfinite(current_reference_logp).to(device=loss_mask.device, dtype=loss_mask.dtype)
+        finite_reference_logp = torch.isfinite(current_reference_logp).to(device=loss_mask.device, dtype=loss_mask.dtype)
+        reference_loss_mask = loss_mask * valid_mask * finite_reference_logp
+        denominator = torch.clamp(reference_loss_mask.sum(), min=1.0)
+        weighted_reference_logp = torch.where(
+            reference_loss_mask > 0,
+            current_reference_logp,
+            torch.zeros_like(current_reference_logp),
+        )
+        exact_loss = -((weighted_reference_logp * reference_loss_mask).sum() / denominator)
+        if not family_enabled or current_reference_family_logp is None:
+            return exact_loss, zero
+        family_valid = torch.isfinite(current_reference_family_logp).to(device=loss_mask.device, dtype=loss_mask.dtype)
+        family_loss_mask = reference_loss_mask * family_valid
+        family_denominator = torch.clamp(family_loss_mask.sum(), min=1.0)
+        weighted_family_logp = torch.where(
+            family_loss_mask > 0,
+            current_reference_family_logp,
+            torch.zeros_like(current_reference_family_logp),
+        )
+        family_loss = -((weighted_family_logp * family_loss_mask).sum() / family_denominator)
+        return exact_loss, family_loss
 
     def _auxiliary_loss_and_metrics(self, batch: Any) -> tuple[Tensor, dict[str, float], dict[str, Any]]:
         if self.model is None:
@@ -2582,9 +3765,22 @@ class ImpalaLearner:
         public_heuristic_target_logits = None
         if (
             packed_legal is not None
-            and float(self.teacher_public_heuristic_coef) != 0.0
+            and (
+                float(self.teacher_public_heuristic_coef) != 0.0
+                or float(self.teacher_public_main_move_coef) != 0.0
+            )
             and hasattr(forward_model, "score_packed_public_heuristic_candidates")
         ):
+            public_target_rows = (
+                None
+                if float(self.teacher_public_main_move_coef) != 0.0
+                else self._teacher_public_heuristic_rows(
+                    batch,
+                    loss_mask=loss_mask,
+                    expected_shape=obs.shape[:2],
+                    action_catalog=action_catalog,
+                )
+            )
             if factorized_result is not None:
                 teacher_aux_packed_view, public_heuristic_target_logits = (
                     self._factorized_public_heuristic_teacher_view(
@@ -2592,6 +3788,7 @@ class ImpalaLearner:
                         obs=obs,
                         loss_mask=loss_mask,
                         packed_legal=packed_legal,
+                        active_rows=public_target_rows,
                     )
                 )
             else:
@@ -2603,6 +3800,7 @@ class ImpalaLearner:
                         loss_mask=loss_mask,
                         packed_legal=packed_legal,
                         observation_context=forward_observation_context,
+                        active_rows=public_target_rows,
                     )
                 self._record_timing_ms("learner_public_heuristic_target", time.perf_counter() - heuristic_started)
 
@@ -2649,6 +3847,8 @@ class ImpalaLearner:
             action_coef=float(self.teacher_action_coef),
             same_family_action_coef=float(self.teacher_same_family_action_coef),
             public_heuristic_coef=float(self.teacher_public_heuristic_coef),
+            public_main_move_coef=float(self.teacher_public_main_move_coef),
+            development_pass_suppression_coef=float(self.teacher_development_pass_suppression_coef),
             public_heuristic_temperature=float(self.teacher_public_heuristic_temperature),
             public_heuristic_families=tuple(self.teacher_public_heuristic_families),
             public_heuristic_target_logits=public_heuristic_target_logits,
@@ -2731,14 +3931,14 @@ class ImpalaLearner:
         )
         if loss_mask is None:
             loss_mask = torch.ones(obs.shape[:2], dtype=obs.dtype, device=obs.device)
-        teacher_aux_active = isinstance(
-            getattr(self.model, "action_catalog", None), ActionCatalog
-        ) and self._teacher_aux_active(auxiliary_update=False)
+        action_catalog = getattr(self.model, "action_catalog", None)
+        teacher_aux_active = isinstance(action_catalog, ActionCatalog) and self._teacher_aux_active(
+            auxiliary_update=False
+        )
         emit_structured_metrics = self._should_emit_structured_metrics(auxiliary_update=False)
         restrict_packed_policy_rows = bool(
             packed_legal is not None
             and bool((loss_mask <= 0.0).any().item())
-            and not teacher_aux_active
             and not emit_structured_metrics
         )
         factorized_result = None
@@ -2787,9 +3987,23 @@ class ImpalaLearner:
         if (
             teacher_aux_active
             and packed_legal is not None
-            and float(self.teacher_public_heuristic_coef) != 0.0
+            and (
+                float(self.teacher_public_heuristic_coef) != 0.0
+                or float(self.teacher_public_main_move_coef) != 0.0
+            )
             and hasattr(forward_model, "score_packed_public_heuristic_candidates")
         ):
+            assert isinstance(action_catalog, ActionCatalog)
+            public_target_rows = (
+                None
+                if float(self.teacher_public_main_move_coef) != 0.0
+                else self._teacher_public_heuristic_rows(
+                    batch,
+                    loss_mask=loss_mask,
+                    expected_shape=obs.shape[:2],
+                    action_catalog=action_catalog,
+                )
+            )
             if factorized_result is not None:
                 teacher_aux_packed_view, public_heuristic_target_logits = (
                     self._factorized_public_heuristic_teacher_view(
@@ -2797,6 +4011,7 @@ class ImpalaLearner:
                         obs=obs,
                         loss_mask=loss_mask,
                         packed_legal=packed_legal,
+                        active_rows=public_target_rows,
                     )
                 )
             else:
@@ -2808,6 +4023,7 @@ class ImpalaLearner:
                         loss_mask=loss_mask,
                         packed_legal=packed_legal,
                         observation_context=forward_observation_context,
+                        active_rows=public_target_rows,
                     )
                 self._record_timing_ms("learner_public_heuristic_target", time.perf_counter() - heuristic_started)
 
@@ -2922,10 +4138,172 @@ class ImpalaLearner:
         policy_loss = -((action_logp * advantages) * loss_mask).sum() / loss_denominator
         value_loss = (((values - targets) ** 2) * loss_mask).sum() / loss_denominator
         entropy_mean = (entropy * loss_mask).sum() / loss_denominator
-        total_loss = policy_loss + (self.value_loss_coef * value_loss) - (self.entropy_coef * entropy_mean)
+        behavior_action_bc_loss = -(action_logp * loss_mask).sum() / loss_denominator
+        reference_policy_top_action_bc_loss, reference_policy_top_action_family_bc_loss = (
+            self._reference_policy_top_action_bc_losses(
+            batch,
+            obs=obs,
+            loss_mask=loss_mask,
+            forward_model=forward_model,
+            packed_legal=packed_legal,
+            legal_mask=legal_mask,
+            logits=logits,
+            packed_logits=packed_logits,
+            )
+        )
+        raw_b1_distill_loss, raw_b1_distill_metrics = self._raw_b1_distill_loss_and_metrics(
+            batch,
+            obs=obs,
+            loss_mask=loss_mask,
+            packed_legal=packed_legal,
+            legal_mask=legal_mask,
+        )
+        counterfactual_positive_loss, counterfactual_positive_metrics = (
+            self._counterfactual_positive_loss_and_metrics()
+        )
+        b1_reference_policy_top_action_bc_loss = loss_mask.new_zeros(())
+        b1_reference_policy_top_action_bc_row_fraction = loss_mask.new_zeros(())
+        raw_b1_opponent_mask = _batch_value(batch, "b1_opponent_mask")
+        b1_opponent_mask = self._optional_time_major_loss_mask(
+            raw_b1_opponent_mask,
+            expected_shape=obs.shape[:2],
+            like=loss_mask,
+        )
+        if float(self.b1_opponent_reference_policy_top_action_bc_coef) != 0.0:
+            if b1_opponent_mask is not None:
+                b1_loss_mask = loss_mask * b1_opponent_mask
+                b1_reference_policy_top_action_bc_row_fraction = b1_loss_mask.sum() / torch.clamp(
+                    loss_mask.sum(),
+                    min=1.0,
+                )
+                if bool((b1_loss_mask > 0.0).any().item()):
+                    b1_reference_policy_top_action_bc_loss, _b1_family_loss = (
+                        self._reference_policy_top_action_bc_losses(
+                            batch,
+                            obs=obs,
+                            loss_mask=b1_loss_mask,
+                            forward_model=forward_model,
+                            packed_legal=packed_legal,
+                            legal_mask=legal_mask,
+                            logits=logits,
+                            packed_logits=packed_logits,
+                            exact_loss_enabled=True,
+                            family_loss_enabled=False,
+                        )
+                    )
+        b1_second_seat_positive_advantage_policy_loss = loss_mask.new_zeros(())
+        b1_second_seat_positive_advantage_row_fraction = loss_mask.new_zeros(())
+        b1_second_seat_positive_advantage_mean = loss_mask.new_zeros(())
+        if float(self.b1_second_seat_positive_advantage_policy_coef) != 0.0 and b1_opponent_mask is not None:
+            raw_to_play_seat = _batch_value(batch, "to_play_seat")
+            if raw_to_play_seat is None:
+                raw_to_play_seat = _batch_value(batch, "actor")
+            if raw_to_play_seat is not None:
+                acting_seat = self._optional_time_major_index_field(
+                    raw_to_play_seat,
+                    field_name="to_play_seat",
+                    expected_shape=obs.shape[:2],
+                )
+                assert acting_seat is not None
+                positive_advantages = torch.clamp(advantages.detach(), min=0.0)
+                b1_second_seat_mask = (
+                    loss_mask
+                    * b1_opponent_mask
+                    * (acting_seat == 1).to(device=loss_mask.device, dtype=loss_mask.dtype)
+                    * (positive_advantages > 0.0).to(device=loss_mask.device, dtype=loss_mask.dtype)
+                )
+                b1_second_seat_positive_advantage_row_fraction = b1_second_seat_mask.sum() / torch.clamp(
+                    loss_mask.sum(),
+                    min=1.0,
+                )
+                b1_second_seat_denominator = torch.clamp(b1_second_seat_mask.sum(), min=1.0)
+                weighted_positive_advantages = torch.where(
+                    b1_second_seat_mask > 0.0,
+                    positive_advantages,
+                    torch.zeros_like(positive_advantages),
+                )
+                b1_second_seat_positive_advantage_mean = (
+                    weighted_positive_advantages.sum() / b1_second_seat_denominator
+                )
+                b1_second_seat_positive_advantage_policy_loss = -(
+                    (action_logp * weighted_positive_advantages * b1_second_seat_mask).sum()
+                    / b1_second_seat_denominator
+                )
+        b1_second_seat_reference_top_action_avoidance_loss = loss_mask.new_zeros(())
+        b1_second_seat_reference_top_action_avoidance_row_fraction = loss_mask.new_zeros(())
+        if (
+            float(self.b1_second_seat_reference_top_action_avoidance_coef) != 0.0
+            and b1_opponent_mask is not None
+        ):
+            raw_to_play_seat = _batch_value(batch, "to_play_seat")
+            if raw_to_play_seat is None:
+                raw_to_play_seat = _batch_value(batch, "actor")
+            if raw_to_play_seat is not None:
+                acting_seat = self._optional_time_major_index_field(
+                    raw_to_play_seat,
+                    field_name="to_play_seat",
+                    expected_shape=obs.shape[:2],
+                )
+                assert acting_seat is not None
+                b1_second_seat_avoidance_mask = (
+                    loss_mask
+                    * b1_opponent_mask
+                    * (acting_seat == 1).to(device=loss_mask.device, dtype=loss_mask.dtype)
+                )
+                b1_second_seat_reference_top_action_avoidance_row_fraction = (
+                    b1_second_seat_avoidance_mask.sum() / torch.clamp(loss_mask.sum(), min=1.0)
+                )
+                if bool((b1_second_seat_avoidance_mask > 0.0).any().item()):
+                    b1_second_seat_reference_top_action_avoidance_loss, _b1_avoid_family_loss = (
+                        self._reference_policy_top_action_bc_losses(
+                            batch,
+                            obs=obs,
+                            loss_mask=b1_second_seat_avoidance_mask,
+                            forward_model=forward_model,
+                            packed_legal=packed_legal,
+                            legal_mask=legal_mask,
+                            logits=logits,
+                            packed_logits=packed_logits,
+                            exact_loss_enabled=True,
+                            family_loss_enabled=False,
+                        )
+                    )
+        total_loss = (
+            (float(self.policy_loss_coef) * policy_loss)
+            + (self.value_loss_coef * value_loss)
+            - (self.entropy_coef * entropy_mean)
+        )
+        if float(self.behavior_action_bc_coef) != 0.0:
+            total_loss = total_loss + (float(self.behavior_action_bc_coef) * behavior_action_bc_loss)
+        if float(self.reference_policy_top_action_bc_coef) != 0.0:
+            total_loss = total_loss + (
+                float(self.reference_policy_top_action_bc_coef) * reference_policy_top_action_bc_loss
+            )
+        if float(self.reference_policy_top_action_family_bc_coef) != 0.0:
+            total_loss = total_loss + (
+                float(self.reference_policy_top_action_family_bc_coef) * reference_policy_top_action_family_bc_loss
+            )
+        if float(self.b1_opponent_reference_policy_top_action_bc_coef) != 0.0:
+            total_loss = total_loss + (
+                float(self.b1_opponent_reference_policy_top_action_bc_coef)
+                * b1_reference_policy_top_action_bc_loss
+            )
+        if float(self.b1_second_seat_positive_advantage_policy_coef) != 0.0:
+            total_loss = total_loss + (
+                float(self.b1_second_seat_positive_advantage_policy_coef)
+                * b1_second_seat_positive_advantage_policy_loss
+            )
+        if float(self.b1_second_seat_reference_top_action_avoidance_coef) != 0.0:
+            total_loss = total_loss - (
+                float(self.b1_second_seat_reference_top_action_avoidance_coef)
+                * b1_second_seat_reference_top_action_avoidance_loss
+            )
+        if float(self.raw_b1_distill_coef) != 0.0:
+            total_loss = total_loss + (float(self.raw_b1_distill_coef) * raw_b1_distill_loss)
+        if float(self.counterfactual_positive_coef) != 0.0:
+            total_loss = total_loss + (float(self.counterfactual_positive_coef) * counterfactual_positive_loss)
 
         teacher_metrics: dict[str, float] = {}
-        action_catalog = getattr(self.model, "action_catalog", None)
         if teacher_aux_active:
             structured_legal_mask = (
                 None
@@ -2983,6 +4361,8 @@ class ImpalaLearner:
                 action_coef=float(self.teacher_action_coef),
                 same_family_action_coef=float(self.teacher_same_family_action_coef),
                 public_heuristic_coef=float(self.teacher_public_heuristic_coef),
+                public_main_move_coef=float(self.teacher_public_main_move_coef),
+                development_pass_suppression_coef=float(self.teacher_development_pass_suppression_coef),
                 public_heuristic_temperature=float(self.teacher_public_heuristic_temperature),
                 public_heuristic_families=tuple(self.teacher_public_heuristic_families),
                 public_heuristic_target_logits=public_heuristic_target_logits,
@@ -3023,20 +4403,153 @@ class ImpalaLearner:
         context["policy_loss"] = policy_loss.detach()
         context["value_loss"] = value_loss.detach()
         context["entropy_mean"] = entropy_mean.detach()
+        context["behavior_action_bc_loss"] = behavior_action_bc_loss.detach()
+        context["reference_policy_top_action_bc_loss"] = reference_policy_top_action_bc_loss.detach()
+        context["reference_policy_top_action_family_bc_loss"] = reference_policy_top_action_family_bc_loss.detach()
+        context["raw_b1_distill_loss"] = raw_b1_distill_loss.detach()
+        context["counterfactual_positive_loss"] = counterfactual_positive_loss.detach()
+        context["b1_opponent_reference_policy_top_action_bc_loss"] = (
+            b1_reference_policy_top_action_bc_loss.detach()
+        )
+        context["b1_second_seat_positive_advantage_policy_loss"] = (
+            b1_second_seat_positive_advantage_policy_loss.detach()
+        )
+        context["b1_second_seat_reference_top_action_avoidance_loss"] = (
+            b1_second_seat_reference_top_action_avoidance_loss.detach()
+        )
         context["total_loss"] = total_loss.detach()
         if factorized_result is not None:
             context["factorized_family_log_probs"] = factorized_result.family_log_probs.detach()
         self._ensure_finite_tensor("policy_loss", policy_loss, batch=batch, context=context)
         self._ensure_finite_tensor("value_loss", value_loss, batch=batch, context=context)
         self._ensure_finite_tensor("entropy_mean", entropy_mean, batch=batch, context=context)
+        self._ensure_finite_tensor("behavior_action_bc_loss", behavior_action_bc_loss, batch=batch, context=context)
+        self._ensure_finite_tensor(
+            "reference_policy_top_action_bc_loss",
+            reference_policy_top_action_bc_loss,
+            batch=batch,
+            context=context,
+        )
+        self._ensure_finite_tensor(
+            "reference_policy_top_action_family_bc_loss",
+            reference_policy_top_action_family_bc_loss,
+            batch=batch,
+            context=context,
+        )
+        self._ensure_finite_tensor("raw_b1_distill_loss", raw_b1_distill_loss, batch=batch, context=context)
+        self._ensure_finite_tensor(
+            "counterfactual_positive_loss",
+            counterfactual_positive_loss,
+            batch=batch,
+            context=context,
+        )
+        self._ensure_finite_tensor(
+            "b1_opponent_reference_policy_top_action_bc_loss",
+            b1_reference_policy_top_action_bc_loss,
+            batch=batch,
+            context=context,
+        )
+        self._ensure_finite_tensor(
+            "b1_second_seat_positive_advantage_policy_loss",
+            b1_second_seat_positive_advantage_policy_loss,
+            batch=batch,
+            context=context,
+        )
+        self._ensure_finite_tensor(
+            "b1_second_seat_reference_top_action_avoidance_loss",
+            b1_second_seat_reference_top_action_avoidance_loss,
+            batch=batch,
+            context=context,
+        )
         self._ensure_finite_tensor("total_loss", total_loss, batch=batch, context=context)
 
         rho_metrics = rhos_for_metrics.detach().reshape(-1).to(dtype=torch.float32)
         metrics = {
             "loss": float(total_loss.detach()),
             "policy_loss": float(policy_loss.detach()),
+            "policy_loss_coef": float(self.policy_loss_coef),
             "value_loss": float(value_loss.detach()),
             "entropy": float(entropy_mean.detach()),
+            "behavior_action_bc_loss": float(behavior_action_bc_loss.detach()),
+            "behavior_action_bc_coef": float(self.behavior_action_bc_coef),
+            "reference_policy_top_action_bc_loss": float(reference_policy_top_action_bc_loss.detach()),
+            "reference_policy_top_action_bc_coef": float(self.reference_policy_top_action_bc_coef),
+            "reference_policy_top_action_family_bc_loss": float(
+                reference_policy_top_action_family_bc_loss.detach()
+            ),
+            "reference_policy_top_action_family_bc_coef": float(
+                self.reference_policy_top_action_family_bc_coef
+            ),
+            "raw_b1_distill_loss": float(raw_b1_distill_loss.detach()),
+            "raw_b1_distill_coef": float(self.raw_b1_distill_coef),
+            "raw_b1_distill_teacher_bias_scale": float(self.raw_b1_distill_teacher_bias_scale),
+            "raw_b1_distill_student_bias_scale": float(self.raw_b1_distill_student_bias_scale),
+            "raw_b1_distill_temperature": float(self.raw_b1_distill_temperature),
+            "raw_b1_distill_top_k": float(self.raw_b1_distill_top_k),
+            "raw_b1_distill_top_action_ce_coef": float(self.raw_b1_distill_top_action_ce_coef),
+            "raw_b1_distill_row_fraction": float(
+                raw_b1_distill_metrics["raw_b1_distill_row_fraction"].detach()
+            ),
+            "raw_b1_top1_match": float(raw_b1_distill_metrics["raw_b1_top1_match"].detach()),
+            "raw_b1_topk_overlap": float(raw_b1_distill_metrics["raw_b1_topk_overlap"].detach()),
+            "raw_b1_family_match": float(raw_b1_distill_metrics["raw_b1_family_match"].detach()),
+            "raw_b1_kl": float(raw_b1_distill_metrics["raw_b1_kl"].detach()),
+            "raw_b1_top_action_ce": float(raw_b1_distill_metrics["raw_b1_top_action_ce"].detach()),
+            "counterfactual_positive_loss": float(counterfactual_positive_loss.detach()),
+            "counterfactual_positive_coef": float(self.counterfactual_positive_coef),
+            "counterfactual_positive_margin_coef": float(self.counterfactual_positive_margin_coef),
+            "counterfactual_positive_margin": float(self.counterfactual_positive_margin),
+            "counterfactual_positive_ce_loss": float(
+                counterfactual_positive_metrics["counterfactual_positive_ce_loss"].detach()
+            ),
+            "counterfactual_positive_margin_loss": float(
+                counterfactual_positive_metrics["counterfactual_positive_margin_loss"].detach()
+            ),
+            "counterfactual_positive_label_count": float(
+                counterfactual_positive_metrics["counterfactual_positive_label_count"].detach()
+            ),
+            "counterfactual_positive_weight_mean": float(
+                counterfactual_positive_metrics["counterfactual_positive_weight_mean"].detach()
+            ),
+            "counterfactual_positive_prob_mean": float(
+                counterfactual_positive_metrics["counterfactual_positive_prob_mean"].detach()
+            ),
+            "counterfactual_positive_top1_match": float(
+                counterfactual_positive_metrics["counterfactual_positive_top1_match"].detach()
+            ),
+            "counterfactual_positive_logit_margin_mean": float(
+                counterfactual_positive_metrics["counterfactual_positive_logit_margin_mean"].detach()
+            ),
+            "b1_opponent_reference_policy_top_action_bc_loss": float(
+                b1_reference_policy_top_action_bc_loss.detach()
+            ),
+            "b1_opponent_reference_policy_top_action_bc_coef": float(
+                self.b1_opponent_reference_policy_top_action_bc_coef
+            ),
+            "b1_opponent_reference_policy_top_action_bc_row_fraction": float(
+                b1_reference_policy_top_action_bc_row_fraction.detach()
+            ),
+            "b1_second_seat_positive_advantage_policy_loss": float(
+                b1_second_seat_positive_advantage_policy_loss.detach()
+            ),
+            "b1_second_seat_positive_advantage_policy_coef": float(
+                self.b1_second_seat_positive_advantage_policy_coef
+            ),
+            "b1_second_seat_positive_advantage_row_fraction": float(
+                b1_second_seat_positive_advantage_row_fraction.detach()
+            ),
+            "b1_second_seat_positive_advantage_mean": float(
+                b1_second_seat_positive_advantage_mean.detach()
+            ),
+            "b1_second_seat_reference_top_action_avoidance_loss": float(
+                b1_second_seat_reference_top_action_avoidance_loss.detach()
+            ),
+            "b1_second_seat_reference_top_action_avoidance_coef": float(
+                self.b1_second_seat_reference_top_action_avoidance_coef
+            ),
+            "b1_second_seat_reference_top_action_avoidance_row_fraction": float(
+                b1_second_seat_reference_top_action_avoidance_row_fraction.detach()
+            ),
             "policy_train_fraction": float(loss_mask.mean().detach()),
             "reward_mean": float(rewards_for_metrics.detach().mean().item()),
             "reward_abs_mean": float(rewards_for_metrics.detach().abs().mean().item()),
@@ -3089,8 +4602,36 @@ class ImpalaLearner:
         if self.optimizer is None:
             if self.model is None:
                 raise ValueError("ImpalaLearner requires a model before creating an optimizer")
-            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
+            self.optimizer = self._create_adam_optimizer()
         return self.optimizer
+
+    def _sync_gradients_if_needed(self) -> None:
+        if self.gradient_sync is None:
+            return
+        self.gradient_sync()
+
+    def _create_adam_optimizer(self) -> Optimizer:
+        if self.model is None:
+            raise ValueError("ImpalaLearner requires a model before creating an optimizer")
+        params = [parameter for parameter in self.model.parameters() if parameter.requires_grad]
+        if not params:
+            raise ValueError("ImpalaLearner requires trainable parameters before creating an optimizer")
+        kwargs: dict[str, bool] = {}
+        backend = str(self.optimizer_backend).strip().lower()
+        device_type = params[0].device.type
+        if backend == "auto":
+            if device_type == "cuda":
+                kwargs["fused"] = True
+        elif backend == "foreach":
+            kwargs["foreach"] = True
+        elif backend == "fused":
+            kwargs["fused"] = True
+        try:
+            return torch.optim.Adam(params, lr=self.learning_rate, **kwargs)
+        except (RuntimeError, TypeError):
+            if backend in {"auto", "foreach", "fused"}:
+                return torch.optim.Adam(params, lr=self.learning_rate)
+            raise
 
     def _forward_time_major(
         self,
@@ -3101,10 +4642,15 @@ class ImpalaLearner:
         actor: Any = None,
         legal_actions: LegalActionBatch | None = None,
         policy_train_mask: Tensor | None = None,
+        forward_model_override: Any | None = None,
     ) -> _ForwardTimeMajorResult:
         if self.model is None:
             raise ValueError("ImpalaLearner requires a model to run the forward pass")
-        forward_model = self.compiled_model if self.compiled_model is not None else self.model
+        forward_model = (
+            forward_model_override
+            if forward_model_override is not None
+            else (self.compiled_model if self.compiled_model is not None else self.model)
+        )
         if obs.ndim != 3:
             raise ValueError(f"obs must be 3D (time, batch, observation), got shape {tuple(obs.shape)}")
 
@@ -3547,6 +5093,45 @@ class ImpalaLearner:
             return (profiles[0],)
         return profiles
 
+    def _teacher_public_heuristic_rows(
+        self,
+        batch: Any,
+        *,
+        loss_mask: Tensor,
+        expected_shape: tuple[int, int],
+        action_catalog: ActionCatalog,
+    ) -> Tensor:
+        flat_loss_mask = loss_mask.reshape(-1) > 0.0
+        teacher_valid = self._optional_time_major_bool_field(
+            _batch_value(batch, "teacher_valid"),
+            field_name="teacher_valid",
+            expected_shape=expected_shape,
+        )
+        if teacher_valid is None:
+            return torch.zeros((0,), dtype=torch.long, device=loss_mask.device)
+        active_rows = flat_loss_mask & teacher_valid.reshape(-1).to(device=loss_mask.device, dtype=torch.bool)
+        requested_families = tuple(self.teacher_public_heuristic_families)
+        if requested_families:
+            teacher_family = self._optional_time_major_index_field(
+                _batch_value(batch, "teacher_family"),
+                field_name="teacher_family",
+                expected_shape=expected_shape,
+            )
+            if teacher_family is None:
+                return torch.zeros((0,), dtype=torch.long, device=loss_mask.device)
+            catalog_metadata = _structured_catalog_metadata(action_catalog)
+            family_ids = _resolve_public_heuristic_family_ids(
+                family_names=catalog_metadata.family_names,
+                requested_families=requested_families,
+            )
+            if not family_ids:
+                return torch.zeros((0,), dtype=torch.long, device=loss_mask.device)
+            active_rows = active_rows & torch.isin(
+                teacher_family.reshape(-1).to(device=loss_mask.device, dtype=torch.long),
+                torch.as_tensor(family_ids, dtype=torch.long, device=loss_mask.device),
+            )
+        return torch.nonzero(active_rows, as_tuple=False).squeeze(1).to(dtype=torch.long)
+
     def _packed_public_heuristic_target_logits(
         self,
         *,
@@ -3555,9 +5140,13 @@ class ImpalaLearner:
         loss_mask: Tensor,
         packed_legal: tuple[Tensor, Tensor, Tensor | None],
         observation_context: Mapping[str, Tensor] | None,
+        active_rows: Tensor | None = None,
     ) -> Tensor | None:
         total_rows = int(obs.shape[0] * obs.shape[1])
-        active_rows = torch.nonzero(loss_mask.reshape(-1) > 0.0, as_tuple=False).squeeze(1)
+        if active_rows is None:
+            active_rows = torch.nonzero(loss_mask.reshape(-1) > 0.0, as_tuple=False).squeeze(1)
+        else:
+            active_rows = active_rows.reshape(-1).to(device=obs.device, dtype=torch.long)
         if active_rows.numel() == 0:
             return None
         flat_obs = obs.reshape(total_rows, obs.shape[-1])
@@ -3603,6 +5192,7 @@ class ImpalaLearner:
         obs: Tensor,
         loss_mask: Tensor,
         packed_legal: tuple[Tensor, Tensor, Tensor | None],
+        active_rows: Tensor | None = None,
     ) -> tuple[_PackedStructuredLegalView, Tensor] | tuple[None, None]:
         if self.model is None:
             raise ValueError("ImpalaLearner requires a model for factorized public-heuristic distillation")
@@ -3617,7 +5207,10 @@ class ImpalaLearner:
         expected_shape = obs.shape[:2]
         batch_size = int(obs.shape[1])
         total_rows = int(expected_shape[0] * expected_shape[1])
-        active_rows = torch.nonzero(loss_mask.reshape(-1) > 0.0, as_tuple=False).squeeze(1)
+        if active_rows is None:
+            active_rows = torch.nonzero(loss_mask.reshape(-1) > 0.0, as_tuple=False).squeeze(1)
+        else:
+            active_rows = active_rows.reshape(-1).to(device=obs.device, dtype=torch.long)
         if active_rows.numel() == 0:
             return None, None
 
@@ -4370,6 +5963,62 @@ class ImpalaLearner:
             custom_metrics["vtrace_rho_p95"] = float(update_metrics["vtrace_rho_p95"])
         if np.isfinite(vtrace_metrics.entropy):
             custom_metrics["vtrace_entropy"] = float(vtrace_metrics.entropy)
+        for key in (
+            "policy_loss_coef",
+            "behavior_action_bc_loss",
+            "behavior_action_bc_coef",
+            "reference_policy_top_action_bc_loss",
+            "reference_policy_top_action_bc_coef",
+            "reference_policy_top_action_family_bc_loss",
+            "reference_policy_top_action_family_bc_coef",
+            "raw_b1_distill_loss",
+            "raw_b1_distill_coef",
+            "raw_b1_distill_teacher_bias_scale",
+            "raw_b1_distill_student_bias_scale",
+            "raw_b1_distill_temperature",
+            "raw_b1_distill_top_k",
+            "raw_b1_distill_top_action_ce_coef",
+            "raw_b1_distill_row_fraction",
+            "raw_b1_top1_match",
+            "raw_b1_topk_overlap",
+            "raw_b1_family_match",
+            "raw_b1_kl",
+            "raw_b1_top_action_ce",
+            "counterfactual_positive_loss",
+            "counterfactual_positive_coef",
+            "counterfactual_positive_margin_coef",
+            "counterfactual_positive_margin",
+            "counterfactual_positive_ce_loss",
+            "counterfactual_positive_margin_loss",
+            "counterfactual_positive_label_count",
+            "counterfactual_positive_weight_mean",
+            "counterfactual_positive_prob_mean",
+            "counterfactual_positive_top1_match",
+            "counterfactual_positive_logit_margin_mean",
+            "b1_opponent_reference_policy_top_action_bc_loss",
+            "b1_opponent_reference_policy_top_action_bc_coef",
+            "b1_opponent_reference_policy_top_action_bc_row_fraction",
+            "b1_second_seat_positive_advantage_policy_loss",
+            "b1_second_seat_positive_advantage_policy_coef",
+            "b1_second_seat_positive_advantage_row_fraction",
+            "b1_second_seat_positive_advantage_mean",
+            "b1_second_seat_reference_top_action_avoidance_loss",
+            "b1_second_seat_reference_top_action_avoidance_coef",
+            "b1_second_seat_reference_top_action_avoidance_row_fraction",
+            "policy_train_fraction",
+            "reward_mean",
+            "reward_abs_mean",
+            "reward_nonzero_fraction",
+            "advantage_mean",
+            "advantage_abs_mean",
+            "target_mean",
+            "target_abs_mean",
+            "teacher_development_pass_suppression_loss",
+            "teacher_development_pass_suppression_selected_fraction",
+            "teacher_development_pass_probability",
+        ):
+            if key in update_metrics:
+                custom_metrics[key] = float(update_metrics[key])
         return custom_metrics
 
     def get_policy_version(self) -> int:

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import cast
 
+import pytest
 import torch
 
 from weiss_rl.artifacts import ArtifactLayout
@@ -280,7 +281,7 @@ def _write_runtime_weiss_sim(
 
 
 def _patch_periodic_dev_eval_config(tmp_path: Path) -> None:
-    preset_path = tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"
+    preset_path = tmp_path / "configs" / "thesis_locked.yaml"
     preset_text = preset_path.read_text(encoding="utf-8")
     preset_text = preset_text.replace(
         "periodic_dev_eval_interval_updates: 50000",
@@ -296,7 +297,7 @@ def _patch_periodic_dev_eval_config(tmp_path: Path) -> None:
 
 def _copy_repo_configs(tmp_path: Path) -> Path:
     shutil.copytree(REPO_ROOT / "configs", tmp_path / "configs")
-    return tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"
+    return tmp_path / "configs" / "thesis_locked.yaml"
 
 
 def _write_eval_only_stack_config(tmp_path: Path) -> Path:
@@ -856,6 +857,44 @@ def test_eval_entrypoint_ignores_incomplete_manifest_selection_from_canonical_ev
     assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
 
 
+def test_eval_entrypoint_rejects_summary_only_manifest_reuse(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_policy_selection_partial"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+    layout.final_eval_summary_json().parent.mkdir(parents=True, exist_ok=True)
+    layout.final_eval_summary_json().write_text("{}\n", encoding="utf-8")
+    manifest = {
+        "policy_set_selection": ["B0 RandomLegal", "policy_partial_only"],
+        "policy_set_selection_details": {
+            "mode": "deterministic_v1",
+            "status": "resolved",
+        },
+    }
+
+    policy_ids, details, resolved_snapshot_registry, resolved_dev_eval = eval_script._resolve_policy_ids_for_run(
+        policy_ids=[],
+        stack=stack,
+        manifest=manifest,
+        layout=layout,
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+    )
+
+    assert "policy_partial_only" not in policy_ids
+    assert details["mode"] == "deterministic_v1"
+    assert resolved_snapshot_registry == layout.training_snapshots_dir / "registry.json"
+    assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
+
+
 def test_eval_entrypoint_ignores_completed_explicit_cli_manifest_selection(tmp_path: Path) -> None:
     import scripts.eval as eval_script
 
@@ -903,6 +942,58 @@ def test_eval_entrypoint_ignores_completed_explicit_cli_manifest_selection(tmp_p
     assert details["mode"] == "deterministic_v1"
     assert resolved_snapshot_registry == layout.training_snapshots_dir / "registry.json"
     assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
+
+
+def test_eval_entrypoint_prefers_current_periodic_dev_eval_summaries(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_policy_selection_current_dev_eval"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+    (layout.training_logs_dir / "dev_eval_summaries.json").write_text("[]\n", encoding="utf-8")
+
+    _policy_ids, _details, _resolved_snapshot_registry, resolved_dev_eval = eval_script._resolve_policy_ids_for_run(
+        policy_ids=["B0 RandomLegal"],
+        stack=stack,
+        manifest={},
+        layout=layout,
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+    )
+
+    assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
+
+
+def test_eval_entrypoint_rejects_missing_explicit_dev_eval_summaries(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    run_dir = tmp_path / "runs" / "eval_policy_selection_missing_explicit"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    shutil.copy2(snapshot_registry_path, layout.training_snapshots_dir / "registry.json")
+    shutil.copy2(dev_eval_summaries_path, layout.training_logs_dir / "periodic_dev_eval_summaries.json")
+
+    with pytest.raises(FileNotFoundError, match="Explicit dev eval summaries path"):
+        eval_script._resolve_policy_ids_for_run(
+            policy_ids=[],
+            stack=stack,
+            manifest={},
+            layout=layout,
+            snapshot_registry_path=None,
+            dev_eval_summaries_path=tmp_path / "missing_dev_eval_summaries.json",
+        )
 
 
 def test_eval_manifest_persistence_records_explicit_cli_policy_selection(tmp_path: Path) -> None:
@@ -1176,13 +1267,40 @@ def test_eval_pipeline_uses_parallel_helper_when_requested(tmp_path: Path, monke
     assert persisted["policy_set_selection"] == expected_policy_ids
 
 
+def test_parallel_eval_worker_devices_treat_auto_as_cuda_auto(monkeypatch) -> None:
+    import scripts.eval as eval_script
+
+    monkeypatch.setattr(eval_script.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(eval_script.torch.cuda, "device_count", lambda: 2)
+
+    assert eval_script._resolved_parallel_worker_devices(
+        parallel_workers=5,
+        explicit_worker_devices=(),
+        eval_device="auto",
+    ) == ("cuda:0", "cuda:1", "cuda:0", "cuda:1", "cuda:0")
+
+
+def test_parallel_eval_worker_devices_reject_invalid_explicit_cuda(monkeypatch) -> None:
+    import scripts.eval as eval_script
+
+    monkeypatch.setattr(eval_script.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(eval_script.torch.cuda, "device_count", lambda: 1)
+
+    with pytest.raises(ValueError, match="only 1 CUDA device"):
+        eval_script._resolved_parallel_worker_devices(
+            parallel_workers=1,
+            explicit_worker_devices=("cuda:2",),
+            eval_device="cpu",
+        )
+
+
 def test_parallel_final_eval_falls_back_to_serial_for_single_matchup(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     import scripts.eval as eval_script
 
-    stack_config = REPO_ROOT / "configs" / "presets" / "typed_local.yaml"
+    stack_config = REPO_ROOT / "configs" / "local.yaml"
     stack = load_stack_config(stack_config)
     run_dir = tmp_path / "run"
     layout = ArtifactLayout.from_run_dir(run_dir)
@@ -2145,6 +2263,8 @@ def test_train_entrypoint_runs_periodic_dev_eval_and_handles_empty_ids_pass_fall
         "checkpoint_path": "training/checkpoints/checkpoint_1.pt",
         "seed_usage_path": "eval/dev_eval/update_1/b0_randomlegal/seed_usage.json",
         "anchor_display_name": "B0 RandomLegal",
+        "matchup_dir": "eval/dev_eval/update_1/b0_randomlegal",
+        "episodes_path": "eval/dev_eval/update_1/b0_randomlegal/episodes.jsonl",
     }
     assert diagnostics_payload["seat_results"]["seat0_wins"] == 2
     assert diagnostics_payload["seat_results"]["seat1_wins"] == 0
@@ -2368,7 +2488,7 @@ def test_train_entrypoint_public_demo_stages_public_safe_catalog_without_weiss_s
 def test_eval_entrypoint_public_demo_generates_demo_only_final_eval_artifacts(tmp_path: Path) -> None:
     train_result, run_dir = _run_public_demo_train(tmp_path, run_label="toy_public_demo_eval")
     assert train_result.returncode == 0, train_result.stderr
-    stack_config = tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"
+    stack_config = tmp_path / "configs" / "thesis_locked.yaml"
 
     result = _run_entrypoint(
         tmp_path,
@@ -2409,7 +2529,7 @@ def test_eval_entrypoint_public_demo_generates_demo_only_final_eval_artifacts(tm
 def test_make_figures_entrypoint_public_demo_writes_clearly_labeled_bundle(tmp_path: Path) -> None:
     train_result, run_dir = _run_public_demo_train(tmp_path, run_label="toy_public_demo_figures")
     assert train_result.returncode == 0, train_result.stderr
-    stack_config = tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"
+    stack_config = tmp_path / "configs" / "thesis_locked.yaml"
     eval_result = _run_entrypoint(
         tmp_path,
         script_name="eval.py",
@@ -2457,3 +2577,4 @@ def test_make_figures_entrypoint_public_demo_writes_clearly_labeled_bundle(tmp_p
     assert manifest["demo_only"] is True
     assert manifest["public_safe"] is True
     assert "Wrote public-demo placeholder figure bundle" in result.stdout
+

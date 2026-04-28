@@ -17,7 +17,7 @@ def test_resolve_devices_falls_back_cleanly() -> None:
 def test_build_launch_plan_round_robins_devices() -> None:
     plan = build_launch_plan(
         group_label="bench_a",
-        stack_configs=["C:/repo/configs/presets/typed_local.yaml", "C:/repo/configs/presets/baselines/ppo_lite.yaml"],
+        stack_configs=["C:/repo/configs/local.yaml", "C:/repo/configs/baselines/ppo_lite.yaml"],
         seeds=[1, 2],
         devices=("cuda:0", "cuda:1"),
     )
@@ -35,7 +35,7 @@ def test_execute_launch_plan_dry_run_writes_group_summary(tmp_path: Path) -> Non
 
     plan = build_launch_plan(
         group_label="bench_b",
-        stack_configs=["C:/repo/configs/presets/typed_local.yaml"],
+        stack_configs=["C:/repo/configs/local.yaml"],
         seeds=[7, 8],
         devices=("cpu",),
         extra_args=["--max-updates", "2"],
@@ -82,3 +82,4 @@ def test_execute_launch_plan_raises_when_any_job_fails(tmp_path: Path) -> None:
     payload = json.loads((repo_root / "runs" / "launch_groups" / "bench_fail" / "summary.json").read_text(encoding="utf-8"))
     assert payload["status"] == "failed"
     assert payload["failed_job_count"] == 1
+

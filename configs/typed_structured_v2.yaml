@@ -1,0 +1,28 @@
+schema_version: 2
+description: typed_structured_v2 local preset
+extends: local.yaml
+model:
+  encoder_kind: structured_v2
+  cuda_learner_candidate_scoring_chunk_size: 1048576
+training:
+  algorithm: impala_vtrace_structured_v1
+  profile_timers: false
+  structured_metrics:
+    mode: sampled
+  teacher_aux:
+    mode: always
+  fixed_opponent_backend: python_scalar
+  structured_aux:
+    enabled: true
+    teacher_family_coef: 0.20
+    teacher_slot_coef: 0.10
+    teacher_attack_type_coef: 0.05
+    teacher_action_coef: 0.10
+  structured_warmstart:
+    enabled: true
+    updates: 32
+    teacher_family_coef: 0.75
+    teacher_slot_coef: 0.35
+    teacher_attack_type_coef: 0.20
+    teacher_action_coef: 0.50
+

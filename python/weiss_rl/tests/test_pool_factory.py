@@ -14,7 +14,7 @@ def _repo_root() -> Path:
 
 
 def test_build_env_config_from_stack_emits_reward_json() -> None:
-    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+    stack = load_stack_config(_repo_root() / "configs" / "local.yaml")
 
     env_config = build_env_config_from_stack(stack, seed=17)
 
@@ -41,13 +41,13 @@ def test_build_env_config_from_stack_emits_curriculum_json_when_present(tmp_path
     (fake_repo / "python").mkdir()
     thesis_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
     thesis_path.write_text(
-        (repo_root / "configs/presets/typed_thesis_locked.yaml").read_text(encoding="utf-8"),
+        (repo_root / "configs/thesis_locked.yaml").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     local_path = fake_repo / "configs" / "typed_local.yaml"
     local_path.write_text(
         (
-            (repo_root / "configs/presets/typed_local.yaml").read_text(encoding="utf-8")
+            (repo_root / "configs/local.yaml").read_text(encoding="utf-8")
             + "\ncurriculum:\n  simulator:\n    max_no_progress_decisions: 192\n    phase: opening\n    staged_decks:\n      - trial\n"
         ),
         encoding="utf-8",
@@ -70,13 +70,13 @@ def test_build_env_config_from_stack_zeroes_shaping_for_terminal_only_objective(
     (fake_repo / "configs").mkdir()
     thesis_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
     thesis_path.write_text(
-        (repo_root / "configs/presets/typed_thesis_locked.yaml").read_text(encoding="utf-8"),
+        (repo_root / "configs/thesis_locked.yaml").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     terminal_path = fake_repo / "configs" / "terminal_only.yaml"
     terminal_path.write_text(
         (
-            (repo_root / "configs/presets/typed_local.yaml").read_text(encoding="utf-8")
+            (repo_root / "configs/local.yaml").read_text(encoding="utf-8")
             + "\nrewards:\n"
             + "  objective: terminal_only_pm1\n"
             + "  shaping:\n"
@@ -106,13 +106,13 @@ def test_build_env_config_from_stack_cycles_deck_pools_by_actor(tmp_path: Path) 
     (fake_repo / "configs").mkdir()
     thesis_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
     thesis_path.write_text(
-        (repo_root / "configs/presets/typed_thesis_locked.yaml").read_text(encoding="utf-8"),
+        (repo_root / "configs/thesis_locked.yaml").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     local_path = fake_repo / "configs" / "typed_local.yaml"
     local_path.write_text(
         (
-            (repo_root / "configs/presets/typed_local.yaml").read_text(encoding="utf-8")
+            (repo_root / "configs/local.yaml").read_text(encoding="utf-8")
             + "\nenvironment:\n"
             + "  deck_pool:\n"
             + "    - preset:quints_balanced_v2\n"
@@ -201,3 +201,5 @@ def test_make_env_pool_from_config_adapts_curriculum_for_high_level_api(monkeypa
     assert captured["mode"] == "fast"
     assert captured["curriculum"] == {"max_no_progress_decisions": 192}
     assert captured["reward_json"] == '{"terminal_win": 1.0}'
+
+

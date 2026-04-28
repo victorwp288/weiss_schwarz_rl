@@ -1,0 +1,17 @@
+schema_version: 2
+description: reduced-size low-lag seed-pool league student that holds B1 reference guidance longer before self-play
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_fade_frontierweighted_seedpool_lag10_warmup200_lowlr_evalguard_localpromo.yaml
+training:
+  reference_policy_top_action_bc_coef: 0.25
+  reference_policy_top_action_bc_final_coef: 0.10
+  reference_policy_top_action_bc_start_updates: 180
+  reference_policy_top_action_bc_end_updates: 360
+  reference_policy_top_action_family_bc_coef: 0.35
+  reference_policy_top_action_family_bc_final_coef: 0.15
+  reference_policy_top_action_family_bc_start_updates: 180
+  reference_policy_top_action_family_bc_end_updates: 360
+  structured_aux:
+    teacher_public_heuristic_coef: 0.08
+    teacher_public_heuristic_final_coef: 0.04
+    teacher_public_heuristic_start_updates: 180
+    teacher_public_heuristic_end_updates: 360

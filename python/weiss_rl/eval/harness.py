@@ -64,6 +64,7 @@ class GameResult:
     pass_with_nonpass_available: int = 0
     max_consecutive_main_moves: int = 0
     simulator_episode_key: int | bytes | None = None
+    terminal_summary: Mapping[str, Any] | None = None
     replay_sample: ReplaySampleResult | None = None
 
 
@@ -111,6 +112,7 @@ class EvalGameRecord:
     main_move_actions: int = 0
     pass_with_nonpass_available: int = 0
     max_consecutive_main_moves: int = 0
+    terminal_summary: Mapping[str, Any] | None = None
     run_id256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -142,6 +144,8 @@ class EvalGameRecord:
             "pass_with_nonpass_available": self.pass_with_nonpass_available,
             "max_consecutive_main_moves": self.max_consecutive_main_moves,
         }
+        if self.terminal_summary is not None:
+            payload["terminal_summary"] = dict(self.terminal_summary)
         if self.run_id256 is not None:
             payload["run_id256"] = self.run_id256
         return payload
@@ -340,6 +344,7 @@ def record_completed_game(
         main_move_actions=int(result.main_move_actions),
         pass_with_nonpass_available=int(result.pass_with_nonpass_available),
         max_consecutive_main_moves=int(result.max_consecutive_main_moves),
+        terminal_summary=result.terminal_summary,
         run_id256=key256_to_hex(_coerce_run_id256(run_id256)),
     )
 

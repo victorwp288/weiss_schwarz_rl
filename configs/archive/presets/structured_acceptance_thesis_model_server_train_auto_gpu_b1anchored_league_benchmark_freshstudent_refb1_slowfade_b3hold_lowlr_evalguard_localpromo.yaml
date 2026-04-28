@@ -1,0 +1,29 @@
+schema_version: 2
+description: reduced-size fresh league student with slower B1 release and stronger aggressive-heuristic pressure
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_fade_lowlr_evalguard_localpromo.yaml
+training:
+  reference_policy_top_action_bc_final_coef: 0.05
+  reference_policy_top_action_bc_start_updates: 80
+  reference_policy_top_action_bc_end_updates: 320
+  reference_policy_top_action_family_bc_final_coef: 0.05
+  reference_policy_top_action_family_bc_start_updates: 80
+  reference_policy_top_action_family_bc_end_updates: 320
+  structured_aux:
+    teacher_public_heuristic_coef: 0.10
+    teacher_public_heuristic_final_coef: 0.05
+    teacher_public_heuristic_start_updates: 80
+    teacher_public_heuristic_end_updates: 320
+    teacher_public_heuristic_profiles:
+      - aggressive
+    teacher_public_heuristic_profile_mode: mixture
+    teacher_public_heuristic_label_profile: aggressive
+league:
+  sampling:
+    heuristic_public_mix_fraction: 0.25
+    heuristic_public_final_mix_fraction: 0.15
+    heuristic_public_mix_end_updates: 400
+    heuristic_public_variant_mix_fraction: 0.40
+    heuristic_public_variant_final_mix_fraction: 0.30
+    heuristic_public_variant_mix_end_updates: 400
+    noleague_baseline_mix_fraction: 0.25
+    noleague_baseline_mix_end_updates: 400

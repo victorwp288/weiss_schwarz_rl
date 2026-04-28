@@ -71,9 +71,14 @@ def _stack_with_promotion_gate_override(stack, **overrides):
     return replace(stack, config=replace(stack.config, league=league))
 
 
-def _posterior(*, prob_gt_target: float, prob_lt_guardrail: float = 0.0) -> PromotionGatePosterior:
+def _posterior(
+    *,
+    prob_gt_target: float,
+    prob_lt_guardrail: float = 0.0,
+    mean: float = 0.6,
+) -> PromotionGatePosterior:
     return PromotionGatePosterior(
-        mean=0.6,
+        mean=mean,
         ci_low=0.55,
         ci_high=0.65,
         ci_half_width=0.05,
@@ -86,14 +91,19 @@ def _posterior(*, prob_gt_target: float, prob_lt_guardrail: float = 0.0) -> Prom
     )
 
 
-def _anchor_result(anchor_name: str, *, prob_lt_guardrail: float) -> PromotionGateAnchorResult:
+def _anchor_result(
+    anchor_name: str,
+    *,
+    prob_lt_guardrail: float,
+    mean: float = 0.6,
+) -> PromotionGateAnchorResult:
     return PromotionGateAnchorResult(
         anchor_name=anchor_name,
         opponent_policy_id=f"{anchor_name}_policy",
         episodes_path="promotion_gate_episodes/test.jsonl",
         matchup_summary=MatchupSummary(games=20),
         truncation=PromotionGateRate(numerator=0, denominator=20, rate=0.0),
-        posterior=_posterior(prob_gt_target=1.0, prob_lt_guardrail=prob_lt_guardrail),
+        posterior=_posterior(prob_gt_target=1.0, prob_lt_guardrail=prob_lt_guardrail, mean=mean),
     )
 
 
@@ -232,6 +242,34 @@ def test_decision_reasons_use_strict_overall_and_anchor_thresholds() -> None:
         stack=stack,
     )
     assert {reason["code"] for reason in anchor_boundary} == {"anchor_loss_guardrail_exceeded"}
+
+
+def test_decision_reasons_reject_anchor_below_configured_target_floor() -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+    stack = _stack_with_promotion_gate_override(
+        stack,
+        target_min_anchor_scores={"B1 NoLeague baseline": 0.5625},
+    )
+    truncation = PromotionGateRate(numerator=0, denominator=20, rate=0.0)
+
+    reasons = _decision_reasons(
+        anchor_results=(
+            _anchor_result("B0 RandomLegal", prob_lt_guardrail=0.0, mean=1.0),
+            _anchor_result("B1 NoLeague baseline", prob_lt_guardrail=0.0, mean=0.5),
+        ),
+        overall=_posterior(prob_gt_target=1.0, mean=0.75),
+        truncation=truncation,
+        stack=stack,
+    )
+
+    assert reasons == [
+        {
+            "anchor_name": "B1 NoLeague baseline",
+            "code": "anchor_target_floor_missed",
+            "observed": 0.5,
+            "required_gte": 0.5625,
+        }
+    ]
 
 
 def test_decision_reasons_allow_truncation_limit_and_reject_above() -> None:

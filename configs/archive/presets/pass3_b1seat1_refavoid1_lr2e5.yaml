@@ -1,0 +1,5 @@
+schema_version: 2
+description: Pass 3 B1 second-seat anti-clone probe that avoids the frozen B1 top action while keeping family rails
+extends: pass3_b1seat1_heavy_reward5_lr2e5.yaml
+training:
+  b1_second_seat_reference_top_action_avoidance_coef: 1.0

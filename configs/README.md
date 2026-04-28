@@ -1,62 +1,55 @@
 # Config Layout
 
-The repo now has one public config system: grouped presets.
+The public launch surface is intentionally small. Use these files for new runs:
 
-## Main Presets
+## Main
 
-- `presets/typed_thesis_locked.yaml`
-  - Thesis-safe default.
-  - Typed GRU model.
-  - Conservative reward, league, and evaluation settings.
-- `presets/typed_local.yaml`
-  - Everyday local default.
-  - Typed GRU model.
-  - More exploration, anti-stall shaping, and shorter league warmup.
+- `main_impala_league_server.yaml`
+- `main_eval.yaml`
+- `residual_league_s1_server.yaml`
+- `residual_eval_s1.yaml`
 
 ## Baselines
 
-- `presets/baselines/noleague_impala.yaml`
-- `presets/baselines/norecurrence_impala.yaml`
-- `presets/baselines/ppo_lite.yaml`
+- `baselines/noleague_impala.yaml`
+- `baselines/noleague_benchmark.yaml`
+- `baselines/noleague_benchmark_warmup.yaml`
+- `baselines/noleague_benchmark_lowlr_continuation.yaml`
+- `baselines/noleague_benchmark_eval.yaml`
+- `baselines/noleague_fullsize_warmup.yaml`
+- `baselines/noleague_fullsize_lowlr_continuation.yaml`
+- `baselines/norecurrence_impala.yaml`
+- `baselines/norecurrence_noleague.yaml`
+- `baselines/ppo_lite.yaml`
+- `baselines/no_tactical_bias_noleague.yaml`
+- `baselines/teacher_fade_noleague.yaml`
+- `baselines/multideck_noleague.yaml`
+- `baselines/reward_shaping_noleague.yaml`
 
-Each baseline extends the frozen thesis-model surface and overrides only the scientific difference that defines the baseline.
+## Ablations
 
-## Thesis Ablations
+- `ablations/reward_shaping.yaml`
+- `ablations/no_tactical_bias.yaml`
+- `ablations/teacher_fade.yaml`
+- `ablations/no_b1_cutoff.yaml`
+- `ablations/multideck.yaml`
 
-- `presets/ablations/structured_acceptance_thesis_model_no_tactical_bias_auto_gpu.yaml`
-- `presets/ablations/structured_acceptance_thesis_model_no_b1_cutoff_auto_gpu.yaml`
-- `presets/ablations/structured_acceptance_thesis_model_teacher_fade_auto_gpu.yaml`
+Evaluation companion aliases live beside the matching ablation when the wrapper
+needs an explicit eval surface.
 
-## Study Config
+## Dev And Compatibility
 
+- `local.yaml`
+- `thesis_locked.yaml`
+- `structured_v2.yaml`
+- `typed_structured_v2.yaml`
+- `stack_smoke.yaml`
 - `study/metagame_sensitivity.yaml`
 
-This file is study-only. It is used by metagame/sensitivity reporting and is not part of the live training preset surface.
+Main, residual, baseline, and ablation configs are self-contained launch files.
+The only compact inheritance kept in the public surface is for local/dev variants,
+where `local.yaml` extends `thesis_locked.yaml` and structured dev configs extend
+`local.yaml`.
 
-## Seeds
-
-- `seeds/dev_eval_seeds.txt`
-- `seeds/promotion_eval_seeds.txt`
-- `seeds/report_eval_seeds.txt`
-
-Seed files contain one unsigned 64-bit integer per line with no comments.
-
-## Smoke Preset
-
-`stack_smoke.yaml` is still available for scaffold checks. It is intentionally tiny and only exists to verify config loading, simulator provenance capture, and manifest writing.
-
-## Override Style
-
-CLI overrides now follow grouped paths, for example:
-
-```bash
-uv run python python/scripts/train.py \
-  --stack-config configs/presets/typed_local.yaml \
-  --override training.optimizer.learning_rate=0.0002 \
-  --override rewards.truncation.reward=-0.05 \
-  --override league.warmup.first_updates=25000
-```
-
-## Path Convention
-
-All file paths inside preset YAML are repo-root relative.
+Historical experiment configs were moved intact to `archive/presets/`. They are
+kept for reproducibility, not as a launch menu or normal dependency.

@@ -1,0 +1,20 @@
+schema_version: 2
+description: actor-parity league bridge with stronger B1 reference/opponent pressure after the u220 frontier
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_devtargetsharp_actorparity3_frontierweighted_seedpool_lag10_evalgated_lowlr_evalguard_localpromo.yaml
+training:
+  reference_policy_top_action_bc_coef: 0.28
+  reference_policy_top_action_bc_final_coef: 0.14
+  reference_policy_top_action_bc_start_updates: 220
+  reference_policy_top_action_bc_end_updates: 520
+  reference_policy_top_action_family_bc_coef: 0.45
+  reference_policy_top_action_family_bc_final_coef: 0.22
+  reference_policy_top_action_family_bc_start_updates: 220
+  reference_policy_top_action_family_bc_end_updates: 520
+league:
+  sampling:
+    heuristic_public_mix_fraction: 0.15
+    heuristic_public_final_mix_fraction: 0.15
+    heuristic_public_variant_mix_fraction: 0.15
+    heuristic_public_variant_final_mix_fraction: 0.15
+    noleague_baseline_mix_fraction: 0.35
+    noleague_baseline_mix_end_updates: -1

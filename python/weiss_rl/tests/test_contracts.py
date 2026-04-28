@@ -972,6 +972,61 @@ def test_structured_legal_policy_value_model_actor_and_learner_packed_scorers_ma
     torch.testing.assert_close(learner_scores, actor_scores)
 
 
+def test_structured_legal_policy_value_model_packed_plan_scorer_matches_legacy_chunked_scorer() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((2, 18), dtype=torch.float32)
+    acting_seat = torch.tensor([0, 1], dtype=torch.long)
+    seat_hidden = model.initial_seat_hidden(2)
+    packed_ids = np.asarray([0, 4, 6, 8, 3, 5, 7, 8], dtype=np.int32)
+    packed_offsets = np.asarray([0, 4, 8], dtype=np.int32)
+    action_catalog = ActionCatalog.from_spec_bundle(_structured_spec_bundle())
+    packed_meta = _packed_meta_from_ids(action_catalog, packed_ids)
+    legal_actions = LegalActionBatch.from_packed(
+        packed_ids,
+        packed_offsets,
+        meta=packed_meta,
+        action_space=9,
+    )
+
+    recurrent_output, state_repr, observation_context, _value, _next_hidden = model.forward_trunk_packed_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+    )
+    ids = torch.as_tensor(legal_actions.ids, dtype=torch.long)
+    offsets = torch.as_tensor(legal_actions.offsets, dtype=torch.long)
+    meta = torch.as_tensor(legal_actions.meta, dtype=torch.long)
+    row_indices = torch.repeat_interleave(torch.arange(obs.shape[0], dtype=torch.long), offsets[1:] - offsets[:-1])
+
+    legacy_scores = model.policy_head._score_candidates_chunked(  # type: ignore[attr-defined]
+        state_repr,
+        row_indices,
+        ids,
+        observation_context,
+        candidate_meta=meta,
+        scoring_mode="learner",
+    )
+    plan_scores = model.score_packed_legal_candidates(
+        recurrent_output,
+        obs,
+        legal_actions,
+        state_repr=state_repr,
+        observation_context=observation_context,
+        scoring_mode="learner",
+    )
+
+    torch.testing.assert_close(plan_scores, legacy_scores)
+
+
 def test_structured_legal_policy_value_model_can_split_actor_and_learner_public_bias() -> None:
     torch.manual_seed(0)
     model = build_policy_value_model(

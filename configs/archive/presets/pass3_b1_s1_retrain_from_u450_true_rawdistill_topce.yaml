@@ -1,0 +1,18 @@
+schema_version: 2
+description: Pass 3 B1 restart from u450 with S1 parity plus raw/S0 B1 KL and raw top-action CE preservation
+extends: pass3_b1_s1_retrain_from_u450_true_rawdistill.yaml
+training:
+  raw_b1_distill:
+    enabled: true
+    teacher_policy_id: b1_noleague_baseline
+    teacher_surface: raw_s0
+    student_surface: raw_s0
+    coef: 1.0
+    final_coef: 0.5
+    start_updates: 450
+    end_updates: 650
+    top_k: 16
+    temperature: 1.5
+    top_action_ce_coef: 1.0
+    teacher_public_heuristic_bias_scale: 0.0
+    student_public_heuristic_bias_scale: 0.0

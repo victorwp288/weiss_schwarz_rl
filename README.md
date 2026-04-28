@@ -60,16 +60,16 @@ make artifact-hygiene
 
 The release-facing experiment surface is the `thesis-model-*` family:
 
-- `thesis-model-auto-gpu` is the canonical current training preset, backed by `configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml`.
-- `thesis-model-eval-auto-gpu` is the canonical richer final-eval companion, backed by `configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml`.
-- `thesis-model-multideck` is the canonical deck-diversity/generalization variant, backed by `configs/presets/structured_acceptance_thesis_model_multideck_auto_gpu.yaml`.
-- `configs/presets/baselines/*.yaml` contains the comparison baselines.
+- `thesis-model-auto-gpu` is the canonical current training preset, backed by `configs/main_impala_league_server.yaml`.
+- `thesis-model-eval-auto-gpu` is the canonical richer final-eval companion, backed by `configs/main_eval.yaml`.
+- `thesis-model-multideck` is the canonical deck-diversity/generalization variant, backed by `configs/ablations/multideck.yaml`.
+- `configs/baselines/*.yaml` contains the comparison baselines.
 - `configs/study/metagame_sensitivity.yaml` holds the study-only metagame/sensitivity settings.
 
 Legacy typed presets remain available for older experiments and lower-level direct entrypoint access:
 
-- `configs/presets/typed_thesis_locked.yaml`
-- `configs/presets/typed_local.yaml`
+- `configs/thesis_locked.yaml`
+- `configs/local.yaml`
 
 `PPO-lite` is implemented in-repo and is mask-aware by construction, so it shares the same legality semantics, snapshot format, and evaluation pipeline as the main IMPALA path.
 
@@ -82,3 +82,4 @@ Canonical runs also write TensorBoard event files under `runs/<run>/tensorboard/
 ```bash
 tensorboard --logdir runs/<run>/tensorboard
 ```
+

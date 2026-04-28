@@ -18,7 +18,7 @@ def _temp_repo(tmp_path: Path) -> Path:
 
 
 def test_load_stack_config_accepts_fail_fast_policies() -> None:
-    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_thesis_locked.yaml")
+    stack = load_stack_config(_repo_root() / "configs" / "thesis_locked.yaml")
 
     assert stack.config.reproducibility is not None
     assert stack.config.evaluation is not None
@@ -59,7 +59,7 @@ def test_load_stack_config_rejects_non_fail_fast_component_policies(
     fake_repo = _temp_repo(tmp_path)
     stack_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
     stack_path.write_text(
-        (repo_root / "configs/presets/typed_thesis_locked.yaml")
+        (repo_root / "configs/thesis_locked.yaml")
         .read_text(encoding="utf-8")
         .replace(needle, replacement, 1),
         encoding="utf-8",
@@ -73,10 +73,12 @@ def test_load_stack_config_rejects_string_boolean_flags(tmp_path: Path) -> None:
     repo_root = _repo_root()
     fake_repo = _temp_repo(tmp_path)
     stack_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
-    text = (repo_root / "configs/presets/typed_thesis_locked.yaml").read_text(encoding="utf-8")
+    text = (repo_root / "configs/thesis_locked.yaml").read_text(encoding="utf-8")
     text = text.replace("require_export_spec_bundle: true", 'require_export_spec_bundle: "true"', 1)
     text = text.replace("fail_on_spec_mismatch: true", 'fail_on_spec_mismatch: "false"', 1)
     stack_path.write_text(text, encoding="utf-8")
 
     with pytest.raises(ValueError, match="must be a boolean"):
         load_stack_config(stack_path)
+
+

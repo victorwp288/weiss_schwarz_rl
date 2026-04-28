@@ -1,0 +1,44 @@
+schema_version: 2
+description: short-horizon B1 no-league benchmark surface for 5-10 minute server-style anchor tests
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_noleague.yaml
+model:
+  gru_hidden_size: 192
+  encoder_mlp_width: 192
+  typed_feature_width: 48
+training:
+  collect_batch_prefetch_enabled: true
+  structured_aux:
+    teacher_public_heuristic_families:
+      - mulligan_select
+      - clock_from_hand
+      - main_play_character
+      - main_play_event
+      - climax_play
+      - main_move
+      - attack
+      - level_up
+      - encore_pay
+      - encore_decline
+      - trigger_order
+      - choice_select
+  structured_warmstart:
+    teacher_public_heuristic_families:
+      - mulligan_select
+      - clock_from_hand
+      - main_play_character
+      - main_play_event
+      - climax_play
+      - main_move
+      - attack
+      - level_up
+      - encore_pay
+      - encore_decline
+      - trigger_order
+      - choice_select
+  rollout:
+    unroll_length: 16
+evaluation:
+  periodic_dev_eval_interval_updates: 0
+curriculum:
+  early_cutoff:
+    enabled: false

@@ -1,0 +1,3 @@
+schema_version: 2
+description: compatibility alias for the promoted short-horizon B1 no-league benchmark surface
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_noleague_benchmark.yaml

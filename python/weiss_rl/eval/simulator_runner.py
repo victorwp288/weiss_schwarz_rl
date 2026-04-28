@@ -53,6 +53,151 @@ from weiss_rl.repro import canonical_json_bytes, stable_hash64
 
 _LEGACY_B1_POLICY_ID = "b1_noleague_baseline"
 _U64_DENOMINATOR = float(1 << 64)
+_TERMINAL_STAGE_SLOT_WIDTH = 7
+
+
+def _coerce_spec_int(value: object, *, context: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise TypeError(f"{context} must be int-compatible")
+    return int(value)
+
+
+def _json_int_at(obs_row: np.ndarray, index: int) -> int | None:
+    if index < 0 or index >= int(obs_row.shape[0]):
+        return None
+    value = obs_row[index]
+    if not np.isfinite(value):
+        return None
+    return int(value)
+
+
+@dataclass(frozen=True, slots=True)
+class _TerminalPlayerObservationLayout:
+    scalar_indices: Mapping[str, int]
+    stage_base: int | None
+    stage_slot_width: int
+    stage_slot_count: int
+
+    def parse(self, obs_row: np.ndarray) -> dict[str, int | None]:
+        summary: dict[str, int | None] = {
+            "level": _json_int_at(obs_row, self.scalar_indices["level_count"]),
+            "clock": _json_int_at(obs_row, self.scalar_indices["clock_count"]),
+            "deck_count": _json_int_at(obs_row, self.scalar_indices["deck_count"]),
+            "hand_size": _json_int_at(obs_row, self.scalar_indices["hand_count"]),
+            "stock": _json_int_at(obs_row, self.scalar_indices["stock_count"]),
+            "waiting_room_count": _json_int_at(obs_row, self.scalar_indices["waiting_room_count"]),
+            "memory_count": _json_int_at(obs_row, self.scalar_indices["memory_count"]),
+            "climax_count": _json_int_at(obs_row, self.scalar_indices["climax_count"]),
+            "resolution_count": _json_int_at(obs_row, self.scalar_indices["resolution_count"]),
+        }
+        if self.stage_base is not None:
+            occupied = 0
+            for slot_index in range(self.stage_slot_count):
+                card_id = _json_int_at(obs_row, self.stage_base + slot_index * self.stage_slot_width)
+                if card_id is not None and card_id != 0:
+                    occupied += 1
+            summary["stage_count"] = occupied
+        else:
+            summary["stage_count"] = None
+        return summary
+
+
+@dataclass(frozen=True, slots=True)
+class _TerminalObservationLayout:
+    obs_len: int
+    self_player: _TerminalPlayerObservationLayout
+    opponent_player: _TerminalPlayerObservationLayout
+
+    @classmethod
+    def from_spec_bundle(cls, spec_bundle: Mapping[str, object]) -> "_TerminalObservationLayout":
+        observation_spec = spec_bundle.get("observation")
+        if not isinstance(observation_spec, Mapping):
+            raise TypeError("spec_bundle.observation must be a mapping")
+        if not bool(observation_spec.get("self_first", False)):
+            raise ValueError("terminal summaries require a self-first observation layout")
+        player_blocks = observation_spec.get("player_blocks")
+        if not isinstance(player_blocks, list) or len(player_blocks) < 2:
+            raise ValueError("terminal summaries require at least two player blocks")
+
+        def parse_player_layout(item: object) -> _TerminalPlayerObservationLayout:
+            if not isinstance(item, Mapping):
+                raise TypeError("player block must be a mapping")
+            base = _coerce_spec_int(item["base"], context="player block base")
+            slices = item.get("slices")
+            if not isinstance(slices, list):
+                raise TypeError("player block slices must be a list")
+            by_name: dict[str, Mapping[str, object]] = {}
+            for slice_item in slices:
+                if isinstance(slice_item, Mapping):
+                    by_name[str(slice_item.get("name"))] = slice_item
+            scalar_indices: dict[str, int] = {}
+            for name in (
+                "level_count",
+                "clock_count",
+                "deck_count",
+                "hand_count",
+                "stock_count",
+                "waiting_room_count",
+                "memory_count",
+                "climax_count",
+                "resolution_count",
+            ):
+                slice_mapping = by_name.get(name)
+                if slice_mapping is None:
+                    raise ValueError(f"terminal summary field missing from observation spec: {name}")
+                scalar_indices[name] = base + _coerce_spec_int(slice_mapping["start"], context=f"{name}.start")
+
+            stage_base: int | None = None
+            stage_slot_width = _TERMINAL_STAGE_SLOT_WIDTH
+            stage_slot_count = 0
+            stage_slice = by_name.get("stage")
+            if stage_slice is not None:
+                stage_base = base + _coerce_spec_int(stage_slice["start"], context="stage.start")
+                stage_len = _coerce_spec_int(stage_slice["len"], context="stage.len")
+                if stage_len >= _TERMINAL_STAGE_SLOT_WIDTH and stage_len % _TERMINAL_STAGE_SLOT_WIDTH == 0:
+                    stage_slot_count = stage_len // _TERMINAL_STAGE_SLOT_WIDTH
+                else:
+                    stage_base = None
+            return _TerminalPlayerObservationLayout(
+                scalar_indices=scalar_indices,
+                stage_base=stage_base,
+                stage_slot_width=stage_slot_width,
+                stage_slot_count=stage_slot_count,
+            )
+
+        return cls(
+            obs_len=_coerce_spec_int(observation_spec["obs_len"], context="observation.obs_len"),
+            self_player=parse_player_layout(player_blocks[0]),
+            opponent_player=parse_player_layout(player_blocks[1]),
+        )
+
+    def parse(
+        self,
+        obs_row: np.ndarray,
+        *,
+        terminal_actor_seat: int | None,
+        last_acting_seat: int | None,
+        seat_mapping_source: str,
+    ) -> dict[str, Any]:
+        flat_obs = np.asarray(obs_row, dtype=np.float32).reshape(-1)
+        if int(flat_obs.shape[0]) < self.obs_len:
+            raise ValueError(f"terminal observation row is too short ({flat_obs.shape[0]} < {self.obs_len})")
+        self_summary = self.self_player.parse(flat_obs)
+        opponent_summary = self.opponent_player.parse(flat_obs)
+        payload: dict[str, Any] = {
+            "schema": "terminal_summary_v1",
+            "terminal_actor_seat": terminal_actor_seat,
+            "last_acting_seat": last_acting_seat,
+            "seat_mapping_source": seat_mapping_source,
+            "perspective_self": self_summary,
+            "perspective_opponent": opponent_summary,
+        }
+        if terminal_actor_seat in (0, 1):
+            payload[f"seat{terminal_actor_seat}"] = self_summary
+            payload[f"seat{1 - int(terminal_actor_seat)}"] = opponent_summary
+        else:
+            payload["seat_mapping_source"] = "unmapped_perspective_only"
+        return payload
 
 
 def _resolve_eval_device(
@@ -434,6 +579,7 @@ class SimulatorEvalRunner(EvalGameRunner):
         replay_capture_rate: float,
         regression_capture_count: int,
         eval_device: torch.device | str | None = None,
+        spec_bundle: Mapping[str, object] | None = None,
     ) -> None:
         self.stack = stack
         self.policies = dict(policies)
@@ -446,14 +592,63 @@ class SimulatorEvalRunner(EvalGameRunner):
         self.regression_capture_count = int(regression_capture_count)
         self._capture_count = 0
         self._device = _resolve_eval_device(stack, eval_device=eval_device)
+        self._terminal_layout: _TerminalObservationLayout | None = None
+        if spec_bundle is not None:
+            try:
+                self._terminal_layout = _TerminalObservationLayout.from_spec_bundle(spec_bundle)
+            except Exception:
+                self._terminal_layout = None
+        self._persistent_env_enabled = self.replay_capture_rate <= 0.0 and self.regression_capture_count <= 0
+        self._persistent_env: DecisionBoundaryEnv | None = None
         for policy in self.policies.values():
             if policy.model is not None and callable(getattr(policy.model, "to", None)):
                 policy.model.to(self._device)
                 policy.model.eval()
         self._baseline_logits = np.zeros((int(action_dim),), dtype=np.float32)
 
+    def close(self) -> None:
+        env = self._persistent_env
+        self._persistent_env = None
+        if env is not None:
+            env.close()
+
+    def _terminal_summary_from_batch(
+        self,
+        *,
+        batch: DecisionBoundaryBatch,
+        last_acting_seat: int | None,
+    ) -> dict[str, Any] | None:
+        layout = self._terminal_layout
+        if layout is None:
+            return None
+        terminal_actor_seat: int | None = None
+        try:
+            actor_value = int(np.asarray(batch.actor, dtype=np.int64).reshape(-1)[0])
+            if actor_value in (0, 1):
+                terminal_actor_seat = actor_value
+        except Exception:
+            terminal_actor_seat = None
+        seat_mapping_source = "terminal_batch_actor_perspective"
+        if terminal_actor_seat is None and last_acting_seat in (0, 1):
+            terminal_actor_seat = int(last_acting_seat)
+            seat_mapping_source = "last_acting_seat_perspective_fallback"
+        try:
+            return layout.parse(
+                np.asarray(batch.obs, dtype=np.float32)[0],
+                terminal_actor_seat=terminal_actor_seat,
+                last_acting_seat=last_acting_seat,
+                seat_mapping_source=seat_mapping_source,
+            )
+        except Exception as exc:
+            return {
+                "schema": "terminal_summary_v1",
+                "error": str(exc),
+                "terminal_actor_seat": terminal_actor_seat,
+                "last_acting_seat": last_acting_seat,
+            }
+
     def run_game(self, scheduled_game: ScheduledGame) -> GameResult:
-        env = self._build_ids_eval_env(seed=scheduled_game.episode_seed)
+        env = self._env_for_game(seed=scheduled_game.episode_seed)
         replay_capture = self._maybe_enable_replay_capture(env=env, scheduled_game=scheduled_game)
         seat_hidden = {
             seat: self._initial_hidden(scheduled_game.seat0_policy_id if seat == 0 else scheduled_game.seat1_policy_id)
@@ -491,6 +686,10 @@ class SimulatorEvalRunner(EvalGameRunner):
                         "no_progress_count": result.no_progress_count,
                         "termination_reason": result.termination_reason,
                         "simulator_episode_key": result.simulator_episode_key,
+                        "terminal_summary": self._terminal_summary_from_batch(
+                            batch=batch,
+                            last_acting_seat=last_acting_seat,
+                        ),
                         **summarize_eval_action_counters(action_counters),
                     }
                     if replay_capture is None:
@@ -548,7 +747,15 @@ class SimulatorEvalRunner(EvalGameRunner):
                 seat_hidden[current_seat] = next_hidden
                 batch = next_batch
         finally:
-            env.close()
+            if not self._persistent_env_enabled:
+                env.close()
+
+    def _env_for_game(self, *, seed: int) -> DecisionBoundaryEnv:
+        if not self._persistent_env_enabled:
+            return self._build_ids_eval_env(seed=seed)
+        if self._persistent_env is None:
+            self._persistent_env = self._build_ids_eval_env(seed=seed)
+        return self._persistent_env
 
     def _build_ids_eval_env(self, *, seed: int) -> DecisionBoundaryEnv:
         env_config = build_env_config_from_stack(self.stack, seed=int(seed))
@@ -871,7 +1078,7 @@ def _config_marks_noleague_baseline(config_canonical: Mapping[str, Any]) -> bool
     if isinstance(experiment, Mapping):
         role = str(experiment.get("role", "")).strip()
         if role:
-            return role == "baseline_noleague"
+            return role == "baseline_noleague" or role.startswith("baseline_noleague_")
     training_family = config_sections.get("training_family_a", {})
     if isinstance(training_family, Mapping):
         mode = str(training_family.get("mode", "")).strip()

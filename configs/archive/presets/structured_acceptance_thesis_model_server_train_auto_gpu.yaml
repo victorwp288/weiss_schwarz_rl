@@ -1,0 +1,13 @@
+schema_version: 2
+description: thesis-model server training preset that prioritizes multi-GPU collector throughput over concurrent dev eval
+extends: structured_acceptance_thesis_model_auto_gpu.yaml
+evaluation:
+  async_periodic_dev_eval_enabled: false
+  periodic_dev_eval_interval_updates: 20
+  periodic_dev_eval_parallel_workers: 6
+  periodic_dev_eval_batched_inference_enabled: false
+league:
+  promotion:
+    gate:
+      async_enabled: false
+      parallel_workers: 6

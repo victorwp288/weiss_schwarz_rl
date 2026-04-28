@@ -60,6 +60,7 @@ class ModelConfig:
     public_heuristic_logit_bias_end_updates: int = -1
     public_heuristic_logit_bias_final_scale: float = 0.0
     public_heuristic_logit_bias_families: tuple[str, ...] = field(default_factory=tuple)
+    public_heuristic_logit_bias_profile: str = "base"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +75,7 @@ class TrainingOptimizerConfig:
     learning_rate: float
     grad_norm_clip: float
     value_loss_coef: float
+    backend: str = "auto"
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +101,22 @@ class TrainingStructuredMetricsConfig:
 @dataclass(frozen=True, slots=True)
 class TrainingTeacherAuxConfig:
     mode: str = "always"
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingScalingConfig:
+    learner_parallelism: str = "auto"
+    learner_gpu_count: str = "auto"
+    actor_topology: str = "auto"
+    target_envs_per_gpu: int = 512
+    min_envs_per_actor: int = 32
+    max_envs_per_actor: int = 64
+    max_actor_process_count: int = 64
+    reserve_cpu_cores: int = 4
+    learner_cpu_cores_per_gpu: int = 2
+    queue_depth_multiplier: int = 2
+    ram_queue_fraction: float = 0.25
+    vram_fraction: float = 0.85
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +152,8 @@ class TrainingStructuredAuxConfig:
     teacher_action_coef: float = 0.0
     teacher_same_family_action_coef: float = 0.0
     teacher_public_heuristic_coef: float = 0.0
+    teacher_public_main_move_coef: float = 0.0
+    teacher_development_pass_suppression_coef: float = 0.0
     teacher_public_heuristic_start_updates: int = 0
     teacher_public_heuristic_end_updates: int = -1
     teacher_public_heuristic_final_coef: float = 0.0
@@ -142,6 +162,7 @@ class TrainingStructuredAuxConfig:
     teacher_public_heuristic_profiles: tuple[str, ...] = field(default_factory=tuple)
     teacher_public_heuristic_profile_mode: str = "mixture"
     teacher_public_heuristic_profiles_end_updates: int = -1
+    teacher_public_heuristic_label_profile: str = "base"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +184,57 @@ class TrainingStructuredWarmstartConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TrainingRawB1DistillConfig:
+    enabled: bool = False
+    teacher_policy_id: str = "b1_noleague_baseline"
+    teacher_surface: str = "raw_s0"
+    student_surface: str = "raw_s0"
+    coef: float = 0.0
+    final_coef: float = 0.0
+    start_updates: int = 0
+    end_updates: int = -1
+    top_k: int = 16
+    temperature: float = 1.5
+    top_action_ce_coef: float = 0.0
+    teacher_public_heuristic_bias_scale: float = 0.0
+    student_public_heuristic_bias_scale: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingCounterfactualPositiveConfig:
+    enabled: bool = False
+    label_dirs: tuple[str, ...] = field(default_factory=tuple)
+    coef: float = 0.0
+    final_coef: float = 0.0
+    start_updates: int = 0
+    end_updates: int = -1
+    margin_coef: float = 0.0
+    margin: float = 1.0
+    max_labels: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingResidualOpponentPolicyConfig:
+    policy_id: str
+    base_snapshot_path: str
+    residual_state_path: str
+    public_heuristic_bias_scale: float = 1.0
+    role: str = "b1_exploiter_candidate"
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingMainResidualPolicyConfig:
+    enabled: bool = False
+    base_snapshot_path: str = ""
+    initial_residual_state_path: str = ""
+    public_heuristic_bias_scale: float = 1.0
+    hidden_dim: int = 256
+    alpha: float = 0.1
+    residual_mode: str = "plain"
+    gate_bias: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class TrainingConfig:
     algorithm: str
     rollout: TrainingRolloutConfig
@@ -176,6 +248,11 @@ class TrainingConfig:
     structured_warmstart: TrainingStructuredWarmstartConfig
     structured_metrics: TrainingStructuredMetricsConfig = field(default_factory=TrainingStructuredMetricsConfig)
     teacher_aux: TrainingTeacherAuxConfig = field(default_factory=TrainingTeacherAuxConfig)
+    raw_b1_distill: TrainingRawB1DistillConfig = field(default_factory=TrainingRawB1DistillConfig)
+    counterfactual_positive: TrainingCounterfactualPositiveConfig = field(
+        default_factory=TrainingCounterfactualPositiveConfig
+    )
+    scaling: TrainingScalingConfig = field(default_factory=TrainingScalingConfig)
     fixed_opponent_backend: str = "python_scalar"
     actor_policy_backend: str = "model"
     actor_heuristic_fraction: float = 1.0
@@ -183,12 +260,35 @@ class TrainingConfig:
     actor_heuristic_end_updates: int = -1
     actor_heuristic_final_fraction: float = 1.0
     train_on_heuristic_actor_rows: bool = True
+    policy_loss_coef: float = 1.0
+    behavior_action_bc_coef: float = 0.0
+    reference_policy_top_action_bc_coef: float = 0.0
+    reference_policy_top_action_bc_final_coef: float = 0.0
+    reference_policy_top_action_bc_start_updates: int = 0
+    reference_policy_top_action_bc_end_updates: int = -1
+    b1_opponent_reference_policy_top_action_bc_coef: float = 0.0
+    b1_second_seat_positive_advantage_policy_coef: float = 0.0
+    b1_second_seat_reference_top_action_avoidance_coef: float = 0.0
+    reference_policy_top_action_family_bc_coef: float = 0.0
+    reference_policy_top_action_family_bc_final_coef: float = 0.0
+    reference_policy_top_action_family_bc_start_updates: int = 0
+    reference_policy_top_action_family_bc_end_updates: int = -1
+    reference_policy_id: str = ""
+    main_residual_policy: TrainingMainResidualPolicyConfig = field(
+        default_factory=TrainingMainResidualPolicyConfig
+    )
     diverse_opponent_actor_count: int = 0
     diverse_model_actor_count: int = 0
+    diverse_opponent_policy_id: str = ""
+    diverse_opponent_policy_ids: tuple[str, ...] = field(default_factory=tuple)
+    residual_opponent_policies: tuple[TrainingResidualOpponentPolicyConfig, ...] = field(default_factory=tuple)
     diverse_opponent_batch_fraction: float = 0.0
     diverse_opponent_batch_wait_ms: int = 0
     collect_batch_prefetch_enabled: bool = False
     heuristic_native_rollout_enabled: bool = False
+    heuristic_native_rollout_profile: str = "base"
+    heuristic_native_rollout_profiles: tuple[str, ...] = field(default_factory=tuple)
+    heuristic_native_rollout_profile_mode: str = "fixed"
     heuristic_actor_hidden_state_tracking: bool = True
     profile_timers: bool = False
     torch_profiler: bool = False
@@ -208,6 +308,10 @@ class TrainingConfig:
     @property
     def grad_norm_clip(self) -> float:
         return float(self.optimizer.grad_norm_clip)
+
+    @property
+    def optimizer_backend(self) -> str:
+        return str(self.optimizer.backend)
 
     @property
     def value_loss_coef(self) -> float:
@@ -298,6 +402,18 @@ class TrainingConfig:
         return self.teacher_aux.mode
 
     @property
+    def learner_parallelism(self) -> str:
+        return str(self.scaling.learner_parallelism)
+
+    @property
+    def learner_gpu_count(self) -> str:
+        return str(self.scaling.learner_gpu_count)
+
+    @property
+    def actor_topology(self) -> str:
+        return str(self.scaling.actor_topology)
+
+    @property
     def teacher_family_coef(self) -> float:
         return float(self.structured_aux.teacher_family_coef)
 
@@ -324,6 +440,14 @@ class TrainingConfig:
     @property
     def teacher_public_heuristic_coef(self) -> float:
         return float(self.structured_aux.teacher_public_heuristic_coef)
+
+    @property
+    def teacher_public_main_move_coef(self) -> float:
+        return float(self.structured_aux.teacher_public_main_move_coef)
+
+    @property
+    def teacher_development_pass_suppression_coef(self) -> float:
+        return float(self.structured_aux.teacher_development_pass_suppression_coef)
 
     @property
     def teacher_public_heuristic_start_updates(self) -> int:
@@ -356,6 +480,10 @@ class TrainingConfig:
     @property
     def teacher_public_heuristic_profiles_end_updates(self) -> int:
         return int(self.structured_aux.teacher_public_heuristic_profiles_end_updates)
+
+    @property
+    def teacher_public_heuristic_label_profile(self) -> str:
+        return str(self.structured_aux.teacher_public_heuristic_label_profile)
 
     @property
     def structured_warmstart_enabled(self) -> bool:
@@ -395,6 +523,7 @@ class RewardShapingConfig:
     level_reward: float
     board_reward: float
     no_progress_penalty: float
+    pass_with_nonpass_penalty: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -485,6 +614,9 @@ class LeagueWarmupConfig:
     initial_window_episodes: int
     ramp_target_updates: int
     ramp_target_window_episodes: int
+    eval_gate_enabled: bool = False
+    eval_gate_min_anchor_scores: dict[str, float] = field(default_factory=dict)
+    eval_gate_min_aggregate_score: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -514,6 +646,7 @@ class PromotionGateConfig:
     folding: str
     guardrails: PromotionGateGuardrailsConfig
     record_file: str
+    target_min_anchor_scores: dict[str, float] = field(default_factory=dict)
     async_enabled: bool = False
     parallel_workers: int = 1
     parallel_worker_devices: tuple[str, ...] = field(default_factory=tuple)
@@ -535,7 +668,11 @@ class LeagueSamplingConfig:
     heuristic_public_variant_final_mix_fraction: float
     noleague_baseline_mix_fraction: float
     noleague_baseline_mix_end_updates: int
+    noleague_baseline_reward_scale: float
+    noleague_baseline_force_focal_seat: int
     warmup_snapshot_mix_fraction: float
+    exclude_seed_snapshots_from_pfsp: bool
+    mirror_mix_fraction: float
     heuristic_public_reserved_envs_per_actor: int
     noleague_baseline_reserved_envs_per_actor: int
     champion_mix_fraction: float
@@ -679,6 +816,8 @@ class EvaluationConfig:
     async_periodic_dev_eval_enabled: bool = False
     periodic_dev_eval_parallel_workers: int = 1
     periodic_dev_eval_parallel_worker_devices: tuple[str, ...] = field(default_factory=tuple)
+    periodic_dev_eval_batched_inference_enabled: bool = False
+    periodic_dev_eval_anchor_weights: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

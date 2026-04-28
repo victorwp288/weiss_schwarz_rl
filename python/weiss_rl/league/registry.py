@@ -70,6 +70,7 @@ class SnapshotMeta:
     weights_sha256: str
     path: str  # run-relative posix path, e.g. "training/snapshots/policy_000123/weights.pt"
     created_utc: str = field(default_factory=_now_utc_iso)
+    source_kind: str = "local"
 
     def sort_key(self) -> tuple[int, str]:
         # Stable ordering: primary by update, then policy_id.
@@ -85,6 +86,7 @@ class SnapshotRegistry:
     snapshots: list[SnapshotMeta] = field(default_factory=list)
     champion_snapshots: list[str] = field(default_factory=list)
     pinned_snapshots: list[str] = field(default_factory=list)
+    rejected_snapshots: list[str] = field(default_factory=list)
 
     def latest(self, n: int = 1) -> list[SnapshotMeta]:
         n = int(n)
@@ -98,6 +100,112 @@ class SnapshotRegistry:
 
     def latest_ids(self, n: int = 1) -> list[str]:
         return [snapshot.policy_id for snapshot in self.latest(n)]
+
+    def snapshot_by_policy_id(self) -> dict[str, SnapshotMeta]:
+        self.normalize()
+        return {snapshot.policy_id: snapshot for snapshot in self.snapshots}
+
+    def latest_seed_history_ids(
+        self,
+        n: int = 1,
+        *,
+        exclude_rejected: bool = True,
+        exclude_policy_ids: Iterable[str] = (),
+    ) -> list[str]:
+        return self.latest_eligible_ids(
+            n,
+            source_kinds={"seed_import"},
+            include_seed_history=True,
+            exclude_rejected=exclude_rejected,
+            exclude_policy_ids=exclude_policy_ids,
+        )
+
+    def latest_local_candidate_ids(
+        self,
+        n: int = 1,
+        *,
+        include_league_import: bool = True,
+        exclude_rejected: bool = True,
+        exclude_policy_ids: Iterable[str] = (),
+    ) -> list[str]:
+        source_kinds = {"local", "legacy"}
+        if include_league_import:
+            source_kinds.add("league_import")
+        return self.latest_eligible_ids(
+            n,
+            source_kinds=source_kinds,
+            include_seed_history=False,
+            exclude_rejected=exclude_rejected,
+            exclude_policy_ids=exclude_policy_ids,
+        )
+
+    def latest_active_champion_ids(
+        self,
+        n: int = 1,
+        *,
+        current_update: int | None = None,
+        max_age_updates: int | None = None,
+        exclude_policy_ids: Iterable[str] = (),
+    ) -> list[str]:
+        n = int(n)
+        if n <= 0:
+            return []
+        self.normalize()
+        excluded_ids = {str(policy_id).strip() for policy_id in exclude_policy_ids if str(policy_id).strip()}
+        rejected_ids = set(self.rejected_snapshots)
+        snapshots_by_id = self.snapshot_by_policy_id()
+        champion_ids = self.latest_champions(
+            len(self.champion_snapshots),
+            current_update=current_update,
+            max_age_updates=max_age_updates,
+        )
+        active_ids = [
+            snapshot_id
+            for snapshot_id in champion_ids
+            if snapshot_id not in excluded_ids
+            and snapshot_id not in rejected_ids
+            and not self._snapshot_is_seed_history(snapshots_by_id.get(snapshot_id), policy_id=snapshot_id)
+            and not self._snapshot_is_baseline_anchor(snapshots_by_id.get(snapshot_id))
+        ]
+        return active_ids[-n:]
+
+    def latest_eligible_ids(
+        self,
+        n: int = 1,
+        *,
+        source_kinds: Iterable[str] | None = None,
+        include_seed_history: bool = False,
+        include_baseline_anchors: bool = False,
+        exclude_rejected: bool = True,
+        exclude_policy_ids: Iterable[str] = (),
+    ) -> list[str]:
+        n = int(n)
+        if n <= 0:
+            return []
+        self.normalize()
+        source_kind_filter = (
+            None
+            if source_kinds is None
+            else {str(source_kind).strip().lower() for source_kind in source_kinds if str(source_kind).strip()}
+        )
+        rejected_ids = set(self.rejected_snapshots) if exclude_rejected else set()
+        excluded_ids = {str(policy_id).strip() for policy_id in exclude_policy_ids if str(policy_id).strip()}
+        eligible_ids: list[str] = []
+        for snapshot in reversed(self.snapshots):
+            policy_id = str(snapshot.policy_id).strip()
+            if not policy_id or policy_id in rejected_ids or policy_id in excluded_ids:
+                continue
+            if not include_seed_history and self._snapshot_is_seed_history(snapshot, policy_id=policy_id):
+                continue
+            if not include_baseline_anchors and self._snapshot_is_baseline_anchor(snapshot):
+                continue
+            source_kind = str(getattr(snapshot, "source_kind", "local") or "local").strip().lower()
+            if source_kind_filter is not None and source_kind not in source_kind_filter:
+                continue
+            eligible_ids.append(policy_id)
+            if len(eligible_ids) >= n:
+                break
+        return list(reversed(eligible_ids))
 
     def latest_champions(
         self,
@@ -130,8 +238,27 @@ class SnapshotRegistry:
 
     def add_champion(self, snapshot_id: str) -> None:
         normalized_snapshot_id = self._require_existing_snapshot_id(snapshot_id)
+        self.rejected_snapshots = [
+            existing for existing in self.rejected_snapshots if existing != normalized_snapshot_id
+        ]
         self.champion_snapshots = self._move_ref_to_end(self.champion_snapshots, normalized_snapshot_id)
         self.normalize()
+
+    def reject_snapshot(self, snapshot_id: str) -> None:
+        normalized_snapshot_id = self._require_existing_snapshot_id(snapshot_id)
+        self.rejected_snapshots = self._move_ref_to_end(self.rejected_snapshots, normalized_snapshot_id)
+        self.normalize()
+
+    def clear_rejection(self, snapshot_id: str) -> bool:
+        normalized_snapshot_id = str(snapshot_id).strip()
+        if not normalized_snapshot_id:
+            return False
+        original = list(self.rejected_snapshots)
+        self.rejected_snapshots = [
+            snapshot for snapshot in self.rejected_snapshots if snapshot != normalized_snapshot_id
+        ]
+        self.normalize()
+        return self.rejected_snapshots != original
 
     def pin_snapshot(self, snapshot_id: str) -> None:
         normalized_snapshot_id = self._require_existing_snapshot_id(snapshot_id)
@@ -199,6 +326,7 @@ class SnapshotRegistry:
         weights_sha256: str,
         path: str,
         created_utc: str | None = None,
+        source_kind: str = "local",
     ) -> None:
         update_i = int(update)
         if update_i < 0:
@@ -213,6 +341,7 @@ class SnapshotRegistry:
             weights_sha256=str(weights_sha256),
             path=_normalize_snapshot_artifact_path(path),
             created_utc=created_utc or _now_utc_iso(),
+            source_kind=str(source_kind).strip() or "local",
         )
 
         for index, existing in enumerate(self.snapshots):
@@ -250,6 +379,9 @@ class SnapshotRegistry:
         self.pinned_snapshots = [
             snapshot_id for snapshot_id in self.pinned_snapshots if snapshot_id in retained_policy_ids
         ]
+        self.rejected_snapshots = [
+            snapshot_id for snapshot_id in self.rejected_snapshots if snapshot_id in retained_policy_ids
+        ]
         return pruned_snapshots
 
     def normalize(self) -> None:
@@ -257,13 +389,25 @@ class SnapshotRegistry:
         self.champion_size = _normalize_window_size(self.champion_size, field_name="champion_size")
         self.snapshots = self._normalized_snapshots()
         existing_snapshot_ids = {snapshot.policy_id for snapshot in self.snapshots}
+        rejected_ids = set(self.rejected_snapshots)
+        active_champion_ids = {
+            snapshot.policy_id
+            for snapshot in self.snapshots
+            if snapshot.policy_id not in rejected_ids
+            and not self._snapshot_is_seed_history(snapshot, policy_id=snapshot.policy_id)
+            and not self._snapshot_is_baseline_anchor(snapshot)
+        }
         self.champion_snapshots = self._normalized_refs(
             self.champion_snapshots,
-            existing_snapshot_ids=existing_snapshot_ids,
+            existing_snapshot_ids=existing_snapshot_ids & active_champion_ids,
             limit=self.champion_size,
         )
         self.pinned_snapshots = self._normalized_refs(
             self.pinned_snapshots,
+            existing_snapshot_ids=existing_snapshot_ids,
+        )
+        self.rejected_snapshots = self._normalized_refs(
+            self.rejected_snapshots,
             existing_snapshot_ids=existing_snapshot_ids,
         )
 
@@ -276,6 +420,7 @@ class SnapshotRegistry:
             "snapshots": [asdict(snapshot) for snapshot in self.snapshots],
             "champion_snapshots": list(self.champion_snapshots),
             "pinned_snapshots": list(self.pinned_snapshots),
+            "rejected_snapshots": list(self.rejected_snapshots),
         }
 
     def save(self, path: Path) -> None:
@@ -300,6 +445,7 @@ class SnapshotRegistry:
                 weights_sha256=str(snapshot.weights_sha256),
                 path=_normalize_snapshot_artifact_path(snapshot.path),
                 created_utc=str(snapshot.created_utc or _now_utc_iso()),
+                source_kind=str(getattr(snapshot, "source_kind", "local") or "local"),
             )
         return sorted(deduped.values(), key=lambda snapshot: snapshot.sort_key())
 
@@ -337,6 +483,16 @@ class SnapshotRegistry:
     def _updates_by_policy(self) -> dict[str, int]:
         return {snapshot.policy_id: int(snapshot.update) for snapshot in self.snapshots}
 
+    @staticmethod
+    def _snapshot_is_seed_history(snapshot: SnapshotMeta | None, *, policy_id: str) -> bool:
+        if snapshot is not None and str(getattr(snapshot, "source_kind", "")).strip().lower() == "seed_import":
+            return True
+        return str(policy_id).startswith("seed_")
+
+    @staticmethod
+    def _snapshot_is_baseline_anchor(snapshot: SnapshotMeta | None) -> bool:
+        return snapshot is not None and str(getattr(snapshot, "source_kind", "")).strip().lower() == "baseline_anchor"
+
     @classmethod
     def load(cls, path: Path) -> SnapshotRegistry:
         if not path.exists():
@@ -358,6 +514,7 @@ class SnapshotRegistry:
                             weights_sha256="",
                             path=snapshot_weights_relpath(str(snapshot_id).strip()),
                             created_utc=_now_utc_iso(),
+                            source_kind="legacy",
                         )
                         for index, snapshot_id in enumerate(snapshot_ids)
                         if str(snapshot_id).strip()
@@ -402,6 +559,7 @@ class SnapshotRegistry:
                     weights_sha256=str(item.get("weights_sha256", "")),
                     path=_normalize_snapshot_artifact_path(path_value),
                     created_utc=str(item.get("created_utc", _now_utc_iso())),
+                    source_kind=str(item.get("source_kind", "local") or "local"),
                 )
             )
 
@@ -411,6 +569,9 @@ class SnapshotRegistry:
         pinned_snapshots_raw = raw.get("pinned_snapshots", [])
         if not isinstance(pinned_snapshots_raw, list):
             raise ValueError("registry.pinned_snapshots must be a list")
+        rejected_snapshots_raw = raw.get("rejected_snapshots", [])
+        if not isinstance(rejected_snapshots_raw, list):
+            raise ValueError("registry.rejected_snapshots must be a list")
 
         registry = cls(
             recent_size=recent_size,
@@ -418,6 +579,7 @@ class SnapshotRegistry:
             snapshots=snapshots,
             champion_snapshots=[str(item).strip() for item in champion_snapshots_raw],
             pinned_snapshots=[str(item).strip() for item in pinned_snapshots_raw],
+            rejected_snapshots=[str(item).strip() for item in rejected_snapshots_raw],
         )
         registry.normalize()
         return registry

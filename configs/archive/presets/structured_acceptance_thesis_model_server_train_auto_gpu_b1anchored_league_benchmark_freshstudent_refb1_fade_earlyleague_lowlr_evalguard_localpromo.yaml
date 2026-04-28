@@ -1,0 +1,6 @@
+schema_version: 2
+description: reduced-size fresh league student that exits B1-guided warmup early for local self-play evolution tests
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_fade_lowlr_evalguard_localpromo.yaml
+league:
+  warmup:
+    first_updates: 60

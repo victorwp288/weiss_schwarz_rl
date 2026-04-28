@@ -1,0 +1,6 @@
+schema_version: 2
+description: reduced-size low-lag B1 seed-pool league student with delayed PFSP until the reference fade is mostly complete
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_fade_frontierweighted_seedpool_lag10_lowlr_evalguard_localpromo.yaml
+league:
+  warmup:
+    first_updates: 200

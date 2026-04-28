@@ -1,0 +1,66 @@
+schema_version: 2
+description: B1 S1 branch with confirmed frozen-B1 residual exploiters as explicit hard-negative opponents
+extends: pass3_b1_s1_retrain_from_u450_true_rawdistill.yaml
+training:
+  diverse_opponent_actor_count: 2
+  diverse_model_actor_count: 2
+  diverse_opponent_policy_ids:
+    - b1_residual_6label_conservative_a01_l2
+    - b1_residual_7label_nonpass_a01_l2
+    - b1_residual_9label_passmix_a01_l2loose
+    - b1_residual_rush_10label_passmix_final800
+    - b1_residual_trainable_live_10label_l2x
+    - b1_residual_trainable_live_mine1_retrain_l2x
+    - b1_residual_trainable_live_alpha010_l2low
+    - b1_residual_10label_familygated_a01_l2
+  residual_opponent_policies:
+    - policy_id: b1_residual_6label_conservative_a01_l2
+      role: b1_exploiter_confirmed_hard_negative
+      base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+      residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_residual_adoption_probe_6label_conservative_a01_l2_20260428/residual_state.pt
+      public_heuristic_bias_scale: 1.0
+    - policy_id: b1_residual_7label_nonpass_a01_l2
+      role: b1_exploiter_diversity_hard_negative
+      base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+      residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_residual_adoption_probe_7label_nonpass_a01_l2_20260428/residual_state.pt
+      public_heuristic_bias_scale: 1.0
+    - policy_id: b1_residual_9label_passmix_a01_l2loose
+      role: b1_exploiter_diversified_hard_negative
+      base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+      residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_residual_adoption_probe_9label_passmix_a01_l2loose_800s_20260428/residual_state.pt
+      public_heuristic_bias_scale: 1.0
+    - policy_id: b1_residual_rush_10label_passmix_final800
+      role: b1_exploiter_primary_hard_negative
+      base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+      residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_residual_adoption_probe_rush_rush_pass_screen_20260428a_final800/residual_state.pt
+      public_heuristic_bias_scale: 1.0
+    - policy_id: b1_residual_trainable_live_10label_l2x
+      role: b1_exploiter_trainable_live_hard_negative
+      base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+      residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_trainable_live_residual_10label_plain_a01_lr3e4_l2x_20260428/residual_state.pt
+      public_heuristic_bias_scale: 1.0
+    - policy_id: b1_residual_trainable_live_mine1_retrain_l2x
+      role: b1_exploiter_trainable_live_retrain_hard_negative
+      base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+      residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_residual_adoption_probe_rush_trainlive_mine1_20260428a/residual_state.pt
+      public_heuristic_bias_scale: 1.0
+    - policy_id: b1_residual_trainable_live_alpha010_l2low
+      role: b1_exploiter_trainable_live_diversity_hard_negative
+      base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+      residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_residual_adoption_probe_rush_trainlive_alpha010_l2low_nomine_20260428/residual_state.pt
+      public_heuristic_bias_scale: 1.0
+    - policy_id: b1_residual_10label_familygated_a01_l2
+      role: b1_exploiter_family_gated_hard_negative
+      base_snapshot_path: runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt
+      residual_state_path: runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_residual_adoption_probe_10label_familygated_a01_l2_20260428/residual_state.pt
+      public_heuristic_bias_scale: 1.0
+league:
+  sampling:
+    hard_negative_mix_fraction: 0.0
+  promotion:
+    enabled: false
+evaluation:
+  periodic_dev_eval_interval_updates: 0
+curriculum:
+  checkpoint_guard:
+    enabled: false

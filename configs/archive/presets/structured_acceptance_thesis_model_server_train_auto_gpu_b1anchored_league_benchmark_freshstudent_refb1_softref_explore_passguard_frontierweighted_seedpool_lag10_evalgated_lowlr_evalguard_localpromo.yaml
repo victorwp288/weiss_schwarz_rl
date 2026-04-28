@@ -1,0 +1,6 @@
+schema_version: 2
+description: reduced-size eval-gated seed-pool league bridge with soft B1 reference plus explicit pass-with-nonpass penalty from B1 audit
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_softref_explore_frontierweighted_seedpool_lag10_evalgated_lowlr_evalguard_localpromo.yaml
+rewards:
+  shaping:
+    pass_with_nonpass_penalty: 0.02

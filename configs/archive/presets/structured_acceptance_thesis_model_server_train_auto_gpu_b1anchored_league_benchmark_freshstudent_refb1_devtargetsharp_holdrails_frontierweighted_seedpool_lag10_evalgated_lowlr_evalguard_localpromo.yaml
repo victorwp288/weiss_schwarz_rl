@@ -1,0 +1,30 @@
+schema_version: 2
+description: reduced-size eval-gated seed-pool league bridge that holds B1/development rails longer before PFSP handoff
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_devtargetsharp_frontierweighted_seedpool_lag10_evalgated_lowlr_evalguard_localpromo.yaml
+training:
+  reference_policy_top_action_bc_coef: 0.20
+  reference_policy_top_action_bc_final_coef: 0.12
+  reference_policy_top_action_bc_start_updates: 300
+  reference_policy_top_action_bc_end_updates: 600
+  reference_policy_top_action_family_bc_coef: 0.28
+  reference_policy_top_action_family_bc_final_coef: 0.18
+  reference_policy_top_action_family_bc_start_updates: 300
+  reference_policy_top_action_family_bc_end_updates: 600
+  exploration:
+    entropy_coef: 0.045
+    entropy_anneal_to: 0.025
+    entropy_anneal_steps_updates: 300000
+  structured_aux:
+    teacher_public_heuristic_coef: 0.22
+    teacher_public_heuristic_final_coef: 0.12
+    teacher_public_heuristic_start_updates: 300
+    teacher_public_heuristic_end_updates: 600
+    teacher_public_heuristic_temperature: 8.0
+    teacher_public_main_move_coef: 0.14
+league:
+  warmup:
+    eval_gate_min_aggregate_score: 0.66
+    eval_gate_min_anchor_scores:
+      B1 NoLeague baseline: 0.5625
+      B3 HeuristicPublicAggro: 0.70
+      Previous recent snapshot: 0.5625

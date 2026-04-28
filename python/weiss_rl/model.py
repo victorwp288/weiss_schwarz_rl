@@ -1044,6 +1044,7 @@ class _StructuredLegalActionHead(nn.Module):
         public_heuristic_logit_bias_scale: float = 0.0,
         public_heuristic_actor_logit_bias_scale: float = -1.0,
         public_heuristic_logit_bias_families: tuple[str, ...] = (),
+        public_heuristic_logit_bias_profile: str = "base",
     ) -> None:
         super().__init__()
         if latent_width <= 0:
@@ -1075,6 +1076,9 @@ class _StructuredLegalActionHead(nn.Module):
             public_heuristic_logit_bias_scale
             if public_heuristic_actor_logit_bias_scale < 0.0
             else public_heuristic_actor_logit_bias_scale
+        )
+        self._public_heuristic_logit_bias_profile = heuristic_public_scoring_profile(
+            public_heuristic_logit_bias_profile
         )
 
         family_names = tuple(family.name for family in action_catalog.families)
@@ -1533,17 +1537,15 @@ class _StructuredLegalActionHead(nn.Module):
             raise ValueError("packed legal offsets must be a valid prefix sum")
         if ids.numel() == 0:
             return latent.new_zeros((0,))
-        lengths = offsets[1:] - offsets[:-1]
-        row_indices = torch.repeat_interleave(
-            torch.arange(latent.shape[0], device=latent.device, dtype=torch.long),
-            lengths,
-        )
-        return self._score_candidates_chunked(
-            resolved_state_repr,
-            row_indices,
-            ids,
-            resolved_context,
+        scoring_plan = self._build_packed_scoring_plan(
+            candidate_ids=ids,
+            offsets=offsets,
             candidate_meta=meta,
+        )
+        return self._score_packed_candidates_chunked(
+            resolved_state_repr,
+            scoring_plan,
+            resolved_context,
             scoring_mode=scoring_mode,
         )
 
@@ -2643,17 +2645,18 @@ class _StructuredLegalActionHead(nn.Module):
         dtype: torch.dtype,
     ) -> Tensor:
         slot_pref = self._slot_preference_values(stage_slots, dtype=dtype)
+        profile = self._public_heuristic_logit_bias_profile
         front_bonus = torch.where(
             stage_slots < len(_PUBLIC_HEURISTIC_FRONT_ROW_SLOTS),
-            stage_slots.new_full(stage_slots.shape, 40.0, dtype=dtype),
+            stage_slots.new_full(stage_slots.shape, float(profile.play_front_bonus), dtype=dtype),
             torch.where(
                 stage_slots < len(_PUBLIC_HEURISTIC_FRONT_ROW_SLOTS) + len(_PUBLIC_HEURISTIC_BACK_ROW_SLOTS),
-                stage_slots.new_full(stage_slots.shape, 20.0, dtype=dtype),
+                stage_slots.new_full(stage_slots.shape, float(profile.play_back_bonus), dtype=dtype),
                 stage_slots.new_zeros(stage_slots.shape, dtype=dtype),
             ),
         )
         occupied = target_numeric[:, 0].to(dtype=dtype) > 0.5
-        raw = stage_slots.new_full(stage_slots.shape, 650.0, dtype=dtype) + slot_pref + front_bonus
+        raw = stage_slots.new_full(stage_slots.shape, float(profile.play_priority), dtype=dtype) + slot_pref + front_bonus
         return torch.where(occupied, stage_slots.new_full(stage_slots.shape, -1000.0, dtype=dtype), raw)
 
     def _move_public_heuristic_raw(
@@ -2669,11 +2672,15 @@ class _StructuredLegalActionHead(nn.Module):
         target_pref = self._slot_preference_values(to_slots, dtype=dtype)
         improvement = target_pref - source_pref
         front_row_threshold = len(_PUBLIC_HEURISTIC_FRONT_ROW_SLOTS)
+        profile = self._public_heuristic_logit_bias_profile
         back_to_front = (from_slots >= front_row_threshold) & (to_slots < front_row_threshold)
         move_to_center = (to_slots == _PUBLIC_HEURISTIC_CENTER_SLOT) & (from_slots != _PUBLIC_HEURISTIC_CENTER_SLOT)
-        bonus = back_to_front.to(dtype=dtype) * 30.0 + move_to_center.to(dtype=dtype) * 15.0
+        bonus = (
+            back_to_front.to(dtype=dtype) * float(profile.move_back_to_front_bonus)
+            + move_to_center.to(dtype=dtype) * float(profile.move_center_bonus)
+        )
         valid = (source_numeric[:, 0].to(dtype=dtype) > 0.5) & (target_numeric[:, 0].to(dtype=dtype) <= 0.5)
-        raw = from_slots.new_full(from_slots.shape, 120.0, dtype=dtype) + improvement + bonus
+        raw = from_slots.new_full(from_slots.shape, float(profile.move_priority), dtype=dtype) + improvement + bonus
         return torch.where(valid, raw, from_slots.new_full(from_slots.shape, -1000.0, dtype=dtype))
 
     def _attack_public_heuristic_raw(
@@ -2692,6 +2699,7 @@ class _StructuredLegalActionHead(nn.Module):
         side_attack_allowed = source_numeric[:, 6].to(dtype=dtype) > 0.5
         defender_occupied = defender_numeric[:, 0].to(dtype=dtype) > 0.5
         defender_power = defender_numeric[:, 3].to(dtype=dtype)
+        profile = self._public_heuristic_logit_bias_profile
         attack_type_score = slot_values.new_zeros(slot_values.shape, dtype=dtype)
         direct_mask = attack_type_values == 2
         frontal_mask = attack_type_values == 0
@@ -2700,8 +2708,8 @@ class _StructuredLegalActionHead(nn.Module):
             direct_mask,
             torch.where(
                 defender_occupied,
-                slot_values.new_full(slot_values.shape, 15.0, dtype=dtype),
-                slot_values.new_full(slot_values.shape, 60.0, dtype=dtype),
+                slot_values.new_full(slot_values.shape, float(profile.attack_direct_blocked_bonus), dtype=dtype),
+                slot_values.new_full(slot_values.shape, float(profile.attack_direct_open_bonus), dtype=dtype),
             ),
             attack_type_score,
         )
@@ -2709,8 +2717,8 @@ class _StructuredLegalActionHead(nn.Module):
             frontal_mask,
             torch.where(
                 attacker_power >= defender_power,
-                slot_values.new_full(slot_values.shape, 45.0, dtype=dtype),
-                slot_values.new_full(slot_values.shape, 25.0, dtype=dtype),
+                slot_values.new_full(slot_values.shape, float(profile.attack_frontal_win_bonus), dtype=dtype),
+                slot_values.new_full(slot_values.shape, float(profile.attack_frontal_loss_bonus), dtype=dtype),
             ),
             attack_type_score,
         )
@@ -2718,15 +2726,15 @@ class _StructuredLegalActionHead(nn.Module):
             side_mask,
             torch.where(
                 side_attack_allowed,
-                slot_values.new_full(slot_values.shape, 40.0, dtype=dtype),
-                slot_values.new_full(slot_values.shape, 5.0, dtype=dtype),
+                slot_values.new_full(slot_values.shape, float(profile.attack_side_allowed_bonus), dtype=dtype),
+                slot_values.new_full(slot_values.shape, float(profile.attack_side_blocked_bonus), dtype=dtype),
             ),
             attack_type_score,
         )
         power_term = attacker_power * 20.0
-        soul_term = attacker_effective_soul * 16.0
+        soul_term = attacker_effective_soul * float(profile.attack_soul_scale * 4)
         raw = (
-            slot_values.new_full(slot_values.shape, 900.0, dtype=dtype)
+            slot_values.new_full(slot_values.shape, float(profile.attack_priority), dtype=dtype)
             + attack_type_score
             + slot_pref
             + power_term
@@ -2744,17 +2752,22 @@ class _StructuredLegalActionHead(nn.Module):
     ) -> Tensor:
         slot_pref = self._slot_preference_values(slot_values, dtype=dtype)
         power_term = slot_numeric[:, 3].to(dtype=dtype) * 20.0
+        profile = self._public_heuristic_logit_bias_profile
         raw = slot_values.new_zeros(slot_values.shape, dtype=dtype)
         if self._encore_pay_family_id >= 0:
             raw = torch.where(
                 family_ids == self._encore_pay_family_id,
-                slot_values.new_full(slot_values.shape, 700.0, dtype=dtype) + slot_pref + power_term,
+                slot_values.new_full(slot_values.shape, float(profile.encore_pay_priority), dtype=dtype)
+                + slot_pref
+                + power_term,
                 raw,
             )
         if self._encore_decline_family_id >= 0:
             raw = torch.where(
                 family_ids == self._encore_decline_family_id,
-                slot_values.new_full(slot_values.shape, 110.0, dtype=dtype) + slot_pref + power_term,
+                slot_values.new_full(slot_values.shape, float(profile.encore_decline_priority), dtype=dtype)
+                + slot_pref
+                + power_term,
                 raw,
             )
         return raw
@@ -3353,6 +3366,8 @@ class _StructuredLegalActionHead(nn.Module):
             return torch.zeros((0,), device=scoring_plan.row_indices.device, dtype=dtype)
         scores_chunks: list[Tensor] = []
         chunk_size = max(1, int(self._candidate_scoring_chunk_size))
+        if scoring_plan.row_indices.device.type == "cuda":
+            chunk_size = max(chunk_size, int(self._cuda_learner_candidate_scoring_chunk_size))
         for start in range(0, scoring_plan.candidate_count, chunk_size):
             end = min(start + chunk_size, scoring_plan.candidate_count)
             scores_chunks.append(
@@ -4466,6 +4481,7 @@ class StructuredLegalPolicyValueModel(PolicyValueModel):
             public_heuristic_logit_bias_scale=float(structured_config.public_heuristic_logit_bias_scale),
             public_heuristic_actor_logit_bias_scale=float(structured_config.public_heuristic_actor_logit_bias_scale),
             public_heuristic_logit_bias_families=tuple(structured_config.public_heuristic_logit_bias_families),
+            public_heuristic_logit_bias_profile=str(structured_config.public_heuristic_logit_bias_profile),
         )
         self.action_catalog = action_catalog
         self._structured_observation_contract = observation_contract
@@ -5058,6 +5074,7 @@ def build_policy_value_model(
         or int(config.public_heuristic_logit_bias_end_updates) != -1
         or float(config.public_heuristic_logit_bias_final_scale) != 0.0
         or bool(config.public_heuristic_logit_bias_families)
+        or str(config.public_heuristic_logit_bias_profile).strip().lower() != "base"
     ):
         raise ValueError(
             "public_heuristic_* model settings require encoder_kind='structured_v2'; "

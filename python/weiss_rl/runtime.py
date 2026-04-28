@@ -42,7 +42,7 @@ from weiss_rl.eval.policy_set import (
 )
 from weiss_rl.league.opponent_pool import OpponentPoolSampler, sample_opponent_snapshot_ids
 from weiss_rl.league.outcomes import OnlineOutcomeTracker
-from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotRegistry
+from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotMeta, SnapshotRegistry
 from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.masking import (
     masked_logp_from_mask,
@@ -50,6 +50,7 @@ from weiss_rl.masking import (
     sample_actions_from_mask,
 )
 from weiss_rl.model import PolicyValueModel, build_policy_value_model
+from weiss_rl.residual_policy import LiveFrozenB1Residual, load_frozen_stored_logit_residual
 from weiss_rl.schedules import linear_anneal_value
 from weiss_rl.termination_reason import classify_episode_end_reason
 
@@ -60,9 +61,16 @@ _FIXED_OPPONENT_EXCLUSIONS = frozenset({"b1_noleague_baseline"})
 _PFSP_TIMEOUT_FILTER_MIN_SAMPLES = 32
 _PROMOTION_GATED_RECENT_RESERVOIR_MIN_SIZE = 2
 _PFSP_DIVERSITY_FLOOR_SIZE = 2
-_PUBLIC_TEACHER_DECISION_KINDS = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
+_PUBLIC_TEACHER_DECISION_KINDS = frozenset({0, 1, 2, 3, 4, 5, 6, 7, 8})
 _DEFAULT_ACTION_META_WIDTH = 4
 _HEURISTIC_PUBLIC_VARIANT_POLICY_IDS = heuristic_public_policy_ids(include_base=False)
+
+
+def _snapshot_meta_is_seed_import(snapshot: SnapshotMeta | None, *, policy_id: str) -> bool:
+    if snapshot is not None and str(getattr(snapshot, "source_kind", "")).strip() == "seed_import":
+        return True
+    # Older registries did not persist source_kind; imported pool ids already carry a stable seed_ prefix.
+    return str(policy_id).startswith("seed_")
 
 
 def _configure_runtime_actor_torch_threads(actor_torch_threads: int) -> None:
@@ -166,6 +174,7 @@ class RuntimeUnroll:
     final_hidden_state: np.ndarray
     episode_seed: np.ndarray
     policy_train_mask: np.ndarray
+    b1_opponent_mask: np.ndarray
     teacher_family: np.ndarray | None = None
     teacher_slot: np.ndarray | None = None
     teacher_move_source: np.ndarray | None = None
@@ -202,6 +211,7 @@ class _SharedCollectorSlot:
     final_hidden_state: np.ndarray
     episode_seed: np.ndarray
     policy_train_mask: np.ndarray
+    b1_opponent_mask: np.ndarray
     teacher_family: np.ndarray
     teacher_slot: np.ndarray
     teacher_move_source: np.ndarray
@@ -328,6 +338,10 @@ class _SharedPendingUnroll:
         return self.slot.policy_train_mask
 
     @property
+    def b1_opponent_mask(self) -> np.ndarray:
+        return self.slot.b1_opponent_mask
+
+    @property
     def teacher_family(self) -> np.ndarray | None:
         return self.slot.teacher_family if self.has_teacher_labels else None
 
@@ -441,7 +455,18 @@ def _collector_counter_template() -> dict[str, int]:
         "pfsp_champion_envs": 0,
         "pfsp_recent_envs": 0,
         "pfsp_hard_negative_envs": 0,
+        "pfsp_residual_opponent_envs": 0,
         "pfsp_warmup_snapshot_envs": 0,
+        "b1_opponent_env_steps": 0,
+        "b1_opponent_train_rows": 0,
+        "native_rollout_profile_base_unrolls": 0,
+        "native_rollout_profile_aggressive_unrolls": 0,
+        "native_rollout_profile_control_unrolls": 0,
+        "actor_model_rows": 0,
+        "actor_heuristic_rows": 0,
+        "policy_train_model_rows": 0,
+        "policy_train_heuristic_rows": 0,
+        "policy_excluded_heuristic_rows": 0,
         "copied_bytes_estimate": 0,
         "collect_actor_unroll_ms": 0,
         "actor_policy_forward_ms": 0,
@@ -641,6 +666,15 @@ def _handle_collector_commands(
                 actor_id=getattr(actor, "actor_id", -1),
                 message="command refresh_opponent_pool done",
             )
+            continue
+        if kind == "set_league_eval_warmup_gate":
+            runtime._league_eval_warmup_gate_open = bool(command.get("open", True))
+            _process_debug_log(
+                run_dir=getattr(runtime, "_run_dir", None),
+                actor_id=getattr(actor, "actor_id", -1),
+                message=f"command set_league_eval_warmup_gate open={runtime._league_eval_warmup_gate_open}",
+            )
+            runtime.refresh_opponent_pool()
             continue
         if kind == "set_fixed_opponents":
             restore_defaults = bool(command.get("restore_defaults", False))
@@ -941,6 +975,13 @@ def _create_shared_collector_slot_config(
             shape=(int(unroll_length), int(envs_per_actor)),
             dtype=np.dtype(np.bool_),
         ),
+        "b1_opponent_mask": _shared_segment_spec(
+            actor_id=actor_id,
+            slot_id=slot_id,
+            name="b1_opponent_mask",
+            shape=(int(unroll_length), int(envs_per_actor)),
+            dtype=np.dtype(np.bool_),
+        ),
         "teacher_family": _shared_segment_spec(
             actor_id=actor_id,
             slot_id=slot_id,
@@ -1047,6 +1088,7 @@ def _open_shared_collector_slot(config: dict[str, Any], *, create: bool = False)
         final_hidden_state=arrays["final_hidden_state"],
         episode_seed=arrays["episode_seed"],
         policy_train_mask=arrays["policy_train_mask"],
+        b1_opponent_mask=arrays["b1_opponent_mask"],
         teacher_family=arrays["teacher_family"],
         teacher_slot=arrays["teacher_slot"],
         teacher_move_source=arrays["teacher_move_source"],
@@ -1093,6 +1135,27 @@ def _shared_unroll_metadata(unroll: RuntimeUnroll, *, slot_id: int | None = None
     return metadata
 
 
+def _shared_pending_unroll_metadata(unroll: _SharedPendingUnroll) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "kind": "shared_unroll_v1",
+        "actor_id": int(unroll.actor_id),
+        "slot_id": int(unroll.slot_id),
+        "unroll_seq": int(unroll.unroll_seq),
+        "behavior_policy_version": int(unroll.behavior_policy_version),
+        "unroll_hash": str(unroll.unroll_hash),
+        "action_space": None if unroll.action_space is None else int(unroll.action_space),
+        "legal_kind": str(unroll.legal_kind),
+        "legal_ids_size": int(unroll.legal_ids_size),
+        "has_legal_action_meta": bool(unroll.has_legal_action_meta),
+        "has_teacher_labels": bool(unroll.has_teacher_labels),
+        "has_teacher_move_source_label": bool(unroll.has_teacher_move_source_label),
+        "has_teacher_action_label": bool(unroll.has_teacher_action_label),
+    }
+    if unroll.counters:
+        metadata["counters"] = {str(key): int(value) for key, value in unroll.counters.items()}
+    return metadata
+
+
 def _write_unroll_to_shared_slot(slot: _SharedCollectorSlot, unroll: RuntimeUnroll) -> None:
     slot.obs[...] = unroll.obs
     slot.actions[...] = unroll.actions
@@ -1109,6 +1172,7 @@ def _write_unroll_to_shared_slot(slot: _SharedCollectorSlot, unroll: RuntimeUnro
     slot.final_hidden_state[...] = unroll.final_hidden_state
     slot.episode_seed[...] = unroll.episode_seed
     slot.policy_train_mask[...] = unroll.policy_train_mask
+    slot.b1_opponent_mask[...] = unroll.b1_opponent_mask
     if (
         unroll.teacher_family is None
         or unroll.teacher_slot is None
@@ -1193,6 +1257,7 @@ def _read_unroll_from_shared_slot(slot: _SharedCollectorSlot, metadata: dict[str
         final_hidden_state=np.array(slot.final_hidden_state, copy=True),
         episode_seed=np.array(slot.episode_seed, copy=True),
         policy_train_mask=np.array(slot.policy_train_mask, copy=True),
+        b1_opponent_mask=np.array(slot.b1_opponent_mask, copy=True),
         teacher_family=(
             np.array(slot.teacher_family, copy=True) if bool(metadata.get("has_teacher_labels", False)) else None
         ),
@@ -1240,6 +1305,7 @@ def _collector_process_main(
     free_queue: Any | None,
     result_queue: Any,
     shared_slot_configs: list[dict[str, Any]] | None,
+    initial_learner_update: int = 0,
 ) -> None:
     system_config = stack.config.system
     stack_for_child = stack
@@ -1314,6 +1380,7 @@ def _collector_process_main(
         performance_log_path=None,
         defer_initial_opponent_pool_refresh=True,
         learner_device=(None if learner_device_name is None else learner_device_name),
+        initial_learner_update=int(initial_learner_update),
     )
     _process_debug_log(
         run_dir=(None if run_dir is None else Path(run_dir)),
@@ -1324,6 +1391,15 @@ def _collector_process_main(
         runtime._actors[0].env.close()
         runtime._actors[0] = runtime._build_actor_state(model=model, actor_id=int(actor_id))
     actor = runtime._actors[0]
+    runtime.refresh_opponent_pool()
+    _process_debug_log(
+        run_dir=(None if run_dir is None else Path(run_dir)),
+        actor_id=int(actor_id),
+        message=(
+            "collector initial refresh_opponent_pool done "
+            f"opponent_models={sorted(getattr(runtime, '_opponent_models', {}).keys())}"
+        ),
+    )
     _process_debug_log(
         run_dir=(None if run_dir is None else Path(run_dir)), actor_id=int(actor_id), message="collector actor ready"
     )
@@ -1418,6 +1494,7 @@ class QueueRuntime:
         performance_log_path: Path | None = None,
         defer_initial_opponent_pool_refresh: bool = False,
         learner_device: torch.device | str | None = None,
+        initial_learner_update: int = 0,
     ) -> None:
         if config.actor_count < 1:
             raise ValueError("actor_count must be >= 1")
@@ -1530,16 +1607,42 @@ class QueueRuntime:
         requested_diverse_actor_count = (
             0 if training_config is None else int(getattr(training_config, "diverse_opponent_actor_count", 0))
         )
-        if requested_diverse_actor_count < 0:
-            raise ValueError("training.diverse_opponent_actor_count must be >= 0")
-        self._diverse_opponent_actor_count = min(int(self.config.actor_count), requested_diverse_actor_count)
+        if requested_diverse_actor_count < -1:
+            raise ValueError("training.diverse_opponent_actor_count must be >= -1")
+        # Process collectors run a child QueueRuntime with actor_count=1 while keeping the
+        # global actor_id. Clamping to the child actor_count would make only actor 0 eligible.
+        self._diverse_opponent_actor_count = int(requested_diverse_actor_count)
         requested_diverse_model_actor_count = (
             0 if training_config is None else int(getattr(training_config, "diverse_model_actor_count", 0))
         )
         if requested_diverse_model_actor_count < 0:
             raise ValueError("training.diverse_model_actor_count must be >= 0")
-        self._diverse_model_actor_count = min(
-            int(self._diverse_opponent_actor_count), requested_diverse_model_actor_count
+        self._diverse_model_actor_count = (
+            int(requested_diverse_model_actor_count)
+            if int(self._diverse_opponent_actor_count) < 0
+            else min(int(self._diverse_opponent_actor_count), int(requested_diverse_model_actor_count))
+        )
+        self._diverse_opponent_policy_id = (
+            "" if training_config is None else str(getattr(training_config, "diverse_opponent_policy_id", "")).strip()
+        )
+        configured_diverse_policy_ids = (
+            ()
+            if training_config is None
+            else tuple(
+                str(policy_id).strip()
+                for policy_id in getattr(training_config, "diverse_opponent_policy_ids", ())
+                if str(policy_id).strip()
+            )
+        )
+        self._diverse_opponent_policy_ids = (
+            configured_diverse_policy_ids
+            if configured_diverse_policy_ids
+            else ((self._diverse_opponent_policy_id,) if self._diverse_opponent_policy_id else ())
+        )
+        self._residual_opponent_policy_specs = (
+            ()
+            if training_config is None
+            else tuple(getattr(training_config, "residual_opponent_policies", ()) or ())
         )
         self._diverse_opponent_batch_fraction = (
             0.0 if training_config is None else float(getattr(training_config, "diverse_opponent_batch_fraction", 0.0))
@@ -1556,6 +1659,36 @@ class QueueRuntime:
             if training_config is None
             else bool(getattr(training_config, "heuristic_native_rollout_enabled", False))
         )
+        self._heuristic_native_rollout_profile = (
+            "base"
+            if training_config is None
+            else str(getattr(training_config, "heuristic_native_rollout_profile", "base")).strip().lower()
+        )
+        if self._heuristic_native_rollout_profile not in {"base", "aggressive", "control"}:
+            raise ValueError("training.heuristic_native_rollout_profile must be one of: base, aggressive, control")
+        self._heuristic_native_rollout_profiles = (
+            ()
+            if training_config is None
+            else tuple(
+                str(profile).strip().lower()
+                for profile in getattr(training_config, "heuristic_native_rollout_profiles", ())
+                if str(profile).strip()
+            )
+        )
+        invalid_native_profiles = sorted(
+            set(self._heuristic_native_rollout_profiles) - {"base", "aggressive", "control"}
+        )
+        if invalid_native_profiles:
+            raise ValueError(
+                "training.heuristic_native_rollout_profiles must contain only: base, aggressive, control"
+            )
+        self._heuristic_native_rollout_profile_mode = (
+            "fixed"
+            if training_config is None
+            else str(getattr(training_config, "heuristic_native_rollout_profile_mode", "fixed")).strip().lower()
+        )
+        if self._heuristic_native_rollout_profile_mode not in {"fixed", "cycle", "random"}:
+            raise ValueError("training.heuristic_native_rollout_profile_mode must be one of: fixed, cycle, random")
         self._heuristic_actor_hidden_state_tracking = (
             True
             if training_config is None
@@ -1569,11 +1702,24 @@ class QueueRuntime:
         self._teacher_action_catalog: ActionCatalog | None = None
         self._teacher_family_index: dict[str, int] = {}
         self._teacher_attack_type_index: dict[str, int] = {}
+        self._teacher_public_heuristic_label_profile = "base"
+        if training_config is not None:
+            self._teacher_public_heuristic_label_profile = str(
+                getattr(training_config, "teacher_public_heuristic_label_profile", "base")
+            ).strip().lower()
+        if self._teacher_public_heuristic_label_profile not in {"base", "aggressive", "control"}:
+            raise ValueError(
+                "training.structured_aux.teacher_public_heuristic_label_profile must be one of: "
+                "base, aggressive, control"
+            )
         if self._teacher_guidance_enabled:
             if self._spec_bundle is None:
                 raise RuntimeError("structured_aux.enabled requires the runtime spec bundle")
             try:
-                self._teacher_policy = HeuristicPublicPolicy.from_spec_bundle(self._spec_bundle)
+                self._teacher_policy = HeuristicPublicPolicy.from_spec_bundle(
+                    self._spec_bundle,
+                    scoring_profile=self._teacher_public_heuristic_label_profile,
+                )
                 self._teacher_action_catalog = ActionCatalog.from_spec_bundle(self._spec_bundle)
             except Exception as exc:
                 raise RuntimeError(
@@ -1588,20 +1734,25 @@ class QueueRuntime:
         if self._actor_policy_backend == "heuristic_public" and self._teacher_policy is None:
             if self._spec_bundle is None:
                 raise RuntimeError("training.actor_policy_backend=heuristic_public requires the runtime spec bundle")
-            self._teacher_policy = HeuristicPublicPolicy.from_spec_bundle(self._spec_bundle)
+            self._teacher_policy = HeuristicPublicPolicy.from_spec_bundle(
+                self._spec_bundle,
+                scoring_profile=self._teacher_public_heuristic_label_profile,
+            )
         self._opponent_sampler: OpponentPoolSampler | None = None
         self._opponent_candidate_ids: tuple[str, ...] = ()
         self._outcomes = OnlineOutcomeTracker(
             window_size=(50_000 if self._league_config is None else int(self._league_config.pfsp_window_episodes))
         )
         self._pfsp_epoch = int(self._outcomes.current_epoch)
-        self._current_learner_update = 0
-        self._effective_learner_update = 0
+        self._current_learner_update = max(0, int(initial_learner_update))
+        self._effective_learner_update = max(0, int(initial_learner_update))
+        self._league_eval_warmup_gate_open = not self._league_eval_warmup_gate_enabled()
         self._published_snapshot_update_by_fingerprint: dict[str, int] = {}
         self._pfsp_pool_size = 0
         self._pfsp_quarantined_opponents = 0
         self._pfsp_champion_pool_size = 0
         self._pfsp_recent_pool_size = 0
+        self._pfsp_warmup_snapshot_pool_size = 0
         self._pfsp_hard_negative_pool_size = 0
         self._pfsp_last_sampled_envs = 0
         self._pfsp_last_mirror_envs = 0
@@ -1615,9 +1766,17 @@ class QueueRuntime:
         self._disable_mirror_policy_fusion = False
         self._opponent_champion_ids: tuple[str, ...] = ()
         self._opponent_recent_ids: tuple[str, ...] = ()
+        self._opponent_warmup_snapshot_ids: tuple[str, ...] = ()
         self._opponent_hard_negative_ids: tuple[str, ...] = ()
+        self._pfsp_last_residual_opponent_envs = 0
         heuristic_public_mix_fraction = 0.0
         heuristic_public_variant_mix_fraction = 0.0
+        diverse_opponent_policy_id = str(getattr(self, "_diverse_opponent_policy_id", "")).strip()
+        diverse_opponent_policy_ids = tuple(
+            str(policy_id).strip()
+            for policy_id in getattr(self, "_diverse_opponent_policy_ids", ())
+            if str(policy_id).strip()
+        )
         if self._league_config is not None:
             sampling_cfg = getattr(self._league_config, "sampling", self._league_config)
             heuristic_public_mix_fraction = float(getattr(sampling_cfg, "heuristic_public_mix_fraction", 0.0))
@@ -1631,8 +1790,11 @@ class QueueRuntime:
                     )
                 ),
             )
+        if any(policy_id in _HEURISTIC_PUBLIC_VARIANT_POLICY_IDS for policy_id in diverse_opponent_policy_ids):
+            heuristic_public_variant_mix_fraction = max(heuristic_public_variant_mix_fraction, 1.0)
         base_heuristic_required = bool(
             heuristic_public_mix_fraction > 0.0
+            or any(policy_id == HEURISTIC_PUBLIC_POLICY_ID for policy_id in diverse_opponent_policy_ids)
             or (
                 int(getattr(self, "_diverse_opponent_actor_count", 0)) > 0
                 and int(getattr(self, "_diverse_opponent_actor_count", 0)) < int(self.config.actor_count)
@@ -1784,6 +1946,7 @@ class QueueRuntime:
             if self._use_process_collectors
             else None
         )
+        self._preload_configured_residual_opponents()
         self._actors = (
             []
             if self._use_process_collectors
@@ -1803,7 +1966,7 @@ class QueueRuntime:
         )
         if self._collector_executor is not None and stack.config.system is not None:
             _configure_runtime_actor_torch_threads(int(stack.config.system.actor_torch_threads))
-        self._last_published_snapshot_version = 0
+        self._last_published_snapshot_version = max(0, int(initial_learner_update))
         self._performance_logger = None if performance_log_path is None else PerformanceLogger(performance_log_path)
         if self._performance_logger is not None:
             self._performance_logger.log(
@@ -1836,6 +1999,7 @@ class QueueRuntime:
         self._runtime_start = time.time()
         self._runtime_last_metrics_time = self._runtime_start
         self._runtime_cumulative_env_steps = 0
+        self._collection_started = False
         if self._use_process_collectors:
             self._start_process_collectors(model)
             self.refresh_opponent_pool()
@@ -2135,15 +2299,23 @@ class QueueRuntime:
         if not self._league_enabled or self._registry_path is None or not self._registry_path.is_file():
             self._opponent_sampler = None
             self._opponent_candidate_ids = ()
-            self._opponent_models = {}
-            self._opponent_model_locks = {}
+            models: dict[str, PolicyValueModel] = {}
+            for spec in getattr(self, "_residual_opponent_policy_specs", ()):
+                policy_id = str(getattr(spec, "policy_id", "")).strip()
+                if not policy_id:
+                    continue
+                models[policy_id] = self._load_residual_opponent_model(spec)
+            self._opponent_models = models
+            self._opponent_model_locks = {policy_id: threading.Lock() for policy_id in models}
             self._pfsp_pool_size = 0
             self._pfsp_quarantined_opponents = 0
             self._pfsp_champion_pool_size = 0
             self._pfsp_recent_pool_size = 0
+            self._pfsp_warmup_snapshot_pool_size = 0
             self._pfsp_hard_negative_pool_size = 0
             self._opponent_champion_ids = ()
             self._opponent_recent_ids = ()
+            self._opponent_warmup_snapshot_ids = ()
             self._opponent_hard_negative_ids = ()
             if getattr(self, "_collector_result_queue", None) is not None:
                 for control_queue in getattr(self, "_collector_control_queues", ()):
@@ -2160,11 +2332,13 @@ class QueueRuntime:
                 current_update=current_update,
                 max_age_updates=max_age_updates,
             )
+        snapshots_by_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
         admitted_champion_ids = tuple(
-            registry.latest_champions(
+            registry.latest_active_champion_ids(
                 int(self._league_config.snapshot_pool_champion_size),
                 current_update=current_update,
                 max_age_updates=max_age_updates,
+                exclude_policy_ids=_FIXED_OPPONENT_EXCLUSIONS,
             )
         )
         recent_size = int(self._league_config.snapshot_pool_recent_size)
@@ -2186,11 +2360,31 @@ class QueueRuntime:
             eps_uniform=float(self._league_config.pfsp_epsilon_uniform),
         )
         self._opponent_sampler = sampler
-        champion_ids = tuple(
-            policy_id for policy_id in admitted_champion_ids if policy_id not in _FIXED_OPPONENT_EXCLUSIONS
+        champion_ids = tuple(admitted_champion_ids)
+        seed_history_query_size = max(
+            int(self._league_config.snapshot_pool_recent_size),
+            int(getattr(pool_cfg, "recent_size", self._league_config.snapshot_pool_recent_size)),
+            int(self._league_config.snapshot_pool_champion_size),
         )
+        warmup_snapshot_ids = (
+            ()
+            if self._exclude_seed_import_snapshots_from_pfsp_active(current_update=current_update)
+            else tuple(
+                registry.latest_seed_history_ids(
+                    seed_history_query_size,
+                    exclude_rejected=bool(self._league_config.promotion_gate_enabled),
+                    exclude_policy_ids=_FIXED_OPPONENT_EXCLUSIONS,
+                )
+            )
+        )
+        rejected_ids = set(getattr(registry, "rejected_snapshots", ())) if bool(self._league_config.promotion_gate_enabled) else set()
         recent_ids = tuple(
-            policy_id for policy_id in registry.latest_ids(recent_size) if policy_id not in _FIXED_OPPONENT_EXCLUSIONS
+            registry.latest_local_candidate_ids(
+                int(recent_size),
+                include_league_import=True,
+                exclude_rejected=bool(self._league_config.promotion_gate_enabled),
+                exclude_policy_ids=tuple(dict.fromkeys([*_FIXED_OPPONENT_EXCLUSIONS, *champion_ids])),
+            )
         )
         candidate_ids = tuple(dict.fromkeys([*champion_ids, *recent_ids]))
         filtered_candidate_ids = self._filter_timeout_heavy_opponents(candidate_ids)
@@ -2205,26 +2399,33 @@ class QueueRuntime:
             policy_id for policy_id in champion_ids if policy_id in candidate_ids and policy_id not in hard_negative_set
         )
         champion_set = set(champion_ids)
-        recent_ids = tuple(
+        eligible_recent_ids = tuple(
             policy_id
             for policy_id in recent_ids
-            if policy_id in candidate_ids and policy_id not in hard_negative_set and policy_id not in champion_set
+            if policy_id in candidate_ids and policy_id not in hard_negative_set
         )
+        non_champion_recent_ids = tuple(policy_id for policy_id in eligible_recent_ids if policy_id not in champion_set)
+        if int(recent_size) <= 0:
+            recent_ids = ()
+        else:
+            recent_ids = non_champion_recent_ids[-int(recent_size) :]
         candidate_ids = tuple(dict.fromkeys([*hard_negative_ids, *champion_ids, *recent_ids]))
         self._opponent_candidate_ids = candidate_ids
         self._pfsp_pool_size = len(candidate_ids)
         self._opponent_champion_ids = champion_ids
         self._opponent_recent_ids = recent_ids
+        self._opponent_warmup_snapshot_ids = warmup_snapshot_ids
         self._opponent_hard_negative_ids = hard_negative_ids
         self._pfsp_champion_pool_size = len(champion_ids)
         self._pfsp_recent_pool_size = len(recent_ids)
+        self._pfsp_warmup_snapshot_pool_size = len(warmup_snapshot_ids)
         self._pfsp_hard_negative_pool_size = len(hard_negative_ids)
         models: dict[str, PolicyValueModel] = {}
-        snapshots_by_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
         resident_policy_ids = tuple(
             dict.fromkeys(
                 [
                     *candidate_ids,
+                    *warmup_snapshot_ids,
                     *self._active_assigned_opponent_policy_ids(),
                     *self._configured_resident_opponent_policy_ids(),
                 ]
@@ -2235,13 +2436,59 @@ class QueueRuntime:
             if snapshot is None:
                 continue
             models[policy_id] = self._load_snapshot_model(snapshot.path)
+        for spec in getattr(self, "_residual_opponent_policy_specs", ()):
+            policy_id = str(getattr(spec, "policy_id", "")).strip()
+            if not policy_id:
+                continue
+            models[policy_id] = self._load_residual_opponent_model(spec)
         self._opponent_models = models
         self._opponent_model_locks = {policy_id: threading.Lock() for policy_id in models}
+        self._maybe_reassign_initial_opponents_after_pool_refresh()
         if stale_demoted:
             registry.save(self._registry_path)
         if getattr(self, "_collector_result_queue", None) is not None:
             for control_queue in getattr(self, "_collector_control_queues", ()):
                 control_queue.put({"kind": "refresh_opponent_pool"})
+
+    def _maybe_reassign_initial_opponents_after_pool_refresh(self) -> None:
+        if bool(getattr(self, "_collection_started", False)):
+            return
+        actors = tuple(getattr(self, "_actors", ()))
+        if not actors:
+            return
+        groups, _weights = self._opponent_sampling_groups()
+        has_non_mirror_group = any(group_name != "mirror" for group_name, _group_ids, _weight in groups)
+        if not has_non_mirror_group:
+            for actor in actors:
+                _process_debug_log(
+                    run_dir=getattr(self, "_run_dir", None),
+                    actor_id=getattr(actor, "actor_id", -1),
+                    message=(
+                        "initial role reassign skipped no non-mirror groups "
+                        f"groups={[group_name for group_name, _ids, _weight in groups]} "
+                        f"models={sorted(getattr(self, '_opponent_models', {}).keys())}"
+                    ),
+                )
+            return
+        for actor in actors:
+            current_policy_ids = np.asarray(getattr(actor, "opponent_policy_id_by_env", ()), dtype=object)
+            if current_policy_ids.size == 0:
+                continue
+            previous_unique = sorted({str(policy_id) for policy_id in current_policy_ids.tolist()})
+            self._assign_episode_roles(
+                actor,
+                np.ones_like(actor.focal_seat_by_env, dtype=np.bool_),
+                initial=True,
+            )
+            _process_debug_log(
+                run_dir=getattr(self, "_run_dir", None),
+                actor_id=getattr(actor, "actor_id", -1),
+                message=(
+                    "initial role reassign applied "
+                    f"previous_unique={previous_unique} "
+                    f"unique={sorted({str(policy_id) for policy_id in actor.opponent_policy_id_by_env.tolist()})}"
+                ),
+            )
 
     def _active_assigned_opponent_policy_ids(self) -> tuple[str, ...]:
         if not hasattr(self, "_actors"):
@@ -2269,6 +2516,15 @@ class QueueRuntime:
             policy_ids.append(_NOLEAGUE_BASELINE_POLICY_ID)
         return tuple(dict.fromkeys(policy_ids))
 
+    def _configured_residual_opponent_policy_ids(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                str(getattr(spec, "policy_id", "")).strip()
+                for spec in getattr(self, "_residual_opponent_policy_specs", ())
+                if str(getattr(spec, "policy_id", "")).strip()
+            )
+        )
+
     def _configured_resident_opponent_policy_ids(self) -> tuple[str, ...]:
         policy_ids = list(self._configured_fixed_opponent_policy_ids())
         heuristic_variant_mix_fraction = self._active_heuristic_public_variant_mix_fraction()
@@ -2281,6 +2537,7 @@ class QueueRuntime:
         noleague_mix_fraction = self._active_noleague_baseline_mix_fraction()
         if noleague_mix_fraction > 0.0:
             policy_ids.append(_NOLEAGUE_BASELINE_POLICY_ID)
+        policy_ids.extend(self._configured_residual_opponent_policy_ids())
         return tuple(dict.fromkeys(policy_ids))
 
     def _active_noleague_baseline_mix_fraction(self) -> float:
@@ -2297,6 +2554,43 @@ class QueueRuntime:
         if mix_end_updates >= 0 and self._league_reference_update() >= mix_end_updates:
             return 0.0
         return noleague_mix_fraction
+
+    def _noleague_baseline_reward_scale(self) -> float:
+        if self._league_config is None:
+            return 1.0
+        sampling_cfg = getattr(self._league_config, "sampling", self._league_config)
+        scale = float(getattr(sampling_cfg, "noleague_baseline_reward_scale", 1.0))
+        if not np.isfinite(scale) or scale < 0.0:
+            return 1.0
+        return scale
+
+    def _noleague_baseline_force_focal_seat(self) -> int:
+        if self._league_config is None:
+            return -1
+        sampling_cfg = getattr(self._league_config, "sampling", self._league_config)
+        seat = int(getattr(sampling_cfg, "noleague_baseline_force_focal_seat", -1))
+        return seat if seat in (0, 1) else -1
+
+    def _apply_opponent_reward_scale(self, actor: _ActorState, rewards: np.ndarray) -> np.ndarray:
+        scale = self._noleague_baseline_reward_scale()
+        if scale == 1.0:
+            return rewards
+        policy_ids = getattr(actor, "opponent_policy_id_by_env", None)
+        if policy_ids is None:
+            return rewards
+        mask = np.asarray(policy_ids, dtype=object) == _NOLEAGUE_BASELINE_POLICY_ID
+        if not np.any(mask):
+            return rewards
+        shaped = np.asarray(rewards, dtype=np.float32).copy()
+        shaped[mask] *= scale
+        return shaped
+
+    def _b1_opponent_mask_for_actor(self, actor: _ActorState) -> np.ndarray:
+        policy_ids = getattr(actor, "opponent_policy_id_by_env", None)
+        env_count = int(getattr(getattr(self, "config", None), "envs_per_actor", 0))
+        if policy_ids is None:
+            return np.zeros((env_count,), dtype=np.bool_)
+        return np.asarray(policy_ids, dtype=object) == _NOLEAGUE_BASELINE_POLICY_ID
 
     def _active_heuristic_public_mix_fraction(self) -> float:
         if self._league_config is None:
@@ -2354,9 +2648,15 @@ class QueueRuntime:
         )
         if warmup_fraction <= 0.0:
             return 0.0
-        if self._league_reference_update() >= int(self._league_config.warmup.first_updates):
+        if (
+            self._league_reference_update() >= int(self._league_config.warmup.first_updates)
+            and not self._league_eval_warmup_gate_blocks_pfsp()
+        ):
             return 0.0
-        if not self._opponent_candidate_ids or not self._opponent_models:
+        warmup_snapshot_ids = tuple(
+            getattr(self, "_opponent_warmup_snapshot_ids", getattr(self, "_opponent_candidate_ids", ()))
+        )
+        if not warmup_snapshot_ids or not self._opponent_models:
             return 0.0
         return warmup_fraction
 
@@ -2425,11 +2725,42 @@ class QueueRuntime:
         self._pfsp_epoch = int(self._outcomes.bump_epoch(drop_previous=True))
         self._pfsp_quarantined_opponents = 0
 
+    def set_league_eval_warmup_gate(self, *, open: bool) -> None:
+        self._league_eval_warmup_gate_open = bool(open)
+        if self._collector_result_queue is not None:
+            for control_queue in self._collector_control_queues:
+                control_queue.put({"kind": "set_league_eval_warmup_gate", "open": bool(open)})
+        self.refresh_opponent_pool()
+
+    def _league_eval_warmup_gate_enabled(self) -> bool:
+        if self._league_config is None:
+            return False
+        warmup_cfg = getattr(self._league_config, "warmup", None)
+        return bool(getattr(warmup_cfg, "eval_gate_enabled", False))
+
+    def _league_eval_warmup_gate_blocks_pfsp(self) -> bool:
+        return self._league_eval_warmup_gate_enabled() and not bool(
+            getattr(self, "_league_eval_warmup_gate_open", False)
+        )
+
     def _league_reference_update(self) -> int:
         effective_update = int(getattr(self, "_effective_learner_update", 0))
         if effective_update > 0:
             return effective_update
         return int(getattr(self, "_current_learner_update", 0))
+
+    def _exclude_seed_import_snapshots_from_pfsp_active(self, *, current_update: int | None = None) -> bool:
+        if self._league_config is None:
+            return False
+        sampling_cfg = getattr(self._league_config, "sampling", self._league_config)
+        if not bool(getattr(sampling_cfg, "exclude_seed_snapshots_from_pfsp", False)):
+            return False
+        warmup_cfg = getattr(self._league_config, "warmup", None)
+        warmup_updates = int(getattr(warmup_cfg, "first_updates", getattr(self._league_config, "warmup_first_updates", 0)))
+        reference_update = self._league_reference_update() if current_update is None else int(current_update)
+        if reference_update < warmup_updates:
+            return False
+        return not self._league_eval_warmup_gate_blocks_pfsp()
 
     def _promotion_gated_recent_reservoir_size(
         self,
@@ -2518,6 +2849,7 @@ class QueueRuntime:
         gamma: float,
         truncation_reward: float,
         truncation_bootstrap_value: bool,
+        pass_with_nonpass_penalty: float = 0.0,
         vtrace_rho_bar: float,
         vtrace_c_bar: float,
     ) -> RuntimeBatch:
@@ -2544,6 +2876,7 @@ class QueueRuntime:
                 gamma=gamma,
                 truncation_reward=truncation_reward,
                 truncation_bootstrap_value=truncation_bootstrap_value,
+                pass_with_nonpass_penalty=pass_with_nonpass_penalty,
                 vtrace_rho_bar=vtrace_rho_bar,
                 vtrace_c_bar=vtrace_c_bar,
             )
@@ -2574,6 +2907,7 @@ class QueueRuntime:
         gae_lambda: float,
         truncation_reward: float,
         truncation_bootstrap_value: bool,
+        pass_with_nonpass_penalty: float = 0.0,
     ) -> RuntimeBatch:
         batch_started = time.perf_counter()
         self._reset_batch_timer_metrics()
@@ -2599,6 +2933,7 @@ class QueueRuntime:
                 gae_lambda=gae_lambda,
                 truncation_reward=truncation_reward,
                 truncation_bootstrap_value=truncation_bootstrap_value,
+                pass_with_nonpass_penalty=pass_with_nonpass_penalty,
             )
             self._record_batch_timer_ms("build_ppo_batch", time.perf_counter() - build_started)
             runtime_metrics = self._runtime_metrics(selected, occupancy_samples=occupancy_samples)
@@ -2679,6 +3014,32 @@ class QueueRuntime:
             return 0
         return int(sum(len(slots) for slots in self._collector_shared_slots.values()))
 
+    def _pending_shared_unroll_count(self, *, actor_id: int | None = None) -> int:
+        return int(
+            sum(
+                1
+                for item in self._pending_unrolls
+                if isinstance(item, _SharedPendingUnroll)
+                and (actor_id is None or int(item.actor_id) == int(actor_id))
+            )
+        )
+
+    def _spill_shared_pending_unroll(self, *, actor_id: int | None = None) -> bool:
+        if not self._use_shared_collector_transport:
+            return False
+        for index, item in enumerate(self._pending_unrolls):
+            if not isinstance(item, _SharedPendingUnroll):
+                continue
+            if actor_id is not None and int(item.actor_id) != int(actor_id):
+                continue
+            spill_started = time.perf_counter()
+            copied = _read_unroll_from_shared_slot(item.slot, _shared_pending_unroll_metadata(item))
+            self._pending_unrolls[index] = copied
+            self._collector_free_queues[int(item.actor_id)].put(int(item.slot_id))
+            self._record_batch_timer_ms("shared_overflow_spill", time.perf_counter() - spill_started)
+            return True
+        return False
+
     def _next_actor_batch(self, count: int) -> list[_ActorState]:
         if count <= 0:
             return []
@@ -2692,12 +3053,17 @@ class QueueRuntime:
 
     def _fill_pending_unrolls(self, *, target_count: int, occupancy_samples: list[float]) -> None:
         if self._collector_result_queue is not None:
-            eager_spill_shared_slots = self._use_shared_collector_transport and int(target_count) > max(
-                1, self._shared_collector_slot_capacity()
-            )
+            shared_slot_capacity = max(1, self._shared_collector_slot_capacity())
             diverse_target = self._diverse_batch_target_count(int(target_count))
             wait_deadline: float | None = None
             while True:
+                if (
+                    self._use_shared_collector_transport
+                    and int(target_count) > shared_slot_capacity
+                    and self._pending_shared_unroll_count() >= shared_slot_capacity
+                ):
+                    if not self._spill_shared_pending_unroll():
+                        break
                 if len(self._pending_unrolls) >= int(target_count):
                     if diverse_target <= 0 or self._pending_diverse_unroll_count() >= diverse_target:
                         break
@@ -2710,24 +3076,23 @@ class QueueRuntime:
                 else:
                     queue_timeout = None
                 occupancy_samples.append(len(self._pending_unrolls) / float(self.config.queue_capacity_unrolls))
+                wait_started = time.perf_counter()
                 if queue_timeout is None:
                     payload = self._collector_result_queue.get()
                 else:
                     try:
                         payload = self._collector_result_queue.get(timeout=queue_timeout)
                     except queue.Empty:
+                        self._record_batch_timer_ms("collector_queue_wait", time.perf_counter() - wait_started)
                         break
+                self._record_batch_timer_ms("collector_queue_wait", time.perf_counter() - wait_started)
                 if (not self._use_shared_collector_transport) or isinstance(payload, RuntimeUnroll):
                     self._pending_unrolls.append(payload)
                     continue
                 actor_id = int(payload["actor_id"])
                 slot_id = int(payload.get("slot_id", 0))
                 slot = self._collector_shared_slots[actor_id][slot_id]
-                if eager_spill_shared_slots:
-                    self._pending_unrolls.append(_read_unroll_from_shared_slot(slot, payload))
-                    self._collector_free_queues[actor_id].put(slot_id)
-                else:
-                    self._pending_unrolls.append(_SharedPendingUnroll.from_metadata(slot, payload))
+                self._pending_unrolls.append(_SharedPendingUnroll.from_metadata(slot, payload))
             return
         if self._use_central_batched_collection:
             while len(self._pending_unrolls) < int(target_count):
@@ -2749,11 +3114,18 @@ class QueueRuntime:
                     self._pending_unrolls.append(self._collect_actor_unroll(actor))
                 continue
             futures = [self._collector_executor.submit(self._collect_actor_unroll, actor) for actor in actors]
+            wait_started = time.perf_counter()
             for future in futures:
                 self._pending_unrolls.append(future.result())
+            self._record_batch_timer_ms("collector_threadpool_wait", time.perf_counter() - wait_started)
 
     def _actor_id_is_diverse_lane(self, actor_id: int) -> bool:
-        return int(actor_id) < int(getattr(self, "_diverse_opponent_actor_count", 0))
+        count = int(getattr(self, "_diverse_opponent_actor_count", 0))
+        return True if count < 0 else int(actor_id) < count
+
+    def _actor_id_force_model_policy_lane(self, actor_id: int) -> bool:
+        count = int(getattr(self, "_diverse_model_actor_count", 0))
+        return True if count < 0 else int(actor_id) < count
 
     def _pending_unroll_is_diverse_lane(self, item: PendingUnroll) -> bool:
         return self._actor_id_is_diverse_lane(int(item.actor_id))
@@ -2764,7 +3136,7 @@ class QueueRuntime:
     def _diverse_batch_target_count(self, batch_size: int) -> int:
         if int(batch_size) <= 0:
             return 0
-        if int(getattr(self, "_diverse_opponent_actor_count", 0)) <= 0:
+        if int(getattr(self, "_diverse_opponent_actor_count", 0)) == 0:
             return 0
         fraction = max(0.0, min(1.0, float(getattr(self, "_diverse_opponent_batch_fraction", 0.0))))
         if fraction <= 0.0:
@@ -2844,6 +3216,7 @@ class QueueRuntime:
                     "shared_slot_configs": (
                         None if not self._use_shared_collector_transport else slot_configs[int(actor_id)]
                     ),
+                    "initial_learner_update": int(self._current_learner_update),
                 },
                 daemon=True,
             )
@@ -2882,9 +3255,10 @@ class QueueRuntime:
                 dtype=object,
             ),
             opponent_hidden=actor_model.initial_seat_hidden(self.config.envs_per_actor, device=self._device),
-            diverse_opponent_lane=(int(actor_id) < int(getattr(self, "_diverse_opponent_actor_count", 0))),
-            force_model_policy_lane=(int(actor_id) < int(getattr(self, "_diverse_model_actor_count", 0))),
+            diverse_opponent_lane=self._actor_id_is_diverse_lane(int(actor_id)),
+            force_model_policy_lane=self._actor_id_force_model_policy_lane(int(actor_id)),
             fixed_opponent_policy_id_by_env=self._fixed_opponent_policy_slots(),
+            snapshot_version=int(self._current_learner_update),
         )
         self._assign_episode_roles(state, np.ones((int(self.config.envs_per_actor),), dtype=np.bool_), initial=True)
         return state
@@ -2922,10 +3296,13 @@ class QueueRuntime:
     def _load_snapshot_model(self, snapshot_path: str) -> PolicyValueModel:
         if self._run_dir is None:
             raise RuntimeError("QueueRuntime cannot load opponent snapshots without a canonical run_dir")
-        payload = torch.load(self._run_dir / snapshot_path, map_location="cpu", weights_only=True)
+        return self._load_snapshot_model_from_path(self._run_dir / snapshot_path, display_path=snapshot_path)
+
+    def _load_snapshot_model_from_path(self, snapshot_path: Path, *, display_path: str | None = None) -> PolicyValueModel:
+        payload = torch.load(snapshot_path, map_location="cpu", weights_only=True)
         model_state_dict = payload.get("model_state_dict")
         if not isinstance(model_state_dict, dict):
-            raise RuntimeError(f"snapshot weights payload missing model_state_dict: {snapshot_path}")
+            raise RuntimeError(f"snapshot weights payload missing model_state_dict: {display_path or snapshot_path}")
         model_config = self.stack.config.model
         if model_config is None:
             raise RuntimeError("stack config is missing model config")
@@ -2937,8 +3314,55 @@ class QueueRuntime:
             spec_bundle=self._spec_bundle,
         ).to(self._device)
         model.load_state_dict(model_state_dict)
+        _restore_model_guidance_from_payload(model, payload)
         model.eval()
         return model
+
+    def _resolve_external_policy_path(self, path_text: str) -> Path:
+        raw = Path(str(path_text))
+        candidates: list[Path] = []
+        if raw.is_absolute():
+            candidates.append(raw)
+        else:
+            if self._run_dir is not None:
+                candidates.append(self._run_dir / raw)
+            candidates.append(Path.cwd() / raw)
+            candidates.append(raw)
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        raise FileNotFoundError(f"could not resolve residual opponent path {path_text!r}")
+
+    def _load_residual_opponent_model(self, spec: Any) -> LiveFrozenB1Residual:
+        base_path = self._resolve_external_policy_path(str(getattr(spec, "base_snapshot_path", "")))
+        residual_path = self._resolve_external_policy_path(str(getattr(spec, "residual_state_path", "")))
+        base_model = self._load_snapshot_model_from_path(base_path, display_path=str(base_path))
+        set_bias_scale = getattr(base_model, "set_public_heuristic_logit_bias_scale", None)
+        if callable(set_bias_scale):
+            bias_scale = float(getattr(spec, "public_heuristic_bias_scale", 1.0))
+            try:
+                set_bias_scale(bias_scale, actor_value=bias_scale)
+            except TypeError:
+                set_bias_scale(bias_scale, scoring_mode="learner")
+                set_bias_scale(bias_scale, scoring_mode="actor")
+        residual_probe = load_frozen_stored_logit_residual(residual_path, device=self._device)
+        model = LiveFrozenB1Residual(base_model=base_model, residual_probe=residual_probe).to(self._device)
+        model.eval()
+        return model
+
+    def _preload_configured_residual_opponents(self) -> None:
+        for spec in getattr(self, "_residual_opponent_policy_specs", ()):
+            policy_id = str(getattr(spec, "policy_id", "")).strip()
+            if not policy_id or policy_id in self._opponent_models:
+                continue
+            self._opponent_models[policy_id] = self._load_residual_opponent_model(spec)
+        self._opponent_model_locks.update(
+            {
+                policy_id: threading.Lock()
+                for policy_id in self._opponent_models
+                if policy_id not in self._opponent_model_locks
+            }
+        )
 
     def _assign_episode_roles(
         self,
@@ -2985,19 +3409,47 @@ class QueueRuntime:
 
         remaining_count = int(np.count_nonzero(remaining_mask))
         if bool(getattr(actor, "diverse_opponent_lane", True)):
-            use_snapshot_only_warmup_lane = (
-                remaining_count > 0
-                and bool(getattr(self, "_league_enabled", False))
-                and getattr(self, "_league_config", None) is not None
-                and not self._pfsp_sampling_ready()
-                and self._active_warmup_snapshot_mix_fraction() > 0.0
-                and bool(self._opponent_candidate_ids)
+            fixed_diverse_policy_ids = tuple(
+                str(policy_id).strip()
+                for policy_id in getattr(self, "_diverse_opponent_policy_ids", ())
+                if str(policy_id).strip()
             )
-            if use_snapshot_only_warmup_lane:
-                sampled_policy_ids = self._sample_warmup_snapshot_policy_ids(
-                    count=remaining_count,
-                    rng=actor.rng,
+            if fixed_diverse_policy_ids:
+                for fixed_diverse_policy_id in fixed_diverse_policy_ids:
+                    if (
+                        fixed_diverse_policy_id not in self._opponent_heuristic_policies
+                        and fixed_diverse_policy_id not in self._opponent_models
+                    ):
+                        raise RuntimeError(
+                            "training.diverse_opponent_policy_ids contains unavailable policy "
+                            f"{fixed_diverse_policy_id!r}"
+                        )
+                offset = 0
+                if len(fixed_diverse_policy_ids) > 1 and remaining_count > 0:
+                    offset = int(actor.rng.integers(len(fixed_diverse_policy_ids)))
+                sampled_policy_ids = tuple(
+                    fixed_diverse_policy_ids[(offset + index) % len(fixed_diverse_policy_ids)]
+                    for index in range(remaining_count)
                 )
+                self._pfsp_last_sampled_envs = remaining_count
+                self._pfsp_last_mirror_envs = 0
+                self._pfsp_last_heuristic_public_envs = (
+                    sum(1 for policy_id in sampled_policy_ids if policy_id == HEURISTIC_PUBLIC_POLICY_ID)
+                )
+                self._pfsp_last_heuristic_public_variant_envs = (
+                    sum(1 for policy_id in sampled_policy_ids if policy_id in _HEURISTIC_PUBLIC_VARIANT_POLICY_IDS)
+                )
+                self._pfsp_last_noleague_baseline_envs = (
+                    sum(1 for policy_id in sampled_policy_ids if policy_id == _NOLEAGUE_BASELINE_POLICY_ID)
+                )
+                residual_policy_ids = set(self._configured_residual_opponent_policy_ids())
+                self._pfsp_last_residual_opponent_envs = (
+                    sum(1 for policy_id in sampled_policy_ids if policy_id in residual_policy_ids)
+                )
+                self._pfsp_last_champion_envs = 0
+                self._pfsp_last_recent_envs = 0
+                self._pfsp_last_hard_negative_envs = 0
+                self._pfsp_last_warmup_snapshot_envs = 0
             else:
                 sampled_policy_ids = self._sample_opponent_policy_ids(count=remaining_count, rng=actor.rng)
             actor.opponent_policy_id_by_env[remaining_mask] = np.asarray(sampled_policy_ids, dtype=object)
@@ -3012,11 +3464,19 @@ class QueueRuntime:
             self._pfsp_last_champion_envs = 0
             self._pfsp_last_recent_envs = 0
             self._pfsp_last_hard_negative_envs = 0
+            self._pfsp_last_residual_opponent_envs = 0
             self._pfsp_last_warmup_snapshot_envs = 0
         if fixed_heuristic_public_count or fixed_noleague_baseline_count:
             self._pfsp_last_sampled_envs += fixed_heuristic_public_count + fixed_noleague_baseline_count
             self._pfsp_last_heuristic_public_envs += fixed_heuristic_public_count
             self._pfsp_last_noleague_baseline_envs += fixed_noleague_baseline_count
+        forced_b1_focal_seat = self._noleague_baseline_force_focal_seat()
+        if forced_b1_focal_seat in (0, 1):
+            b1_assign_mask = done_array & (
+                np.asarray(actor.opponent_policy_id_by_env, dtype=object) == _NOLEAGUE_BASELINE_POLICY_ID
+            )
+            if np.any(b1_assign_mask):
+                actor.focal_seat_by_env[b1_assign_mask] = int(forced_b1_focal_seat)
         if counters is not None:
             counters["pfsp_sampled_envs"] += int(self._pfsp_last_sampled_envs)
             counters["pfsp_mirror_envs"] += int(self._pfsp_last_mirror_envs)
@@ -3028,6 +3488,7 @@ class QueueRuntime:
             counters["pfsp_champion_envs"] += int(self._pfsp_last_champion_envs)
             counters["pfsp_recent_envs"] += int(self._pfsp_last_recent_envs)
             counters["pfsp_hard_negative_envs"] += int(self._pfsp_last_hard_negative_envs)
+            counters["pfsp_residual_opponent_envs"] += int(getattr(self, "_pfsp_last_residual_opponent_envs", 0))
             counters["pfsp_warmup_snapshot_envs"] += int(getattr(self, "_pfsp_last_warmup_snapshot_envs", 0))
 
     def _sample_opponent_policy_ids(self, *, count: int, rng: np.random.Generator) -> tuple[str, ...]:
@@ -3040,6 +3501,7 @@ class QueueRuntime:
             self._pfsp_last_champion_envs = 0
             self._pfsp_last_recent_envs = 0
             self._pfsp_last_hard_negative_envs = 0
+            self._pfsp_last_residual_opponent_envs = 0
             self._pfsp_last_warmup_snapshot_envs = 0
             return ()
         if not self._league_enabled:
@@ -3051,73 +3513,13 @@ class QueueRuntime:
             self._pfsp_last_champion_envs = 0
             self._pfsp_last_recent_envs = 0
             self._pfsp_last_hard_negative_envs = 0
+            self._pfsp_last_residual_opponent_envs = 0
             self._pfsp_last_warmup_snapshot_envs = 0
             return tuple(_MIRROR_OPPONENT_POLICY_ID for _ in range(count))
-        assert self._league_config is not None
-        sampling_cfg = getattr(self._league_config, "sampling", self._league_config)
-        pfsp_ready = self._pfsp_sampling_ready()
-        groups: list[tuple[str, tuple[str, ...], float]] = []
-        heuristic_public_start_updates = max(
-            0,
-            int(getattr(sampling_cfg, "heuristic_public_start_updates", 0)),
-        )
-        heuristic_public_weight = self._active_heuristic_public_mix_fraction()
-        heuristic_public_variant_weight = self._active_heuristic_public_variant_mix_fraction()
-        noleague_baseline_weight = self._active_noleague_baseline_mix_fraction()
-        warmup_snapshot_weight = self._active_warmup_snapshot_mix_fraction()
-        champion_weight = max(0.0, float(getattr(sampling_cfg, "champion_mix_fraction", 0.35)))
-        hard_negative_weight = max(0.0, float(getattr(sampling_cfg, "hard_negative_mix_fraction", 0.2)))
-        recent_weight = max(
-            0.0,
-            1.0
-            - heuristic_public_weight
-            - heuristic_public_variant_weight
-            - noleague_baseline_weight
-            - champion_weight
-            - hard_negative_weight,
-        )
-        heuristic_policies = getattr(self, "_opponent_heuristic_policies", {})
-        if (
-            heuristic_public_weight > 0.0
-            and self._league_reference_update() >= heuristic_public_start_updates
-            and HEURISTIC_PUBLIC_POLICY_ID in heuristic_policies
-        ):
-            groups.append(("heuristic_public", (HEURISTIC_PUBLIC_POLICY_ID,), heuristic_public_weight))
-        heuristic_variant_policy_ids = tuple(
-            policy_id for policy_id in _HEURISTIC_PUBLIC_VARIANT_POLICY_IDS if policy_id in heuristic_policies
-        )
-        if (
-            heuristic_public_variant_weight > 0.0
-            and self._league_reference_update() >= heuristic_public_start_updates
-            and heuristic_variant_policy_ids
-        ):
-            groups.append(("heuristic_public_variant", heuristic_variant_policy_ids, heuristic_public_variant_weight))
-        if noleague_baseline_weight > 0.0 and _NOLEAGUE_BASELINE_POLICY_ID in self._opponent_models:
-            groups.append(("noleague_baseline", (_NOLEAGUE_BASELINE_POLICY_ID,), noleague_baseline_weight))
-        if not pfsp_ready and warmup_snapshot_weight > 0.0 and self._opponent_candidate_ids:
-            groups.append(("warmup_snapshot", self._opponent_candidate_ids, warmup_snapshot_weight))
-        if pfsp_ready and self._opponent_hard_negative_ids:
-            groups.append(("hard_negative", self._opponent_hard_negative_ids, hard_negative_weight))
-        if pfsp_ready and self._opponent_champion_ids:
-            groups.append(("champion", self._opponent_champion_ids, champion_weight))
-        if pfsp_ready and self._opponent_recent_ids:
-            groups.append(("recent", self._opponent_recent_ids, recent_weight))
-        if not pfsp_ready:
-            mirror_weight = max(
-                0.0,
-                1.0
-                - heuristic_public_weight
-                - heuristic_public_variant_weight
-                - noleague_baseline_weight
-                - warmup_snapshot_weight,
-            )
-            groups.append(("mirror", (_MIRROR_OPPONENT_POLICY_ID,), mirror_weight))
-        elif not groups:
-            groups.append(("recent", self._opponent_candidate_ids, 1.0))
-        weights = np.asarray([weight for _, _, weight in groups], dtype=np.float64)
-        if not np.any(weights > 0):
-            weights = np.ones_like(weights)
-        weights = weights / np.sum(weights)
+        groups, weights = self._opponent_sampling_groups()
+        if not groups:
+            groups = (("mirror", (_MIRROR_OPPONENT_POLICY_ID,), 1.0),)
+            weights = np.ones((1,), dtype=np.float64)
         sampled_group_indices = rng.choice(len(groups), size=count, replace=True, p=weights)
         sampled_policy_ids_list = [""] * count
         mirror_count = 0
@@ -3171,13 +3573,108 @@ class QueueRuntime:
         self._pfsp_last_heuristic_public_variant_envs = heuristic_public_variant_count
         self._pfsp_last_noleague_baseline_envs = noleague_baseline_count
         self._pfsp_last_hard_negative_envs = hard_negative_count
+        residual_policy_ids = set(self._configured_residual_opponent_policy_ids())
+        self._pfsp_last_residual_opponent_envs = (
+            sum(1 for policy_id in sampled_policy_ids_list if policy_id in residual_policy_ids)
+        )
         self._pfsp_last_champion_envs = champion_count
         self._pfsp_last_recent_envs = recent_count
         self._pfsp_last_warmup_snapshot_envs = warmup_snapshot_count
         return tuple(str(policy_id) for policy_id in sampled_policy_ids_list)
 
+    def _opponent_sampling_groups(self) -> tuple[tuple[tuple[str, tuple[str, ...], float], ...], np.ndarray]:
+        if not bool(getattr(self, "_league_enabled", False)) or self._league_config is None:
+            return (("mirror", (_MIRROR_OPPONENT_POLICY_ID,), 1.0),), np.ones((1,), dtype=np.float64)
+        sampling_cfg = getattr(self._league_config, "sampling", self._league_config)
+        pfsp_ready = self._pfsp_sampling_ready()
+        groups: list[tuple[str, tuple[str, ...], float]] = []
+        heuristic_public_start_updates = max(
+            0,
+            int(getattr(sampling_cfg, "heuristic_public_start_updates", 0)),
+        )
+        heuristic_public_weight = self._active_heuristic_public_mix_fraction()
+        heuristic_public_variant_weight = self._active_heuristic_public_variant_mix_fraction()
+        noleague_baseline_weight = self._active_noleague_baseline_mix_fraction()
+        warmup_snapshot_weight = self._active_warmup_snapshot_mix_fraction()
+        mirror_weight = max(0.0, float(getattr(sampling_cfg, "mirror_mix_fraction", 0.0)))
+        champion_weight = max(0.0, float(getattr(sampling_cfg, "champion_mix_fraction", 0.35)))
+        hard_negative_weight = max(0.0, float(getattr(sampling_cfg, "hard_negative_mix_fraction", 0.2)))
+        non_recent_weight = 0.0
+        heuristic_policies = getattr(self, "_opponent_heuristic_policies", {})
+        if (
+            heuristic_public_weight > 0.0
+            and self._league_reference_update() >= heuristic_public_start_updates
+            and HEURISTIC_PUBLIC_POLICY_ID in heuristic_policies
+        ):
+            groups.append(("heuristic_public", (HEURISTIC_PUBLIC_POLICY_ID,), heuristic_public_weight))
+            non_recent_weight += heuristic_public_weight
+        heuristic_variant_policy_ids = tuple(
+            policy_id for policy_id in _HEURISTIC_PUBLIC_VARIANT_POLICY_IDS if policy_id in heuristic_policies
+        )
+        if (
+            heuristic_public_variant_weight > 0.0
+            and self._league_reference_update() >= heuristic_public_start_updates
+            and heuristic_variant_policy_ids
+        ):
+            groups.append(("heuristic_public_variant", heuristic_variant_policy_ids, heuristic_public_variant_weight))
+            non_recent_weight += heuristic_public_variant_weight
+        if noleague_baseline_weight > 0.0 and _NOLEAGUE_BASELINE_POLICY_ID in self._opponent_models:
+            groups.append(("noleague_baseline", (_NOLEAGUE_BASELINE_POLICY_ID,), noleague_baseline_weight))
+            non_recent_weight += noleague_baseline_weight
+        warmup_snapshot_ids = tuple(
+            getattr(self, "_opponent_warmup_snapshot_ids", getattr(self, "_opponent_candidate_ids", ()))
+        )
+        if not pfsp_ready and warmup_snapshot_weight > 0.0 and warmup_snapshot_ids:
+            groups.append(("warmup_snapshot", warmup_snapshot_ids, warmup_snapshot_weight))
+            non_recent_weight += warmup_snapshot_weight
+        if pfsp_ready and self._opponent_hard_negative_ids:
+            groups.append(("hard_negative", self._opponent_hard_negative_ids, hard_negative_weight))
+            non_recent_weight += hard_negative_weight
+        if pfsp_ready and self._opponent_champion_ids:
+            groups.append(("champion", self._opponent_champion_ids, champion_weight))
+            non_recent_weight += champion_weight
+        if pfsp_ready and mirror_weight > 0.0:
+            groups.append(("mirror", (_MIRROR_OPPONENT_POLICY_ID,), mirror_weight))
+            non_recent_weight += mirror_weight
+        if pfsp_ready and self._opponent_recent_ids:
+            recent_weight = max(0.0, 1.0 - non_recent_weight)
+            groups.append(("recent", self._opponent_recent_ids, recent_weight))
+        if not pfsp_ready:
+            mirror_weight = max(0.0, 1.0 - non_recent_weight)
+            groups.append(("mirror", (_MIRROR_OPPONENT_POLICY_ID,), mirror_weight))
+        elif not groups:
+            groups.append(("recent", self._opponent_candidate_ids, 1.0))
+        weights = np.asarray([weight for _, _, weight in groups], dtype=np.float64)
+        if weights.size == 0:
+            return (), np.asarray([], dtype=np.float64)
+        if not np.any(weights > 0):
+            weights = np.ones_like(weights)
+        weights = weights / np.sum(weights)
+        return tuple(groups), weights
+
+    def _opponent_sampling_group_weight_metrics(self) -> dict[str, float]:
+        groups, weights = self._opponent_sampling_groups()
+        metrics = {
+            "pfsp_sampling_weight_mirror": 0.0,
+            "pfsp_sampling_weight_heuristic_public": 0.0,
+            "pfsp_sampling_weight_heuristic_public_variant": 0.0,
+            "pfsp_sampling_weight_noleague_baseline": 0.0,
+            "pfsp_sampling_weight_warmup_snapshot": 0.0,
+            "pfsp_sampling_weight_hard_negative": 0.0,
+            "pfsp_sampling_weight_champion": 0.0,
+            "pfsp_sampling_weight_recent": 0.0,
+        }
+        for (group_name, _group_ids, _raw_weight), normalized_weight in zip(groups, weights, strict=True):
+            key = f"pfsp_sampling_weight_{group_name}"
+            if key in metrics:
+                metrics[key] += float(normalized_weight)
+        return metrics
+
     def _sample_warmup_snapshot_policy_ids(self, *, count: int, rng: np.random.Generator) -> tuple[str, ...]:
-        if count <= 0 or not self._opponent_candidate_ids:
+        warmup_snapshot_ids = tuple(
+            getattr(self, "_opponent_warmup_snapshot_ids", getattr(self, "_opponent_candidate_ids", ()))
+        )
+        if count <= 0 or not warmup_snapshot_ids:
             self._pfsp_last_sampled_envs = 0
             self._pfsp_last_mirror_envs = 0
             self._pfsp_last_heuristic_public_envs = 0
@@ -3186,15 +3683,16 @@ class QueueRuntime:
             self._pfsp_last_champion_envs = 0
             self._pfsp_last_recent_envs = 0
             self._pfsp_last_hard_negative_envs = 0
+            self._pfsp_last_residual_opponent_envs = 0
             self._pfsp_last_warmup_snapshot_envs = 0
             return ()
         assert self._league_config is not None
         sampled_policy_ids = sample_opponent_snapshot_ids(
-            self._opponent_candidate_ids,
+            warmup_snapshot_ids,
             count=count,
             rng=rng,
             win_rates_by_snapshot_id={
-                policy_id: self._outcomes.win_rate(policy_id) for policy_id in self._opponent_candidate_ids
+                policy_id: self._outcomes.win_rate(policy_id) for policy_id in warmup_snapshot_ids
             },
             power=float(self._league_config.pfsp_power),
             eps_uniform=float(self._league_config.pfsp_epsilon_uniform),
@@ -3207,15 +3705,22 @@ class QueueRuntime:
         self._pfsp_last_champion_envs = 0
         self._pfsp_last_recent_envs = 0
         self._pfsp_last_hard_negative_envs = 0
+        self._pfsp_last_residual_opponent_envs = 0
         self._pfsp_last_warmup_snapshot_envs = count
         return tuple(str(policy_id) for policy_id in sampled_policy_ids)
 
     def _pfsp_sampling_ready(self) -> bool:
-        if not self._league_enabled or self._league_config is None or self._opponent_sampler is None:
+        if (
+            not bool(getattr(self, "_league_enabled", False))
+            or self._league_config is None
+            or getattr(self, "_opponent_sampler", None) is None
+        ):
             return False
         if self._league_reference_update() < int(self._league_config.warmup.first_updates):
             return False
-        return bool(self._opponent_candidate_ids) and bool(self._opponent_models)
+        if self._league_eval_warmup_gate_blocks_pfsp():
+            return False
+        return bool(getattr(self, "_opponent_candidate_ids", ())) and bool(getattr(self, "_opponent_models", {}))
 
     def _heuristic_opponent_policy(self, policy_id: str) -> HeuristicPublicPolicy | None:
         heuristic_policy = getattr(self, "_opponent_heuristic_policies", {}).get(str(policy_id))
@@ -3384,8 +3889,6 @@ class QueueRuntime:
             return False
         if getattr(self, "_league_config", None) is None:
             return False
-        if self._active_heuristic_public_mix_fraction() < 1.0:
-            return False
         if not self._actor_fixed_opponents_all_heuristic_public(actor):
             return False
         opponent_policy_ids = np.asarray(actor.opponent_policy_id_by_env, dtype=object)
@@ -3472,6 +3975,12 @@ class QueueRuntime:
                         teacher_attack_type[int(row_index)] = int(attack_type_index)
         return teacher_family, teacher_slot, teacher_move_source, teacher_attack_type, teacher_action, teacher_valid
 
+    def _public_teacher_rows(self, *, focal_rows: np.ndarray, decision_kind: np.ndarray) -> np.ndarray:
+        decision_kind_array = np.asarray(decision_kind, dtype=np.int32)
+        return np.flatnonzero(
+            np.asarray(focal_rows, dtype=np.bool_) & np.isin(decision_kind_array, tuple(_PUBLIC_TEACHER_DECISION_KINDS))
+        )
+
     def _teacher_labels_from_ids(
         self,
         *,
@@ -3488,10 +3997,7 @@ class QueueRuntime:
         )
         if not self._teacher_guidance_active_for_collection() or self._teacher_policy is None:
             return teacher_family, teacher_slot, teacher_move_source, teacher_attack_type, teacher_action, teacher_valid
-        decision_kind_array = np.asarray(decision_kind, dtype=np.int32)
-        teacher_rows = np.flatnonzero(
-            np.asarray(focal_rows, dtype=np.bool_) & np.isin(decision_kind_array, tuple(_PUBLIC_TEACHER_DECISION_KINDS))
-        )
+        teacher_rows = self._public_teacher_rows(focal_rows=focal_rows, decision_kind=decision_kind)
         if teacher_rows.size == 0:
             return teacher_family, teacher_slot, teacher_move_source, teacher_attack_type, teacher_action, teacher_valid
         if counters is not None:
@@ -3526,10 +4032,7 @@ class QueueRuntime:
         )
         if not self._teacher_guidance_active_for_collection() or self._teacher_policy is None:
             return teacher_family, teacher_slot, teacher_move_source, teacher_attack_type, teacher_action, teacher_valid
-        decision_kind_array = np.asarray(decision_kind, dtype=np.int32)
-        teacher_rows = np.flatnonzero(
-            np.asarray(focal_rows, dtype=np.bool_) & np.isin(decision_kind_array, tuple(_PUBLIC_TEACHER_DECISION_KINDS))
-        )
+        teacher_rows = self._public_teacher_rows(focal_rows=focal_rows, decision_kind=decision_kind)
         if teacher_rows.size == 0:
             return teacher_family, teacher_slot, teacher_move_source, teacher_attack_type, teacher_action, teacher_valid
         if counters is not None:
@@ -3607,7 +4110,7 @@ class QueueRuntime:
         logp_out: np.ndarray | None,
         rng: np.random.Generator,
         sample_actions: bool = True,
-    ) -> None:
+    ) -> tuple[np.ndarray, np.ndarray]:
         focal_indices = np.flatnonzero(focal_rows)
         model_focal_indices, heuristic_focal_indices = self._split_focal_actor_rows(
             actor=actor,
@@ -3657,6 +4160,7 @@ class QueueRuntime:
                 rng=rng,
                 sample_actions=sample_actions,
             )
+        return model_focal_indices, heuristic_focal_indices
 
     def _fill_policy_outputs_ids(
         self,
@@ -3674,7 +4178,7 @@ class QueueRuntime:
         logp_out: np.ndarray | None,
         rng: np.random.Generator,
         sample_actions: bool = True,
-    ) -> None:
+    ) -> tuple[np.ndarray, np.ndarray]:
         focal_indices = np.flatnonzero(focal_rows)
         model_focal_indices, heuristic_focal_indices = self._split_focal_actor_rows(
             actor=actor,
@@ -3729,6 +4233,7 @@ class QueueRuntime:
                 rng=rng,
                 sample_actions=sample_actions,
             )
+        return model_focal_indices, heuristic_focal_indices
 
     def _apply_opponent_rows_mask(
         self,
@@ -4316,6 +4821,20 @@ class QueueRuntime:
     def _should_track_heuristic_actor_hidden_state(self) -> bool:
         return bool(getattr(self, "_heuristic_actor_hidden_state_tracking", True))
 
+    def _active_heuristic_native_rollout_profile(self, actor: _ActorState) -> str:
+        profiles = tuple(getattr(self, "_heuristic_native_rollout_profiles", ()))
+        if not profiles:
+            return str(getattr(self, "_heuristic_native_rollout_profile", "base"))
+        mode = str(getattr(self, "_heuristic_native_rollout_profile_mode", "fixed")).strip().lower()
+        if mode == "fixed":
+            return profiles[0]
+        if mode == "random":
+            index = int(actor.rng.integers(0, len(profiles)))
+            return profiles[index]
+        update = int(getattr(self, "_current_learner_update", 0))
+        actor_id = int(getattr(actor, "actor_id", 0))
+        return profiles[(update + actor_id) % len(profiles)]
+
     def _value_and_advance_rows(
         self,
         *,
@@ -4390,6 +4909,14 @@ class QueueRuntime:
             return np.zeros((0,), dtype=np.int64), focal_indices
         if heuristic_fraction <= 0.0:
             return focal_indices, np.zeros((0,), dtype=np.int64)
+        if (
+            not bool(getattr(self, "_actor_behavior_values_required", True))
+            and not self._should_track_heuristic_actor_hidden_state()
+        ):
+            raise RuntimeError(
+                "mixed heuristic/model actor rows require "
+                "training.heuristic_actor_hidden_state_tracking=true when behavior values are not collected"
+            )
         heuristic_mask = rng.random(focal_indices.shape[0]) < heuristic_fraction
         return (
             focal_indices[~heuristic_mask].astype(np.int64, copy=False),
@@ -4401,16 +4928,59 @@ class QueueRuntime:
         *,
         actor: _ActorState,
         focal_rows: np.ndarray,
+        model_focal_indices: np.ndarray | None = None,
+        counters: dict[str, int] | None = None,
     ) -> np.ndarray:
         focal_mask = np.asarray(focal_rows, dtype=np.bool_)
         if bool(getattr(self, "_train_on_heuristic_actor_rows", True)):
+            if counters is not None:
+                if model_focal_indices is not None:
+                    source_mask = np.zeros(focal_mask.shape, dtype=np.bool_)
+                    model_indices = np.asarray(model_focal_indices, dtype=np.int64)
+                    valid_model_indices = model_indices[
+                        (model_indices >= 0)
+                        & (model_indices < focal_mask.shape[0])
+                        & focal_mask[np.clip(model_indices, 0, max(focal_mask.shape[0] - 1, 0))]
+                    ]
+                    source_mask[valid_model_indices] = True
+                    counters["policy_train_model_rows"] += int(np.count_nonzero(source_mask))
+                    counters["policy_train_heuristic_rows"] += int(np.count_nonzero(focal_mask & ~source_mask))
+                elif (
+                    self._actor_policy_backend == "heuristic_public"
+                    and not bool(getattr(actor, "force_model_policy_lane", False))
+                    and self._active_actor_heuristic_fraction() >= 1.0
+                ):
+                    counters["policy_train_heuristic_rows"] += int(np.count_nonzero(focal_mask))
+                else:
+                    counters["policy_train_model_rows"] += int(np.count_nonzero(focal_mask))
             return focal_mask
         if self._actor_policy_backend != "heuristic_public":
+            if counters is not None:
+                counters["policy_train_model_rows"] += int(np.count_nonzero(focal_mask))
             return focal_mask
         if bool(getattr(actor, "force_model_policy_lane", False)):
+            if counters is not None:
+                counters["policy_train_model_rows"] += int(np.count_nonzero(focal_mask))
             return focal_mask
+        if model_focal_indices is not None:
+            train_mask = np.zeros(focal_mask.shape, dtype=np.bool_)
+            model_indices = np.asarray(model_focal_indices, dtype=np.int64)
+            valid_model_indices = model_indices[
+                (model_indices >= 0)
+                & (model_indices < focal_mask.shape[0])
+                & focal_mask[np.clip(model_indices, 0, max(focal_mask.shape[0] - 1, 0))]
+            ]
+            train_mask[valid_model_indices] = True
+            if counters is not None:
+                counters["policy_train_model_rows"] += int(np.count_nonzero(train_mask))
+                counters["policy_excluded_heuristic_rows"] += int(np.count_nonzero(focal_mask & ~train_mask))
+            return train_mask
         if self._active_actor_heuristic_fraction() >= 1.0:
+            if counters is not None:
+                counters["policy_excluded_heuristic_rows"] += int(np.count_nonzero(focal_mask))
             return np.zeros(focal_mask.shape, dtype=np.bool_)
+        if counters is not None:
+            counters["policy_train_model_rows"] += int(np.count_nonzero(focal_mask))
         return focal_mask
 
     def _apply_heuristic_actor_rows_mask(
@@ -4723,7 +5293,7 @@ class QueueRuntime:
         values_outs: Sequence[np.ndarray],
         actions_outs: Sequence[np.ndarray],
         logp_outs: Sequence[np.ndarray],
-    ) -> None:
+    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
         if self._actor_policy_backend != "heuristic_public":
             self._central_sample_policy_rows_ids_model(
                 actors=actors,
@@ -4735,32 +5305,10 @@ class QueueRuntime:
                 actions_outs=actions_outs,
                 logp_outs=logp_outs,
             )
-            return
-        heuristic_fraction = self._active_actor_heuristic_fraction()
-        if heuristic_fraction >= 1.0:
-            self._central_sample_policy_rows_ids_heuristic(
-                actors=actors,
-                batches=batches,
-                obs_steps=obs_steps,
-                actor_steps=actor_steps,
-                row_indices_by_actor=row_indices_by_actor,
-                values_outs=values_outs,
-                actions_outs=actions_outs,
-                logp_outs=logp_outs,
+            return (
+                [np.asarray(rows, dtype=np.int64) for rows in row_indices_by_actor],
+                [np.zeros((0,), dtype=np.int64) for _ in row_indices_by_actor],
             )
-            return
-        if heuristic_fraction <= 0.0:
-            self._central_sample_policy_rows_ids_model(
-                actors=actors,
-                batches=batches,
-                obs_steps=obs_steps,
-                actor_steps=actor_steps,
-                row_indices_by_actor=row_indices_by_actor,
-                values_outs=values_outs,
-                actions_outs=actions_outs,
-                logp_outs=logp_outs,
-            )
-            return
         heuristic_rows_by_actor: list[np.ndarray] = []
         model_rows_by_actor: list[np.ndarray] = []
         any_heuristic_rows = False
@@ -4770,9 +5318,11 @@ class QueueRuntime:
                 heuristic_rows_by_actor.append(row_indices)
                 model_rows_by_actor.append(row_indices)
                 continue
-            heuristic_mask = actor.rng.random(row_indices.shape[0]) < heuristic_fraction
-            heuristic_rows = row_indices[heuristic_mask]
-            model_rows = row_indices[~heuristic_mask]
+            model_rows, heuristic_rows = self._split_focal_actor_rows(
+                actor=actor,
+                focal_indices=np.asarray(row_indices, dtype=np.int64),
+                rng=actor.rng,
+            )
             heuristic_rows_by_actor.append(heuristic_rows)
             model_rows_by_actor.append(model_rows)
             any_heuristic_rows = any_heuristic_rows or heuristic_rows.size > 0
@@ -4788,6 +5338,7 @@ class QueueRuntime:
                 actions_outs=actions_outs,
                 logp_outs=logp_outs,
             )
+        return model_rows_by_actor, heuristic_rows_by_actor
         if any_model_rows:
             self._central_sample_policy_rows_ids_model(
                 actors=actors,
@@ -5254,6 +5805,7 @@ class QueueRuntime:
         self._record_batch_timer_ms("central_fixed_opponent_overwrite", time.perf_counter() - overwrite_started)
 
     def _collect_actor_unrolls_central(self, actors: Sequence[_ActorState]) -> list[RuntimeUnroll]:
+        self._collection_started = True
         central_started = time.perf_counter()
         if not actors:
             return []
@@ -5276,6 +5828,7 @@ class QueueRuntime:
                 "values": np.zeros((T, N), dtype=np.float32),
                 "episode_seed": np.zeros((T, N), dtype=np.uint64),
                 "policy_train_mask": np.zeros((T, N), dtype=np.bool_),
+                "b1_opponent_mask": np.zeros((T, N), dtype=np.bool_),
                 "teacher_family": np.full((T, N), -1, dtype=np.int32),
                 "teacher_slot": np.full((T, N), -1, dtype=np.int32),
                 "teacher_move_source": np.full((T, N), -1, dtype=np.int32),
@@ -5355,8 +5908,10 @@ class QueueRuntime:
                     for focal_rows, mirror_rows in zip(policy_row_indices, mirror_rows_by_actor, strict=True)
                 ]
                 forward_started = time.perf_counter()
+                model_actor_rows_by_actor = [np.zeros((0,), dtype=np.int64) for _ in actors]
+                heuristic_actor_rows_by_actor = [np.zeros((0,), dtype=np.int64) for _ in actors]
                 if any(rows.size > 0 for rows in sampled_policy_rows_by_actor):
-                    self._central_sample_policy_rows_ids(
+                    model_actor_rows_by_actor, heuristic_actor_rows_by_actor = self._central_sample_policy_rows_ids(
                         actors=actors,
                         batches=batches,
                         obs_steps=obs_steps,
@@ -5513,9 +6068,28 @@ class QueueRuntime:
                 state = state_by_actor[int(actor.actor_id)]
                 obs_step = np.asarray(obs_storage_step, dtype=np.float32)
                 focal_rows = actor_step == actor.focal_seat_by_env
+                model_focal_indices_for_step = None
+                if structured_central_packed:
+                    model_focal_indices_for_step = model_actor_rows_by_actor[actor_index]
+                    model_focal_count = int(np.count_nonzero(focal_rows[model_focal_indices_for_step]))
+                    heuristic_focal_indices = heuristic_actor_rows_by_actor[actor_index]
+                    heuristic_focal_count = int(np.count_nonzero(focal_rows[heuristic_focal_indices]))
+                    state["counters"]["actor_model_rows"] += model_focal_count
+                    state["counters"]["actor_heuristic_rows"] += heuristic_focal_count
                 state["policy_train_mask"][step_index] = self._policy_train_mask_for_actor(
                     actor=actor,
                     focal_rows=focal_rows,
+                    model_focal_indices=model_focal_indices_for_step,
+                    counters=state["counters"],
+                )
+                state["b1_opponent_mask"][step_index] = self._b1_opponent_mask_for_actor(actor)
+                state["counters"]["b1_opponent_env_steps"] += int(
+                    np.count_nonzero(state["b1_opponent_mask"][step_index])
+                )
+                state["counters"]["b1_opponent_train_rows"] += int(
+                    np.count_nonzero(
+                        state["b1_opponent_mask"][step_index] & state["policy_train_mask"][step_index]
+                    )
                 )
                 if actor.layout_name == "i16_legal_ids":
                     legal_ids, legal_offsets = _require_ids_offsets(batch)
@@ -5631,7 +6205,10 @@ class QueueRuntime:
 
                 state["obs"][step_index] = obs_storage_step
                 state["actions"][step_index] = np.asarray(action_step, dtype=np.uint16)
-                state["rewards"][step_index] = np.asarray(next_batch.reward, dtype=np.float32)
+                state["rewards"][step_index] = self._apply_opponent_reward_scale(
+                    actor,
+                    np.asarray(next_batch.reward, dtype=np.float32),
+                )
                 state["terminated"][step_index] = np.asarray(next_batch.terminated, dtype=np.bool_)
                 state["truncated"][step_index] = np.asarray(next_batch.truncated, dtype=np.bool_)
                 state["to_play_seat"][step_index] = actor_step.astype(np.int8, copy=False)
@@ -5719,6 +6296,7 @@ class QueueRuntime:
                 + state["values"].nbytes
                 + state["episode_seed"].nbytes
                 + state["policy_train_mask"].nbytes
+                + state["b1_opponent_mask"].nbytes
                 + state["teacher_family"].nbytes
                 + state["teacher_slot"].nbytes
                 + state["teacher_move_source"].nbytes
@@ -5773,6 +6351,7 @@ class QueueRuntime:
                     final_hidden_state=actor.seat_hidden.detach().cpu().numpy().copy(),
                     episode_seed=state["episode_seed"],
                     policy_train_mask=state["policy_train_mask"],
+                    b1_opponent_mask=state["b1_opponent_mask"],
                     teacher_family=state["teacher_family"],
                     teacher_slot=state["teacher_slot"],
                     teacher_attack_type=state["teacher_attack_type"],
@@ -5786,6 +6365,7 @@ class QueueRuntime:
         return unrolls
 
     def _collect_actor_unroll_all_heuristic_ids_native_rollout(self, actor: _ActorState) -> RuntimeUnroll:
+        self._collection_started = True
         unroll_started = time.perf_counter()
         T = int(self.config.unroll_length)
         N = int(self.config.envs_per_actor)
@@ -5809,8 +6389,10 @@ class QueueRuntime:
         weiss_sim = __import__("weiss_sim")
         trajectory = weiss_sim.BatchOutTrajectoryI16LegalIds(T, N)
         rollout_started = time.perf_counter()
-        rollout_into(T, trajectory)
+        native_profile = self._active_heuristic_native_rollout_profile(actor)
+        rollout_into(T, trajectory, native_profile)
         rollout_elapsed = time.perf_counter() - rollout_started
+        counters[f"native_rollout_profile_{native_profile}_unrolls"] += 1
         actor.env._record_python_timing(
             "python_native_heuristic_rollout",
             int(rollout_elapsed * 1_000_000_000.0),
@@ -5831,6 +6413,7 @@ class QueueRuntime:
         else:
             episode_seed = np.asarray(episode_seed_src, dtype=np.uint64)
         policy_train_mask = np.zeros((T, N), dtype=np.bool_)
+        b1_opponent_mask = np.zeros((T, N), dtype=np.bool_)
         teacher_family = np.full((T, N), -1, dtype=np.int32) if teacher_labels_enabled else None
         teacher_slot = np.full((T, N), -1, dtype=np.int32) if teacher_labels_enabled else None
         teacher_move_source = np.full((T, N), -1, dtype=np.int32) if teacher_labels_enabled else None
@@ -5854,6 +6437,11 @@ class QueueRuntime:
                 actor=actor,
                 focal_rows=focal_rows,
             )
+            b1_opponent_mask[step_index] = self._b1_opponent_mask_for_actor(actor)
+            counters["b1_opponent_env_steps"] += int(np.count_nonzero(b1_opponent_mask[step_index]))
+            counters["b1_opponent_train_rows"] += int(
+                np.count_nonzero(b1_opponent_mask[step_index] & policy_train_mask[step_index])
+            )
 
             step_offsets = np.asarray(legal_offsets_all[step_index], dtype=np.uint32)
             used = 0 if step_offsets.size == 0 else int(step_offsets[-1])
@@ -5867,6 +6455,12 @@ class QueueRuntime:
             ) = teacher_valid_step = None
             if teacher_labels_enabled:
                 teacher_started = time.perf_counter()
+                teacher_rows = self._public_teacher_rows(
+                    focal_rows=focal_rows,
+                    decision_kind=np.asarray(decision_kind_all[step_index], dtype=np.int32),
+                )
+                if counters is not None:
+                    counters["teacher_tactical_row_count"] += int(teacher_rows.size)
                 (
                     teacher_family_step,
                     teacher_slot_step,
@@ -5874,14 +6468,10 @@ class QueueRuntime:
                     teacher_attack_type_step,
                     teacher_action_step,
                     teacher_valid_step,
-                ) = self._teacher_labels_from_ids(
-                    focal_rows=focal_rows,
-                    decision_kind=np.asarray(decision_kind_all[step_index], dtype=np.int32),
-                    obs_step=np.asarray(obs[step_index], dtype=np.float32),
-                    legal_ids=step_ids,
-                    legal_offsets=step_offsets,
-                    legal_action_meta=step_meta,
-                    counters=counters,
+                ) = self._teacher_labels_from_actions(
+                    row_indices=teacher_rows,
+                    chosen_actions=np.asarray(actions[step_index], dtype=np.int64)[teacher_rows],
+                    num_rows=int(N),
                 )
                 counters["teacher_label_ms"] += int((time.perf_counter() - teacher_started) * 1000.0)
             counters["packed_candidate_count"] += int(step_ids.shape[0])
@@ -5973,6 +6563,7 @@ class QueueRuntime:
             final_hidden_state=actor.seat_hidden.detach().cpu().numpy().copy(),
             episode_seed=episode_seed,
             policy_train_mask=policy_train_mask,
+            b1_opponent_mask=b1_opponent_mask,
             teacher_family=teacher_family,
             teacher_slot=teacher_slot,
             teacher_move_source=teacher_move_source,
@@ -5993,6 +6584,7 @@ class QueueRuntime:
             + values.nbytes
             + episode_seed.nbytes
             + policy_train_mask.nbytes
+            + b1_opponent_mask.nbytes
             + bootstrap_obs.nbytes
             + bootstrap_actor.nbytes
             + bootstrap_value.nbytes
@@ -6012,6 +6604,7 @@ class QueueRuntime:
         return unroll
 
     def _collect_actor_unroll_all_heuristic_ids_fast(self, actor: _ActorState) -> RuntimeUnroll:
+        self._collection_started = True
         unroll_started = time.perf_counter()
         T = int(self.config.unroll_length)
         N = int(self.config.envs_per_actor)
@@ -6026,6 +6619,7 @@ class QueueRuntime:
         values = np.zeros((T, N), dtype=np.float32)
         episode_seed = np.zeros((T, N), dtype=np.uint64)
         policy_train_mask = np.zeros((T, N), dtype=np.bool_)
+        b1_opponent_mask = np.zeros((T, N), dtype=np.bool_)
         teacher_labels_enabled = self._teacher_guidance_active_for_collection()
         teacher_family = np.full((T, N), -1, dtype=np.int32) if teacher_labels_enabled else None
         teacher_slot = np.full((T, N), -1, dtype=np.int32) if teacher_labels_enabled else None
@@ -6080,6 +6674,11 @@ class QueueRuntime:
             policy_train_mask[step_index] = self._policy_train_mask_for_actor(
                 actor=actor,
                 focal_rows=focal_rows,
+            )
+            b1_opponent_mask[step_index] = self._b1_opponent_mask_for_actor(actor)
+            counters["b1_opponent_env_steps"] += int(np.count_nonzero(b1_opponent_mask[step_index]))
+            counters["b1_opponent_train_rows"] += int(
+                np.count_nonzero(b1_opponent_mask[step_index] & policy_train_mask[step_index])
             )
 
             teacher_family_step = teacher_slot_step = teacher_move_source_step = teacher_attack_type_step = (
@@ -6178,7 +6777,7 @@ class QueueRuntime:
 
             obs[step_index] = current_obs_storage
             actions[step_index] = action_step.astype(np.uint16, copy=False)
-            rewards[step_index] = step_rewards
+            rewards[step_index] = self._apply_opponent_reward_scale(actor, step_rewards)
             terminated[step_index] = step_terminated
             truncated[step_index] = step_truncated
             to_play_seat[step_index] = current_actor.astype(np.int8, copy=False)
@@ -6303,6 +6902,7 @@ class QueueRuntime:
             final_hidden_state=actor.seat_hidden.detach().cpu().numpy().copy(),
             episode_seed=episode_seed,
             policy_train_mask=policy_train_mask,
+            b1_opponent_mask=b1_opponent_mask,
             teacher_family=teacher_family,
             teacher_slot=teacher_slot,
             teacher_move_source=teacher_move_source,
@@ -6323,6 +6923,7 @@ class QueueRuntime:
             + values.nbytes
             + episode_seed.nbytes
             + policy_train_mask.nbytes
+            + b1_opponent_mask.nbytes
             + bootstrap_obs.nbytes
             + bootstrap_actor.nbytes
             + bootstrap_value.nbytes
@@ -6342,6 +6943,7 @@ class QueueRuntime:
         return unroll
 
     def _collect_actor_unroll(self, actor: _ActorState) -> RuntimeUnroll:
+        self._collection_started = True
         if self._can_collect_all_heuristic_ids_native_rollout(actor):
             return self._collect_actor_unroll_all_heuristic_ids_native_rollout(actor)
         if self._can_collect_all_heuristic_ids_fast(actor):
@@ -6360,6 +6962,7 @@ class QueueRuntime:
         values = np.zeros((T, N), dtype=np.float32)
         episode_seed = np.zeros((T, N), dtype=np.uint64)
         policy_train_mask = np.zeros((T, N), dtype=np.bool_)
+        b1_opponent_mask = np.zeros((T, N), dtype=np.bool_)
         teacher_family = np.full((T, N), -1, dtype=np.int32)
         teacher_slot = np.full((T, N), -1, dtype=np.int32)
         teacher_move_source = np.full((T, N), -1, dtype=np.int32)
@@ -6388,10 +6991,8 @@ class QueueRuntime:
             value_step = np.zeros((N,), dtype=np.float32)
             action_step = np.zeros((N,), dtype=np.int64)
             logp_step = np.zeros((N,), dtype=np.float32)
-            policy_train_mask[step_index] = self._policy_train_mask_for_actor(
-                actor=actor,
-                focal_rows=focal_rows,
-            )
+            model_focal_indices_for_step: np.ndarray | None = None
+            heuristic_focal_indices_for_step = np.zeros((0,), dtype=np.int64)
             logits_step = np.empty((N, self.action_dim), dtype=np.float32)
 
             if actor.layout_name == "i16_legal_ids":
@@ -6425,7 +7026,7 @@ class QueueRuntime:
                         packed_meta.append(np.asarray(legal_action_meta, dtype=np.uint16))
                     packed_offsets.append(np.asarray(legal_offsets[1:] + offset_base, dtype=np.uint32))
                     policy_started = time.perf_counter()
-                    self._fill_policy_outputs_ids(
+                    model_focal_indices_for_step, heuristic_focal_indices_for_step = self._fill_policy_outputs_ids(
                         actor=actor,
                         obs_step=obs_step,
                         actor_step=actor_step,
@@ -6466,7 +7067,7 @@ class QueueRuntime:
                         packed_meta.append(np.asarray(legal_action_meta, dtype=np.uint16))
                     packed_offsets.append(np.asarray(legal_offsets[1:] + offset_base, dtype=np.uint32))
                     policy_started = time.perf_counter()
-                    self._fill_policy_outputs_ids(
+                    model_focal_indices_for_step, heuristic_focal_indices_for_step = self._fill_policy_outputs_ids(
                         actor=actor,
                         obs_step=obs_step,
                         actor_step=actor_step,
@@ -6523,7 +7124,7 @@ class QueueRuntime:
                     current_legal_mask = np.asarray(legal_mask, dtype=np.bool_).copy()
                     mask_steps.append(current_legal_mask)
                     policy_started = time.perf_counter()
-                    self._fill_policy_outputs_mask(
+                    model_focal_indices_for_step, heuristic_focal_indices_for_step = self._fill_policy_outputs_mask(
                         actor=actor,
                         obs_step=obs_step,
                         actor_step=actor_step,
@@ -6561,7 +7162,7 @@ class QueueRuntime:
                     legal_mask_array = np.asarray(legal_mask, dtype=np.bool_)
                     mask_steps.append(legal_mask_array)
                     policy_started = time.perf_counter()
-                    self._fill_policy_outputs_mask(
+                    model_focal_indices_for_step, heuristic_focal_indices_for_step = self._fill_policy_outputs_mask(
                         actor=actor,
                         obs_step=obs_step,
                         actor_step=actor_step,
@@ -6586,11 +7187,29 @@ class QueueRuntime:
                     env_started = time.perf_counter()
                     next_batch = actor.env.step(action_step.astype(np.uint32, copy=False))
                     counters["actor_env_step_ms"] += int((time.perf_counter() - env_started) * 1000.0)
+            if model_focal_indices_for_step is None:
+                model_focal_indices_for_step = np.flatnonzero(focal_rows)
+            counters["actor_model_rows"] += int(np.count_nonzero(focal_rows[model_focal_indices_for_step]))
+            counters["actor_heuristic_rows"] += int(np.count_nonzero(focal_rows[heuristic_focal_indices_for_step]))
+            policy_train_mask[step_index] = self._policy_train_mask_for_actor(
+                actor=actor,
+                focal_rows=focal_rows,
+                model_focal_indices=model_focal_indices_for_step,
+                counters=counters,
+            )
+            b1_opponent_mask[step_index] = self._b1_opponent_mask_for_actor(actor)
+            counters["b1_opponent_env_steps"] += int(np.count_nonzero(b1_opponent_mask[step_index]))
+            counters["b1_opponent_train_rows"] += int(
+                np.count_nonzero(b1_opponent_mask[step_index] & policy_train_mask[step_index])
+            )
             done = np.logical_or(next_batch.terminated, next_batch.truncated)
 
             obs[step_index] = obs_storage_step
             actions[step_index] = action_step.astype(np.uint16, copy=False)
-            rewards[step_index] = np.asarray(next_batch.reward, dtype=np.float32)
+            rewards[step_index] = self._apply_opponent_reward_scale(
+                actor,
+                np.asarray(next_batch.reward, dtype=np.float32),
+            )
             terminated[step_index] = np.asarray(next_batch.terminated, dtype=np.bool_)
             truncated[step_index] = np.asarray(next_batch.truncated, dtype=np.bool_)
             to_play_seat[step_index] = actor_step.astype(np.int8, copy=False)
@@ -6691,6 +7310,7 @@ class QueueRuntime:
             final_hidden_state=actor.seat_hidden.detach().cpu().numpy().copy(),
             episode_seed=episode_seed,
             policy_train_mask=policy_train_mask,
+            b1_opponent_mask=b1_opponent_mask,
             teacher_family=teacher_family,
             teacher_slot=teacher_slot,
             teacher_move_source=teacher_move_source,
@@ -6711,6 +7331,7 @@ class QueueRuntime:
             + values.nbytes
             + episode_seed.nbytes
             + policy_train_mask.nbytes
+            + b1_opponent_mask.nbytes
             + teacher_family.nbytes
             + teacher_slot.nbytes
             + teacher_move_source.nbytes
@@ -6726,6 +7347,37 @@ class QueueRuntime:
         actor.next_unroll_seq += 1
         return unroll
 
+    def _apply_pass_with_nonpass_penalty(
+        self,
+        rewards: np.ndarray,
+        *,
+        actions: np.ndarray,
+        legal_actions: LegalActionBatch,
+        policy_train_mask: np.ndarray,
+        penalty: float,
+    ) -> np.ndarray:
+        if penalty <= 0.0:
+            return rewards
+        pass_action_id = int(getattr(getattr(self, "config", None), "pass_action_id"))
+        chosen_pass = np.asarray(actions, dtype=np.int64) == pass_action_id
+        train_rows = np.asarray(policy_train_mask, dtype=np.bool_)
+        if legal_actions.mask is not None:
+            legal_mask = np.asarray(legal_actions.mask, dtype=np.bool_)
+            if pass_action_id < 0 or pass_action_id >= int(legal_mask.shape[-1]):
+                return rewards
+            nonpass_available = legal_mask.sum(axis=-1) > 1
+        else:
+            if legal_actions.offsets is None:
+                return rewards
+            row_lengths = np.asarray(legal_actions.offsets[1:] - legal_actions.offsets[:-1], dtype=np.int64)
+            nonpass_available = (row_lengths > 1).reshape(chosen_pass.shape)
+        penalty_mask = chosen_pass & nonpass_available & train_rows
+        if not bool(penalty_mask.any()):
+            return rewards
+        shaped_rewards = np.array(rewards, dtype=np.float32, copy=True)
+        shaped_rewards[penalty_mask] -= float(penalty)
+        return shaped_rewards
+
     def _build_learner_batch(
         self,
         unrolls: Sequence[PendingUnroll],
@@ -6733,39 +7385,85 @@ class QueueRuntime:
         gamma: float,
         truncation_reward: float,
         truncation_bootstrap_value: bool,
+        pass_with_nonpass_penalty: float = 0.0,
         vtrace_rho_bar: float,
         vtrace_c_bar: float,
     ) -> dict[str, Any]:
         concat_started = time.perf_counter()
-        obs = _concat_time_major_field(unrolls, "obs")
-        actions = _concat_time_major_field(unrolls, "actions")
-        rewards = _concat_time_major_field(unrolls, "rewards")
-        terminated = _concat_time_major_field(unrolls, "terminated")
-        truncated = _concat_time_major_field(unrolls, "truncated")
-        to_play_seat = _concat_time_major_field(unrolls, "to_play_seat")
-        behavior_logp = _concat_time_major_field(unrolls, "behavior_logp")
-        behavior_values = _concat_time_major_field(unrolls, "values")
-        bootstrap_value = np.concatenate(
-            [np.asarray(unroll.bootstrap_value, dtype=np.float32) for unroll in unrolls], axis=0
+        core_started = time.perf_counter()
+        core_fields = _concat_time_major_fields(
+            unrolls,
+            (
+                "obs",
+                "actions",
+                "rewards",
+                "terminated",
+                "truncated",
+                "to_play_seat",
+                "behavior_logp",
+                "values",
+                "policy_train_mask",
+                "b1_opponent_mask",
+            ),
         )
-        initial_hidden_state = _concat_batch_major_field(unrolls, "initial_hidden_state")
-        bootstrap_obs = np.concatenate(
-            [np.asarray(unroll.bootstrap_obs, dtype=np.float32) for unroll in unrolls], axis=0
+        obs = core_fields["obs"]
+        actions = core_fields["actions"]
+        rewards = core_fields["rewards"]
+        terminated = core_fields["terminated"]
+        truncated = core_fields["truncated"]
+        to_play_seat = core_fields["to_play_seat"]
+        behavior_logp = core_fields["behavior_logp"]
+        behavior_values = core_fields["values"]
+        policy_train_mask = core_fields["policy_train_mask"]
+        b1_opponent_mask = core_fields["b1_opponent_mask"]
+        self._record_batch_timer_ms("batch_core_field_concatenation", time.perf_counter() - core_started)
+
+        bootstrap_started = time.perf_counter()
+        batch_major_fields = _concat_batch_major_fields(
+            unrolls,
+            ("bootstrap_value", "initial_hidden_state", "bootstrap_obs", "bootstrap_actor", "final_hidden_state"),
         )
-        bootstrap_actor = np.concatenate(
-            [np.asarray(unroll.bootstrap_actor, dtype=np.int64) for unroll in unrolls], axis=0
+        bootstrap_value = batch_major_fields["bootstrap_value"].astype(np.float32, copy=False)
+        initial_hidden_state = batch_major_fields["initial_hidden_state"]
+        bootstrap_obs = batch_major_fields["bootstrap_obs"].astype(np.float32, copy=False)
+        bootstrap_actor = batch_major_fields["bootstrap_actor"].astype(np.int64, copy=False)
+        final_hidden_state = batch_major_fields["final_hidden_state"]
+        self._record_batch_timer_ms("batch_bootstrap_field_concatenation", time.perf_counter() - bootstrap_started)
+
+        teacher_started = time.perf_counter()
+        teacher_fields = _concat_optional_time_major_fields(
+            unrolls,
+            {
+                "teacher_family": -1,
+                "teacher_slot": -1,
+                "teacher_move_source": -1,
+                "teacher_attack_type": -1,
+                "teacher_action": -1,
+                "teacher_valid": False,
+            },
         )
-        final_hidden_state = _concat_batch_major_field(unrolls, "final_hidden_state")
-        policy_train_mask = _concat_time_major_field(unrolls, "policy_train_mask")
-        teacher_family = _concat_optional_time_major_field(unrolls, "teacher_family", missing_fill_value=-1)
-        teacher_slot = _concat_optional_time_major_field(unrolls, "teacher_slot", missing_fill_value=-1)
-        teacher_move_source = _concat_optional_time_major_field(unrolls, "teacher_move_source", missing_fill_value=-1)
-        teacher_attack_type = _concat_optional_time_major_field(unrolls, "teacher_attack_type", missing_fill_value=-1)
-        teacher_action = _concat_optional_time_major_field(unrolls, "teacher_action", missing_fill_value=-1)
-        teacher_valid = _concat_optional_time_major_field(unrolls, "teacher_valid", missing_fill_value=False)
+        teacher_family = teacher_fields["teacher_family"]
+        teacher_slot = teacher_fields["teacher_slot"]
+        teacher_move_source = teacher_fields["teacher_move_source"]
+        teacher_attack_type = teacher_fields["teacher_attack_type"]
+        teacher_action = teacher_fields["teacher_action"]
+        teacher_valid = teacher_fields["teacher_valid"]
+        self._record_batch_timer_ms("batch_teacher_field_concatenation", time.perf_counter() - teacher_started)
+
+        legal_started = time.perf_counter()
         legal_actions = _concatenate_legal_actions(unrolls, action_space=int(self.action_dim))
+        self._record_batch_timer_ms("legal_concatenation_only", time.perf_counter() - legal_started)
+        self._record_batch_timer_ms("batch_concat_total", time.perf_counter() - concat_started)
+        # Kept as the legacy aggregate for existing benchmark comparisons.
         self._record_batch_timer_ms("legal_concatenation", time.perf_counter() - concat_started)
         legal_mask = None if legal_actions.mask is None else legal_actions.mask
+        rewards = self._apply_pass_with_nonpass_penalty(
+            rewards,
+            actions=actions,
+            legal_actions=legal_actions,
+            policy_train_mask=policy_train_mask,
+            penalty=float(pass_with_nonpass_penalty),
+        )
         discounts = np.logical_not(terminated).astype(np.float32) * float(gamma)
         if not truncation_bootstrap_value:
             discounts *= np.logical_not(truncated).astype(np.float32)
@@ -6790,6 +7488,7 @@ class QueueRuntime:
             "vtrace_rho_bar": float(vtrace_rho_bar),
             "vtrace_c_bar": float(vtrace_c_bar),
             "policy_train_mask": policy_train_mask,
+            "b1_opponent_mask": b1_opponent_mask,
             "teacher_family": teacher_family,
             "teacher_slot": teacher_slot,
             "teacher_move_source": teacher_move_source,
@@ -6806,27 +7505,72 @@ class QueueRuntime:
         gae_lambda: float,
         truncation_reward: float,
         truncation_bootstrap_value: bool,
+        pass_with_nonpass_penalty: float = 0.0,
     ) -> dict[str, Any]:
         concat_started = time.perf_counter()
-        obs = _concat_time_major_field(unrolls, "obs")
-        actions = _concat_time_major_field(unrolls, "actions")
-        rewards = _concat_time_major_field(unrolls, "rewards")
-        terminated = _concat_time_major_field(unrolls, "terminated")
-        truncated = _concat_time_major_field(unrolls, "truncated")
-        to_play_seat = _concat_time_major_field(unrolls, "to_play_seat")
-        old_logp = _concat_time_major_field(unrolls, "behavior_logp")
-        old_values = _concat_time_major_field(unrolls, "values")
-        initial_hidden_state = _concat_batch_major_field(unrolls, "initial_hidden_state")
-        policy_train_mask = _concat_time_major_field(unrolls, "policy_train_mask")
-        teacher_family = _concat_optional_time_major_field(unrolls, "teacher_family", missing_fill_value=-1)
-        teacher_slot = _concat_optional_time_major_field(unrolls, "teacher_slot", missing_fill_value=-1)
-        teacher_move_source = _concat_optional_time_major_field(unrolls, "teacher_move_source", missing_fill_value=-1)
-        teacher_attack_type = _concat_optional_time_major_field(unrolls, "teacher_attack_type", missing_fill_value=-1)
-        teacher_action = _concat_optional_time_major_field(unrolls, "teacher_action", missing_fill_value=-1)
-        teacher_valid = _concat_optional_time_major_field(unrolls, "teacher_valid", missing_fill_value=False)
+        core_started = time.perf_counter()
+        core_fields = _concat_time_major_fields(
+            unrolls,
+            (
+                "obs",
+                "actions",
+                "rewards",
+                "terminated",
+                "truncated",
+                "to_play_seat",
+                "behavior_logp",
+                "values",
+                "policy_train_mask",
+                "b1_opponent_mask",
+            ),
+        )
+        obs = core_fields["obs"]
+        actions = core_fields["actions"]
+        rewards = core_fields["rewards"]
+        terminated = core_fields["terminated"]
+        truncated = core_fields["truncated"]
+        to_play_seat = core_fields["to_play_seat"]
+        old_logp = core_fields["behavior_logp"]
+        old_values = core_fields["values"]
+        policy_train_mask = core_fields["policy_train_mask"]
+        b1_opponent_mask = core_fields["b1_opponent_mask"]
+        initial_hidden_state = _concat_batch_major_fields(unrolls, ("initial_hidden_state",))["initial_hidden_state"]
+        self._record_batch_timer_ms("batch_core_field_concatenation", time.perf_counter() - core_started)
+
+        teacher_started = time.perf_counter()
+        teacher_fields = _concat_optional_time_major_fields(
+            unrolls,
+            {
+                "teacher_family": -1,
+                "teacher_slot": -1,
+                "teacher_move_source": -1,
+                "teacher_attack_type": -1,
+                "teacher_action": -1,
+                "teacher_valid": False,
+            },
+        )
+        teacher_family = teacher_fields["teacher_family"]
+        teacher_slot = teacher_fields["teacher_slot"]
+        teacher_move_source = teacher_fields["teacher_move_source"]
+        teacher_attack_type = teacher_fields["teacher_attack_type"]
+        teacher_action = teacher_fields["teacher_action"]
+        teacher_valid = teacher_fields["teacher_valid"]
+        self._record_batch_timer_ms("batch_teacher_field_concatenation", time.perf_counter() - teacher_started)
+
+        legal_started = time.perf_counter()
         legal_actions = _concatenate_legal_actions(unrolls, action_space=int(self.action_dim))
+        self._record_batch_timer_ms("legal_concatenation_only", time.perf_counter() - legal_started)
+        self._record_batch_timer_ms("batch_concat_total", time.perf_counter() - concat_started)
+        # Kept as the legacy aggregate for existing benchmark comparisons.
         self._record_batch_timer_ms("legal_concatenation", time.perf_counter() - concat_started)
         legal_mask = None if legal_actions.mask is None else legal_actions.mask
+        rewards = self._apply_pass_with_nonpass_penalty(
+            rewards,
+            actions=actions,
+            legal_actions=legal_actions,
+            policy_train_mask=policy_train_mask,
+            penalty=float(pass_with_nonpass_penalty),
+        )
 
         discounts = np.logical_not(terminated).astype(np.float32) * float(gamma)
         if not truncation_bootstrap_value:
@@ -6860,6 +7604,7 @@ class QueueRuntime:
             "returns": returns,
             "advantages": advantages,
             "policy_train_mask": policy_train_mask,
+            "b1_opponent_mask": b1_opponent_mask,
             "teacher_family": teacher_family,
             "teacher_slot": teacher_slot,
             "teacher_move_source": teacher_move_source,
@@ -6920,6 +7665,7 @@ class QueueRuntime:
         occupancy = np.asarray(tuple(occupancy_samples) or (0.0,), dtype=np.float64)
         lag_array = np.asarray(policy_lags or (0.0,), dtype=np.float64)
         effective_update = int(getattr(self, "_effective_learner_update", 0))
+        league_reference_update = int(self._league_reference_update())
         counter_totals: dict[str, float] = {}
         for unroll in selected:
             counters = getattr(unroll, "counters", None)
@@ -6934,24 +7680,43 @@ class QueueRuntime:
         )
         if row_count_total <= 0.0:
             row_count_total = tactical_rows
+        runtime_config = getattr(self, "config", None)
+        opponent_candidate_ids = tuple(getattr(self, "_opponent_candidate_ids", ()))
+        opponent_models = getattr(self, "_opponent_models", {})
+        opponent_model_count = sum(1 for policy_id in opponent_candidate_ids if policy_id in opponent_models)
+        sampling_weight_metrics = self._opponent_sampling_group_weight_metrics()
         metrics = {
             "actor_env_steps_per_sec": float(batch_env_steps / elapsed_window),
             "actor_env_steps_per_sec_cumulative": float(self._runtime_cumulative_env_steps / elapsed),
+            "runtime_actor_count": float(getattr(runtime_config, "actor_count", 0)),
+            "runtime_envs_per_actor": float(getattr(runtime_config, "envs_per_actor", 0)),
             "batch_env_steps": float(batch_env_steps),
             "queue_occupancy_p50": float(np.percentile(occupancy, 50)),
             "queue_occupancy_p90": float(np.percentile(occupancy, 90)),
             "policy_version_lag_p50": float(np.percentile(lag_array, 50)),
             "policy_version_lag_p90": float(np.percentile(lag_array, 90)),
-            "league_effective_update": float(effective_update),
-            "league_update_lag": float(max(0, int(getattr(self, "_current_learner_update", 0)) - effective_update)),
+            "league_effective_update": float(league_reference_update),
+            "league_raw_effective_update": float(effective_update),
+            "league_update_lag": float(
+                max(0, int(getattr(self, "_current_learner_update", 0)) - league_reference_update)
+            ),
             "actor_heuristic_fraction_active": float(self._active_actor_heuristic_fraction()),
             "heuristic_public_mix_fraction_active": float(self._active_heuristic_public_mix_fraction()),
             "heuristic_public_variant_mix_fraction_active": float(self._active_heuristic_public_variant_mix_fraction()),
+            "noleague_baseline_reward_scale_active": float(self._noleague_baseline_reward_scale()),
+            "noleague_baseline_force_focal_seat_active": float(self._noleague_baseline_force_focal_seat()),
             "warmup_snapshot_mix_fraction_active": float(self._active_warmup_snapshot_mix_fraction()),
+            "league_eval_warmup_gate_enabled": float(1.0 if self._league_eval_warmup_gate_enabled() else 0.0),
+            "league_eval_warmup_gate_open": float(
+                1.0 if bool(getattr(self, "_league_eval_warmup_gate_open", False)) else 0.0
+            ),
+            "pfsp_sampling_ready": float(1.0 if self._pfsp_sampling_ready() else 0.0),
             "pfsp_pool_size": float(self._pfsp_pool_size),
+            "pfsp_candidate_model_count": float(opponent_model_count),
             "pfsp_quarantined_opponents": float(self._pfsp_quarantined_opponents),
             "pfsp_champion_pool_size": float(self._pfsp_champion_pool_size),
             "pfsp_recent_pool_size": float(self._pfsp_recent_pool_size),
+            "pfsp_warmup_snapshot_pool_size": float(getattr(self, "_pfsp_warmup_snapshot_pool_size", 0)),
             "pfsp_hard_negative_pool_size": float(self._pfsp_hard_negative_pool_size),
             "pfsp_sampled_envs": float(counter_totals.get("pfsp_sampled_envs", self._pfsp_last_sampled_envs)),
             "pfsp_mirror_envs": float(counter_totals.get("pfsp_mirror_envs", self._pfsp_last_mirror_envs)),
@@ -6975,6 +7740,12 @@ class QueueRuntime:
             "pfsp_hard_negative_envs": float(
                 counter_totals.get("pfsp_hard_negative_envs", self._pfsp_last_hard_negative_envs)
             ),
+            "pfsp_residual_opponent_envs": float(
+                counter_totals.get(
+                    "pfsp_residual_opponent_envs",
+                    getattr(self, "_pfsp_last_residual_opponent_envs", 0.0),
+                )
+            ),
             "pfsp_warmup_snapshot_envs": float(
                 counter_totals.get(
                     "pfsp_warmup_snapshot_envs",
@@ -6982,6 +7753,7 @@ class QueueRuntime:
                 )
             ),
             "pfsp_epoch": float(self._pfsp_epoch),
+            **sampling_weight_metrics,
             "tactical_row_count": tactical_rows,
             "packed_candidate_count": packed_candidates,
             "copied_bytes_estimate": float(counter_totals.get("copied_bytes_estimate", 0.0)),
@@ -7032,6 +7804,10 @@ def build_runtime_config(
     pass_action_id: int,
     runtime_mode: QueueRuntimeMode,
     minimal_batch: bool = False,
+    resolved_actor_count: int | None = None,
+    resolved_envs_per_actor: int | None = None,
+    resolved_batch_unrolls_per_update: int | None = None,
+    resolved_queue_capacity_unrolls: int | None = None,
 ) -> QueueRuntimeConfig:
     system = stack.config.system
     training = stack.config.training
@@ -7040,15 +7816,30 @@ def build_runtime_config(
 
     configured_actor_count = int(system.actor_process_count)
     configured_envs_per_actor = int(system.envs_per_actor)
-    actor_count, envs_per_actor = _resolve_actor_topology(
-        num_envs=int(num_envs),
-        runtime_mode=runtime_mode,
-        configured_actor_count=configured_actor_count,
-        configured_envs_per_actor=configured_envs_per_actor,
-    )
+    if resolved_actor_count is not None or resolved_envs_per_actor is not None:
+        if resolved_actor_count is None or resolved_envs_per_actor is None:
+            raise ValueError("resolved_actor_count and resolved_envs_per_actor must be provided together")
+        actor_count = max(1, int(resolved_actor_count))
+        envs_per_actor = max(1, int(resolved_envs_per_actor))
+    else:
+        actor_count, envs_per_actor = _resolve_actor_topology(
+            num_envs=int(num_envs),
+            runtime_mode=runtime_mode,
+            configured_actor_count=configured_actor_count,
+            configured_envs_per_actor=configured_envs_per_actor,
+        )
 
-    batch_unrolls_per_update = int(training.batch_unrolls_per_update)
-    queue_capacity_unrolls = max(int(system.actor_queue_capacity_unrolls), batch_unrolls_per_update)
+    batch_unrolls_per_update = (
+        int(training.batch_unrolls_per_update)
+        if resolved_batch_unrolls_per_update is None
+        else max(1, int(resolved_batch_unrolls_per_update))
+    )
+    queue_capacity_unrolls = max(
+        int(system.actor_queue_capacity_unrolls)
+        if resolved_queue_capacity_unrolls is None
+        else int(resolved_queue_capacity_unrolls),
+        batch_unrolls_per_update,
+    )
     if minimal_batch:
         batch_unrolls_per_update = int(actor_count)
         queue_capacity_unrolls = int(actor_count)
@@ -7100,18 +7891,98 @@ def _actor_seed(base_seed: int, actor_id: int) -> int:
 
 
 def _concat_time_major_field(unrolls: Sequence[PendingUnroll], field_name: str) -> np.ndarray:
+    return _concat_time_major_fields(unrolls, (field_name,))[field_name]
+
+
+def _concat_time_major_fields(
+    unrolls: Sequence[PendingUnroll],
+    field_names: Sequence[str],
+) -> dict[str, np.ndarray]:
     if not unrolls:
         raise ValueError("unrolls must be non-empty")
-    template = np.asarray(getattr(unrolls[0], field_name))
-    total_batch = sum(int(np.asarray(getattr(unroll, field_name)).shape[1]) for unroll in unrolls)
-    result = np.empty((template.shape[0], total_batch, *template.shape[2:]), dtype=template.dtype)
+    if not field_names:
+        return {}
+    templates = {field_name: np.asarray(getattr(unrolls[0], field_name)) for field_name in field_names}
+    total_batch = sum(int(np.asarray(getattr(unroll, field_names[0])).shape[1]) for unroll in unrolls)
+    results = {
+        field_name: np.empty((template.shape[0], total_batch, *template.shape[2:]), dtype=template.dtype)
+        for field_name, template in templates.items()
+    }
     offset = 0
     for unroll in unrolls:
-        value = np.asarray(getattr(unroll, field_name))
-        width = int(value.shape[1])
-        result[:, offset : offset + width, ...] = value
+        first_value = np.asarray(getattr(unroll, field_names[0]))
+        width = int(first_value.shape[1])
+        for field_name, result in results.items():
+            value = np.asarray(getattr(unroll, field_name), dtype=result.dtype)
+            result[:, offset : offset + width, ...] = value
         offset += width
-    return result
+    return results
+
+
+def _concat_optional_time_major_fields(
+    unrolls: Sequence[PendingUnroll],
+    fill_values: Mapping[str, Any],
+) -> dict[str, np.ndarray | None]:
+    if not fill_values:
+        return {}
+    if not unrolls:
+        raise ValueError("unrolls must be non-empty")
+    total_batch = sum(int(np.asarray(unroll.obs).shape[1]) for unroll in unrolls)
+    templates: dict[str, np.ndarray] = {}
+    for field_name in fill_values:
+        for unroll in unrolls:
+            raw_value = getattr(unroll, field_name)
+            if raw_value is not None:
+                templates[field_name] = np.asarray(raw_value)
+                break
+    results: dict[str, np.ndarray | None] = {}
+    for field_name, fill_value in fill_values.items():
+        template = templates.get(field_name)
+        if template is None:
+            results[field_name] = None
+        else:
+            results[field_name] = np.empty((template.shape[0], total_batch, *template.shape[2:]), dtype=template.dtype)
+    offset = 0
+    for unroll in unrolls:
+        obs = np.asarray(unroll.obs)
+        width = int(obs.shape[1])
+        for field_name, fill_value in fill_values.items():
+            result = results[field_name]
+            if result is None:
+                continue
+            raw_value = getattr(unroll, field_name)
+            if raw_value is None:
+                value = np.full((obs.shape[0], width, *result.shape[2:]), fill_value, dtype=result.dtype)
+            else:
+                value = np.asarray(raw_value, dtype=result.dtype)
+            result[:, offset : offset + width, ...] = value
+        offset += width
+    return results
+
+
+def _concat_batch_major_fields(
+    unrolls: Sequence[PendingUnroll],
+    field_names: Sequence[str],
+) -> dict[str, np.ndarray]:
+    if not unrolls:
+        raise ValueError("unrolls must be non-empty")
+    if not field_names:
+        return {}
+    templates = {field_name: np.asarray(getattr(unrolls[0], field_name)) for field_name in field_names}
+    total_batch = sum(int(np.asarray(getattr(unroll, field_names[0])).shape[0]) for unroll in unrolls)
+    results = {
+        field_name: np.empty((total_batch, *template.shape[1:]), dtype=template.dtype)
+        for field_name, template in templates.items()
+    }
+    offset = 0
+    for unroll in unrolls:
+        first_value = np.asarray(getattr(unroll, field_names[0]))
+        width = int(first_value.shape[0])
+        for field_name, result in results.items():
+            value = np.asarray(getattr(unroll, field_name), dtype=result.dtype)
+            result[offset : offset + width, ...] = value
+        offset += width
+    return results
 
 
 def _concat_optional_time_major_field(
@@ -7120,39 +7991,11 @@ def _concat_optional_time_major_field(
     *,
     missing_fill_value: Any,
 ) -> np.ndarray | None:
-    present_values = [getattr(unroll, field_name) for unroll in unrolls if getattr(unroll, field_name) is not None]
-    if not present_values:
-        return None
-    template = np.asarray(present_values[0])
-    total_batch = sum(int(np.asarray(unroll.obs).shape[1]) for unroll in unrolls)
-    result = np.empty((template.shape[0], total_batch, *template.shape[2:]), dtype=template.dtype)
-    offset = 0
-    for unroll in unrolls:
-        raw_value = getattr(unroll, field_name)
-        if raw_value is None:
-            obs = np.asarray(unroll.obs)
-            value = np.full((obs.shape[0], obs.shape[1], *template.shape[2:]), missing_fill_value, dtype=template.dtype)
-        else:
-            value = np.asarray(raw_value, dtype=template.dtype)
-        width = int(value.shape[1])
-        result[:, offset : offset + width, ...] = value
-        offset += width
-    return result
+    return _concat_optional_time_major_fields(unrolls, {field_name: missing_fill_value})[field_name]
 
 
 def _concat_batch_major_field(unrolls: Sequence[PendingUnroll], field_name: str) -> np.ndarray:
-    if not unrolls:
-        raise ValueError("unrolls must be non-empty")
-    template = np.asarray(getattr(unrolls[0], field_name))
-    total_batch = sum(int(np.asarray(getattr(unroll, field_name)).shape[0]) for unroll in unrolls)
-    result = np.empty((total_batch, *template.shape[1:]), dtype=template.dtype)
-    offset = 0
-    for unroll in unrolls:
-        value = np.asarray(getattr(unroll, field_name))
-        width = int(value.shape[0])
-        result[offset : offset + width, ...] = value
-        offset += width
-    return result
+    return _concat_batch_major_fields(unrolls, (field_name,))[field_name]
 
 
 def _concatenate_legal_actions(unrolls: Sequence[PendingUnroll], *, action_space: int) -> LegalActionBatch:

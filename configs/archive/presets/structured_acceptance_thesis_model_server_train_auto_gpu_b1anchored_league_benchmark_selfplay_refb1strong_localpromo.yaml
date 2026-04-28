@@ -1,0 +1,5 @@
+schema_version: 2
+description: reduced-size B1-anchored model-policy league with stronger frozen B1 top-action distillation
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_selfplay_refb1_localpromo.yaml
+training:
+  reference_policy_top_action_bc_coef: 0.5

@@ -159,7 +159,7 @@ def test_train_entrypoint_helper_resolves_central_actor_torch_threads(monkeypatc
 
 def test_train_entrypoint_applies_profile_flags_before_hashing() -> None:
     module = _load_script_module("train.py")
-    stack = module.load_stack_config(REPO_ROOT / "configs" / "presets" / "typed_thesis_locked.yaml")
+    stack = module.load_stack_config(REPO_ROOT / "configs" / "thesis_locked.yaml")
 
     base_hash = module.compute_config_hash256(stack)
     updated = module._apply_training_flag_overrides(
@@ -319,7 +319,7 @@ def test_structured_v2_baseline_entrypoint_writes_contract(monkeypatch, tmp_path
 def test_structured_v2_campaign_entrypoint_writes_dry_run_summary(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module("structured_v2_campaign.py")
     repo_root = tmp_path / "weiss_schwarz_rl"
-    stack_config = repo_root / "configs" / "presets" / "typed_structured_v2.yaml"
+    stack_config = repo_root / "configs" / "typed_structured_v2.yaml"
     stack_config.parent.mkdir(parents=True, exist_ok=True)
     stack_config.write_text("config: {}\n", encoding="utf-8")
     baseline_run_dir = repo_root / "runs" / "baseline_ref"
@@ -399,7 +399,7 @@ def test_structured_v2_campaign_entrypoint_writes_dry_run_summary(monkeypatch, t
 def test_structured_v2_campaign_entrypoint_records_failed_step(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module("structured_v2_campaign.py")
     repo_root = tmp_path / "weiss_schwarz_rl"
-    stack_config = repo_root / "configs" / "presets" / "typed_structured_v2.yaml"
+    stack_config = repo_root / "configs" / "typed_structured_v2.yaml"
     stack_config.parent.mkdir(parents=True, exist_ok=True)
     stack_config.write_text("config: {}\n", encoding="utf-8")
     baseline_run_dir = repo_root / "runs" / "baseline_ref"
@@ -523,7 +523,7 @@ def test_launch_experiments_entrypoint_dry_run_plumbs_devices(monkeypatch, tmp_p
             "--group-label",
             "cli_group",
             "--stack-config",
-            str(tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"),
+            str(tmp_path / "configs" / "thesis_locked.yaml"),
             "--seed",
             "7",
             "--train-arg=--max-updates",
@@ -541,7 +541,7 @@ def test_launch_experiments_entrypoint_dry_run_plumbs_devices(monkeypatch, tmp_p
     }
     assert observed["build_launch_plan"] == {
         "group_label": "cli_group",
-        "stack_configs": [str((tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml").resolve())],
+        "stack_configs": [str((tmp_path / "configs" / "thesis_locked.yaml").resolve())],
         "seeds": [7],
         "devices": ("cpu",),
         "run_label_prefix": None,
@@ -646,3 +646,4 @@ def test_write_paper_readiness_fixture_entrypoint_writes_ready_run(monkeypatch, 
 
     payload = build_paper_readiness_summary(run_dir=run_dir)
     assert payload["passed"] is True
+

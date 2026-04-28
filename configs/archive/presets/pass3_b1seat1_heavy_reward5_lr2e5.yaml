@@ -1,0 +1,14 @@
+schema_version: 2
+description: Pass 3 hard-seat B1 exploit probe with heavier B1 lane, amplified B1 reward, and modest LR bump
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_b1init_devtargetsharp_actorparity3_shift450_vlowlr_noseedpfsp_b1exploitgate_noseedwarm_entropy08_frontierweighted_seedpool_lag10_evalgated_lowlr_evalguard_localpromo.yaml
+training:
+  optimizer:
+    learning_rate: 0.00002
+league:
+  sampling:
+    noleague_baseline_mix_fraction: 0.50
+    noleague_baseline_mix_end_updates: 750
+    noleague_baseline_reward_scale: 5.0
+    noleague_baseline_force_focal_seat: 1
+    heuristic_public_mix_fraction: 0.15
+    heuristic_public_variant_mix_fraction: 0.15

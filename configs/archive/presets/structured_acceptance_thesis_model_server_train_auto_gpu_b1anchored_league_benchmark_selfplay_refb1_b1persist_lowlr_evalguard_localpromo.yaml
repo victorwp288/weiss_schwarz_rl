@@ -1,0 +1,7 @@
+schema_version: 2
+description: reduced-size refB1 low-LR league diagnostic with persistent late B1 opponent pressure
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_selfplay_refb1strong_lowlr_evalguard_localpromo.yaml
+league:
+  sampling:
+    noleague_baseline_mix_fraction: 0.25
+    noleague_baseline_mix_end_updates: -1

@@ -12,8 +12,14 @@ def test_list_sweep_presets_is_stable() -> None:
 def test_get_sweep_preset_returns_candidates() -> None:
     preset = get_sweep_preset("noleague_impala_compact")
 
-    assert preset.stack_config == "configs/presets/baselines/noleague_impala.yaml"
+    assert preset.stack_config == "configs/baselines/noleague_impala.yaml"
     assert len(preset.candidates) == 4
+
+
+def test_norecurrence_sweep_uses_noleague_anchor_surface() -> None:
+    preset = get_sweep_preset("norecurrence_compact")
+
+    assert preset.stack_config == "configs/baselines/norecurrence_noleague.yaml"
 
 
 def test_build_sweep_launch_plan_builds_candidate_seed_grid(tmp_path: Path) -> None:

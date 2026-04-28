@@ -1,0 +1,10 @@
+schema_version: 2
+description: reduced-size true-league continuation where B1 reference imitation fades into frontier self-play
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_selfplay_refb1_frontier_family_lowlr_evalguard_localpromo.yaml
+training:
+  reference_policy_top_action_bc_final_coef: 0.05
+  reference_policy_top_action_bc_start_updates: 820
+  reference_policy_top_action_bc_end_updates: 900
+  reference_policy_top_action_family_bc_final_coef: 0.0
+  reference_policy_top_action_family_bc_start_updates: 820
+  reference_policy_top_action_family_bc_end_updates: 900

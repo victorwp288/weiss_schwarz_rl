@@ -1,0 +1,12 @@
+schema_version: 2
+description: reduced-size fresh league student scored by B1/B3/history frontier instead of easy-anchor average
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_fade_lowlr_evalguard_localpromo.yaml
+evaluation:
+  periodic_dev_eval_anchor_weights:
+    B0 RandomLegal: 0.25
+    B1 NoLeague baseline: 3.0
+    B2 HeuristicPublic: 0.25
+    B3 HeuristicPublicAggro: 3.0
+    B4 HeuristicPublicControl: 1.0
+    Previous champion snapshot: 2.0
+    Previous recent snapshot: 2.0

@@ -1,0 +1,27 @@
+schema_version: 2
+description: Short FP32 main-policy absorption check against confirmed trainable-live residual hard negatives
+extends: pass3_b1_s1_main_vs_confirmed_residual_hardnegatives_cfaux.yaml
+training:
+  optimizer:
+    learning_rate: 0.0002
+    value_loss_coef: 0.25
+  precision:
+    mixed_precision: false
+  checkpointing:
+    checkpoint_interval_updates: 5
+    snapshot_interval_updates: 5
+    actor_reload_interval_updates: 5
+  raw_b1_distill:
+    enabled: false
+    coef: 0.0
+    final_coef: 0.0
+  counterfactual_positive:
+    coef: 3.0
+    final_coef: 2.0
+    start_updates: 450
+    end_updates: 470
+    margin_coef: 0.3
+    margin: 1.5
+    max_labels: 10
+evaluation:
+  periodic_dev_eval_interval_updates: 0

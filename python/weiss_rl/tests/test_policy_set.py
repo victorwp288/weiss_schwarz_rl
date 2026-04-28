@@ -9,6 +9,7 @@ import pytest
 from weiss_rl.config import load_stack_config
 from weiss_rl.eval.policy_set import (
     DevEvalPolicySummary,
+    HEURISTIC_PUBLIC_POLICY_ID,
     parse_training_policy_id,
     recommend_focal_policy_id,
     select_final_policy_set_deterministic_v1,
@@ -248,6 +249,85 @@ def test_selector_maps_legacy_dev_eval_policy_ids_to_durable_registry_ids() -> N
         "B2 HeuristicPublic",
         "policy_000003",
         "policy_000002",
+    ]
+
+
+def test_selector_keeps_b2_when_only_anchor_scores_mention_it() -> None:
+    config = _selection_config(
+        include_final_champion_snapshot=False,
+        include_spaced_snapshots_near_percent_updates=(),
+    )
+    registry = _build_registry([("policy_000003", 60)])
+    summaries = {
+        "policy_000003": DevEvalPolicySummary(
+            policy_id="policy_000003",
+            aggregate_score=0.92,
+            anchor_scores={
+                "B0 RandomLegal": 1.0,
+                "B1 NoLeague baseline": 0.75,
+                HEURISTIC_PUBLIC_POLICY_ID: 1.0,
+            },
+        )
+    }
+
+    selected = select_final_policy_set_deterministic_v1(
+        snapshot_registry=registry,
+        dev_eval_summaries=summaries,
+        config=config,
+        final_policy_set_size=4,
+    )
+
+    assert selected == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        HEURISTIC_PUBLIC_POLICY_ID,
+        "policy_000003",
+    ]
+
+
+def test_selector_uses_optional_anchor_display_names_from_anchor_scores() -> None:
+    config = _selection_config(
+        include_final_champion_snapshot=False,
+        include_spaced_snapshots_near_percent_updates=(),
+    )
+    registry = _build_registry(
+        [
+            ("policy_000200", 200),
+            ("policy_000250", 250),
+        ]
+    )
+    summaries = {
+        "policy_000200": DevEvalPolicySummary(
+            policy_id="policy_000200",
+            aggregate_score=0.70,
+            anchor_scores={
+                "B0 RandomLegal": 1.0,
+                "B1 NoLeague baseline": 0.6,
+                "Previous recent snapshot": 0.8,
+            },
+        ),
+        "policy_000250": DevEvalPolicySummary(
+            policy_id="policy_000250",
+            aggregate_score=0.69,
+            anchor_scores={
+                "B0 RandomLegal": 1.0,
+                "B1 NoLeague baseline": 0.6,
+                "Previous recent snapshot": 0.4,
+            },
+        ),
+    }
+
+    selected = select_final_policy_set_deterministic_v1(
+        snapshot_registry=registry,
+        dev_eval_summaries=summaries,
+        config=config,
+        final_policy_set_size=3,
+    )
+
+    assert selected == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "policy_000200",
     ]
 
 

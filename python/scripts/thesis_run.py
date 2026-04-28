@@ -8,43 +8,85 @@ from pathlib import Path
 from typing import Any
 
 _PRESET_PATHS = {
-    "thesis-model-auto-gpu": Path("configs/presets/structured_acceptance_thesis_model_auto_gpu.yaml"),
-    "thesis-model-eval-auto-gpu": Path("configs/presets/structured_acceptance_thesis_model_eval_auto_gpu.yaml"),
-    "thesis-model-multideck": Path("configs/presets/structured_acceptance_thesis_model_multideck_auto_gpu.yaml"),
+    "thesis-model-auto-gpu": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-eval-auto-gpu": Path("configs/main_eval.yaml"),
+    "thesis-model-server-train": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-server-train-b1anchored": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-server-train-b1anchored-refb1strong-lowlr": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-server-train-b1anchored-benchmark": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-server-train-b1anchored-benchmark-localpromo": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-localpromo": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-bckl-localpromo": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-localpromo": Path(
+        "configs/main_impala_league_server.yaml"
+    ),
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-evalguard-localpromo": Path(
+        "configs/main_impala_league_server.yaml"
+    ),
+    "thesis-model-server-train-b1anchored-benchmark-modelbridge-localpromo": Path("configs/main_impala_league_server.yaml"),
+    "b1-anchor-fullsize-warmup": Path("configs/baselines/noleague_fullsize_warmup.yaml"),
+    "b1-anchor-fullsize-lowlr-continuation": Path("configs/baselines/noleague_fullsize_lowlr_continuation.yaml"),
+    "b1-anchor-benchmark": Path("configs/baselines/noleague_benchmark.yaml"),
+    "b1-anchor-benchmark-warmup": Path("configs/baselines/noleague_benchmark_warmup.yaml"),
+    "b1-anchor-benchmark-lowlr-continuation": Path("configs/baselines/noleague_benchmark_lowlr_continuation.yaml"),
+    "b1-anchor-benchmark-eval-auto-gpu": Path("configs/baselines/noleague_benchmark_eval.yaml"),
+    "thesis-model-multideck": Path("configs/ablations/multideck.yaml"),
     "thesis-model-multideck-eval-auto-gpu": Path(
-        "configs/presets/structured_acceptance_thesis_model_multideck_eval_auto_gpu.yaml"
+        "configs/ablations/multideck_eval.yaml"
     ),
     "ablate-teacher-fade": Path(
-        "configs/presets/ablations/structured_acceptance_thesis_model_teacher_fade_auto_gpu.yaml"
+        "configs/ablations/teacher_fade.yaml"
     ),
     "ablate-teacher-fade-eval-auto-gpu": Path(
-        "configs/presets/ablations/structured_acceptance_thesis_model_teacher_fade_eval_auto_gpu.yaml"
+        "configs/ablations/teacher_fade_eval.yaml"
     ),
     "ablate-no-tactical-bias": Path(
-        "configs/presets/ablations/structured_acceptance_thesis_model_no_tactical_bias_auto_gpu.yaml"
+        "configs/ablations/no_tactical_bias.yaml"
     ),
     "ablate-no-tactical-bias-eval-auto-gpu": Path(
-        "configs/presets/ablations/structured_acceptance_thesis_model_no_tactical_bias_eval_auto_gpu.yaml"
+        "configs/ablations/no_tactical_bias_eval.yaml"
+    ),
+    "ablate-teacher-fade-no-tactical-bias": Path(
+        "configs/ablations/teacher_fade_no_tactical_bias.yaml"
+    ),
+    "ablate-teacher-fade-no-tactical-bias-eval-auto-gpu": Path(
+        "configs/ablations/teacher_fade_no_tactical_bias_eval.yaml"
     ),
     "ablate-no-b1-cutoff": Path(
-        "configs/presets/ablations/structured_acceptance_thesis_model_no_b1_cutoff_auto_gpu.yaml"
+        "configs/ablations/no_b1_cutoff.yaml"
     ),
     "ablate-no-b1-cutoff-eval-auto-gpu": Path(
-        "configs/presets/ablations/structured_acceptance_thesis_model_no_b1_cutoff_eval_auto_gpu.yaml"
+        "configs/ablations/no_b1_cutoff_eval.yaml"
     ),
     "ablate-reward-shaping": Path(
-        "configs/presets/ablations/structured_acceptance_thesis_model_reward_shaping_auto_gpu.yaml"
+        "configs/ablations/reward_shaping.yaml"
     ),
     "ablate-reward-shaping-eval-auto-gpu": Path(
-        "configs/presets/ablations/structured_acceptance_thesis_model_reward_shaping_eval_auto_gpu.yaml"
+        "configs/ablations/reward_shaping_eval.yaml"
     ),
 }
 _DEFAULT_EVAL_PRESET = "thesis-model-eval-auto-gpu"
 _DEFAULT_EVAL_PRESET_OVERRIDES = {
     "thesis-model-auto-gpu": "thesis-model-eval-auto-gpu",
+    "thesis-model-server-train": "thesis-model-eval-auto-gpu",
+    "thesis-model-server-train-b1anchored": "thesis-model-eval-auto-gpu",
+    "thesis-model-server-train-b1anchored-refb1strong-lowlr": "thesis-model-eval-auto-gpu",
+    "thesis-model-server-train-b1anchored-benchmark": "b1-anchor-benchmark-eval-auto-gpu",
+    "thesis-model-server-train-b1anchored-benchmark-localpromo": "b1-anchor-benchmark-eval-auto-gpu",
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-localpromo": "b1-anchor-benchmark-eval-auto-gpu",
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-bckl-localpromo": "b1-anchor-benchmark-eval-auto-gpu",
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-localpromo": "b1-anchor-benchmark-eval-auto-gpu",
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-evalguard-localpromo": "b1-anchor-benchmark-eval-auto-gpu",
+    "thesis-model-server-train-b1anchored-benchmark-modelbridge-localpromo": "b1-anchor-benchmark-eval-auto-gpu",
+    "b1-anchor-fullsize-warmup": "thesis-model-eval-auto-gpu",
+    "b1-anchor-fullsize-lowlr-continuation": "thesis-model-eval-auto-gpu",
+    "b1-anchor-benchmark": "b1-anchor-benchmark-eval-auto-gpu",
+    "b1-anchor-benchmark-warmup": "b1-anchor-benchmark-eval-auto-gpu",
+    "b1-anchor-benchmark-lowlr-continuation": "b1-anchor-benchmark-eval-auto-gpu",
     "thesis-model-multideck": "thesis-model-multideck-eval-auto-gpu",
     "ablate-teacher-fade": "ablate-teacher-fade-eval-auto-gpu",
     "ablate-no-tactical-bias": "ablate-no-tactical-bias-eval-auto-gpu",
+    "ablate-teacher-fade-no-tactical-bias": "ablate-teacher-fade-no-tactical-bias-eval-auto-gpu",
     "ablate-no-b1-cutoff": "ablate-no-b1-cutoff-eval-auto-gpu",
     "ablate-reward-shaping": "ablate-reward-shaping-eval-auto-gpu",
 }
@@ -130,6 +172,7 @@ def main() -> None:
     parser.add_argument("--num-envs", type=int, default=2)
     parser.add_argument("--unroll-length", type=int, default=4)
     parser.add_argument("--max-updates", type=int, default=1)
+    parser.add_argument("--max-wall-clock-minutes", type=float, default=None)
     parser.add_argument("--runtime-mode", type=str, default="train_ordered")
     parser.add_argument("--profile", type=str, default="")
     parser.add_argument("--device", type=str, default="")
@@ -137,6 +180,7 @@ def main() -> None:
     parser.add_argument("--resume-run-dir", type=Path, default=None)
     parser.add_argument("--resume-from", type=str, default="")
     parser.add_argument("--b1-baseline-run-dir", type=Path, default=None)
+    parser.add_argument("--seed-snapshot-run-dir", type=Path, default=None)
     parser.add_argument("--compare-run-dir", action="append", default=None)
     parser.add_argument("--compare-launch-group-summary", type=Path, default=None)
     parser.add_argument("--compare-out-dir", type=Path, default=None)
@@ -186,6 +230,8 @@ def main() -> None:
         "--runtime-mode",
         str(args.runtime_mode),
     ]
+    if args.max_wall_clock_minutes is not None:
+        train_command.extend(["--max-wall-clock-minutes", str(args.max_wall_clock_minutes)])
     if args.profile:
         train_command.extend(["--profile", str(args.profile)])
     if args.device:
@@ -198,6 +244,8 @@ def main() -> None:
         train_command.extend(["--resume-from", str(args.resume_from)])
     if args.b1_baseline_run_dir is not None:
         train_command.extend(["--b1-baseline-run-dir", str(args.b1_baseline_run_dir)])
+    if args.seed_snapshot_run_dir is not None:
+        train_command.extend(["--seed-snapshot-run-dir", str(args.seed_snapshot_run_dir)])
     for extra in args.train_arg or []:
         train_command.append(str(extra))
     failed = False
@@ -249,8 +297,12 @@ def main() -> None:
         "eval_stack_config": eval_stack_config.as_posix(),
         "preset": str(args.preset),
         "eval_preset": eval_preset,
+        "max_wall_clock_minutes": None if args.max_wall_clock_minutes is None else float(args.max_wall_clock_minutes),
         "b1_baseline_run_dir": (
             None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve().as_posix()
+        ),
+        "seed_snapshot_run_dir": (
+            None if args.seed_snapshot_run_dir is None else args.seed_snapshot_run_dir.resolve().as_posix()
         ),
         "dry_run": bool(args.dry_run),
         "status": "failed" if failed else ("planned" if args.dry_run else "completed"),

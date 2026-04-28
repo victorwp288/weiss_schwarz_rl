@@ -1,0 +1,11 @@
+schema_version: 2
+description: reduced-size refB1 low-LR league diagnostic with actor-only public heuristic bias and learner/eval unbiased logits
+extends: structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_selfplay_refb1strong_lowlr_evalguard_localpromo.yaml
+model:
+  public_heuristic_logit_bias_scale: 0.0
+  public_heuristic_actor_logit_bias_scale: 1.0
+training:
+  structured_aux:
+    teacher_public_heuristic_coef: 0.0
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_main_move_coef: 0.0
