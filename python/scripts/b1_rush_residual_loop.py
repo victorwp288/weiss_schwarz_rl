@@ -12,17 +12,16 @@ import argparse
 import json
 import subprocess
 import sys
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
-
+from typing import Any
 
 DEFAULT_STACK_CONFIG = "configs/residual_eval_s1.yaml"
 DEFAULT_RUN_DIR = "runs/b1_s1_distillonly_u450_to_u455_20260427"
 DEFAULT_B1_BASELINE_RUN_DIR = "runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425"
 DEFAULT_B1_CHECKPOINT = (
-    "runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/"
-    "training/checkpoints/checkpoint_450.pt"
+    "runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt"
 )
 
 DEFAULT_LABEL_DIRS = [
@@ -216,7 +215,9 @@ def main() -> None:
             mine_cmd.append("--require-pass-legal")
         if args.require_baseline_family:
             mine_cmd.extend(["--require-baseline-family", args.require_baseline_family])
-        _append_repeated(mine_cmd, "--exclude-labels", [str(path / "counterfactual_labels.jsonl") for path in label_dirs])
+        _append_repeated(
+            mine_cmd, "--exclude-labels", [str(path / "counterfactual_labels.jsonl") for path in label_dirs]
+        )
         _run(mine_cmd, cwd=cwd)
         mined_dir = _counterfactual_artifact_dir(run_dir, mine_artifact)
         if (mined_dir / "counterfactual_labels.jsonl").is_file() and _read_jsonl(
@@ -231,7 +232,9 @@ def main() -> None:
 
     def train_residual(steps: int, output_dir: Path) -> dict[str, Any]:
         script_name = (
-            "b1_trainable_residual_policy.py" if str(args.trainer) == "trainable-live" else "b1_residual_adoption_probe.py"
+            "b1_trainable_residual_policy.py"
+            if str(args.trainer) == "trainable-live"
+            else "b1_residual_adoption_probe.py"
         )
         train_cmd = [
             sys.executable,
@@ -283,7 +286,11 @@ def main() -> None:
                 )
         _append_repeated(train_cmd, "--label-dir", [str(path) for path in label_dirs])
         _run(train_cmd, cwd=cwd)
-        report_name = "trainable_residual_report.json" if str(args.trainer) == "trainable-live" else "residual_adoption_report.json"
+        report_name = (
+            "trainable_residual_report.json"
+            if str(args.trainer) == "trainable-live"
+            else "residual_adoption_report.json"
+        )
         return dict(_read_json(output_dir / report_name))
 
     adoption_report = train_residual(args.train_steps, adoption_dir)
@@ -370,9 +377,7 @@ def main() -> None:
         "confirm": confirm_reports,
         "promoted_to_confirm": bool(confirm_reports),
         "decision_hint": (
-            "confirm_or_integrate_candidate"
-            if confirm_reports
-            else "reject_or_retrain_candidate_before_confirm"
+            "confirm_or_integrate_candidate" if confirm_reports else "reject_or_retrain_candidate_before_confirm"
         ),
     }
     _write_json(summary_path, payload)
@@ -381,4 +386,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

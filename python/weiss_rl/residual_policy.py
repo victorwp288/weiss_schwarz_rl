@@ -200,7 +200,9 @@ class LiveFrozenB1Residual(nn.Module):
                 for row_index in range(int(obs.shape[0])):
                     row = obs[row_index].detach().cpu().contiguous().numpy()
                     row_sha = hashlib.sha256(row.tobytes()).hexdigest()
-                    actor_matches = self.gate_actor_seat is None or int(actor[row_index].item()) == int(self.gate_actor_seat)
+                    actor_matches = self.gate_actor_seat is None or int(actor[row_index].item()) == int(
+                        self.gate_actor_seat
+                    )
                     if row_sha == self.gate_obs_sha256 and actor_matches:
                         residual[row_index : row_index + 1] = self.residual_probe.residual_logits(
                             obs[row_index : row_index + 1],

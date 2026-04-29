@@ -274,9 +274,7 @@ class TrainingConfig:
     reference_policy_top_action_family_bc_start_updates: int = 0
     reference_policy_top_action_family_bc_end_updates: int = -1
     reference_policy_id: str = ""
-    main_residual_policy: TrainingMainResidualPolicyConfig = field(
-        default_factory=TrainingMainResidualPolicyConfig
-    )
+    main_residual_policy: TrainingMainResidualPolicyConfig = field(default_factory=TrainingMainResidualPolicyConfig)
     diverse_opponent_actor_count: int = 0
     diverse_model_actor_count: int = 0
     diverse_opponent_policy_id: str = ""

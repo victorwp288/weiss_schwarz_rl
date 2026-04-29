@@ -8,6 +8,7 @@ artifacts so an ``auto`` run can be reproduced or audited later.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from math import ceil
 from typing import Any
 
 import psutil
@@ -113,10 +114,7 @@ def hardware_profile_from_name(name: str) -> HardwareProfile:
             vram_gb_per_gpu=48.0,
             gpu_name="mock-gpu",
         )
-    raise ValueError(
-        "unknown hardware profile "
-        f"{name!r}; use local, uc1-l40-3, uc1-l40-4, 8gpu-l40, or gpu<N>"
-    )
+    raise ValueError(f"unknown hardware profile {name!r}; use local, uc1-l40-3, uc1-l40-4, 8gpu-l40, or gpu<N>")
 
 
 def detect_hardware_profile(*, name: str = "local") -> HardwareProfile:
@@ -126,10 +124,16 @@ def detect_hardware_profile(*, name: str = "local") -> HardwareProfile:
     gpu_name = ""
     vram_gb = 0.0
     if gpu_count > 0:
+        gpu_names: list[str] = []
+        vram_gb_values: list[float] = []
         try:
-            props = torch.cuda.get_device_properties(0)
-            gpu_name = str(props.name)
-            vram_gb = float(props.total_memory / (1024.0**3))
+            for device_index in range(gpu_count):
+                props = torch.cuda.get_device_properties(device_index)
+                gpu_names.append(str(props.name))
+                vram_gb_values.append(float(props.total_memory / (1024.0**3)))
+            unique_names = tuple(dict.fromkeys(gpu_names))
+            gpu_name = unique_names[0] if len(unique_names) == 1 else "mixed: " + ", ".join(unique_names)
+            vram_gb = min(vram_gb_values) if vram_gb_values else 0.0
         except Exception:
             gpu_name = "cuda"
             vram_gb = 0.0
@@ -151,7 +155,12 @@ def _parse_gpu_count(requested: str, *, visible_gpu_count: int) -> int:
     if gpu_count < 0:
         raise ValueError("learner_gpu_count must be >= 0 or auto")
     if visible_gpu_count > 0:
-        return min(gpu_count, visible_gpu_count)
+        if gpu_count > visible_gpu_count:
+            raise ValueError(
+                "learner_gpu_count exceeds visible CUDA devices: "
+                f"requested={gpu_count} visible={visible_gpu_count}; adjust CUDA_VISIBLE_DEVICES or use auto"
+            )
+        return gpu_count
     return gpu_count
 
 
@@ -170,7 +179,9 @@ def resolve_training_topology(
     learner_gpu_count = _parse_gpu_count(request.learner_gpu_count, visible_gpu_count=visible_gpu_count)
     requested_parallelism = str(request.learner_parallelism).strip().lower()
     if requested_parallelism == "auto":
-        resolved_parallelism = "ddp" if learner_gpu_count > 1 else ("single_cuda" if learner_gpu_count == 1 else "single_cpu")
+        resolved_parallelism = (
+            "ddp" if learner_gpu_count > 1 else ("single_cuda" if learner_gpu_count == 1 else "single_cpu")
+        )
     elif requested_parallelism == "single":
         resolved_parallelism = "single_cuda" if learner_gpu_count > 0 else "single_cpu"
         learner_gpu_count = min(learner_gpu_count, 1)
@@ -182,26 +193,54 @@ def resolve_training_topology(
     if str(request.actor_topology).strip().lower() != "auto":
         actor_count = max(1, int(configured_actor_count))
         envs_per_actor = max(1, int(configured_envs_per_actor))
+        requested_actor_cap = max(1, int(request.max_actor_process_count))
+        if actor_count > requested_actor_cap:
+            raise ValueError(
+                "manual actor topology exceeds max_actor_process_count: "
+                f"actor_count={actor_count} max_actor_process_count={requested_actor_cap}"
+            )
         notes.append("manual_actor_topology")
+        shard_count = int(learner_gpu_count) if resolved_parallelism == "ddp" and int(learner_gpu_count) > 0 else 1
+        if shard_count > 1 and actor_count % shard_count != 0:
+            raise ValueError(
+                "manual actor topology must be divisible by DDP learner GPU count: "
+                f"actor_count={actor_count} learner_gpu_count={shard_count}"
+            )
     else:
         scale_gpu_count = max(1, int(learner_gpu_count))
         target_total_envs = max(1, int(request.target_envs_per_gpu) * scale_gpu_count)
         learner_reserved = max(1, int(request.learner_cpu_cores_per_gpu) * max(1, int(learner_gpu_count)))
         actor_cpu_budget = max(1, int(hardware.cpu_cores) - int(request.reserve_cpu_cores) - learner_reserved)
-        requested_actor_cap = max(int(configured_actor_count), int(request.max_actor_process_count))
+        requested_actor_cap = int(request.max_actor_process_count)
         max_actor_count = max(1, min(requested_actor_cap, actor_cpu_budget))
         min_envs = max(1, int(request.min_envs_per_actor))
         max_envs = max(min_envs, int(request.max_envs_per_actor))
+        shard_count = int(learner_gpu_count) if resolved_parallelism == "ddp" and int(learner_gpu_count) > 0 else 1
         actor_candidates = [
             actor_count
             for actor_count in range(1, max_actor_count + 1)
-            if target_total_envs % actor_count == 0
-            and min_envs <= (target_total_envs // actor_count) <= max_envs
+            if target_total_envs % actor_count == 0 and min_envs <= (target_total_envs // actor_count) <= max_envs
+            and actor_count % shard_count == 0
         ]
         if not actor_candidates:
-            actor_count = max(1, min(max_actor_count, max(1, target_total_envs // max_envs)))
-            envs_per_actor = max(1, target_total_envs // actor_count)
-            notes.append("actor_topology_rounded")
+            if max_actor_count < shard_count:
+                raise ValueError(
+                    "autoscale cannot allocate at least one actor per DDP rank: "
+                    f"max_actor_count={max_actor_count} learner_gpu_count={shard_count}"
+                )
+            max_shardable_actor_count = max(shard_count, max_actor_count - (max_actor_count % shard_count))
+            max_supported_envs = int(max_shardable_actor_count) * int(max_envs)
+            if max_supported_envs < target_total_envs:
+                actor_count = max_shardable_actor_count
+                envs_per_actor = max_envs
+                notes.append("target_envs_reduced_by_actor_capacity")
+            else:
+                actor_count = max(shard_count, ceil(target_total_envs / max_envs))
+                if actor_count % shard_count != 0:
+                    actor_count += shard_count - (actor_count % shard_count)
+                actor_count = min(max_shardable_actor_count, actor_count)
+                envs_per_actor = ceil(target_total_envs / actor_count)
+                notes.append("actor_topology_rounded")
         else:
             actor_count = min(
                 actor_candidates,
@@ -209,11 +248,18 @@ def resolve_training_topology(
             )
             envs_per_actor = target_total_envs // actor_count
     total_envs = int(actor_count * envs_per_actor)
+    shard_count = int(learner_gpu_count) if resolved_parallelism == "ddp" and int(learner_gpu_count) > 0 else 1
     batch_unrolls_per_update = max(int(configured_batch_unrolls_per_update), int(actor_count))
+    if shard_count > 1 and batch_unrolls_per_update % shard_count != 0:
+        batch_unrolls_per_update += shard_count - (batch_unrolls_per_update % shard_count)
+        notes.append("batch_unrolls_rounded_for_ddp")
     queue_capacity_unrolls = max(
         int(configured_queue_capacity_unrolls),
         int(batch_unrolls_per_update) * max(1, int(request.queue_depth_multiplier)),
     )
+    if shard_count > 1 and queue_capacity_unrolls % shard_count != 0:
+        queue_capacity_unrolls += shard_count - (queue_capacity_unrolls % shard_count)
+        notes.append("queue_capacity_rounded_for_ddp")
     learner_reserved_cpu = max(1, int(request.learner_cpu_cores_per_gpu) * max(1, int(learner_gpu_count)))
     actor_cpu_available = max(1, int(hardware.cpu_cores) - int(request.reserve_cpu_cores) - learner_reserved_cpu)
     return ResolvedTrainingTopology(
@@ -237,3 +283,19 @@ def resolve_training_topology(
         vram_budget_gb_per_gpu=float(hardware.vram_gb_per_gpu) * float(request.vram_fraction),
         notes=tuple(notes),
     )
+
+
+def validate_ddp_world_size(topology: ResolvedTrainingTopology, *, world_size: int) -> None:
+    if str(topology.resolved_learner_parallelism).strip().lower() != "ddp":
+        return
+    expected = int(topology.learner_gpu_count)
+    actual = int(world_size)
+    if expected <= 0:
+        return
+    if actual != expected:
+        raise ValueError(
+            "autoscale resolved "
+            f"{expected} learner GPU(s), but the distributed world size is {actual}; "
+            f"launch with torchrun --nproc_per_node={expected} or adjust CUDA_VISIBLE_DEVICES/"
+            "training.scaling.learner_gpu_count"
+        )

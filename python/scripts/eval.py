@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import multiprocessing
 import sys
 from collections.abc import Mapping, Sequence
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, cast
 
-import torch
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.cli_banner import print_startup_banner
 from weiss_rl.config import compute_config_hash256, load_stack_config, load_study_config
@@ -21,17 +18,31 @@ from weiss_rl.eval import (
     finalize_final_eval,
     load_dev_eval_summaries,
     load_eval_game_records,
-    resolve_final_policy_set,
     run_final_eval,
-    run_final_eval_matchup,
     validate_eval_game_records_contract,
     write_matchup_diagnostics_json,
     write_matchup_summary_csv,
     write_matchup_summary_json,
     write_paper_readiness_json,
 )
+from weiss_rl.eval.parallel import (
+    policy_ids_for_matchup_shard,
+    resolved_parallel_worker_devices,
+    run_final_eval_matchup_worker,
+    run_parallel_final_eval,
+    shard_matchup_specs,
+)
 from weiss_rl.eval.payoff_folding import PayoffFoldScheme
 from weiss_rl.eval.policy_set import recommend_focal_policy_id
+from weiss_rl.eval.run_policy_selection import resolve_policy_ids_for_run
+from weiss_rl.eval.run_reports import (
+    effective_manifest_git_commit,
+    load_json_object,
+    normalize_git_commit,
+    persist_policy_selection_in_manifest,
+    update_run_level_reports,
+    write_json,
+)
 from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
 from weiss_rl.metagame import build_sensitivity_report
 from weiss_rl.plotting.paper_figures import render_paper_figures
@@ -76,12 +87,7 @@ def _require_matching_hash(*, flag_name: str, expected: str, actual: str) -> Non
 
 
 def _normalize_git_commit(value: str) -> str:
-    normalized = value.strip().lower()
-    if len(normalized) != _GIT_COMMIT_HEX_LENGTH:
-        return ""
-    if any(char not in "0123456789abcdef" for char in normalized):
-        return ""
-    return normalized
+    return normalize_git_commit(value)
 
 
 def _resolve_run_label(parser: argparse.ArgumentParser, run_label: str, run_id_alias: str) -> str:
@@ -104,14 +110,11 @@ def _require_positive_int(parser: argparse.ArgumentParser, flag_name: str, value
 
 
 def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{label} JSON must contain an object at the top level")
-    return payload
+    return load_json_object(path, label=label)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json(path, payload)
 
 
 def _effective_manifest_git_commit(
@@ -119,10 +122,7 @@ def _effective_manifest_git_commit(
     manifest: dict[str, Any],
     git_commit_override: str,
 ) -> str:
-    current = _normalize_git_commit(str(manifest.get("git_commit", "")))
-    if current:
-        return current
-    return _normalize_git_commit(git_commit_override)
+    return effective_manifest_git_commit(manifest=manifest, git_commit_override=git_commit_override)
 
 
 def _persist_policy_selection_in_manifest(
@@ -132,100 +132,12 @@ def _persist_policy_selection_in_manifest(
     policy_ids: list[str],
     selection_details: dict[str, Any],
 ) -> None:
-    manifest["policy_set_selection"] = list(policy_ids)
-    merged_details = dict(selection_details)
-    merged_details.setdefault("status", "resolved")
-    merged_details["resolved_by"] = "canonical_eval_pipeline_v1"
-    merged_details["policy_count"] = len(policy_ids)
-    manifest["policy_set_selection_details"] = merged_details
-    _write_json(layout.manifest_path, manifest)
-
-
-def _policy_selection_mode(selection_details: dict[str, Any]) -> str:
-    return str(selection_details.get("mode", "")).strip().lower()
-
-
-def _resolve_selection_inputs_from_manifest(
-    *,
-    stack_root: Path,
-    manifest: dict[str, Any],
-) -> tuple[Path | None, Path | None]:
-    details = manifest.get("policy_set_selection_details")
-    if not isinstance(details, dict):
-        return None, None
-    source_paths = details.get("source_paths")
-    if not isinstance(source_paths, dict):
-        return None, None
-
-    def _resolve(path_value: Any) -> Path | None:
-        if not isinstance(path_value, str) or not path_value.strip():
-            return None
-        candidate = Path(path_value)
-        if not candidate.is_absolute():
-            candidate = stack_root / candidate
-        return candidate
-
-    return _resolve(source_paths.get("snapshot_registry_json")), _resolve(source_paths.get("dev_eval_summaries_json"))
-
-
-def _default_dev_eval_summaries_path(layout: ArtifactLayout) -> Path | None:
-    for candidate in (
-        layout.training_logs_dir / "periodic_dev_eval_summaries.json",
-        layout.training_logs_dir / "dev_eval_summaries.json",
-    ):
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _run_summary_marks_canonical_eval_completed(layout: ArtifactLayout) -> bool:
-    if not layout.run_summary_path.is_file():
-        return False
-    try:
-        run_summary = _load_json_object(layout.run_summary_path, label="run summary")
-    except Exception:
-        return False
-    return bool(run_summary.get("canonical_eval_completed", False))
-
-
-def _authoritative_manifest_policy_selection(
-    *,
-    manifest: dict[str, Any],
-    layout: ArtifactLayout,
-    snapshot_registry_path: Path | None,
-    dev_eval_summaries_path: Path | None,
-    allow_completed_manifest_policy_selection: bool,
-) -> tuple[list[str], dict[str, Any]] | None:
-    if not allow_completed_manifest_policy_selection:
-        return None
-    if snapshot_registry_path is not None or dev_eval_summaries_path is not None:
-        return None
-
-    manifest_policy_ids = manifest.get("policy_set_selection")
-    if not isinstance(manifest_policy_ids, list):
-        return None
-    resolved_from_manifest = [str(policy_id).strip() for policy_id in manifest_policy_ids if str(policy_id).strip()]
-    if not resolved_from_manifest:
-        return None
-
-    details = manifest.get("policy_set_selection_details")
-    status = ""
-    selection_details: dict[str, Any] = {}
-    if isinstance(details, dict):
-        selection_details = dict(details)
-        status = str(details.get("status", "")).strip().lower()
-    if status == "unresolved":
-        return None
-    if _policy_selection_mode(selection_details) == "explicit_cli":
-        return None
-
-    if not _run_summary_marks_canonical_eval_completed(layout):
-        return None
-
-    selection_details.setdefault("mode", "manifest_policy_set_selection")
-    selection_details.setdefault("status", "resolved")
-    selection_details["policy_count"] = len(resolved_from_manifest)
-    return resolved_from_manifest, selection_details
+    persist_policy_selection_in_manifest(
+        layout=layout,
+        manifest=manifest,
+        policy_ids=policy_ids,
+        selection_details=selection_details,
+    )
 
 
 def _resolve_policy_ids_for_run(
@@ -238,116 +150,15 @@ def _resolve_policy_ids_for_run(
     dev_eval_summaries_path: Path | None,
     allow_completed_manifest_policy_selection: bool = True,
 ) -> tuple[list[str], dict[str, Any], Path | None, Path | None]:
-    manifest_snapshot_registry, manifest_dev_eval = _resolve_selection_inputs_from_manifest(
-        stack_root=stack.root,
-        manifest=manifest,
-    )
-    resolved_snapshot_registry: Path | None = (
-        snapshot_registry_path or manifest_snapshot_registry or (layout.training_snapshots_dir / "registry.json")
-    )
-    if snapshot_registry_path is not None and not snapshot_registry_path.is_file():
-        raise FileNotFoundError(f"Explicit snapshot registry path does not exist: {snapshot_registry_path}")
-    if manifest_snapshot_registry is not None and not manifest_snapshot_registry.is_file():
-        raise FileNotFoundError(f"Manifest snapshot registry path does not exist: {manifest_snapshot_registry}")
-    if resolved_snapshot_registry is None or not resolved_snapshot_registry.is_file():
-        resolved_snapshot_registry = None
-    resolved_dev_eval = dev_eval_summaries_path or manifest_dev_eval
-    if dev_eval_summaries_path is not None and not dev_eval_summaries_path.is_file():
-        raise FileNotFoundError(f"Explicit dev eval summaries path does not exist: {dev_eval_summaries_path}")
-    if manifest_dev_eval is not None and not manifest_dev_eval.is_file():
-        raise FileNotFoundError(f"Manifest dev eval summaries path does not exist: {manifest_dev_eval}")
-    if resolved_dev_eval is None or not resolved_dev_eval.is_file():
-        resolved_dev_eval = _default_dev_eval_summaries_path(layout)
-
-    explicit_policy_ids = [policy_id.strip() for policy_id in policy_ids if policy_id.strip()]
-    if explicit_policy_ids:
-        return (
-            explicit_policy_ids,
-            {"mode": "explicit_cli", "policy_count": len(explicit_policy_ids)},
-            resolved_snapshot_registry,
-            resolved_dev_eval,
-        )
-
-    authoritative_manifest_selection = _authoritative_manifest_policy_selection(
+    return resolve_policy_ids_for_run(
+        policy_ids=policy_ids,
+        stack=stack,
         manifest=manifest,
         layout=layout,
         snapshot_registry_path=snapshot_registry_path,
         dev_eval_summaries_path=dev_eval_summaries_path,
         allow_completed_manifest_policy_selection=allow_completed_manifest_policy_selection,
     )
-    if authoritative_manifest_selection is not None:
-        resolved_from_manifest, selection_details = authoritative_manifest_selection
-        return resolved_from_manifest, selection_details, resolved_snapshot_registry, resolved_dev_eval
-
-    manifest_policy_ids = manifest.get("policy_set_selection")
-    resolved_from_manifest = (
-        [str(policy_id).strip() for policy_id in manifest_policy_ids if str(policy_id).strip()]
-        if isinstance(manifest_policy_ids, list)
-        else []
-    )
-
-    evaluation = stack.config.evaluation
-    if evaluation is None:
-        raise ValueError("stack config is missing evaluation settings")
-
-    if resolved_snapshot_registry is not None and resolved_dev_eval is not None:
-        resolved = resolve_final_policy_set(
-            snapshot_registry_path=resolved_snapshot_registry,
-            dev_eval_summaries_path=resolved_dev_eval,
-            config=evaluation.final_policy_set_selection,
-            final_policy_set_size=evaluation.final_policy_set_size,
-        )
-        return (
-            resolved,
-            {
-                "mode": "deterministic_v1",
-                "policy_count": len(resolved),
-                "snapshot_registry_path": resolved_snapshot_registry.as_posix(),
-                "dev_eval_summaries_path": resolved_dev_eval.as_posix(),
-                "final_policy_set_size": int(evaluation.final_policy_set_size),
-            },
-            resolved_snapshot_registry,
-            resolved_dev_eval,
-        )
-
-    if resolved_from_manifest and allow_completed_manifest_policy_selection:
-        return (
-            resolved_from_manifest,
-            {
-                "mode": "manifest_policy_set_selection_fallback",
-                "policy_count": len(resolved_from_manifest),
-            },
-            resolved_snapshot_registry,
-            resolved_dev_eval,
-        )
-
-    if resolved_from_manifest and not allow_completed_manifest_policy_selection:
-        raise FileNotFoundError(
-            "current final policy-set inputs could not be resolved from run artifacts, and completed manifest reuse "
-            "is disabled. Provide current snapshot/dev-eval inputs or pass --reuse-manifest-policy-selection."
-        )
-
-    if resolved_snapshot_registry is None:
-        raise FileNotFoundError(
-            "final policy-set resolution requires a snapshot registry; checked "
-            f"{snapshot_registry_path or manifest_snapshot_registry or (layout.training_snapshots_dir / 'registry.json')}"
-        )
-    if resolved_dev_eval is None:
-        checked_paths = [
-            path.as_posix()
-            for path in (
-                dev_eval_summaries_path,
-                manifest_dev_eval,
-                layout.training_logs_dir / "dev_eval_summaries.json",
-                layout.training_logs_dir / "periodic_dev_eval_summaries.json",
-            )
-            if path is not None
-        ]
-        raise FileNotFoundError(
-            "final policy-set resolution requires dev-eval summaries; checked "
-            + (", ".join(checked_paths) if checked_paths else "<none>")
-        )
-    raise AssertionError("policy-set resolution should have returned or raised before reaching this point")
 
 
 def _update_run_level_reports(
@@ -361,45 +172,16 @@ def _update_run_level_reports(
     figure_paths: tuple[Path, ...],
     readiness_payload: dict[str, Any] | None,
 ) -> None:
-    run_summary = _load_json_object(layout.run_summary_path, label="run summary")
-    run_summary.update(
-        {
-            "final_eval_dir": layout.relative(layout.final_eval_dir),
-            "policy_ids": list(policy_ids),
-            "policy_set_selection_mode": selection_details.get("mode", "unknown"),
-            "metagame_dir": None if metagame_payload is None else layout.relative(layout.metagame_dir),
-            "figure_outputs": [layout.relative(path) for path in figure_paths],
-            "paper_readiness_summary_path": layout.relative(layout.paper_readiness_summary_path),
-            "paper_grade": bool(readiness_payload and readiness_payload.get("passed", False)),
-            "canonical_eval_completed": True,
-        }
+    update_run_level_reports(
+        layout=layout,
+        run_dir=run_dir,
+        policy_ids=policy_ids,
+        selection_details=selection_details,
+        final_eval_payload=final_eval_payload,
+        metagame_payload=metagame_payload,
+        figure_paths=figure_paths,
+        readiness_payload=readiness_payload,
     )
-    _write_json(layout.run_summary_path, run_summary)
-
-    determinism_report = _load_json_object(layout.determinism_report_path, label="determinism report")
-    replay_verification = _load_json_object(layout.replay_verification_json(), label="replay verification summary")
-    artifact_hashes = _load_json_object(layout.final_eval_aggregate_hashes_json(), label="final eval artifact hashes")
-    determinism_report.update(
-        {
-            "run_dir": run_dir.as_posix(),
-            "policy_selection_mode": selection_details.get("mode", "unknown"),
-            "replay_verification": {
-                "path": layout.relative(layout.replay_verification_json()),
-                "status": replay_verification.get("status", "unknown"),
-                "sampled_episode_count": replay_verification.get("sampled_episode_count", 0),
-                "verified_episode_count": replay_verification.get("verified_episode_count", 0),
-                "failed_episode_count": replay_verification.get("failed_episode_count", 0),
-            },
-            "canonical_artifact_hashes": dict(cast(dict[str, Any], artifact_hashes.get("artifacts", {}))),
-            "final_eval": {
-                "path": layout.relative(layout.final_eval_summary_json()),
-                "policy_ids": list(policy_ids),
-                "selection": dict(selection_details),
-                "matchup_count": len(cast(list[Any], final_eval_payload.get("matchups", []))),
-            },
-        }
-    )
-    _write_json(layout.determinism_report_path, determinism_report)
 
 
 def _resolved_parallel_worker_devices(
@@ -408,41 +190,11 @@ def _resolved_parallel_worker_devices(
     explicit_worker_devices: Sequence[str],
     eval_device: str,
 ) -> tuple[str, ...]:
-    if parallel_workers < 1:
-        raise ValueError("parallel_workers must be >= 1")
-
-    normalized_explicit = tuple(device.strip() for device in explicit_worker_devices if device.strip())
-    if normalized_explicit:
-        device_pool = normalized_explicit
-        _validate_parallel_worker_device_pool(device_pool, source="parallel_worker_devices")
-    else:
-        normalized_eval_device = str(eval_device).strip().lower()
-        if normalized_eval_device in {"auto", "cuda:auto"} and torch.cuda.is_available():
-            device_count = torch.cuda.device_count()
-            device_pool = tuple(f"cuda:{index}" for index in range(device_count)) or ("cuda:auto",)
-        elif normalized_eval_device in {"auto", "cuda:auto"}:
-            device_pool = ("cpu",)
-        else:
-            device_pool = (str(eval_device).strip() or "cpu",)
-            _validate_parallel_worker_device_pool(device_pool, source="eval_device")
-    return tuple(device_pool[index % len(device_pool)] for index in range(parallel_workers))
-
-
-def _validate_parallel_worker_device_pool(device_pool: Sequence[str], *, source: str) -> None:
-    for device_text in device_pool:
-        try:
-            device = torch.device(str(device_text).strip())
-        except (RuntimeError, ValueError) as exc:
-            raise ValueError(f"{source} contains invalid device {device_text!r}") from exc
-        if device.type != "cuda":
-            continue
-        if not torch.cuda.is_available():
-            raise ValueError(f"{source} requested CUDA device {device_text!r}, but CUDA is not available")
-        device_count = int(torch.cuda.device_count())
-        if device.index is not None and device.index >= device_count:
-            raise ValueError(
-                f"{source} requested CUDA device {device_text!r}, but only {device_count} CUDA device(s) are available"
-            )
+    return resolved_parallel_worker_devices(
+        parallel_workers=parallel_workers,
+        explicit_worker_devices=explicit_worker_devices,
+        eval_device=eval_device,
+    )
 
 
 def _shard_matchup_specs(
@@ -450,24 +202,11 @@ def _shard_matchup_specs(
     matchup_specs: Sequence[Mapping[str, Any]],
     shard_count: int,
 ) -> list[list[dict[str, Any]]]:
-    if shard_count < 1:
-        raise ValueError("shard_count must be >= 1")
-    shards: list[list[dict[str, Any]]] = [[] for _ in range(shard_count)]
-    for index, matchup_spec in enumerate(matchup_specs):
-        shards[index % shard_count].append(dict(matchup_spec))
-    return [shard for shard in shards if shard]
+    return shard_matchup_specs(matchup_specs=matchup_specs, shard_count=shard_count)
 
 
 def _policy_ids_for_matchup_shard(matchup_specs: Sequence[Mapping[str, Any]]) -> list[str]:
-    ordered: list[str] = []
-    seen: set[str] = set()
-    for matchup_spec in matchup_specs:
-        for key in ("focal_policy_id", "opponent_policy_id"):
-            policy_id = str(matchup_spec[key])
-            if policy_id not in seen:
-                seen.add(policy_id)
-                ordered.append(policy_id)
-    return ordered
+    return policy_ids_for_matchup_shard(matchup_specs)
 
 
 def _run_final_eval_matchup_worker(
@@ -492,62 +231,27 @@ def _run_final_eval_matchup_worker(
     replay_capture_rate: float,
     regression_capture_count: int,
 ) -> list[dict[str, Any]]:
-    stack = load_stack_config(stack_config_path)
-    evaluation = stack.config.evaluation
-    if evaluation is None:
-        raise ValueError("stack config is missing evaluation settings")
-    contract = load_verified_simulator_contract(stack.root, expected_spec_hash=spec_hash256)
-    observation_dim = int(contract.spec_bundle["observation"]["obs_len"])
-    action_dim = int(contract.spec_bundle["action"]["action_space_size"])
-    pass_action_id = int(contract.spec_bundle["action"]["pass_action_id"])
-    resolved_policies = resolve_eval_policies(
-        stack=stack,
-        policy_ids=list(policy_ids),
+    return run_final_eval_matchup_worker(
+        stack_config_path=stack_config_path,
         run_dir=run_dir,
-        observation_dim=observation_dim,
-        action_dim=action_dim,
-        spec_bundle=contract.spec_bundle,
+        output_dir=output_dir,
+        policy_ids=policy_ids,
+        matchup_specs=matchup_specs,
+        paired_seeds=paired_seeds,
+        stage1_paired_seeds=stage1_paired_seeds,
+        max_paired_seeds=max_paired_seeds,
+        stop_rules=stop_rules,
+        run_id256=run_id256,
+        config_hash256=config_hash256,
+        spec_hash256=spec_hash256,
+        scheme=scheme,
+        sample_count=sample_count,
         snapshot_registry_path=snapshot_registry_path,
         b1_baseline_run_dir=b1_baseline_run_dir,
         eval_device=eval_device,
+        replay_capture_rate=replay_capture_rate,
+        regression_capture_count=regression_capture_count,
     )
-    layout = ArtifactLayout.from_run_dir(run_dir)
-    runner = SimulatorEvalRunner(
-        stack=stack,
-        policies=resolved_policies,
-        artifact_layout=layout,
-        run_id256=run_id256,
-        spec_hash256=spec_hash256,
-        action_dim=action_dim,
-        pass_action_id=pass_action_id,
-        require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
-        replay_capture_rate=float(replay_capture_rate),
-        regression_capture_count=int(regression_capture_count),
-        eval_device=eval_device,
-        spec_bundle=contract.spec_bundle if isinstance(contract.spec_bundle, dict) else None,
-    )
-    try:
-        return [
-            run_final_eval_matchup(
-                output_dir=output_dir,
-                matchup_spec=matchup_spec,
-                paired_seeds=paired_seeds,
-                stage1_paired_seeds=stage1_paired_seeds,
-                max_paired_seeds=max_paired_seeds,
-                stop_rules=stop_rules,
-                runner=runner,
-                run_id256=run_id256,
-                config_hash256=config_hash256,
-                spec_hash256=spec_hash256,
-                scheme=scheme,
-                sample_count=sample_count,
-            )
-            for matchup_spec in matchup_specs
-        ]
-    finally:
-        close_runner = getattr(runner, "close", None)
-        if callable(close_runner):
-            close_runner()
 
 
 def _run_parallel_final_eval(
@@ -573,121 +277,30 @@ def _run_parallel_final_eval(
     parallel_workers: int,
     parallel_worker_devices: Sequence[str],
 ) -> dict[str, Any]:
-    evaluation = stack.config.evaluation
-    if evaluation is None:
-        raise ValueError("stack config is missing evaluation settings")
-
-    matchup_specs = build_final_eval_matchups(policy_ids=policy_ids)
-    metadata_payload = dict(metadata)
-    pipeline_metadata = dict(cast(dict[str, Any], metadata_payload.get("pipeline", {})))
-    worker_count = min(int(parallel_workers), len(matchup_specs))
-    if worker_count < 2:
-        pipeline_metadata["parallel_eval"] = {
-            "enabled": False,
-            "requested_worker_count": int(parallel_workers),
-            "worker_count": int(max(1, worker_count)),
-            "matchup_count": len(matchup_specs),
-            "fallback_reason": "single_matchup",
-            "replay_capture_mode": "serial_fallback_v1",
-        }
-        metadata_payload["pipeline"] = pipeline_metadata
-        matchup_results = _run_final_eval_matchup_worker(
-            stack_config_path=stack_config_path,
-            run_dir=run_dir,
-            output_dir=layout.final_eval_dir,
-            policy_ids=_policy_ids_for_matchup_shard(matchup_specs),
-            matchup_specs=matchup_specs,
-            paired_seeds=list(paired_seeds),
-            stage1_paired_seeds=int(stage1_paired_seeds),
-            max_paired_seeds=int(max_paired_seeds),
-            stop_rules=stop_rules,
-            run_id256=run_id256,
-            config_hash256=config_hash256,
-            spec_hash256=spec_hash256,
-            scheme=scheme,
-            sample_count=int(sample_count),
-            snapshot_registry_path=snapshot_registry_path,
-            b1_baseline_run_dir=b1_baseline_run_dir,
-            eval_device=str(evaluation.eval_device),
-            replay_capture_rate=float(evaluation.replay_capture_rate_eval),
-            regression_capture_count=int(evaluation.regression_capture_count),
-        )
-        return finalize_final_eval(
-            output_dir=layout.final_eval_dir,
-            policy_ids=policy_ids,
-            matchup_results=matchup_results,
-            stage1_paired_seeds=stage1_paired_seeds,
-            max_paired_seeds=max_paired_seeds,
-            paired_seeds=paired_seeds,
-            stop_rules=stop_rules,
-            scheme=scheme,
-            sample_count=sample_count,
-            selection_payload={"mode": "explicit", "policy_count": len(policy_ids)},
-            metadata=metadata_payload,
-            seed_file_path=seed_file_path,
-        )
-    worker_devices = _resolved_parallel_worker_devices(
-        parallel_workers=worker_count,
-        explicit_worker_devices=parallel_worker_devices,
-        eval_device=str(evaluation.eval_device),
-    )
-    matchup_shards = _shard_matchup_specs(matchup_specs=matchup_specs, shard_count=worker_count)
-    pipeline_metadata["parallel_eval"] = {
-        "enabled": True,
-        "requested_worker_count": int(parallel_workers),
-        "worker_count": len(matchup_shards),
-        "matchup_count": len(matchup_specs),
-        "worker_devices": list(worker_devices[: len(matchup_shards)]),
-        "matchup_shard_sizes": [len(shard) for shard in matchup_shards],
-        "replay_capture_mode": "disabled_parallel_v1",
-    }
-    metadata_payload["pipeline"] = pipeline_metadata
-
-    futures = []
-    ctx = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=len(matchup_shards), mp_context=ctx) as executor:
-        for shard_index, matchup_shard in enumerate(matchup_shards):
-            futures.append(
-                executor.submit(
-                    _run_final_eval_matchup_worker,
-                    stack_config_path=stack_config_path,
-                    run_dir=run_dir,
-                    output_dir=layout.final_eval_dir,
-                    policy_ids=_policy_ids_for_matchup_shard(matchup_shard),
-                    matchup_specs=matchup_shard,
-                    paired_seeds=list(paired_seeds),
-                    stage1_paired_seeds=int(stage1_paired_seeds),
-                    max_paired_seeds=int(max_paired_seeds),
-                    stop_rules=stop_rules,
-                    run_id256=run_id256,
-                    config_hash256=config_hash256,
-                    spec_hash256=spec_hash256,
-                    scheme=scheme,
-                    sample_count=int(sample_count),
-                    snapshot_registry_path=snapshot_registry_path,
-                    b1_baseline_run_dir=b1_baseline_run_dir,
-                    eval_device=worker_devices[shard_index],
-                    replay_capture_rate=0.0,
-                    regression_capture_count=0,
-                )
-            )
-        matchup_results: list[dict[str, Any]] = []
-        for future in as_completed(futures):
-            matchup_results.extend(future.result())
-
-    return finalize_final_eval(
-        output_dir=layout.final_eval_dir,
+    return run_parallel_final_eval(
+        stack_config_path=stack_config_path,
+        stack=stack,
+        run_dir=run_dir,
+        layout=layout,
         policy_ids=policy_ids,
-        matchup_results=matchup_results,
+        paired_seeds=paired_seeds,
         stage1_paired_seeds=stage1_paired_seeds,
         max_paired_seeds=max_paired_seeds,
-        paired_seeds=paired_seeds,
         stop_rules=stop_rules,
+        run_id256=run_id256,
+        config_hash256=config_hash256,
+        spec_hash256=spec_hash256,
         scheme=scheme,
         sample_count=sample_count,
-        selection_payload={"mode": "explicit", "policy_count": len(policy_ids)},
-        metadata=metadata_payload,
+        snapshot_registry_path=snapshot_registry_path,
+        b1_baseline_run_dir=b1_baseline_run_dir,
+        metadata=metadata,
         seed_file_path=seed_file_path,
+        parallel_workers=parallel_workers,
+        parallel_worker_devices=parallel_worker_devices,
+        matchup_builder=build_final_eval_matchups,
+        matchup_worker=_run_final_eval_matchup_worker,
+        finalizer=finalize_final_eval,
     )
 
 

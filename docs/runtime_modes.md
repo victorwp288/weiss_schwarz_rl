@@ -51,7 +51,7 @@ Use this for public-safe CI/demo artifacts.
 ## Simulator installation modes
 
 - `uv sync --extra dev` uses the repo's regular dev dependencies.
-- `uv sync --extra dev --extra sim` adds `weiss-sim 0.8.1` and is the canonical validation path for simulator-backed runs.
+- `uv sync --extra dev --extra sim` adds `weiss-sim 0.8.2` and is the canonical validation path for simulator-backed runs.
 - If you prefer a sibling checkout for local development, point `WEISS_SIM_PYTHONPATH` at the simulator source tree.
 
 ## Practical rule

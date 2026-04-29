@@ -471,7 +471,9 @@ def _aggregate_audit_summary(
         Counter
     )
     mismatched_family_pair_counts_by_outcome: dict[str, Counter[tuple[str, str]]] = defaultdict(Counter)
-    mismatched_family_pair_counts_by_seat_outcome: dict[tuple[int, str], Counter[tuple[str, str]]] = defaultdict(Counter)
+    mismatched_family_pair_counts_by_seat_outcome: dict[tuple[int, str], Counter[tuple[str, str]]] = defaultdict(
+        Counter
+    )
     variation_by_outcome: dict[str, dict[str, float]] = defaultdict(_variation_accumulator)
     variation_by_seat_outcome: dict[tuple[int, str], dict[str, float]] = defaultdict(_variation_accumulator)
     alignment_by_outcome: dict[str, dict[str, float]] = defaultdict(_alignment_accumulator)
@@ -725,7 +727,9 @@ def _top_grouped_counter_items(
     limit: int = 5,
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for group_key, counter in sorted(grouped_counters.items(), key=lambda item: tuple(str(part) for part in _as_tuple(item[0]))):
+    for group_key, counter in sorted(
+        grouped_counters.items(), key=lambda item: tuple(str(part) for part in _as_tuple(item[0]))
+    ):
         payload: dict[str, Any] = {
             "top_items": _top_counter_items(counter, key_names=key_names, limit=limit),
             "total_count": int(sum(counter.values())),
@@ -799,7 +803,9 @@ def _update_alignment_accumulator(
 
 def _variation_group_payload(grouped_variation: dict[Any, dict[str, float]]) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
-    for group_key, values in sorted(grouped_variation.items(), key=lambda item: tuple(str(part) for part in _as_tuple(item[0]))):
+    for group_key, values in sorted(
+        grouped_variation.items(), key=lambda item: tuple(str(part) for part in _as_tuple(item[0]))
+    ):
         compared_steps = int(values["compared_steps"])
         payload: dict[str, Any] = {
             "bundle_count": int(values["bundle_count"]),
@@ -818,7 +824,9 @@ def _variation_group_payload(grouped_variation: dict[Any, dict[str, float]]) -> 
 
 def _alignment_group_payload(grouped_alignment: dict[Any, dict[str, float]]) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
-    for group_key, values in sorted(grouped_alignment.items(), key=lambda item: tuple(str(part) for part in _as_tuple(item[0]))):
+    for group_key, values in sorted(
+        grouped_alignment.items(), key=lambda item: tuple(str(part) for part in _as_tuple(item[0]))
+    ):
         compared_steps = int(values["compared_steps"])
         payload: dict[str, Any] = {
             "bundle_count": int(values["bundle_count"]),
@@ -830,9 +838,7 @@ def _alignment_group_payload(grouped_alignment: dict[Any, dict[str, float]]) -> 
                 float(values["weighted_top_action_family_match_rate"]) / compared_steps if compared_steps else 0.0
             ),
             "policy_a_mean_probability_on_policy_b_top_action": (
-                float(values["weighted_probability_on_policy_b_top_action"]) / compared_steps
-                if compared_steps
-                else 0.0
+                float(values["weighted_probability_on_policy_b_top_action"]) / compared_steps if compared_steps else 0.0
             ),
         }
         for key_name, part in zip(_group_key_names(group_key), _as_tuple(group_key), strict=False):

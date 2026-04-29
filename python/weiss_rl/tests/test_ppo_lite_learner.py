@@ -84,3 +84,24 @@ def test_ppo_lite_update_reports_completed_epochs() -> None:
     assert metrics["ppo_epochs_completed"] == pytest.approx(3.0)
     assert "approx_kl" in metrics
     assert "clip_fraction" in metrics
+
+
+def test_ppo_lite_update_calls_gradient_sync_once_per_epoch() -> None:
+    sync_calls = 0
+
+    def sync_gradients() -> None:
+        nonlocal sync_calls
+        sync_calls += 1
+
+    learner = PpoLiteLearner(
+        model=TinyPolicyValueModel(),
+        pass_action_id=2,
+        normalize_advantages=False,
+        ppo_epochs=2,
+        target_kl=0.0,
+        gradient_sync=sync_gradients,
+    )
+
+    learner.update(_ppo_batch())
+
+    assert sync_calls == 2

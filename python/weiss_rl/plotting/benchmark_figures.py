@@ -456,7 +456,9 @@ def _method_from_config(config_root: dict[str, Any]) -> tuple[str, str]:
         training_config=training_config,
     ):
         return "thesis_ablation_teacher_fade", "Thesis ablation: teacher fade"
-    if experiment_role == "ablation_no_tactical_bias" or _looks_like_no_tactical_bias_ablation(model_config=model_config):
+    if experiment_role == "ablation_no_tactical_bias" or _looks_like_no_tactical_bias_ablation(
+        model_config=model_config
+    ):
         return "thesis_ablation_no_tactical_bias", "Thesis ablation: no tactical bias"
     if experiment_role == "ablation_no_b1_cutoff" or _looks_like_no_b1_cutoff_ablation(league_config=league_config):
         return "thesis_ablation_no_b1_cutoff", "Thesis ablation: no B1 cutoff"

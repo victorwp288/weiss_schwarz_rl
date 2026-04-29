@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 import scripts.train as train_script
 import torch
-import weiss_rl.eval.simulator_runner as simulator_runner
 from scripts.train import (
     MinimalRollout,
     PeriodicDevEvalOpponentSpec,
@@ -19,6 +18,7 @@ from scripts.train import (
     _build_learner_batch,
     _checkpoint_candidate_metric,
     _confirmatory_dev_eval_request,
+    _ddp_indexed_cuda_override_error,
     _dev_eval_ineligibility_reasons,
     _entropy_coef_for_next_update,
     _expand_periodic_dev_eval_paired_seeds,
@@ -37,7 +37,9 @@ from scripts.train import (
     _weighted_dev_eval_aggregate,
 )
 
+import weiss_rl.eval.simulator_runner as simulator_runner
 from weiss_rl.config import apply_stack_overrides, load_stack_config
+from weiss_rl.distributed import DistributedContext
 from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
 
 
@@ -257,13 +259,16 @@ def test_drop_stale_pending_promotion_gate_discards_candidates_newer_than_rollba
         pinned_snapshot_ids=("policy_000160", "anchor_000160"),
     )
 
-    assert train_script._drop_stale_pending_promotion_gate(
-        stack=stack,
-        training_paths=training_paths,
-        run_dir=tmp_path,
-        pending_gate=stale_gate,
-        rollback_best_update_count=160,
-    ) is None
+    assert (
+        train_script._drop_stale_pending_promotion_gate(
+            stack=stack,
+            training_paths=training_paths,
+            run_dir=tmp_path,
+            pending_gate=stale_gate,
+            rollback_best_update_count=160,
+        )
+        is None
+    )
     assert observed == [("policy_000220", "anchor_000160")]
     assert (
         train_script._drop_stale_pending_promotion_gate(
@@ -646,12 +651,7 @@ def test_parallel_promotion_gate_assembles_seed_block_records_parent_side(
         tmp_path / "eval" / "promotion_gate" / "update_1" / "promotion_gate_episodes" / "00_b0_randomlegal.jsonl"
     )
     episodes_b = (
-        tmp_path
-        / "eval"
-        / "promotion_gate"
-        / "update_1"
-        / "promotion_gate_episodes"
-        / "01_b1_noleague_baseline.jsonl"
+        tmp_path / "eval" / "promotion_gate" / "update_1" / "promotion_gate_episodes" / "01_b1_noleague_baseline.jsonl"
     )
     assert len(episodes_a.read_text(encoding="utf-8").splitlines()) == 16
     assert len(episodes_b.read_text(encoding="utf-8").splitlines()) == 16
@@ -935,7 +935,7 @@ def test_periodic_dev_eval_opponents_include_extra_snapshot_anchor_from_promotio
                     required=("B0 RandomLegal", "B1 NoLeague baseline"),
                     optional_if_available=("policy_000123",),
                 )
-            )
+            ),
         )
     )
     contract = SimpleNamespace(spec_bundle={"observation": {"kind": "stub"}, "action": {"kind": "stub"}})
@@ -989,7 +989,7 @@ def test_periodic_dev_eval_opponents_resolve_symbolic_snapshot_anchor_aliases(
                     required=("B0 RandomLegal", "B1 NoLeague baseline"),
                     optional_if_available=("Previous champion snapshot", "Previous recent snapshot"),
                 )
-            )
+            ),
         )
     )
     contract = SimpleNamespace(spec_bundle={"observation": {"kind": "stub"}, "action": {"kind": "stub"}})
@@ -1257,22 +1257,34 @@ def test_symbolic_snapshot_aliases_keep_seed_history_explicit() -> None:
     registry.add_champion("seed_imported_policy_000009")
     registry.add_champion("policy_000480")
 
-    assert train_script._resolve_symbolic_promotion_anchor_policy_id(
-        "Latest imported seed history snapshot",
-        registry=registry,
-    ) == "seed_imported_policy_000009"
-    assert train_script._resolve_symbolic_promotion_anchor_policy_id(
-        "Latest local candidate snapshot",
-        registry=registry,
-    ) == "policy_000500"
-    assert train_script._resolve_symbolic_promotion_anchor_policy_id(
-        "Latest promoted champion snapshot",
-        registry=registry,
-    ) == "policy_000480"
-    assert train_script._resolve_symbolic_promotion_anchor_policy_id(
-        "Latest champion snapshot",
-        registry=registry,
-    ) == "policy_000480"
+    assert (
+        train_script._resolve_symbolic_promotion_anchor_policy_id(
+            "Latest imported seed history snapshot",
+            registry=registry,
+        )
+        == "seed_imported_policy_000009"
+    )
+    assert (
+        train_script._resolve_symbolic_promotion_anchor_policy_id(
+            "Latest local candidate snapshot",
+            registry=registry,
+        )
+        == "policy_000500"
+    )
+    assert (
+        train_script._resolve_symbolic_promotion_anchor_policy_id(
+            "Latest promoted champion snapshot",
+            registry=registry,
+        )
+        == "policy_000480"
+    )
+    assert (
+        train_script._resolve_symbolic_promotion_anchor_policy_id(
+            "Latest champion snapshot",
+            registry=registry,
+        )
+        == "policy_000480"
+    )
 
 
 def test_pin_and_unpin_snapshot_ids_preserve_existing_pins(tmp_path: Path) -> None:
@@ -1349,6 +1361,36 @@ def test_resolve_async_periodic_dev_eval_device_prefers_non_learner_actor_gpu(mo
     )
 
     assert resolved == "cuda:2"
+
+
+def test_resolve_async_periodic_dev_eval_device_stays_on_rank_gpu_for_ddp(monkeypatch) -> None:
+    stack = SimpleNamespace(
+        config=SimpleNamespace(
+            evaluation=SimpleNamespace(eval_device="cuda:auto"),
+            system=SimpleNamespace(actor_process_count=4),
+        )
+    )
+    monkeypatch.setattr(
+        train_script,
+        "resolve_actor_device_layout",
+        lambda stack, actor_count, learner_device, prefer_process_collectors: ("cuda:1", "cuda:2"),
+    )
+
+    resolved = _resolve_async_periodic_dev_eval_device(
+        stack=stack,
+        learner_device=torch.device("cuda:0"),
+        distributed_context=DistributedContext(enabled=True, world_size=4, rank=0, local_rank=0, backend="nccl"),
+    )
+
+    assert resolved == "cuda:0"
+
+
+def test_ddp_indexed_cuda_override_fails_for_all_multi_rank_processes() -> None:
+    assert _ddp_indexed_cuda_override_error("cuda:0", world_size=4) is not None
+    assert _ddp_indexed_cuda_override_error("cuda:3", world_size=4) is not None
+    assert _ddp_indexed_cuda_override_error("cuda", world_size=4) is None
+    assert _ddp_indexed_cuda_override_error("cuda:auto", world_size=4) is None
+    assert _ddp_indexed_cuda_override_error("cuda:0", world_size=1) is None
 
 
 def test_resolved_periodic_dev_eval_worker_devices_cycles_explicit_devices(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1677,9 +1719,15 @@ def test_specialized_noleague_baseline_roles_are_accepted_for_train_and_eval_imp
 def test_wall_clock_budget_reached_only_after_elapsed_budget() -> None:
     start_time = 100.0
     assert train_script._wall_clock_budget_seconds(7.5) == pytest.approx(450.0)
-    assert train_script._wall_clock_budget_reached(start_time=start_time, max_wall_clock_seconds=450.0, now=549.9) is False
-    assert train_script._wall_clock_budget_reached(start_time=start_time, max_wall_clock_seconds=450.0, now=550.0) is True
-    assert train_script._wall_clock_budget_reached(start_time=start_time, max_wall_clock_seconds=None, now=999.0) is False
+    assert (
+        train_script._wall_clock_budget_reached(start_time=start_time, max_wall_clock_seconds=450.0, now=549.9) is False
+    )
+    assert (
+        train_script._wall_clock_budget_reached(start_time=start_time, max_wall_clock_seconds=450.0, now=550.0) is True
+    )
+    assert (
+        train_script._wall_clock_budget_reached(start_time=start_time, max_wall_clock_seconds=None, now=999.0) is False
+    )
 
 
 def test_maybe_request_b2_disagreement_audit_on_flatline_writes_request(tmp_path: Path) -> None:
@@ -1773,4 +1821,3 @@ def test_maybe_request_b2_disagreement_audit_on_confidence_only_gate(tmp_path: P
     request_log = train_script._b2_disagreement_audit_requests_path(training_paths)
     entries = [json.loads(line) for line in request_log.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert entries[-1]["trigger_reasons"] == ["confidence_only_gate"]
-

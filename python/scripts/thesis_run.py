@@ -15,15 +15,21 @@ _PRESET_PATHS = {
     "thesis-model-server-train-b1anchored-refb1strong-lowlr": Path("configs/main_impala_league_server.yaml"),
     "thesis-model-server-train-b1anchored-benchmark": Path("configs/main_impala_league_server.yaml"),
     "thesis-model-server-train-b1anchored-benchmark-localpromo": Path("configs/main_impala_league_server.yaml"),
-    "thesis-model-server-train-b1anchored-benchmark-selfplay-localpromo": Path("configs/main_impala_league_server.yaml"),
-    "thesis-model-server-train-b1anchored-benchmark-selfplay-bckl-localpromo": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-localpromo": Path(
+        "configs/main_impala_league_server.yaml"
+    ),
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-bckl-localpromo": Path(
+        "configs/main_impala_league_server.yaml"
+    ),
     "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-localpromo": Path(
         "configs/main_impala_league_server.yaml"
     ),
     "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-evalguard-localpromo": Path(
         "configs/main_impala_league_server.yaml"
     ),
-    "thesis-model-server-train-b1anchored-benchmark-modelbridge-localpromo": Path("configs/main_impala_league_server.yaml"),
+    "thesis-model-server-train-b1anchored-benchmark-modelbridge-localpromo": Path(
+        "configs/main_impala_league_server.yaml"
+    ),
     "b1-anchor-fullsize-warmup": Path("configs/baselines/noleague_fullsize_warmup.yaml"),
     "b1-anchor-fullsize-lowlr-continuation": Path("configs/baselines/noleague_fullsize_lowlr_continuation.yaml"),
     "b1-anchor-benchmark": Path("configs/baselines/noleague_benchmark.yaml"),
@@ -31,39 +37,19 @@ _PRESET_PATHS = {
     "b1-anchor-benchmark-lowlr-continuation": Path("configs/baselines/noleague_benchmark_lowlr_continuation.yaml"),
     "b1-anchor-benchmark-eval-auto-gpu": Path("configs/baselines/noleague_benchmark_eval.yaml"),
     "thesis-model-multideck": Path("configs/ablations/multideck.yaml"),
-    "thesis-model-multideck-eval-auto-gpu": Path(
-        "configs/ablations/multideck_eval.yaml"
-    ),
-    "ablate-teacher-fade": Path(
-        "configs/ablations/teacher_fade.yaml"
-    ),
-    "ablate-teacher-fade-eval-auto-gpu": Path(
-        "configs/ablations/teacher_fade_eval.yaml"
-    ),
-    "ablate-no-tactical-bias": Path(
-        "configs/ablations/no_tactical_bias.yaml"
-    ),
-    "ablate-no-tactical-bias-eval-auto-gpu": Path(
-        "configs/ablations/no_tactical_bias_eval.yaml"
-    ),
-    "ablate-teacher-fade-no-tactical-bias": Path(
-        "configs/ablations/teacher_fade_no_tactical_bias.yaml"
-    ),
+    "thesis-model-multideck-eval-auto-gpu": Path("configs/ablations/multideck_eval.yaml"),
+    "ablate-teacher-fade": Path("configs/ablations/teacher_fade.yaml"),
+    "ablate-teacher-fade-eval-auto-gpu": Path("configs/ablations/teacher_fade_eval.yaml"),
+    "ablate-no-tactical-bias": Path("configs/ablations/no_tactical_bias.yaml"),
+    "ablate-no-tactical-bias-eval-auto-gpu": Path("configs/ablations/no_tactical_bias_eval.yaml"),
+    "ablate-teacher-fade-no-tactical-bias": Path("configs/ablations/teacher_fade_no_tactical_bias.yaml"),
     "ablate-teacher-fade-no-tactical-bias-eval-auto-gpu": Path(
         "configs/ablations/teacher_fade_no_tactical_bias_eval.yaml"
     ),
-    "ablate-no-b1-cutoff": Path(
-        "configs/ablations/no_b1_cutoff.yaml"
-    ),
-    "ablate-no-b1-cutoff-eval-auto-gpu": Path(
-        "configs/ablations/no_b1_cutoff_eval.yaml"
-    ),
-    "ablate-reward-shaping": Path(
-        "configs/ablations/reward_shaping.yaml"
-    ),
-    "ablate-reward-shaping-eval-auto-gpu": Path(
-        "configs/ablations/reward_shaping_eval.yaml"
-    ),
+    "ablate-no-b1-cutoff": Path("configs/ablations/no_b1_cutoff.yaml"),
+    "ablate-no-b1-cutoff-eval-auto-gpu": Path("configs/ablations/no_b1_cutoff_eval.yaml"),
+    "ablate-reward-shaping": Path("configs/ablations/reward_shaping.yaml"),
+    "ablate-reward-shaping-eval-auto-gpu": Path("configs/ablations/reward_shaping_eval.yaml"),
 }
 _DEFAULT_EVAL_PRESET = "thesis-model-eval-auto-gpu"
 _DEFAULT_EVAL_PRESET_OVERRIDES = {
@@ -90,6 +76,23 @@ _DEFAULT_EVAL_PRESET_OVERRIDES = {
     "ablate-no-b1-cutoff": "ablate-no-b1-cutoff-eval-auto-gpu",
     "ablate-reward-shaping": "ablate-reward-shaping-eval-auto-gpu",
 }
+_SERVER_TRAIN_PRESETS = {
+    "thesis-model-auto-gpu",
+    "thesis-model-server-train",
+    "thesis-model-server-train-b1anchored",
+    "thesis-model-server-train-b1anchored-refb1strong-lowlr",
+    "thesis-model-server-train-b1anchored-benchmark",
+    "thesis-model-server-train-b1anchored-benchmark-localpromo",
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-localpromo",
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-bckl-localpromo",
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-localpromo",
+    "thesis-model-server-train-b1anchored-benchmark-selfplay-refb1strong-lowlr-evalguard-localpromo",
+    "thesis-model-server-train-b1anchored-benchmark-modelbridge-localpromo",
+}
+
+
+def _argv_has_option(argv: list[str], option: str) -> bool:
+    return option in argv or any(token.startswith(option + "=") for token in argv)
 
 
 def _command_display(command: list[str]) -> str:
@@ -120,6 +123,20 @@ def _run_step(*, command: list[str], cwd: Path, dry_run: bool) -> dict[str, Any]
     payload["status"] = "completed"
     payload["returncode"] = 0
     return payload
+
+
+def _train_entrypoint_command(*, python_exe: str, torchrun_nproc: int) -> list[str]:
+    if int(torchrun_nproc) <= 0:
+        return [python_exe, "python/scripts/train.py"]
+    return [
+        python_exe,
+        "-m",
+        "torch.distributed.run",
+        "--standalone",
+        "--nproc_per_node",
+        str(int(torchrun_nproc)),
+        "python/scripts/train.py",
+    ]
 
 
 def _resolve_cli_path(*, repo_root: Path, path: Path) -> Path:
@@ -176,6 +193,13 @@ def main() -> None:
     parser.add_argument("--runtime-mode", type=str, default="train_ordered")
     parser.add_argument("--profile", type=str, default="")
     parser.add_argument("--device", type=str, default="")
+    parser.add_argument("--autoscale", action="store_true")
+    parser.add_argument("--autoscale-dry-run", action="store_true")
+    parser.add_argument("--hardware-profile", type=str, default="")
+    parser.add_argument("--torchrun-nproc", type=int, default=0)
+    parser.add_argument("--ddp", action="store_true")
+    parser.add_argument("--ddp-backend", type=str, default="")
+    parser.add_argument("--ddp-timeout-seconds", type=int, default=0)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--resume-run-dir", type=Path, default=None)
     parser.add_argument("--resume-from", type=str, default="")
@@ -191,7 +215,8 @@ def main() -> None:
     parser.add_argument("--skip-compare", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--repo-root", type=Path, default=None, help=argparse.SUPPRESS)
-    args = parser.parse_args()
+    raw_argv = sys.argv[1:]
+    args = parser.parse_args(raw_argv)
 
     repo_root = Path(__file__).resolve().parents[2] if args.repo_root is None else Path(args.repo_root).resolve()
     if args.list_presets:
@@ -200,6 +225,20 @@ def main() -> None:
         return
     if not str(args.run_label).strip():
         parser.error("--run-label is required unless --list-presets is used")
+    server_defaults_applied = False
+    if args.stack_config is None and str(args.preset) in _SERVER_TRAIN_PRESETS:
+        server_defaults_applied = True
+        if not bool(args.autoscale or args.autoscale_dry_run):
+            args.autoscale = True
+        if not str(args.hardware_profile).strip():
+            args.hardware_profile = "local"
+        if not _argv_has_option(raw_argv, "--runtime-mode"):
+            args.runtime_mode = "train_async_fast"
+        if not _argv_has_option(raw_argv, "--unroll-length"):
+            args.unroll_length = 64
+        if not _argv_has_option(raw_argv, "--max-updates"):
+            args.max_updates = 400
+    num_envs_explicit = _argv_has_option(raw_argv, "--num-envs")
     python_exe = sys.executable
     run_dir = repo_root / "runs" / args.run_label
     stack_config = _resolve_stack_config(repo_root=repo_root, stack_config=args.stack_config, preset=str(args.preset))
@@ -215,27 +254,42 @@ def main() -> None:
     steps: list[dict[str, Any]] = []
 
     train_command = [
-        python_exe,
-        "python/scripts/train.py",
+        *_train_entrypoint_command(python_exe=python_exe, torchrun_nproc=int(args.torchrun_nproc)),
         "--stack-config",
         str(stack_config),
         "--run-label",
         args.run_label,
-        "--num-envs",
-        str(args.num_envs),
-        "--unroll-length",
-        str(args.unroll_length),
-        "--max-updates",
-        str(args.max_updates),
-        "--runtime-mode",
-        str(args.runtime_mode),
     ]
+    if not (bool(args.autoscale or args.autoscale_dry_run) and not num_envs_explicit):
+        train_command.extend(["--num-envs", str(args.num_envs)])
+    train_command.extend(
+        [
+            "--unroll-length",
+            str(args.unroll_length),
+            "--max-updates",
+            str(args.max_updates),
+            "--runtime-mode",
+            str(args.runtime_mode),
+        ]
+    )
     if args.max_wall_clock_minutes is not None:
         train_command.extend(["--max-wall-clock-minutes", str(args.max_wall_clock_minutes)])
     if args.profile:
         train_command.extend(["--profile", str(args.profile)])
     if args.device:
         train_command.extend(["--device", str(args.device)])
+    if args.autoscale:
+        train_command.append("--autoscale")
+    if args.autoscale_dry_run:
+        train_command.append("--autoscale-dry-run")
+    if args.hardware_profile:
+        train_command.extend(["--hardware-profile", str(args.hardware_profile)])
+    if args.ddp or int(args.torchrun_nproc) > 0:
+        train_command.append("--ddp")
+    if args.ddp_backend:
+        train_command.extend(["--ddp-backend", str(args.ddp_backend)])
+    if int(args.ddp_timeout_seconds) > 0:
+        train_command.extend(["--ddp-timeout-seconds", str(args.ddp_timeout_seconds)])
     if args.seed is not None:
         train_command.extend(["--seed", str(args.seed)])
     if args.resume_run_dir is not None:
@@ -252,7 +306,7 @@ def main() -> None:
     try:
         steps.append(_run_step(command=train_command, cwd=repo_root, dry_run=bool(args.dry_run)))
 
-        if not args.skip_eval:
+        if not args.skip_eval and not args.autoscale_dry_run:
             eval_command = [
                 python_exe,
                 "python/scripts/eval.py",
@@ -271,7 +325,7 @@ def main() -> None:
             compare_run_dirs=args.compare_run_dir,
             compare_launch_group_summary=args.compare_launch_group_summary,
         )
-        if not args.skip_compare and should_run_compare:
+        if not args.skip_compare and not args.autoscale_dry_run and should_run_compare:
             compare_command = [
                 python_exe,
                 "python/scripts/compare_runs.py",
@@ -298,6 +352,14 @@ def main() -> None:
         "preset": str(args.preset),
         "eval_preset": eval_preset,
         "max_wall_clock_minutes": None if args.max_wall_clock_minutes is None else float(args.max_wall_clock_minutes),
+        "autoscale": bool(args.autoscale),
+        "autoscale_dry_run": bool(args.autoscale_dry_run),
+        "server_defaults_applied": bool(server_defaults_applied),
+        "hardware_profile": str(args.hardware_profile),
+        "torchrun_nproc": int(args.torchrun_nproc),
+        "ddp": bool(args.ddp or int(args.torchrun_nproc) > 0),
+        "ddp_backend": str(args.ddp_backend),
+        "ddp_timeout_seconds": int(args.ddp_timeout_seconds),
         "b1_baseline_run_dir": (
             None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.resolve().as_posix()
         ),

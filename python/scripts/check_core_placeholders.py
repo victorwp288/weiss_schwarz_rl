@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -20,7 +21,10 @@ CORE_MODULES = (
 PATTERN = re.compile(r"\b(?:TODO|NotImplemented(?:Error)?)\b")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Check core modules for TODO/NotImplemented placeholders.")
+    parser.parse_args([] if argv is None else argv)
+
     failures: list[str] = []
     for relative_path in CORE_MODULES:
         text = relative_path.read_text(encoding="utf-8")
@@ -36,4 +40,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

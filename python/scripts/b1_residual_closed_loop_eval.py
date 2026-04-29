@@ -9,21 +9,19 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Mapping
-
-import numpy as np
-import torch
+from typing import Any
 
 import b1_artifact_matrix as matrix
 import b1_counterfactual_labels as cf
+import torch
 from weiss_rl.residual_policy import (
     FrozenStoredLogitResidual,
     LiveFrozenB1Residual,
     load_frozen_stored_logit_residual,
 )
-
 
 _RESIDUAL_POLICY_ID = "B1 residual S1"
 
@@ -57,7 +55,9 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 class _ResidualClosedLoopRunner(matrix._MatrixSimulatorEvalRunner):  # type: ignore[name-defined]
-    def __init__(self, *args: Any, rng_alias_policy_id: str = "", rng_alias_target_policy_id: str = "", **kwargs: Any) -> None:
+    def __init__(
+        self, *args: Any, rng_alias_policy_id: str = "", rng_alias_target_policy_id: str = "", **kwargs: Any
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._rng_alias_policy_id = str(rng_alias_policy_id or "")
         self._rng_alias_target_policy_id = str(rng_alias_target_policy_id or "")
@@ -226,7 +226,9 @@ def main() -> None:
             "gate_obs_sha256": gate_obs_sha256,
             "gate_actor_seat": gate_actor_seat,
             "public_heuristic_bias_scale": float(args.public_heuristic_bias_scale),
-            "policies": {policy_id: _policy_manifest_entry(policy_id, policy) for policy_id, policy in policies.items()},
+            "policies": {
+                policy_id: _policy_manifest_entry(policy_id, policy) for policy_id, policy in policies.items()
+            },
         },
     )
 
@@ -306,10 +308,7 @@ def main() -> None:
         and str(row.get("policy_id")) == _RESIDUAL_POLICY_ID
     ]
     fingerprint_rows = [
-        row
-        for row in trace_rows
-        if expected_fingerprint
-        and str(row.get("legal_ids_sha256")) == expected_fingerprint
+        row for row in trace_rows if expected_fingerprint and str(row.get("legal_ids_sha256")) == expected_fingerprint
     ]
     residual_fingerprint_rows = [row for row in fingerprint_rows if str(row.get("policy_id")) == _RESIDUAL_POLICY_ID]
     strict_rows = [

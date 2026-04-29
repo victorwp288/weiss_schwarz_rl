@@ -8,8 +8,8 @@ import pytest
 
 from weiss_rl.config import load_stack_config
 from weiss_rl.eval.policy_set import (
-    DevEvalPolicySummary,
     HEURISTIC_PUBLIC_POLICY_ID,
+    DevEvalPolicySummary,
     parse_training_policy_id,
     recommend_focal_policy_id,
     select_final_policy_set_deterministic_v1,

@@ -18,23 +18,26 @@ from typing import Any
 
 import numpy as np
 import torch
-
+import train as train_script
 from weiss_rl.action_catalog import ActionCatalog, DecodedAction
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.eval.diagnostics import build_seat_advantage_diagnostics
 from weiss_rl.eval.export import build_matchup_export, write_matchup_summary_json
 from weiss_rl.eval.harness import EvalGameRecord, ScheduledGame, run_seat_swapped_matchup, sample_action_pinned
 from weiss_rl.eval.payoff_folding import paired_seed_score, validated_paired_seed_groups
-from weiss_rl.eval.simulator_runner import NO_LEAGUE_POLICY_ID, ResolvedEvalPolicy, SimulatorEvalRunner, resolve_eval_policies
 from weiss_rl.eval.policy_set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,
     RANDOM_LEGAL_POLICY_ID,
 )
+from weiss_rl.eval.simulator_runner import (
+    NO_LEAGUE_POLICY_ID,
+    ResolvedEvalPolicy,
+    SimulatorEvalRunner,
+    resolve_eval_policies,
+)
 from weiss_rl.repro import canonical_json_bytes, stable_hash64
-
-import train as train_script
 
 
 def _manifest_value(manifest: Mapping[str, object], *keys: str) -> str:
@@ -386,7 +389,9 @@ def _canonical_builtin_policy_id(raw: str) -> str:
     key = re.sub(r"[^A-Za-z0-9]+", "_", stripped).strip("_").upper()
     policy_id = _BUILTIN_POLICY_ALIASES.get(key)
     if policy_id is None:
-        allowed = ", ".join(sorted({"B0_RandomLegal", "B2_HeuristicPublic", "B3_HeuristicAggro", "B4_HeuristicControl"}))
+        allowed = ", ".join(
+            sorted({"B0_RandomLegal", "B2_HeuristicPublic", "B3_HeuristicAggro", "B4_HeuristicControl"})
+        )
         raise argparse.ArgumentTypeError(f"unknown builtin policy {raw!r}; expected one of: {allowed}")
     return policy_id
 
@@ -497,7 +502,9 @@ class _MatrixSimulatorEvalRunner(SimulatorEvalRunner):
         self._force_pass_seat = None if force_pass_seat is None else int(force_pass_seat)
         self._force_pass_max_per_episode = max(0, int(force_pass_max_per_episode))
         self._force_action_seat = None if force_action_seat is None else int(force_action_seat)
-        self._force_action_decision_index = None if force_action_decision_index is None else int(force_action_decision_index)
+        self._force_action_decision_index = (
+            None if force_action_decision_index is None else int(force_action_decision_index)
+        )
         self._force_action_id = None if force_action_id is None else int(force_action_id)
         self._force_action_pair_index = None if force_action_pair_index is None else int(force_action_pair_index)
         self._force_action_swap_index = None if force_action_swap_index is None else int(force_action_swap_index)
@@ -771,9 +778,15 @@ class _MatrixSimulatorEvalRunner(SimulatorEvalRunner):
             ):
                 return int(selected_action), mode
             forced_action_id = int(self._force_action_id)
-            if self._force_action_pair_index is not None and int(scheduled_game.pair_index) != self._force_action_pair_index:
+            if (
+                self._force_action_pair_index is not None
+                and int(scheduled_game.pair_index) != self._force_action_pair_index
+            ):
                 return int(selected_action), mode
-            if self._force_action_swap_index is not None and int(scheduled_game.swap_index) != self._force_action_swap_index:
+            if (
+                self._force_action_swap_index is not None
+                and int(scheduled_game.swap_index) != self._force_action_swap_index
+            ):
                 return int(selected_action), mode
             if int(current_seat) != self._force_action_seat:
                 return int(selected_action), mode
@@ -935,7 +948,9 @@ def main() -> None:
     parser.add_argument("--matchup", action="append", type=_parse_matchup_arg, default=[])
     parser.add_argument("--pairs", type=int, default=8)
     parser.add_argument("--artifact-dir-name", default="b1_artifact_matrix")
-    parser.add_argument("--surface-name", default="", help="Optional eval-surface label, e.g. official_s3/lowbias_s1/raw_s0.")
+    parser.add_argument(
+        "--surface-name", default="", help="Optional eval-surface label, e.g. official_s3/lowbias_s1/raw_s0."
+    )
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--include-self", action="store_true")
     parser.add_argument("--focal-action-mode", choices=("sample", "greedy"), default="sample")
@@ -1120,7 +1135,9 @@ def main() -> None:
                 right_model,
             )
     _write_json(matrix_dir / "policy_load_manifest.json", load_manifest)
-    _write_json(matrix_dir / "resolved_policies.json", {key: policy.to_manifest_dict() for key, policy in policies.items()})
+    _write_json(
+        matrix_dir / "resolved_policies.json", {key: policy.to_manifest_dict() for key, policy in policies.items()}
+    )
 
     matchup_matrix: dict[tuple[str, str], dict[str, Any]] = {}
     ordered_pairs: list[tuple[str, str]] = []

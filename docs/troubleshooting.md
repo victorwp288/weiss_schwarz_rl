@@ -24,7 +24,7 @@ Fix:
 - switch to Python 3.10-3.12
 - if you are on an unsupported Linux/Windows architecture or interpreter, let `uv` use the fallback PyPI build instead of forcing a CUDA-specific install
 - re-run `uv sync --extra dev`
-- if you need `weiss-sim 0.8.1` too, use `uv sync --extra dev --extra sim`
+- if you need `weiss-sim 0.8.2` too, use `uv sync --extra dev --extra sim`
 
 ## Simulator import issues
 

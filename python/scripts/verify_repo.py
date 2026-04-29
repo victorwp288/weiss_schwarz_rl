@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -11,7 +12,10 @@ def _run_step(*, label: str, command: list[str], cwd: Path) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Run the local repository verification ladder.")
+    parser.parse_args([] if argv is None else argv)
+
     repo_root = Path(__file__).resolve().parents[2]
     python_exe = sys.executable
     commands = [
@@ -84,4 +88,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

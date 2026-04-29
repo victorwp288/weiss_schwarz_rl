@@ -646,4 +646,3 @@ def test_write_paper_readiness_fixture_entrypoint_writes_ready_run(monkeypatch, 
 
     payload = build_paper_readiness_summary(run_dir=run_dir)
     assert payload["passed"] is True
-

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import json
+import inspect
 import multiprocessing as mp
 import os
 import queue
@@ -14,14 +14,13 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass, replace
-from multiprocessing import shared_memory
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
 import torch
 
+from weiss_rl import runtime_collectors as _collector_support
 from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.action_diagnostics import (
     make_action_sequence_state,
@@ -51,10 +50,80 @@ from weiss_rl.masking import (
 )
 from weiss_rl.model import PolicyValueModel, build_policy_value_model
 from weiss_rl.residual_policy import LiveFrozenB1Residual, load_frozen_stored_logit_residual
+from weiss_rl.runtime_batching import (
+    concat_batch_major_field as _batching_concat_batch_major_field,
+)
+from weiss_rl.runtime_batching import (
+    concat_batch_major_fields as _batching_concat_batch_major_fields,
+)
+from weiss_rl.runtime_batching import (
+    concat_optional_time_major_field as _batching_concat_optional_time_major_field,
+)
+from weiss_rl.runtime_batching import (
+    concat_optional_time_major_fields as _batching_concat_optional_time_major_fields,
+)
+from weiss_rl.runtime_batching import (
+    concat_time_major_field as _batching_concat_time_major_field,
+)
+from weiss_rl.runtime_batching import (
+    concat_time_major_fields as _batching_concat_time_major_fields,
+)
+from weiss_rl.runtime_batching import (
+    concatenate_batch_legal_actions as _batching_concatenate_batch_legal_actions,
+)
+from weiss_rl.runtime_batching import (
+    concatenate_legal_actions as _batching_concatenate_legal_actions,
+)
+from weiss_rl.runtime_batching import (
+    gae_advantages as _batching_gae_advantages,
+)
+from weiss_rl.runtime_batching import (
+    infer_packed_meta_width as _batching_infer_packed_meta_width,
+)
+from weiss_rl.runtime_batching import optional_legal_action_meta as _batching_optional_legal_action_meta
+from weiss_rl.runtime_batching import require_ids_offsets as _batching_require_ids_offsets
+from weiss_rl.runtime_batching import require_mask as _batching_require_mask
+from weiss_rl.runtime_batching import slice_packed_rows as _batching_slice_packed_rows
+from weiss_rl.runtime_batching import slice_packed_rows_with_meta as _batching_slice_packed_rows_with_meta
+from weiss_rl.runtime_batching import structured_legal_batch_from_mask as _batching_structured_legal_batch_from_mask
+from weiss_rl.runtime_batching import structured_legal_batch_from_packed as _batching_structured_legal_batch_from_packed
+from weiss_rl.runtime_collectors import (
+    PerformanceLogger,
+    _accumulate_timeout_counters,
+    _actor_inference_model,
+    _ActorState,
+    _collector_counter_template,
+    _collector_process_main,
+    _configure_runtime_actor_torch_threads,
+    _configured_learner_device_name,
+    _is_cuda_auto_request,
+    _maybe_compile_runtime_actor_model,
+    _merge_simulator_timing_counters,
+    _model_guidance_payload,
+    _packed_legal_views_from_step_out,
+    _process_debug_log,
+    _resolve_runtime_actor_device,
+    _restore_model_guidance_from_payload,
+    _serialize_state_dict_for_ipc,
+    _timeout_limits_for_env,
+    resolve_actor_device_layout,
+)
+from weiss_rl.runtime_shared import (
+    _create_shared_collector_slot_config,
+    _open_shared_collector_slot,
+    _read_unroll_from_shared_slot,
+    _shared_pending_unroll_metadata,
+)
+from weiss_rl.runtime_types import (
+    QueueRuntimeConfig,
+    QueueRuntimeMode,
+    RuntimeBatch,
+    RuntimeUnroll,
+    _SharedCollectorSlot,
+    _SharedPendingUnroll,
+)
 from weiss_rl.schedules import linear_anneal_value
-from weiss_rl.termination_reason import classify_episode_end_reason
 
-QueueRuntimeMode = Literal["train_ordered", "train_async_fast"]
 _MIRROR_OPPONENT_POLICY_ID = "latest_policy_mirror"
 _NOLEAGUE_BASELINE_POLICY_ID = "b1_noleague_baseline"
 _FIXED_OPPONENT_EXCLUSIONS = frozenset({"b1_noleague_baseline"})
@@ -64,6 +133,47 @@ _PFSP_DIVERSITY_FLOOR_SIZE = 2
 _PUBLIC_TEACHER_DECISION_KINDS = frozenset({0, 1, 2, 3, 4, 5, 6, 7, 8})
 _DEFAULT_ACTION_META_WIDTH = 4
 _HEURISTIC_PUBLIC_VARIANT_POLICY_IDS = heuristic_public_policy_ids(include_base=False)
+PendingUnroll = RuntimeUnroll | _SharedPendingUnroll
+_handle_collector_commands = _collector_support._handle_collector_commands
+_shared_unroll_metadata = _collector_support._shared_unroll_metadata
+_write_unroll_to_shared_slot = _collector_support._write_unroll_to_shared_slot
+
+
+def _call_heuristic_native_rollout(
+    rollout_into: Any,
+    steps: int,
+    trajectory: Any,
+    native_profile: str,
+) -> None:
+    try:
+        signature = inspect.signature(rollout_into)
+    except (TypeError, ValueError):
+        signature = None
+    if signature is not None:
+        positional_params = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ]
+        if any(parameter.kind is inspect.Parameter.VAR_POSITIONAL for parameter in signature.parameters.values()):
+            rollout_into(steps, trajectory, native_profile)
+            return
+        if len(positional_params) >= 3:
+            rollout_into(steps, trajectory, native_profile)
+            return
+        rollout_into(steps, trajectory)
+        return
+    try:
+        rollout_into(steps, trajectory, native_profile)
+    except TypeError as profile_error:
+        try:
+            rollout_into(steps, trajectory)
+        except TypeError as fallback_error:
+            raise profile_error from fallback_error
 
 
 def _snapshot_meta_is_seed_import(snapshot: SnapshotMeta | None, *, policy_id: str) -> bool:
@@ -71,1410 +181,6 @@ def _snapshot_meta_is_seed_import(snapshot: SnapshotMeta | None, *, policy_id: s
         return True
     # Older registries did not persist source_kind; imported pool ids already carry a stable seed_ prefix.
     return str(policy_id).startswith("seed_")
-
-
-def _configure_runtime_actor_torch_threads(actor_torch_threads: int) -> None:
-    threads = int(actor_torch_threads)
-    if threads < 1:
-        raise ValueError("actor_torch_threads must be >= 1")
-    torch.set_num_threads(threads)
-    with suppress(RuntimeError):
-        torch.set_num_interop_threads(1)
-
-
-def _serialize_state_dict_for_ipc(state_dict: dict[str, Any]) -> dict[str, Any]:
-    serialized: dict[str, Any] = {}
-    for key, value in state_dict.items():
-        if isinstance(value, torch.Tensor):
-            serialized[str(key)] = np.array(value.detach().cpu().numpy(), copy=True)
-        else:
-            serialized[str(key)] = copy.deepcopy(value)
-    return serialized
-
-
-def _deserialize_state_dict_from_ipc(state_dict: dict[str, Any]) -> dict[str, Any]:
-    restored: dict[str, Any] = {}
-    for key, value in state_dict.items():
-        if isinstance(value, np.ndarray):
-            restored[str(key)] = torch.from_numpy(np.array(value, copy=True))
-        else:
-            restored[str(key)] = copy.deepcopy(value)
-    return restored
-
-
-def _model_guidance_payload(model: PolicyValueModel | None) -> dict[str, float]:
-    if model is None:
-        return {}
-    get_bias_scale = getattr(model, "get_public_heuristic_logit_bias_scale", None)
-    if not callable(get_bias_scale):
-        return {}
-    return {
-        "public_heuristic_logit_bias_scale": float(get_bias_scale(scoring_mode="learner")),
-        "public_heuristic_actor_logit_bias_scale": float(get_bias_scale(scoring_mode="actor")),
-    }
-
-
-def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload: Mapping[str, object]) -> None:
-    if model is None:
-        return
-    set_bias_scale = getattr(model, "set_public_heuristic_logit_bias_scale", None)
-    if not callable(set_bias_scale):
-        return
-    learner_scale = payload.get("public_heuristic_logit_bias_scale")
-    actor_scale = payload.get("public_heuristic_actor_logit_bias_scale")
-    if learner_scale is None and actor_scale is None:
-        return
-    resolved_learner_scale = None if learner_scale is None else float(learner_scale)
-    resolved_actor_scale = None if actor_scale is None else float(actor_scale)
-    if resolved_learner_scale is None:
-        get_bias_scale = getattr(model, "get_public_heuristic_logit_bias_scale", None)
-        if not callable(get_bias_scale):
-            return
-        resolved_learner_scale = float(get_bias_scale(scoring_mode="learner"))
-    set_bias_scale(resolved_learner_scale, actor_value=resolved_actor_scale)
-
-
-@dataclass(frozen=True, slots=True)
-class QueueRuntimeConfig:
-    mode: QueueRuntimeMode
-    actor_count: int
-    envs_per_actor: int
-    unroll_length: int
-    batch_unrolls_per_update: int
-    queue_capacity_unrolls: int
-    profile: str
-    base_seed: int
-    pass_action_id: int
-    actor_reload_interval_updates: int
-
-    @property
-    def total_envs(self) -> int:
-        return int(self.actor_count * self.envs_per_actor)
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeUnroll:
-    actor_id: int
-    unroll_seq: int
-    behavior_policy_version: int
-    unroll_hash: str
-    obs: np.ndarray
-    actions: np.ndarray
-    rewards: np.ndarray
-    terminated: np.ndarray
-    truncated: np.ndarray
-    to_play_seat: np.ndarray
-    behavior_logp: np.ndarray
-    values: np.ndarray
-    legal_actions: LegalActionBatch
-    bootstrap_obs: np.ndarray
-    bootstrap_actor: np.ndarray
-    bootstrap_value: np.ndarray
-    initial_hidden_state: np.ndarray
-    final_hidden_state: np.ndarray
-    episode_seed: np.ndarray
-    policy_train_mask: np.ndarray
-    b1_opponent_mask: np.ndarray
-    teacher_family: np.ndarray | None = None
-    teacher_slot: np.ndarray | None = None
-    teacher_move_source: np.ndarray | None = None
-    teacher_attack_type: np.ndarray | None = None
-    teacher_action: np.ndarray | None = None
-    teacher_valid: np.ndarray | None = None
-    behavior_logits: np.ndarray | None = None
-    counters: dict[str, int] | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeBatch:
-    learner_batch: dict[str, Any]
-    runtime_metrics: dict[str, float]
-
-
-@dataclass(slots=True)
-class _SharedCollectorSlot:
-    actor_id: int
-    slot_id: int
-    layout_name: str
-    obs: np.ndarray
-    actions: np.ndarray
-    rewards: np.ndarray
-    terminated: np.ndarray
-    truncated: np.ndarray
-    to_play_seat: np.ndarray
-    behavior_logp: np.ndarray
-    values: np.ndarray
-    bootstrap_obs: np.ndarray
-    bootstrap_actor: np.ndarray
-    bootstrap_value: np.ndarray
-    initial_hidden_state: np.ndarray
-    final_hidden_state: np.ndarray
-    episode_seed: np.ndarray
-    policy_train_mask: np.ndarray
-    b1_opponent_mask: np.ndarray
-    teacher_family: np.ndarray
-    teacher_slot: np.ndarray
-    teacher_move_source: np.ndarray
-    teacher_attack_type: np.ndarray
-    teacher_action: np.ndarray
-    teacher_valid: np.ndarray
-    legal_ids: np.ndarray | None
-    legal_action_meta: np.ndarray | None
-    legal_offsets: np.ndarray | None
-    legal_mask: np.ndarray | None
-    _segments: tuple[shared_memory.SharedMemory, ...]
-
-    def close(self, *, unlink: bool) -> None:
-        seen: set[str] = set()
-        for segment in self._segments:
-            if segment.name in seen:
-                continue
-            seen.add(segment.name)
-            segment.close()
-            if unlink:
-                with suppress(FileNotFoundError):
-                    segment.unlink()
-
-
-@dataclass(slots=True)
-class _SharedPendingUnroll:
-    actor_id: int
-    slot_id: int
-    behavior_policy_version: int
-    unroll_seq: int
-    unroll_hash: str
-    slot: _SharedCollectorSlot
-    action_space: int | None
-    legal_kind: str
-    legal_ids_size: int
-    has_legal_action_meta: bool
-    has_teacher_labels: bool
-    has_teacher_move_source_label: bool
-    has_teacher_action_label: bool
-    counters: dict[str, int] | None = None
-    _legal_actions: LegalActionBatch | None = None
-
-    @classmethod
-    def from_metadata(cls, slot: _SharedCollectorSlot, metadata: dict[str, Any]) -> _SharedPendingUnroll:
-        return cls(
-            actor_id=int(metadata["actor_id"]),
-            slot_id=int(metadata.get("slot_id", 0)),
-            behavior_policy_version=int(metadata["behavior_policy_version"]),
-            unroll_seq=int(metadata["unroll_seq"]),
-            unroll_hash=str(metadata["unroll_hash"]),
-            slot=slot,
-            action_space=None if metadata.get("action_space") is None else int(metadata["action_space"]),
-            legal_kind=str(metadata.get("legal_kind", "mask")),
-            legal_ids_size=int(metadata.get("legal_ids_size", 0)),
-            has_legal_action_meta=bool(metadata.get("has_legal_action_meta", False)),
-            has_teacher_labels=bool(metadata.get("has_teacher_labels", False)),
-            has_teacher_move_source_label=bool(metadata.get("has_teacher_move_source_label", False)),
-            has_teacher_action_label=bool(metadata.get("has_teacher_action_label", False)),
-            counters=(
-                None
-                if not isinstance(metadata.get("counters"), dict)
-                else {str(key): int(value) for key, value in dict(metadata["counters"]).items()}
-            ),
-        )
-
-    @property
-    def obs(self) -> np.ndarray:
-        return self.slot.obs
-
-    @property
-    def actions(self) -> np.ndarray:
-        return self.slot.actions
-
-    @property
-    def rewards(self) -> np.ndarray:
-        return self.slot.rewards
-
-    @property
-    def terminated(self) -> np.ndarray:
-        return self.slot.terminated
-
-    @property
-    def truncated(self) -> np.ndarray:
-        return self.slot.truncated
-
-    @property
-    def to_play_seat(self) -> np.ndarray:
-        return self.slot.to_play_seat
-
-    @property
-    def behavior_logp(self) -> np.ndarray:
-        return self.slot.behavior_logp
-
-    @property
-    def values(self) -> np.ndarray:
-        return self.slot.values
-
-    @property
-    def bootstrap_obs(self) -> np.ndarray:
-        return self.slot.bootstrap_obs
-
-    @property
-    def bootstrap_actor(self) -> np.ndarray:
-        return self.slot.bootstrap_actor
-
-    @property
-    def bootstrap_value(self) -> np.ndarray:
-        return self.slot.bootstrap_value
-
-    @property
-    def initial_hidden_state(self) -> np.ndarray:
-        return self.slot.initial_hidden_state
-
-    @property
-    def final_hidden_state(self) -> np.ndarray:
-        return self.slot.final_hidden_state
-
-    @property
-    def episode_seed(self) -> np.ndarray:
-        return self.slot.episode_seed
-
-    @property
-    def policy_train_mask(self) -> np.ndarray:
-        return self.slot.policy_train_mask
-
-    @property
-    def b1_opponent_mask(self) -> np.ndarray:
-        return self.slot.b1_opponent_mask
-
-    @property
-    def teacher_family(self) -> np.ndarray | None:
-        return self.slot.teacher_family if self.has_teacher_labels else None
-
-    @property
-    def teacher_slot(self) -> np.ndarray | None:
-        return self.slot.teacher_slot if self.has_teacher_labels else None
-
-    @property
-    def teacher_move_source(self) -> np.ndarray | None:
-        return self.slot.teacher_move_source if self.has_teacher_move_source_label else None
-
-    @property
-    def teacher_attack_type(self) -> np.ndarray | None:
-        return self.slot.teacher_attack_type if self.has_teacher_labels else None
-
-    @property
-    def teacher_action(self) -> np.ndarray | None:
-        return self.slot.teacher_action if self.has_teacher_action_label else None
-
-    @property
-    def teacher_valid(self) -> np.ndarray | None:
-        return self.slot.teacher_valid if self.has_teacher_labels else None
-
-    @property
-    def behavior_logits(self) -> None:
-        return None
-
-    @property
-    def legal_actions(self) -> LegalActionBatch:
-        cached = self._legal_actions
-        if cached is not None:
-            return cached
-        if self.legal_kind == "packed":
-            assert self.slot.legal_ids is not None and self.slot.legal_offsets is not None
-            cached = LegalActionBatch.from_packed(
-                self.slot.legal_ids[: self.legal_ids_size],
-                self.slot.legal_offsets,
-                meta=(
-                    None
-                    if self.slot.legal_action_meta is None or not self.has_legal_action_meta
-                    else self.slot.legal_action_meta[: self.legal_ids_size]
-                ),
-                action_space=self.action_space,
-            )
-        else:
-            assert self.slot.legal_mask is not None
-            cached = LegalActionBatch.from_mask(self.slot.legal_mask, action_space=self.action_space)
-        self._legal_actions = cached
-        return cached
-
-
-PendingUnroll = RuntimeUnroll | _SharedPendingUnroll
-
-
-@dataclass(slots=True)
-class _ActorState:
-    actor_id: int
-    env: DecisionBoundaryEnv
-    model: PolicyValueModel
-    compiled_model: Any | None
-    rng: np.random.Generator
-    seat_hidden: torch.Tensor
-    current_batch: DecisionBoundaryBatch
-    layout_name: str
-    focal_seat_by_env: np.ndarray
-    opponent_policy_id_by_env: np.ndarray
-    opponent_hidden: torch.Tensor
-    diverse_opponent_lane: bool
-    force_model_policy_lane: bool
-    fixed_opponent_policy_id_by_env: np.ndarray | None = None
-    snapshot_version: int = 0
-    next_unroll_seq: int = 0
-
-
-class PerformanceLogger:
-    """Write runtime performance records as JSONL."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-
-    def log(self, payload: dict[str, Any]) -> None:
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, sort_keys=True) + "\n")
-
-
-def _collector_counter_template() -> dict[str, int]:
-    return {
-        "engine_fault_done_rows": 0,
-        "no_progress_timeout_rows": 0,
-        "natural_timeout_rows": 0,
-        "decision_limit_timeout_rows": 0,
-        "tick_limit_timeout_rows": 0,
-        "timeout_unknown_rows": 0,
-        "total_actions": 0,
-        "pass_actions": 0,
-        "main_move_actions": 0,
-        "pass_with_nonpass_available": 0,
-        "max_consecutive_main_moves": 0,
-        "focal_row_count": 0,
-        "opponent_row_count": 0,
-        "tactical_row_count": 0,
-        "teacher_tactical_row_count": 0,
-        "fixed_opponent_tactical_row_count": 0,
-        "packed_candidate_count": 0,
-        "pfsp_sampled_envs": 0,
-        "pfsp_mirror_envs": 0,
-        "pfsp_heuristic_public_envs": 0,
-        "pfsp_heuristic_public_variant_envs": 0,
-        "pfsp_noleague_baseline_envs": 0,
-        "pfsp_champion_envs": 0,
-        "pfsp_recent_envs": 0,
-        "pfsp_hard_negative_envs": 0,
-        "pfsp_residual_opponent_envs": 0,
-        "pfsp_warmup_snapshot_envs": 0,
-        "b1_opponent_env_steps": 0,
-        "b1_opponent_train_rows": 0,
-        "native_rollout_profile_base_unrolls": 0,
-        "native_rollout_profile_aggressive_unrolls": 0,
-        "native_rollout_profile_control_unrolls": 0,
-        "actor_model_rows": 0,
-        "actor_heuristic_rows": 0,
-        "policy_train_model_rows": 0,
-        "policy_train_heuristic_rows": 0,
-        "policy_excluded_heuristic_rows": 0,
-        "copied_bytes_estimate": 0,
-        "collect_actor_unroll_ms": 0,
-        "actor_policy_forward_ms": 0,
-        "actor_env_step_ms": 0,
-        "actor_action_summary_ms": 0,
-        "actor_done_reset_ms": 0,
-        "actor_bootstrap_ms": 0,
-        "teacher_label_ms": 0,
-        "fixed_opponent_routing_ms": 0,
-        "simulator_select_actions_from_logits_count": 0,
-        "simulator_select_actions_from_logits_ns": 0,
-        "simulator_sample_actions_from_logits_count": 0,
-        "simulator_sample_actions_from_logits_ns": 0,
-        "simulator_step_select_from_logits_into_i16_legal_ids_count": 0,
-        "simulator_step_select_from_logits_into_i16_legal_ids_ns": 0,
-        "simulator_step_sample_from_logits_into_i16_legal_ids_count": 0,
-        "simulator_step_sample_from_logits_into_i16_legal_ids_ns": 0,
-        "simulator_step_sample_from_logits_with_logp_into_i16_legal_ids_count": 0,
-        "simulator_step_sample_from_logits_with_logp_into_i16_legal_ids_ns": 0,
-        "simulator_legal_ids_materialize_count": 0,
-        "simulator_legal_ids_materialize_ns": 0,
-        "simulator_legal_action_meta_materialize_count": 0,
-        "simulator_legal_action_meta_materialize_ns": 0,
-        "simulator_python_reset": 0,
-        "simulator_python_step": 0,
-        "simulator_python_step_sample_from_logits": 0,
-        "simulator_python_step_sample_from_logits_with_logp": 0,
-        "simulator_python_reset_done": 0,
-    }
-
-
-def _timeout_limits_for_env(env: DecisionBoundaryEnv) -> dict[str, int | None]:
-    return {
-        "max_decisions": _optional_int(getattr(env, "max_decisions", None)),
-        "max_ticks": _optional_int(getattr(env, "max_ticks", None)),
-        "max_no_progress_decisions": _optional_int(getattr(env, "max_no_progress_decisions", None)),
-    }
-
-
-def _optional_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    return int(value)
-
-
-def _merge_simulator_timing_counters(counters: dict[str, int], env: DecisionBoundaryEnv) -> None:
-    drain_timing_counters = getattr(env, "drain_timing_counters", None)
-    if not callable(drain_timing_counters):
-        return
-    for key, value in drain_timing_counters().items():
-        counters[f"simulator_{str(key)}"] = counters.get(f"simulator_{str(key)}", 0) + int(value)
-
-
-def _accumulate_timeout_counters(
-    *,
-    counters: dict[str, int],
-    batch: DecisionBoundaryBatch,
-    done: np.ndarray,
-    timeout_limits: dict[str, int | None],
-) -> None:
-    done_mask = np.asarray(done, dtype=np.bool_)
-    if not np.any(done_mask):
-        return
-    decision_count = np.asarray(
-        getattr(batch, "decision_count", np.zeros(done_mask.shape, dtype=np.int32)), dtype=np.int64
-    )
-    tick_count = np.asarray(getattr(batch, "tick_count", np.zeros(done_mask.shape, dtype=np.int32)), dtype=np.int64)
-    no_progress_count = np.asarray(
-        getattr(batch, "no_progress_count", np.zeros(done_mask.shape, dtype=np.int32)),
-        dtype=np.int64,
-    )
-    terminated = np.asarray(batch.terminated, dtype=np.bool_)
-    truncated = np.asarray(batch.truncated, dtype=np.bool_)
-    engine_status = np.asarray(batch.engine_status, dtype=np.int64)
-    for env_index in np.flatnonzero(done_mask):
-        reason = classify_episode_end_reason(
-            terminated=bool(terminated[int(env_index)]),
-            truncated=bool(truncated[int(env_index)]),
-            engine_status=int(engine_status[int(env_index)]),
-            decision_count=int(decision_count[int(env_index)]),
-            tick_count=int(tick_count[int(env_index)]),
-            no_progress_count=int(no_progress_count[int(env_index)]),
-            max_decisions=timeout_limits["max_decisions"],
-            max_ticks=timeout_limits["max_ticks"],
-            max_no_progress_decisions=timeout_limits["max_no_progress_decisions"],
-        )
-        if reason == "engine_fault":
-            counters["engine_fault_done_rows"] += 1
-        elif reason == "no_progress_timeout":
-            counters["no_progress_timeout_rows"] += 1
-        elif reason == "decision_limit_timeout":
-            counters["natural_timeout_rows"] += 1
-            counters["decision_limit_timeout_rows"] += 1
-        elif reason == "tick_limit_timeout":
-            counters["natural_timeout_rows"] += 1
-            counters["tick_limit_timeout_rows"] += 1
-        elif reason == "timeout_unknown":
-            counters["natural_timeout_rows"] += 1
-            counters["timeout_unknown_rows"] += 1
-
-
-def _packed_legal_views_from_step_out(step_out: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    legal_offsets = np.asarray(step_out.legal_offsets, dtype=np.uint32)
-    used = 0 if legal_offsets.size == 0 else int(legal_offsets[-1])
-    legal_ids = np.asarray(step_out.legal_ids, dtype=np.uint32)[:used]
-    raw_meta = getattr(step_out, "legal_action_meta", None)
-    legal_action_meta = None if raw_meta is None else np.asarray(raw_meta, dtype=np.uint16)[:used]
-    return legal_ids, legal_offsets, legal_action_meta
-
-
-def _process_debug_log(*, run_dir: Path | None, actor_id: int, message: str) -> None:
-    if str(os.environ.get("WEISS_RL_PROCESS_DEBUG", "")).strip().lower() not in {"1", "true", "yes", "on"}:
-        return
-    if run_dir is None:
-        return
-    log_path = Path(run_dir) / "training" / "logs" / f"collector_debug_actor{int(actor_id):02d}.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write(f"{time.time():.6f} {message}\n")
-
-
-def _handle_collector_commands(
-    *,
-    runtime: Any,
-    actor: _ActorState,
-    control_queue: Any,
-    default_fixed_slots: np.ndarray | None,
-    default_forced_policy_ids: tuple[str, ...],
-    default_teacher_active: bool,
-    default_has_noleague_baseline: bool,
-) -> bool:
-    while True:
-        try:
-            command = control_queue.get_nowait()
-        except queue.Empty:
-            return False
-        kind = str(command.get("kind", ""))
-        _process_debug_log(
-            run_dir=getattr(runtime, "_run_dir", None),
-            actor_id=getattr(actor, "actor_id", -1),
-            message=f"command kind={kind}",
-        )
-        if kind == "stop":
-            return True
-        if kind == "reload":
-            actor.model.load_state_dict(_deserialize_state_dict_from_ipc(command["model_state_dict"]))
-            _restore_model_guidance_from_payload(actor.model, command)
-            actor.model.eval()
-            update = int(command.get("update", actor.snapshot_version))
-            actor.snapshot_version = update
-            runtime._current_learner_update = update
-            if "effective_update" in command:
-                runtime._effective_learner_update = int(command["effective_update"])
-            if bool(command.get("refresh_opponent_pool", False)):
-                _process_debug_log(
-                    run_dir=getattr(runtime, "_run_dir", None),
-                    actor_id=getattr(actor, "actor_id", -1),
-                    message="command reload refresh_opponent_pool start",
-                )
-                runtime.refresh_opponent_pool()
-                _process_debug_log(
-                    run_dir=getattr(runtime, "_run_dir", None),
-                    actor_id=getattr(actor, "actor_id", -1),
-                    message="command reload refresh_opponent_pool done",
-                )
-            continue
-        if kind == "set_update":
-            runtime._current_learner_update = int(command.get("update", getattr(runtime, "_current_learner_update", 0)))
-            if "effective_update" in command:
-                runtime._effective_learner_update = int(command["effective_update"])
-            if bool(command.get("refresh_opponent_pool", False)):
-                _process_debug_log(
-                    run_dir=getattr(runtime, "_run_dir", None),
-                    actor_id=getattr(actor, "actor_id", -1),
-                    message="command set_update refresh_opponent_pool start",
-                )
-                runtime.refresh_opponent_pool()
-                _process_debug_log(
-                    run_dir=getattr(runtime, "_run_dir", None),
-                    actor_id=getattr(actor, "actor_id", -1),
-                    message="command set_update refresh_opponent_pool done",
-                )
-            continue
-        if kind == "refresh_opponent_pool":
-            if "update" in command:
-                runtime._current_learner_update = int(command["update"])
-            if "effective_update" in command:
-                runtime._effective_learner_update = int(command["effective_update"])
-            _process_debug_log(
-                run_dir=getattr(runtime, "_run_dir", None),
-                actor_id=getattr(actor, "actor_id", -1),
-                message="command refresh_opponent_pool start",
-            )
-            runtime.refresh_opponent_pool()
-            _process_debug_log(
-                run_dir=getattr(runtime, "_run_dir", None),
-                actor_id=getattr(actor, "actor_id", -1),
-                message="command refresh_opponent_pool done",
-            )
-            continue
-        if kind == "set_league_eval_warmup_gate":
-            runtime._league_eval_warmup_gate_open = bool(command.get("open", True))
-            _process_debug_log(
-                run_dir=getattr(runtime, "_run_dir", None),
-                actor_id=getattr(actor, "actor_id", -1),
-                message=f"command set_league_eval_warmup_gate open={runtime._league_eval_warmup_gate_open}",
-            )
-            runtime.refresh_opponent_pool()
-            continue
-        if kind == "set_fixed_opponents":
-            restore_defaults = bool(command.get("restore_defaults", False))
-            activate_teacher = (
-                default_teacher_active if restore_defaults else bool(command.get("activate_teacher_heuristic", False))
-            )
-            if activate_teacher and runtime._teacher_policy is not None:
-                runtime._opponent_heuristic_policies[HEURISTIC_PUBLIC_POLICY_ID] = runtime._teacher_policy
-            elif not default_teacher_active:
-                runtime._opponent_heuristic_policies.pop(HEURISTIC_PUBLIC_POLICY_ID, None)
-
-            if restore_defaults:
-                runtime._forced_fixed_opponent_policy_ids = tuple(default_forced_policy_ids)
-            else:
-                runtime._forced_fixed_opponent_policy_ids = tuple(
-                    str(policy_id) for policy_id in command.get("forced_policy_ids", ())
-                )
-
-            baseline_state_dict = None if restore_defaults else command.get("noleague_baseline_state_dict")
-            if baseline_state_dict is not None:
-                baseline_model = build_policy_value_model(
-                    observation_dim=int(runtime.observation_dim),
-                    config=runtime.stack.config.model,
-                    action_dim=int(runtime.action_dim),
-                    observation_spec=runtime._observation_spec,
-                    spec_bundle=runtime._spec_bundle,
-                ).to(runtime._device)
-                baseline_model.load_state_dict(_deserialize_state_dict_from_ipc(baseline_state_dict))
-                baseline_model.eval()
-                runtime._opponent_models[_NOLEAGUE_BASELINE_POLICY_ID] = baseline_model
-                runtime._opponent_model_locks[_NOLEAGUE_BASELINE_POLICY_ID] = threading.Lock()
-            elif restore_defaults and not default_has_noleague_baseline:
-                runtime._opponent_models.pop(_NOLEAGUE_BASELINE_POLICY_ID, None)
-                runtime._opponent_model_locks.pop(_NOLEAGUE_BASELINE_POLICY_ID, None)
-
-            if restore_defaults:
-                actor.fixed_opponent_policy_id_by_env = (
-                    None if default_fixed_slots is None else np.asarray(default_fixed_slots, dtype=object).copy()
-                )
-            else:
-                fixed_slots = command.get("fixed_opponent_policy_id_by_env")
-                actor.fixed_opponent_policy_id_by_env = (
-                    None if fixed_slots is None else np.asarray(fixed_slots, dtype=object)
-                )
-            runtime._reset_actor_state_for_fixed_opponents(actor)
-
-
-def _obs_numpy_dtype_for_profile(profile: str) -> np.dtype[Any]:
-    normalized = str(profile).strip().lower()
-    if normalized == "debug":
-        return np.dtype(np.int32)
-    return np.dtype(np.int16)
-
-
-def _is_cuda_auto_request(requested: str) -> bool:
-    normalized = str(requested).strip().lower()
-    return normalized in {"auto", "cuda:auto", "cuda:all", "all"}
-
-
-def _available_cuda_device_names() -> tuple[str, ...]:
-    if not torch.cuda.is_available():
-        return ()
-    return tuple(f"cuda:{index}" for index in range(int(torch.cuda.device_count())))
-
-
-def _normalize_device_name(requested: str) -> str:
-    value = str(requested).strip()
-    if not value:
-        return "cpu"
-    if _is_cuda_auto_request(value):
-        available = _available_cuda_device_names()
-        return "cpu" if not available else available[0]
-    if value.startswith("cuda") and not torch.cuda.is_available():
-        return "cpu"
-    device = torch.device(value)
-    if device.type == "cuda":
-        return f"cuda:{0 if device.index is None else int(device.index)}"
-    return str(device)
-
-
-def _configured_learner_device_name(
-    stack: StackConfig,
-    *,
-    learner_device: torch.device | str | None = None,
-) -> str:
-    if learner_device is not None:
-        return _normalize_device_name(str(learner_device))
-    system = stack.config.system
-    requested = "cpu" if system is None else str(getattr(system, "learner_device", "cpu")).strip()
-    return _normalize_device_name(requested)
-
-
-def resolve_actor_device_layout(
-    stack: StackConfig,
-    *,
-    actor_count: int,
-    learner_device: torch.device | str | None = None,
-    prefer_process_collectors: bool = False,
-) -> tuple[str, ...]:
-    count = max(1, int(actor_count))
-    system = stack.config.system
-    requested = "cpu" if system is None else str(getattr(system, "actor_device", "cpu")).strip()
-    if not requested:
-        requested = "cpu"
-    requested_parts = tuple(part.strip() for part in requested.split(",") if part.strip())
-    if len(requested_parts) > 1:
-        normalized = tuple(_normalize_device_name(part) for part in requested_parts)
-        return tuple(normalized[index % len(normalized)] for index in range(count))
-    if _is_cuda_auto_request(requested):
-        available = _available_cuda_device_names()
-        if not available:
-            return ("cpu",) * count
-        learner_name = _configured_learner_device_name(stack, learner_device=learner_device)
-        actor_pool = tuple(device_name for device_name in available if device_name != learner_name)
-        if not actor_pool:
-            actor_pool = available
-        if not prefer_process_collectors:
-            return (actor_pool[0],) * count
-        return tuple(actor_pool[index % len(actor_pool)] for index in range(count))
-    normalized = _normalize_device_name(requested)
-    return (normalized,) * count
-
-
-def _resolve_runtime_actor_device(
-    stack: StackConfig,
-    *,
-    learner_device: torch.device | str | None = None,
-) -> torch.device:
-    system = stack.config.system
-    requested = "cpu" if system is None else str(system.actor_device).strip()
-    prefer_process_collectors = "," in requested or _is_cuda_auto_request(requested)
-    resolved = resolve_actor_device_layout(
-        stack,
-        actor_count=1,
-        learner_device=learner_device,
-        prefer_process_collectors=prefer_process_collectors,
-    )[0]
-    return torch.device(resolved)
-
-
-def _maybe_compile_runtime_actor_model(model: PolicyValueModel, *, enabled: bool) -> Any | None:
-    if not enabled:
-        return None
-    if bool(getattr(model, "supports_legal_candidate_scoring", False)):
-        enable_trunk_compile = getattr(model, "enable_trunk_compile", None)
-        if not callable(enable_trunk_compile):
-            return None
-        try:
-            enable_trunk_compile(mode="reduce-overhead")
-        except Exception:
-            return None
-        return model
-    try:
-        return torch.compile(model, mode="reduce-overhead")
-    except Exception:
-        return None
-
-
-def _actor_inference_model(actor: _ActorState) -> Any:
-    return actor.compiled_model if actor.compiled_model is not None else actor.model
-
-
-def _shared_segment_spec(
-    *,
-    actor_id: int,
-    slot_id: int,
-    name: str,
-    shape: tuple[int, ...],
-    dtype: np.dtype[Any],
-) -> dict[str, Any]:
-    size = int(np.prod(shape, dtype=np.int64)) * int(dtype.itemsize)
-    return {
-        "name": f"weissrl_{actor_id}_{slot_id}_{name}_{time.time_ns()}",
-        "shape": tuple(int(dim) for dim in shape),
-        "dtype": dtype.str,
-        "size": size,
-    }
-
-
-def _create_shared_collector_slot_config(
-    *,
-    actor_id: int,
-    slot_id: int = 0,
-    profile: str,
-    unroll_length: int,
-    envs_per_actor: int,
-    observation_dim: int,
-    action_dim: int,
-    hidden_size: int,
-    layout_name: str,
-    legal_action_meta_width: int = _DEFAULT_ACTION_META_WIDTH,
-) -> dict[str, Any]:
-    rows = int(unroll_length * envs_per_actor)
-    obs_dtype = _obs_numpy_dtype_for_profile(profile)
-    specs = {
-        "obs": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="obs",
-            shape=(int(unroll_length), int(envs_per_actor), int(observation_dim)),
-            dtype=obs_dtype,
-        ),
-        "actions": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="actions",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.uint16),
-        ),
-        "rewards": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="rewards",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.float32),
-        ),
-        "terminated": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="terminated",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.bool_),
-        ),
-        "truncated": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="truncated",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.bool_),
-        ),
-        "to_play_seat": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="to_play_seat",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.int8),
-        ),
-        "behavior_logp": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="behavior_logp",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.float32),
-        ),
-        "values": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="values",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.float32),
-        ),
-        "bootstrap_obs": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="bootstrap_obs",
-            shape=(int(envs_per_actor), int(observation_dim)),
-            dtype=np.dtype(np.float32),
-        ),
-        "bootstrap_actor": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="bootstrap_actor",
-            shape=(int(envs_per_actor),),
-            dtype=np.dtype(np.int64),
-        ),
-        "bootstrap_value": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="bootstrap_value",
-            shape=(int(envs_per_actor),),
-            dtype=np.dtype(np.float32),
-        ),
-        "initial_hidden_state": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="initial_hidden_state",
-            shape=(int(envs_per_actor), 2, int(hidden_size)),
-            dtype=np.dtype(np.float32),
-        ),
-        "final_hidden_state": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="final_hidden_state",
-            shape=(int(envs_per_actor), 2, int(hidden_size)),
-            dtype=np.dtype(np.float32),
-        ),
-        "episode_seed": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="episode_seed",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.uint64),
-        ),
-        "policy_train_mask": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="policy_train_mask",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.bool_),
-        ),
-        "b1_opponent_mask": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="b1_opponent_mask",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.bool_),
-        ),
-        "teacher_family": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="teacher_family",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.int32),
-        ),
-        "teacher_slot": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="teacher_slot",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.int32),
-        ),
-        "teacher_move_source": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="teacher_move_source",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.int32),
-        ),
-        "teacher_attack_type": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="teacher_attack_type",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.int32),
-        ),
-        "teacher_action": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="teacher_action",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.int32),
-        ),
-        "teacher_valid": _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="teacher_valid",
-            shape=(int(unroll_length), int(envs_per_actor)),
-            dtype=np.dtype(np.bool_),
-        ),
-    }
-    if str(layout_name) == "i16_legal_ids":
-        specs["legal_ids"] = _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="legal_ids",
-            shape=(rows * int(action_dim),),
-            dtype=np.dtype(np.uint32),
-        )
-        specs["legal_action_meta"] = _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="legal_action_meta",
-            shape=(rows * int(action_dim), int(legal_action_meta_width)),
-            dtype=np.dtype(np.uint16),
-        )
-        specs["legal_offsets"] = _shared_segment_spec(
-            actor_id=actor_id, slot_id=slot_id, name="legal_offsets", shape=(rows + 1,), dtype=np.dtype(np.uint32)
-        )
-    else:
-        specs["legal_mask"] = _shared_segment_spec(
-            actor_id=actor_id,
-            slot_id=slot_id,
-            name="legal_mask",
-            shape=(int(unroll_length), int(envs_per_actor), int(action_dim)),
-            dtype=np.dtype(np.bool_),
-        )
-    return {
-        "actor_id": int(actor_id),
-        "slot_id": int(slot_id),
-        "layout_name": str(layout_name),
-        "specs": specs,
-    }
-
-
-def _open_shared_collector_slot(config: dict[str, Any], *, create: bool = False) -> _SharedCollectorSlot:
-    specs = dict(config["specs"])
-    segments: list[shared_memory.SharedMemory] = []
-    arrays: dict[str, np.ndarray] = {}
-    for key, spec in specs.items():
-        shape = tuple(int(dim) for dim in spec["shape"])
-        dtype = np.dtype(spec["dtype"])
-        segment = shared_memory.SharedMemory(name=spec["name"], create=create, size=int(spec["size"]))
-        segments.append(segment)
-        arrays[key] = np.ndarray(shape, dtype=dtype, buffer=segment.buf)
-    return _SharedCollectorSlot(
-        actor_id=int(config["actor_id"]),
-        slot_id=int(config.get("slot_id", 0)),
-        layout_name=str(config["layout_name"]),
-        obs=arrays["obs"],
-        actions=arrays["actions"],
-        rewards=arrays["rewards"],
-        terminated=arrays["terminated"],
-        truncated=arrays["truncated"],
-        to_play_seat=arrays["to_play_seat"],
-        behavior_logp=arrays["behavior_logp"],
-        values=arrays["values"],
-        bootstrap_obs=arrays["bootstrap_obs"],
-        bootstrap_actor=arrays["bootstrap_actor"],
-        bootstrap_value=arrays["bootstrap_value"],
-        initial_hidden_state=arrays["initial_hidden_state"],
-        final_hidden_state=arrays["final_hidden_state"],
-        episode_seed=arrays["episode_seed"],
-        policy_train_mask=arrays["policy_train_mask"],
-        b1_opponent_mask=arrays["b1_opponent_mask"],
-        teacher_family=arrays["teacher_family"],
-        teacher_slot=arrays["teacher_slot"],
-        teacher_move_source=arrays["teacher_move_source"],
-        teacher_attack_type=arrays["teacher_attack_type"],
-        teacher_action=arrays["teacher_action"],
-        teacher_valid=arrays["teacher_valid"],
-        legal_ids=arrays.get("legal_ids"),
-        legal_action_meta=arrays.get("legal_action_meta"),
-        legal_offsets=arrays.get("legal_offsets"),
-        legal_mask=arrays.get("legal_mask"),
-        _segments=tuple(segments),
-    )
-
-
-def _shared_unroll_metadata(unroll: RuntimeUnroll, *, slot_id: int | None = None) -> dict[str, Any]:
-    metadata: dict[str, Any] = {
-        "kind": "shared_unroll_v1",
-        "actor_id": int(unroll.actor_id),
-        "unroll_seq": int(unroll.unroll_seq),
-        "behavior_policy_version": int(unroll.behavior_policy_version),
-        "unroll_hash": str(unroll.unroll_hash),
-        "action_space": int(unroll.legal_actions.action_space)
-        if unroll.legal_actions.action_space is not None
-        else None,
-    }
-    if unroll.legal_actions.ids is not None and unroll.legal_actions.offsets is not None:
-        metadata["legal_kind"] = "packed"
-        metadata["legal_ids_size"] = int(unroll.legal_actions.ids.size)
-        metadata["has_legal_action_meta"] = bool(unroll.legal_actions.meta is not None)
-    else:
-        metadata["legal_kind"] = "mask"
-    if slot_id is not None:
-        metadata["slot_id"] = int(slot_id)
-    if unroll.counters:
-        metadata["counters"] = {str(key): int(value) for key, value in unroll.counters.items()}
-    metadata["has_teacher_labels"] = bool(
-        unroll.teacher_family is not None
-        and unroll.teacher_slot is not None
-        and unroll.teacher_attack_type is not None
-        and unroll.teacher_valid is not None
-    )
-    metadata["has_teacher_move_source_label"] = bool(unroll.teacher_move_source is not None)
-    metadata["has_teacher_action_label"] = bool(unroll.teacher_action is not None)
-    return metadata
-
-
-def _shared_pending_unroll_metadata(unroll: _SharedPendingUnroll) -> dict[str, Any]:
-    metadata: dict[str, Any] = {
-        "kind": "shared_unroll_v1",
-        "actor_id": int(unroll.actor_id),
-        "slot_id": int(unroll.slot_id),
-        "unroll_seq": int(unroll.unroll_seq),
-        "behavior_policy_version": int(unroll.behavior_policy_version),
-        "unroll_hash": str(unroll.unroll_hash),
-        "action_space": None if unroll.action_space is None else int(unroll.action_space),
-        "legal_kind": str(unroll.legal_kind),
-        "legal_ids_size": int(unroll.legal_ids_size),
-        "has_legal_action_meta": bool(unroll.has_legal_action_meta),
-        "has_teacher_labels": bool(unroll.has_teacher_labels),
-        "has_teacher_move_source_label": bool(unroll.has_teacher_move_source_label),
-        "has_teacher_action_label": bool(unroll.has_teacher_action_label),
-    }
-    if unroll.counters:
-        metadata["counters"] = {str(key): int(value) for key, value in unroll.counters.items()}
-    return metadata
-
-
-def _write_unroll_to_shared_slot(slot: _SharedCollectorSlot, unroll: RuntimeUnroll) -> None:
-    slot.obs[...] = unroll.obs
-    slot.actions[...] = unroll.actions
-    slot.rewards[...] = unroll.rewards
-    slot.terminated[...] = unroll.terminated
-    slot.truncated[...] = unroll.truncated
-    slot.to_play_seat[...] = unroll.to_play_seat
-    slot.behavior_logp[...] = unroll.behavior_logp
-    slot.values[...] = unroll.values
-    slot.bootstrap_obs[...] = unroll.bootstrap_obs
-    slot.bootstrap_actor[...] = unroll.bootstrap_actor
-    slot.bootstrap_value[...] = unroll.bootstrap_value
-    slot.initial_hidden_state[...] = unroll.initial_hidden_state
-    slot.final_hidden_state[...] = unroll.final_hidden_state
-    slot.episode_seed[...] = unroll.episode_seed
-    slot.policy_train_mask[...] = unroll.policy_train_mask
-    slot.b1_opponent_mask[...] = unroll.b1_opponent_mask
-    if (
-        unroll.teacher_family is None
-        or unroll.teacher_slot is None
-        or unroll.teacher_attack_type is None
-        or unroll.teacher_valid is None
-    ):
-        slot.teacher_family.fill(-1)
-        slot.teacher_slot.fill(-1)
-        slot.teacher_attack_type.fill(-1)
-        slot.teacher_valid.fill(False)
-    else:
-        slot.teacher_family[...] = unroll.teacher_family
-        slot.teacher_slot[...] = unroll.teacher_slot
-        slot.teacher_attack_type[...] = unroll.teacher_attack_type
-        slot.teacher_valid[...] = unroll.teacher_valid
-    if unroll.teacher_move_source is None:
-        slot.teacher_move_source.fill(-1)
-    else:
-        slot.teacher_move_source[...] = unroll.teacher_move_source
-    if unroll.teacher_action is None:
-        slot.teacher_action.fill(-1)
-    else:
-        slot.teacher_action[...] = unroll.teacher_action
-    if slot.legal_ids is not None and slot.legal_offsets is not None:
-        assert unroll.legal_actions.ids is not None and unroll.legal_actions.offsets is not None
-        ids = np.asarray(unroll.legal_actions.ids, dtype=np.uint32)
-        meta = None if unroll.legal_actions.meta is None else np.asarray(unroll.legal_actions.meta, dtype=np.uint16)
-        offsets = np.asarray(unroll.legal_actions.offsets, dtype=np.uint32)
-        slot.legal_ids[: ids.size] = ids
-        if slot.legal_action_meta is not None:
-            slot.legal_action_meta[...] = np.iinfo(slot.legal_action_meta.dtype).max
-            if meta is not None and meta.size:
-                slot.legal_action_meta[: meta.shape[0]] = meta
-        slot.legal_offsets[:] = offsets
-        return
-    assert slot.legal_mask is not None
-    slot.legal_mask[...] = unroll.legal_actions.to_mask(
-        expected_shape=(int(unroll.obs.shape[0]), int(unroll.obs.shape[1])),
-        action_space=int(slot.legal_mask.shape[-1]),
-    )
-
-
-def _read_unroll_from_shared_slot(slot: _SharedCollectorSlot, metadata: dict[str, Any]) -> RuntimeUnroll:
-    action_space = metadata.get("action_space")
-    if str(metadata.get("legal_kind", "")) == "packed":
-        assert slot.legal_ids is not None and slot.legal_offsets is not None
-        ids_size = int(metadata["legal_ids_size"])
-        legal_actions = LegalActionBatch.from_packed(
-            np.array(slot.legal_ids[:ids_size], copy=True),
-            np.array(slot.legal_offsets, copy=True),
-            meta=(
-                None
-                if slot.legal_action_meta is None or not bool(metadata.get("has_legal_action_meta", False))
-                else np.array(slot.legal_action_meta[:ids_size], copy=True)
-            ),
-            action_space=None if action_space is None else int(action_space),
-        )
-    else:
-        assert slot.legal_mask is not None
-        legal_actions = LegalActionBatch.from_mask(
-            np.array(slot.legal_mask, copy=True),
-            action_space=None if action_space is None else int(action_space),
-        )
-    return RuntimeUnroll(
-        actor_id=int(metadata["actor_id"]),
-        unroll_seq=int(metadata["unroll_seq"]),
-        behavior_policy_version=int(metadata["behavior_policy_version"]),
-        unroll_hash=str(metadata["unroll_hash"]),
-        obs=np.array(slot.obs, copy=True),
-        actions=np.array(slot.actions, copy=True),
-        rewards=np.array(slot.rewards, copy=True),
-        terminated=np.array(slot.terminated, copy=True),
-        truncated=np.array(slot.truncated, copy=True),
-        to_play_seat=np.array(slot.to_play_seat, copy=True),
-        behavior_logp=np.array(slot.behavior_logp, copy=True),
-        values=np.array(slot.values, copy=True),
-        legal_actions=legal_actions,
-        bootstrap_obs=np.array(slot.bootstrap_obs, copy=True),
-        bootstrap_actor=np.array(slot.bootstrap_actor, copy=True),
-        bootstrap_value=np.array(slot.bootstrap_value, copy=True),
-        initial_hidden_state=np.array(slot.initial_hidden_state, copy=True),
-        final_hidden_state=np.array(slot.final_hidden_state, copy=True),
-        episode_seed=np.array(slot.episode_seed, copy=True),
-        policy_train_mask=np.array(slot.policy_train_mask, copy=True),
-        b1_opponent_mask=np.array(slot.b1_opponent_mask, copy=True),
-        teacher_family=(
-            np.array(slot.teacher_family, copy=True) if bool(metadata.get("has_teacher_labels", False)) else None
-        ),
-        teacher_slot=(
-            np.array(slot.teacher_slot, copy=True) if bool(metadata.get("has_teacher_labels", False)) else None
-        ),
-        teacher_move_source=(
-            np.array(slot.teacher_move_source, copy=True)
-            if bool(metadata.get("has_teacher_move_source_label", False))
-            else None
-        ),
-        teacher_attack_type=(
-            np.array(slot.teacher_attack_type, copy=True) if bool(metadata.get("has_teacher_labels", False)) else None
-        ),
-        teacher_action=(
-            np.array(slot.teacher_action, copy=True) if bool(metadata.get("has_teacher_action_label", False)) else None
-        ),
-        teacher_valid=(
-            np.array(slot.teacher_valid, copy=True) if bool(metadata.get("has_teacher_labels", False)) else None
-        ),
-        behavior_logits=None,
-        counters=(
-            None
-            if not isinstance(metadata.get("counters"), dict)
-            else {str(key): int(value) for key, value in dict(metadata["counters"]).items()}
-        ),
-    )
-
-
-def _collector_process_main(
-    *,
-    stack: StackConfig,
-    config: QueueRuntimeConfig,
-    model_state_dict: dict[str, Any],
-    model_guidance_payload: dict[str, float],
-    observation_dim: int,
-    action_dim: int,
-    observation_spec: dict[str, Any] | None,
-    spec_bundle: dict[str, Any] | None,
-    run_dir: str | None,
-    actor_id: int,
-    actor_device_name: str | None,
-    learner_device_name: str | None,
-    control_queue: Any,
-    free_queue: Any | None,
-    result_queue: Any,
-    shared_slot_configs: list[dict[str, Any]] | None,
-    initial_learner_update: int = 0,
-) -> None:
-    system_config = stack.config.system
-    stack_for_child = stack
-    if system_config is not None:
-        child_system = system_config
-        if actor_device_name is not None:
-            child_system = replace(child_system, actor_device=str(actor_device_name))
-        if learner_device_name is not None:
-            child_system = replace(child_system, learner_device=str(learner_device_name))
-        if child_system is not system_config:
-            stack_for_child = replace(
-                stack,
-                config=replace(
-                    stack.config,
-                    system=child_system,
-                ),
-            )
-            system_config = stack_for_child.config.system
-    if (
-        system_config is not None
-        and str(getattr(system_config, "collection_backend", "auto")).strip().lower() == "process"
-    ):
-        stack_for_child = replace(
-            stack_for_child,
-            config=replace(
-                stack_for_child.config,
-                system=replace(system_config, collection_backend="auto"),
-            ),
-        )
-        system_config = stack_for_child.config.system
-    if system_config is not None:
-        _configure_runtime_actor_torch_threads(int(getattr(system_config, "actor_torch_threads", 1)))
-    model_config = stack_for_child.config.model
-    if model_config is None:
-        raise RuntimeError("stack config is missing model config")
-    model = build_policy_value_model(
-        observation_dim=int(observation_dim),
-        config=model_config,
-        action_dim=int(action_dim),
-        observation_spec=observation_spec,
-        spec_bundle=spec_bundle,
-    ).to(torch.device("cpu"))
-    model.load_state_dict(_deserialize_state_dict_from_ipc(model_state_dict))
-    _restore_model_guidance_from_payload(model, model_guidance_payload)
-    model.eval()
-    local_config = QueueRuntimeConfig(
-        mode="train_async_fast",
-        actor_count=1,
-        envs_per_actor=int(config.envs_per_actor),
-        unroll_length=int(config.unroll_length),
-        batch_unrolls_per_update=1,
-        queue_capacity_unrolls=1,
-        profile=str(config.profile),
-        base_seed=int(config.base_seed),
-        pass_action_id=int(config.pass_action_id),
-        actor_reload_interval_updates=int(config.actor_reload_interval_updates),
-    )
-    shared_slots = (
-        None
-        if shared_slot_configs is None
-        else tuple(_open_shared_collector_slot(shared_slot_config) for shared_slot_config in shared_slot_configs)
-    )
-    runtime = QueueRuntime(
-        stack=stack_for_child,
-        config=local_config,
-        model=model,
-        observation_dim=int(observation_dim),
-        action_dim=int(action_dim),
-        observation_spec=observation_spec,
-        spec_bundle=spec_bundle,
-        run_dir=(None if run_dir is None else Path(run_dir)),
-        performance_log_path=None,
-        defer_initial_opponent_pool_refresh=True,
-        learner_device=(None if learner_device_name is None else learner_device_name),
-        initial_learner_update=int(initial_learner_update),
-    )
-    _process_debug_log(
-        run_dir=(None if run_dir is None else Path(run_dir)),
-        actor_id=int(actor_id),
-        message="collector runtime initialized",
-    )
-    if int(actor_id) != 0:
-        runtime._actors[0].env.close()
-        runtime._actors[0] = runtime._build_actor_state(model=model, actor_id=int(actor_id))
-    actor = runtime._actors[0]
-    runtime.refresh_opponent_pool()
-    _process_debug_log(
-        run_dir=(None if run_dir is None else Path(run_dir)),
-        actor_id=int(actor_id),
-        message=(
-            "collector initial refresh_opponent_pool done "
-            f"opponent_models={sorted(getattr(runtime, '_opponent_models', {}).keys())}"
-        ),
-    )
-    _process_debug_log(
-        run_dir=(None if run_dir is None else Path(run_dir)), actor_id=int(actor_id), message="collector actor ready"
-    )
-    default_fixed_slots = (
-        None
-        if actor.fixed_opponent_policy_id_by_env is None
-        else np.asarray(actor.fixed_opponent_policy_id_by_env, dtype=object).copy()
-    )
-    default_forced_policy_ids = tuple(getattr(runtime, "_forced_fixed_opponent_policy_ids", ()))
-    default_teacher_active = HEURISTIC_PUBLIC_POLICY_ID in runtime._opponent_heuristic_policies
-    default_has_noleague_baseline = _NOLEAGUE_BASELINE_POLICY_ID in runtime._opponent_models
-    try:
-        while True:
-            if _handle_collector_commands(
-                runtime=runtime,
-                actor=actor,
-                control_queue=control_queue,
-                default_fixed_slots=default_fixed_slots,
-                default_forced_policy_ids=default_forced_policy_ids,
-                default_teacher_active=default_teacher_active,
-                default_has_noleague_baseline=default_has_noleague_baseline,
-            ):
-                return
-            _process_debug_log(
-                run_dir=(None if run_dir is None else Path(run_dir)),
-                actor_id=int(actor_id),
-                message="collector collect start",
-            )
-            unroll = runtime._collect_actor_unroll(actor)
-            _process_debug_log(
-                run_dir=(None if run_dir is None else Path(run_dir)),
-                actor_id=int(actor_id),
-                message="collector collect done",
-            )
-            if shared_slots is None or free_queue is None:
-                result_queue.put(unroll)
-                _process_debug_log(
-                    run_dir=(None if run_dir is None else Path(run_dir)),
-                    actor_id=int(actor_id),
-                    message="collector result queued direct",
-                )
-                continue
-            while True:
-                if _handle_collector_commands(
-                    runtime=runtime,
-                    actor=actor,
-                    control_queue=control_queue,
-                    default_fixed_slots=default_fixed_slots,
-                    default_forced_policy_ids=default_forced_policy_ids,
-                    default_teacher_active=default_teacher_active,
-                    default_has_noleague_baseline=default_has_noleague_baseline,
-                ):
-                    return
-                try:
-                    token = free_queue.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-                if token == "stop":
-                    return
-                slot_id = int(token)
-                if slot_id < 0 or slot_id >= len(shared_slots):
-                    raise RuntimeError(f"collector {actor_id} received invalid shared slot token {slot_id}")
-                break
-            _write_unroll_to_shared_slot(shared_slots[slot_id], unroll)
-            result_queue.put(_shared_unroll_metadata(unroll, slot_id=slot_id))
-            _process_debug_log(
-                run_dir=(None if run_dir is None else Path(run_dir)),
-                actor_id=int(actor_id),
-                message=f"collector result queued shared slot={slot_id}",
-            )
-    finally:
-        if shared_slots is not None:
-            for shared_slot in shared_slots:
-                shared_slot.close(unlink=False)
-        runtime.close()
 
 
 class QueueRuntime:
@@ -1494,6 +200,7 @@ class QueueRuntime:
         performance_log_path: Path | None = None,
         defer_initial_opponent_pool_refresh: bool = False,
         learner_device: torch.device | str | None = None,
+        rank_local_actor_devices: bool = False,
         initial_learner_update: int = 0,
     ) -> None:
         if config.actor_count < 1:
@@ -1525,6 +232,7 @@ class QueueRuntime:
             actor_count=int(config.actor_count),
             learner_device=self._learner_device,
             prefer_process_collectors=True,
+            rank_local_cuda_auto=bool(rank_local_actor_devices),
         )
         self._device = _resolve_runtime_actor_device(stack, learner_device=self._learner_device)
         self._run_dir = None if run_dir is None else Path(run_dir)
@@ -1640,9 +348,7 @@ class QueueRuntime:
             else ((self._diverse_opponent_policy_id,) if self._diverse_opponent_policy_id else ())
         )
         self._residual_opponent_policy_specs = (
-            ()
-            if training_config is None
-            else tuple(getattr(training_config, "residual_opponent_policies", ()) or ())
+            () if training_config is None else tuple(getattr(training_config, "residual_opponent_policies", ()) or ())
         )
         self._diverse_opponent_batch_fraction = (
             0.0 if training_config is None else float(getattr(training_config, "diverse_opponent_batch_fraction", 0.0))
@@ -1679,9 +385,7 @@ class QueueRuntime:
             set(self._heuristic_native_rollout_profiles) - {"base", "aggressive", "control"}
         )
         if invalid_native_profiles:
-            raise ValueError(
-                "training.heuristic_native_rollout_profiles must contain only: base, aggressive, control"
-            )
+            raise ValueError("training.heuristic_native_rollout_profiles must contain only: base, aggressive, control")
         self._heuristic_native_rollout_profile_mode = (
             "fixed"
             if training_config is None
@@ -1704,9 +408,9 @@ class QueueRuntime:
         self._teacher_attack_type_index: dict[str, int] = {}
         self._teacher_public_heuristic_label_profile = "base"
         if training_config is not None:
-            self._teacher_public_heuristic_label_profile = str(
-                getattr(training_config, "teacher_public_heuristic_label_profile", "base")
-            ).strip().lower()
+            self._teacher_public_heuristic_label_profile = (
+                str(getattr(training_config, "teacher_public_heuristic_label_profile", "base")).strip().lower()
+            )
         if self._teacher_public_heuristic_label_profile not in {"base", "aggressive", "control"}:
             raise ValueError(
                 "training.structured_aux.teacher_public_heuristic_label_profile must be one of: "
@@ -1771,7 +475,6 @@ class QueueRuntime:
         self._pfsp_last_residual_opponent_envs = 0
         heuristic_public_mix_fraction = 0.0
         heuristic_public_variant_mix_fraction = 0.0
-        diverse_opponent_policy_id = str(getattr(self, "_diverse_opponent_policy_id", "")).strip()
         diverse_opponent_policy_ids = tuple(
             str(policy_id).strip()
             for policy_id in getattr(self, "_diverse_opponent_policy_ids", ())
@@ -2295,7 +998,7 @@ class QueueRuntime:
             "snapshot_apply_latency_ms": apply_latency_ms,
         }
 
-    def refresh_opponent_pool(self) -> None:
+    def refresh_opponent_pool(self, *, allow_registry_write: bool = True) -> None:
         if not self._league_enabled or self._registry_path is None or not self._registry_path.is_file():
             self._opponent_sampler = None
             self._opponent_candidate_ids = ()
@@ -2377,7 +1080,6 @@ class QueueRuntime:
                 )
             )
         )
-        rejected_ids = set(getattr(registry, "rejected_snapshots", ())) if bool(self._league_config.promotion_gate_enabled) else set()
         recent_ids = tuple(
             registry.latest_local_candidate_ids(
                 int(recent_size),
@@ -2386,6 +1088,15 @@ class QueueRuntime:
                 exclude_policy_ids=tuple(dict.fromkeys([*_FIXED_OPPONENT_EXCLUSIONS, *champion_ids])),
             )
         )
+        if recent_ids:
+            active_assigned_ids = set(self._active_assigned_opponent_policy_ids())
+            latest_recent_update = max(int(snapshots_by_id[policy_id].update) for policy_id in recent_ids)
+            recent_ids = tuple(
+                policy_id
+                for policy_id in recent_ids
+                if policy_id not in active_assigned_ids
+                or int(snapshots_by_id[policy_id].update) >= latest_recent_update
+            )
         candidate_ids = tuple(dict.fromkeys([*champion_ids, *recent_ids]))
         filtered_candidate_ids = self._filter_timeout_heavy_opponents(candidate_ids)
         candidate_ids, quarantined_count = self._apply_opponent_pool_diversity_floor(
@@ -2400,9 +1111,7 @@ class QueueRuntime:
         )
         champion_set = set(champion_ids)
         eligible_recent_ids = tuple(
-            policy_id
-            for policy_id in recent_ids
-            if policy_id in candidate_ids and policy_id not in hard_negative_set
+            policy_id for policy_id in recent_ids if policy_id in candidate_ids and policy_id not in hard_negative_set
         )
         non_champion_recent_ids = tuple(policy_id for policy_id in eligible_recent_ids if policy_id not in champion_set)
         if int(recent_size) <= 0:
@@ -2444,7 +1153,7 @@ class QueueRuntime:
         self._opponent_models = models
         self._opponent_model_locks = {policy_id: threading.Lock() for policy_id in models}
         self._maybe_reassign_initial_opponents_after_pool_refresh()
-        if stale_demoted:
+        if stale_demoted and bool(allow_registry_write):
             registry.save(self._registry_path)
         if getattr(self, "_collector_result_queue", None) is not None:
             for control_queue in getattr(self, "_collector_control_queues", ()):
@@ -2472,12 +1181,13 @@ class QueueRuntime:
             return
         for actor in actors:
             current_policy_ids = np.asarray(getattr(actor, "opponent_policy_id_by_env", ()), dtype=object)
-            if current_policy_ids.size == 0:
+            focal_seat_by_env = getattr(actor, "focal_seat_by_env", None)
+            if current_policy_ids.size == 0 or focal_seat_by_env is None:
                 continue
             previous_unique = sorted({str(policy_id) for policy_id in current_policy_ids.tolist()})
             self._assign_episode_roles(
                 actor,
-                np.ones_like(actor.focal_seat_by_env, dtype=np.bool_),
+                np.ones_like(focal_seat_by_env, dtype=np.bool_),
                 initial=True,
             )
             _process_debug_log(
@@ -2556,18 +1266,20 @@ class QueueRuntime:
         return noleague_mix_fraction
 
     def _noleague_baseline_reward_scale(self) -> float:
-        if self._league_config is None:
+        league_config = getattr(self, "_league_config", None)
+        if league_config is None:
             return 1.0
-        sampling_cfg = getattr(self._league_config, "sampling", self._league_config)
+        sampling_cfg = getattr(league_config, "sampling", league_config)
         scale = float(getattr(sampling_cfg, "noleague_baseline_reward_scale", 1.0))
         if not np.isfinite(scale) or scale < 0.0:
             return 1.0
         return scale
 
     def _noleague_baseline_force_focal_seat(self) -> int:
-        if self._league_config is None:
+        league_config = getattr(self, "_league_config", None)
+        if league_config is None:
             return -1
-        sampling_cfg = getattr(self._league_config, "sampling", self._league_config)
+        sampling_cfg = getattr(league_config, "sampling", league_config)
         seat = int(getattr(sampling_cfg, "noleague_baseline_force_focal_seat", -1))
         return seat if seat in (0, 1) else -1
 
@@ -2756,7 +1468,9 @@ class QueueRuntime:
         if not bool(getattr(sampling_cfg, "exclude_seed_snapshots_from_pfsp", False)):
             return False
         warmup_cfg = getattr(self._league_config, "warmup", None)
-        warmup_updates = int(getattr(warmup_cfg, "first_updates", getattr(self._league_config, "warmup_first_updates", 0)))
+        warmup_updates = int(
+            getattr(warmup_cfg, "first_updates", getattr(self._league_config, "warmup_first_updates", 0))
+        )
         reference_update = self._league_reference_update() if current_update is None else int(current_update)
         if reference_update < warmup_updates:
             return False
@@ -3019,8 +1733,7 @@ class QueueRuntime:
             sum(
                 1
                 for item in self._pending_unrolls
-                if isinstance(item, _SharedPendingUnroll)
-                and (actor_id is None or int(item.actor_id) == int(actor_id))
+                if isinstance(item, _SharedPendingUnroll) and (actor_id is None or int(item.actor_id) == int(actor_id))
             )
         )
 
@@ -3298,7 +2011,9 @@ class QueueRuntime:
             raise RuntimeError("QueueRuntime cannot load opponent snapshots without a canonical run_dir")
         return self._load_snapshot_model_from_path(self._run_dir / snapshot_path, display_path=snapshot_path)
 
-    def _load_snapshot_model_from_path(self, snapshot_path: Path, *, display_path: str | None = None) -> PolicyValueModel:
+    def _load_snapshot_model_from_path(
+        self, snapshot_path: Path, *, display_path: str | None = None
+    ) -> PolicyValueModel:
         payload = torch.load(snapshot_path, map_location="cpu", weights_only=True)
         model_state_dict = payload.get("model_state_dict")
         if not isinstance(model_state_dict, dict):
@@ -3433,18 +2148,18 @@ class QueueRuntime:
                 )
                 self._pfsp_last_sampled_envs = remaining_count
                 self._pfsp_last_mirror_envs = 0
-                self._pfsp_last_heuristic_public_envs = (
-                    sum(1 for policy_id in sampled_policy_ids if policy_id == HEURISTIC_PUBLIC_POLICY_ID)
+                self._pfsp_last_heuristic_public_envs = sum(
+                    1 for policy_id in sampled_policy_ids if policy_id == HEURISTIC_PUBLIC_POLICY_ID
                 )
-                self._pfsp_last_heuristic_public_variant_envs = (
-                    sum(1 for policy_id in sampled_policy_ids if policy_id in _HEURISTIC_PUBLIC_VARIANT_POLICY_IDS)
+                self._pfsp_last_heuristic_public_variant_envs = sum(
+                    1 for policy_id in sampled_policy_ids if policy_id in _HEURISTIC_PUBLIC_VARIANT_POLICY_IDS
                 )
-                self._pfsp_last_noleague_baseline_envs = (
-                    sum(1 for policy_id in sampled_policy_ids if policy_id == _NOLEAGUE_BASELINE_POLICY_ID)
+                self._pfsp_last_noleague_baseline_envs = sum(
+                    1 for policy_id in sampled_policy_ids if policy_id == _NOLEAGUE_BASELINE_POLICY_ID
                 )
                 residual_policy_ids = set(self._configured_residual_opponent_policy_ids())
-                self._pfsp_last_residual_opponent_envs = (
-                    sum(1 for policy_id in sampled_policy_ids if policy_id in residual_policy_ids)
+                self._pfsp_last_residual_opponent_envs = sum(
+                    1 for policy_id in sampled_policy_ids if policy_id in residual_policy_ids
                 )
                 self._pfsp_last_champion_envs = 0
                 self._pfsp_last_recent_envs = 0
@@ -3574,8 +2289,8 @@ class QueueRuntime:
         self._pfsp_last_noleague_baseline_envs = noleague_baseline_count
         self._pfsp_last_hard_negative_envs = hard_negative_count
         residual_policy_ids = set(self._configured_residual_opponent_policy_ids())
-        self._pfsp_last_residual_opponent_envs = (
-            sum(1 for policy_id in sampled_policy_ids_list if policy_id in residual_policy_ids)
+        self._pfsp_last_residual_opponent_envs = sum(
+            1 for policy_id in sampled_policy_ids_list if policy_id in residual_policy_ids
         )
         self._pfsp_last_champion_envs = champion_count
         self._pfsp_last_recent_envs = recent_count
@@ -3710,13 +2425,15 @@ class QueueRuntime:
         return tuple(str(policy_id) for policy_id in sampled_policy_ids)
 
     def _pfsp_sampling_ready(self) -> bool:
+        league_config = getattr(self, "_league_config", None)
         if (
             not bool(getattr(self, "_league_enabled", False))
-            or self._league_config is None
+            or league_config is None
             or getattr(self, "_opponent_sampler", None) is None
         ):
             return False
-        if self._league_reference_update() < int(self._league_config.warmup.first_updates):
+        warmup_cfg = getattr(league_config, "warmup", None)
+        if self._league_reference_update() < int(getattr(warmup_cfg, "first_updates", 0)):
             return False
         if self._league_eval_warmup_gate_blocks_pfsp():
             return False
@@ -4456,7 +3173,9 @@ class QueueRuntime:
         logp_out: np.ndarray | None,
         rng: np.random.Generator,
         sample_actions: bool = True,
+        source_label: str = "policy_rows",
     ) -> None:
+        del source_label
         with (
             torch.inference_mode(),
             torch.amp.autocast(
@@ -5338,7 +4057,6 @@ class QueueRuntime:
                 actions_outs=actions_outs,
                 logp_outs=logp_outs,
             )
-        return model_rows_by_actor, heuristic_rows_by_actor
         if any_model_rows:
             self._central_sample_policy_rows_ids_model(
                 actors=actors,
@@ -5350,6 +4068,7 @@ class QueueRuntime:
                 actions_outs=actions_outs,
                 logp_outs=logp_outs,
             )
+        return model_rows_by_actor, heuristic_rows_by_actor
 
     def _central_value_actor_rows(
         self,
@@ -6087,9 +4806,7 @@ class QueueRuntime:
                     np.count_nonzero(state["b1_opponent_mask"][step_index])
                 )
                 state["counters"]["b1_opponent_train_rows"] += int(
-                    np.count_nonzero(
-                        state["b1_opponent_mask"][step_index] & state["policy_train_mask"][step_index]
-                    )
+                    np.count_nonzero(state["b1_opponent_mask"][step_index] & state["policy_train_mask"][step_index])
                 )
                 if actor.layout_name == "i16_legal_ids":
                     legal_ids, legal_offsets = _require_ids_offsets(batch)
@@ -6354,6 +5071,7 @@ class QueueRuntime:
                     b1_opponent_mask=state["b1_opponent_mask"],
                     teacher_family=state["teacher_family"],
                     teacher_slot=state["teacher_slot"],
+                    teacher_move_source=state["teacher_move_source"],
                     teacher_attack_type=state["teacher_attack_type"],
                     teacher_action=state["teacher_action"],
                     teacher_valid=state["teacher_valid"],
@@ -6390,7 +5108,7 @@ class QueueRuntime:
         trajectory = weiss_sim.BatchOutTrajectoryI16LegalIds(T, N)
         rollout_started = time.perf_counter()
         native_profile = self._active_heuristic_native_rollout_profile(actor)
-        rollout_into(T, trajectory, native_profile)
+        _call_heuristic_native_rollout(rollout_into, T, trajectory, native_profile)
         rollout_elapsed = time.perf_counter() - rollout_started
         counters[f"native_rollout_profile_{native_profile}_unrolls"] += 1
         actor.env._record_python_timing(
@@ -7358,7 +6076,7 @@ class QueueRuntime:
     ) -> np.ndarray:
         if penalty <= 0.0:
             return rewards
-        pass_action_id = int(getattr(getattr(self, "config", None), "pass_action_id"))
+        pass_action_id = int(self.config.pass_action_id)
         chosen_pass = np.asarray(actions, dtype=np.int64) == pass_action_id
         train_rows = np.asarray(policy_train_mask, dtype=np.bool_)
         if legal_actions.mask is not None:
@@ -7891,98 +6609,28 @@ def _actor_seed(base_seed: int, actor_id: int) -> int:
 
 
 def _concat_time_major_field(unrolls: Sequence[PendingUnroll], field_name: str) -> np.ndarray:
-    return _concat_time_major_fields(unrolls, (field_name,))[field_name]
+    return _batching_concat_time_major_field(unrolls, field_name)
 
 
 def _concat_time_major_fields(
     unrolls: Sequence[PendingUnroll],
     field_names: Sequence[str],
 ) -> dict[str, np.ndarray]:
-    if not unrolls:
-        raise ValueError("unrolls must be non-empty")
-    if not field_names:
-        return {}
-    templates = {field_name: np.asarray(getattr(unrolls[0], field_name)) for field_name in field_names}
-    total_batch = sum(int(np.asarray(getattr(unroll, field_names[0])).shape[1]) for unroll in unrolls)
-    results = {
-        field_name: np.empty((template.shape[0], total_batch, *template.shape[2:]), dtype=template.dtype)
-        for field_name, template in templates.items()
-    }
-    offset = 0
-    for unroll in unrolls:
-        first_value = np.asarray(getattr(unroll, field_names[0]))
-        width = int(first_value.shape[1])
-        for field_name, result in results.items():
-            value = np.asarray(getattr(unroll, field_name), dtype=result.dtype)
-            result[:, offset : offset + width, ...] = value
-        offset += width
-    return results
+    return _batching_concat_time_major_fields(unrolls, field_names)
 
 
 def _concat_optional_time_major_fields(
     unrolls: Sequence[PendingUnroll],
     fill_values: Mapping[str, Any],
 ) -> dict[str, np.ndarray | None]:
-    if not fill_values:
-        return {}
-    if not unrolls:
-        raise ValueError("unrolls must be non-empty")
-    total_batch = sum(int(np.asarray(unroll.obs).shape[1]) for unroll in unrolls)
-    templates: dict[str, np.ndarray] = {}
-    for field_name in fill_values:
-        for unroll in unrolls:
-            raw_value = getattr(unroll, field_name)
-            if raw_value is not None:
-                templates[field_name] = np.asarray(raw_value)
-                break
-    results: dict[str, np.ndarray | None] = {}
-    for field_name, fill_value in fill_values.items():
-        template = templates.get(field_name)
-        if template is None:
-            results[field_name] = None
-        else:
-            results[field_name] = np.empty((template.shape[0], total_batch, *template.shape[2:]), dtype=template.dtype)
-    offset = 0
-    for unroll in unrolls:
-        obs = np.asarray(unroll.obs)
-        width = int(obs.shape[1])
-        for field_name, fill_value in fill_values.items():
-            result = results[field_name]
-            if result is None:
-                continue
-            raw_value = getattr(unroll, field_name)
-            if raw_value is None:
-                value = np.full((obs.shape[0], width, *result.shape[2:]), fill_value, dtype=result.dtype)
-            else:
-                value = np.asarray(raw_value, dtype=result.dtype)
-            result[:, offset : offset + width, ...] = value
-        offset += width
-    return results
+    return _batching_concat_optional_time_major_fields(unrolls, fill_values)
 
 
 def _concat_batch_major_fields(
     unrolls: Sequence[PendingUnroll],
     field_names: Sequence[str],
 ) -> dict[str, np.ndarray]:
-    if not unrolls:
-        raise ValueError("unrolls must be non-empty")
-    if not field_names:
-        return {}
-    templates = {field_name: np.asarray(getattr(unrolls[0], field_name)) for field_name in field_names}
-    total_batch = sum(int(np.asarray(getattr(unroll, field_names[0])).shape[0]) for unroll in unrolls)
-    results = {
-        field_name: np.empty((total_batch, *template.shape[1:]), dtype=template.dtype)
-        for field_name, template in templates.items()
-    }
-    offset = 0
-    for unroll in unrolls:
-        first_value = np.asarray(getattr(unroll, field_names[0]))
-        width = int(first_value.shape[0])
-        for field_name, result in results.items():
-            value = np.asarray(getattr(unroll, field_name), dtype=result.dtype)
-            result[offset : offset + width, ...] = value
-        offset += width
-    return results
+    return _batching_concat_batch_major_fields(unrolls, field_names)
 
 
 def _concat_optional_time_major_field(
@@ -7991,154 +6639,31 @@ def _concat_optional_time_major_field(
     *,
     missing_fill_value: Any,
 ) -> np.ndarray | None:
-    return _concat_optional_time_major_fields(unrolls, {field_name: missing_fill_value})[field_name]
+    return _batching_concat_optional_time_major_field(
+        unrolls,
+        field_name,
+        missing_fill_value=missing_fill_value,
+    )
 
 
 def _concat_batch_major_field(unrolls: Sequence[PendingUnroll], field_name: str) -> np.ndarray:
-    return _concat_batch_major_fields(unrolls, (field_name,))[field_name]
+    return _batching_concat_batch_major_field(unrolls, field_name)
 
 
 def _concatenate_legal_actions(unrolls: Sequence[PendingUnroll], *, action_space: int) -> LegalActionBatch:
-    packed_offsets: list[np.ndarray] = [np.array([0], dtype=np.uint32)]
-    mask_parts: list[np.ndarray] = []
-    saw_packed = False
-    saw_mask = False
-
-    for unroll in unrolls:
-        legal_actions = unroll.legal_actions
-        if legal_actions.ids is not None and legal_actions.offsets is not None:
-            saw_packed = True
-            offset_base = int(packed_offsets[-1][-1])
-            packed_offsets.append(np.asarray(legal_actions.offsets[1:] + offset_base, dtype=np.uint32))
-            continue
-
-        saw_mask = True
-        mask_parts.append(
-            legal_actions.to_mask(
-                expected_shape=(int(unroll.obs.shape[0]), int(unroll.obs.shape[1])),
-                action_space=int(action_space),
-            )
-        )
-
-    if saw_packed and not saw_mask:
-        total_time_steps = int(unrolls[0].obs.shape[0])
-        for unroll in unrolls[1:]:
-            if int(unroll.obs.shape[0]) != total_time_steps:
-                raise RuntimeError("packed legal-action concatenation requires aligned unroll lengths")
-        if not all(
-            unroll.legal_actions.row_count == int(unroll.obs.shape[0] * unroll.obs.shape[1]) for unroll in unrolls
-        ):
-            packed_ids: list[np.ndarray] = []
-            packed_meta: list[np.ndarray] = []
-            packed_offsets = [np.array([0], dtype=np.uint32)]
-            any_meta = any(unroll.legal_actions.meta is not None for unroll in unrolls)
-            for unroll in unrolls:
-                legal_actions = unroll.legal_actions
-                assert legal_actions.ids is not None and legal_actions.offsets is not None
-                row_limit = int(unroll.obs.shape[0] * unroll.obs.shape[1])
-                offsets = np.asarray(legal_actions.offsets, dtype=np.uint32)
-                ids_limit = int(offsets[min(row_limit, max(offsets.size - 1, 0))])
-                ids = np.asarray(legal_actions.ids[:ids_limit], dtype=np.uint32)
-                offset_base = int(packed_offsets[-1][-1])
-                packed_ids.append(ids)
-                packed_offsets.append(np.asarray(offsets[1 : row_limit + 1] + offset_base, dtype=np.uint32))
-                if any_meta and legal_actions.meta is not None:
-                    packed_meta.append(np.asarray(legal_actions.meta[:ids_limit], dtype=np.uint16))
-            return LegalActionBatch.from_packed(
-                np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
-                np.concatenate(packed_offsets, axis=0),
-                meta=(
-                    np.concatenate(packed_meta, axis=0)
-                    if packed_meta
-                    else (np.zeros((0, _infer_packed_meta_width(unrolls)), dtype=np.uint16) if any_meta else None)
-                ),
-                action_space=int(action_space),
-            )
-
-        total_ids = sum(int(np.asarray(unroll.legal_actions.ids, dtype=np.uint32).size) for unroll in unrolls)
-        total_rows = sum(int(unroll.obs.shape[0] * unroll.obs.shape[1]) for unroll in unrolls)
-        total_batch = sum(int(unroll.obs.shape[1]) for unroll in unrolls)
-        ordered_packed_ids = np.empty((total_ids,), dtype=np.uint32)
-        any_meta = any(unroll.legal_actions.meta is not None for unroll in unrolls)
-        ordered_packed_meta = (
-            np.empty((total_ids, _infer_packed_meta_width(unrolls)), dtype=np.uint16)
-            if any_meta and total_ids > 0
-            else None
-        )
-        ordered_packed_offsets = np.empty((total_rows + 1,), dtype=np.uint32)
-        ordered_packed_offsets[0] = 0
-        ordered_widths = np.empty((total_time_steps, total_batch), dtype=np.uint32)
-        batch_offset = 0
-        for unroll in unrolls:
-            legal_actions = unroll.legal_actions
-            assert legal_actions.offsets is not None
-            env_count = int(unroll.obs.shape[1])
-            widths = np.diff(np.asarray(legal_actions.offsets, dtype=np.uint32)).reshape(total_time_steps, env_count)
-            ordered_widths[:, batch_offset : batch_offset + env_count] = widths
-            batch_offset += env_count
-        ordered_packed_offsets[1:] = np.cumsum(ordered_widths.reshape(-1), dtype=np.uint64).astype(
-            np.uint32, copy=False
-        )
-        ids_offset = 0
-        for time_index in range(total_time_steps):
-            for unroll in unrolls:
-                legal_actions = unroll.legal_actions
-                assert legal_actions.ids is not None and legal_actions.offsets is not None
-                env_count = int(unroll.obs.shape[1])
-                row_base = int(time_index * env_count)
-                offsets = np.asarray(legal_actions.offsets, dtype=np.uint32)
-                ids = np.asarray(legal_actions.ids, dtype=np.uint32)
-                meta = None if legal_actions.meta is None else np.asarray(legal_actions.meta, dtype=np.uint16)
-                start = int(offsets[row_base])
-                end = int(offsets[row_base + env_count])
-                width = end - start
-                if width > 0:
-                    ordered_packed_ids[ids_offset : ids_offset + width] = ids[start:end]
-                    if ordered_packed_meta is not None:
-                        if meta is None:
-                            ordered_packed_meta[ids_offset : ids_offset + width] = np.iinfo(np.uint16).max
-                        else:
-                            ordered_packed_meta[ids_offset : ids_offset + width] = meta[start:end]
-                ids_offset += width
-
-        return LegalActionBatch.from_packed(
-            ordered_packed_ids[:ids_offset],
-            ordered_packed_offsets,
-            meta=None if ordered_packed_meta is None else ordered_packed_meta[:ids_offset],
-            action_space=int(action_space),
-        )
-
-    if saw_packed:
-        mask_parts = [
-            unroll.legal_actions.to_mask(
-                expected_shape=(int(unroll.obs.shape[0]), int(unroll.obs.shape[1])),
-                action_space=int(action_space),
-            )
-            for unroll in unrolls
-        ]
-
-    if not mask_parts:
-        raise RuntimeError("runtime learner batch requires at least one legal-action payload")
-    return LegalActionBatch.from_mask(np.concatenate(mask_parts, axis=1), action_space=int(action_space))
+    return _batching_concatenate_legal_actions(unrolls, action_space=action_space)
 
 
 def _require_ids_offsets(batch: DecisionBoundaryBatch) -> tuple[np.ndarray, np.ndarray]:
-    if batch.ids_offsets is None:
-        raise RuntimeError("QueueRuntime requires ids_offsets legality batches")
-    legal_ids, legal_offsets = batch.ids_offsets
-    return np.asarray(legal_ids, dtype=np.uint32), np.asarray(legal_offsets, dtype=np.uint32)
+    return _batching_require_ids_offsets(batch)
 
 
 def _optional_legal_action_meta(batch: DecisionBoundaryBatch) -> np.ndarray | None:
-    if batch.legal_action_meta is None:
-        return None
-    return np.asarray(batch.legal_action_meta, dtype=np.uint16)
+    return _batching_optional_legal_action_meta(batch)
 
 
 def _require_mask(batch: DecisionBoundaryBatch) -> np.ndarray:
-    if batch.mask is None:
-        raise RuntimeError("QueueRuntime expected dense mask legality for this actor batch")
-    return np.asarray(batch.mask, dtype=np.bool_)
+    return _batching_require_mask(batch)
 
 
 def _concatenate_batch_legal_actions(
@@ -8146,33 +6671,7 @@ def _concatenate_batch_legal_actions(
     *,
     action_space: int,
 ) -> LegalActionBatch | None:
-    if not batches:
-        return None
-    if all(batch.mask is not None for batch in batches):
-        masks = [np.asarray(batch.mask, dtype=np.bool_) for batch in batches]
-        return LegalActionBatch.from_mask(
-            np.expand_dims(np.concatenate(masks, axis=0), axis=0),
-            action_space=int(action_space),
-        )
-    if all(batch.ids_offsets is not None for batch in batches):
-        packed_ids: list[np.ndarray] = []
-        packed_meta: list[np.ndarray] = []
-        packed_offsets = [np.array([0], dtype=np.uint32)]
-        for batch in batches:
-            legal_ids, legal_offsets = _require_ids_offsets(batch)
-            offset_base = int(packed_offsets[-1][-1])
-            packed_ids.append(np.asarray(legal_ids, dtype=np.uint32))
-            legal_action_meta = _optional_legal_action_meta(batch)
-            if legal_action_meta is not None:
-                packed_meta.append(np.asarray(legal_action_meta, dtype=np.uint16))
-            packed_offsets.append(np.asarray(legal_offsets[1:] + offset_base, dtype=np.uint32))
-        return LegalActionBatch.from_packed(
-            np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
-            np.concatenate(packed_offsets, axis=0),
-            meta=(np.concatenate(packed_meta, axis=0) if packed_meta else None),
-            action_space=int(action_space),
-        )
-    return None
+    return _batching_concatenate_batch_legal_actions(batches, action_space=action_space)
 
 
 def _slice_packed_rows(
@@ -8180,18 +6679,7 @@ def _slice_packed_rows(
     legal_offsets: np.ndarray,
     row_indices: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    selected_ids: list[np.ndarray] = []
-    offsets = [0]
-    for row_index in row_indices.tolist():
-        start = int(legal_offsets[int(row_index)])
-        stop = int(legal_offsets[int(row_index) + 1])
-        row_ids = np.asarray(legal_ids[start:stop], dtype=np.uint32)
-        selected_ids.append(row_ids)
-        offsets.append(offsets[-1] + int(row_ids.size))
-    return (
-        np.concatenate(selected_ids, axis=0) if selected_ids else np.zeros((0,), dtype=np.uint32),
-        np.asarray(offsets, dtype=np.uint32),
-    )
+    return _batching_slice_packed_rows(legal_ids, legal_offsets, row_indices)
 
 
 def _slice_packed_rows_with_meta(
@@ -8201,25 +6689,16 @@ def _slice_packed_rows_with_meta(
     *,
     legal_action_meta: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    subset_ids, subset_offsets = _slice_packed_rows(legal_ids, legal_offsets, row_indices)
-    subset_meta = None
-    if legal_action_meta is not None:
-        selected_meta: list[np.ndarray] = []
-        for row_index in row_indices.tolist():
-            start = int(legal_offsets[int(row_index)])
-            stop = int(legal_offsets[int(row_index) + 1])
-            selected_meta.append(np.asarray(legal_action_meta[start:stop], dtype=np.uint16))
-        subset_meta = (
-            np.concatenate(selected_meta, axis=0)
-            if selected_meta
-            else np.zeros((0, legal_action_meta.shape[1]), dtype=np.uint16)
-        )
-    return subset_ids, subset_offsets, subset_meta
+    return _batching_slice_packed_rows_with_meta(
+        legal_ids,
+        legal_offsets,
+        row_indices,
+        legal_action_meta=legal_action_meta,
+    )
 
 
 def _structured_legal_batch_from_mask(legal_mask: np.ndarray, row_indices: np.ndarray) -> LegalActionBatch:
-    row_mask = np.asarray(legal_mask[row_indices], dtype=np.bool_)
-    return LegalActionBatch.from_mask(np.expand_dims(row_mask, axis=0))
+    return _batching_structured_legal_batch_from_mask(legal_mask, row_indices)
 
 
 def _structured_legal_batch_from_packed(
@@ -8228,20 +6707,16 @@ def _structured_legal_batch_from_packed(
     row_indices: np.ndarray,
     legal_action_meta: np.ndarray | None = None,
 ) -> LegalActionBatch:
-    subset_ids, subset_offsets, subset_meta = _slice_packed_rows_with_meta(
+    return _batching_structured_legal_batch_from_packed(
         legal_ids,
         legal_offsets,
         row_indices,
         legal_action_meta=legal_action_meta,
     )
-    return LegalActionBatch.from_packed(subset_ids, subset_offsets, meta=subset_meta)
 
 
 def _infer_packed_meta_width(unrolls: Sequence[RuntimeUnroll]) -> int:
-    for unroll in unrolls:
-        if unroll.legal_actions.meta is not None:
-            return int(np.asarray(unroll.legal_actions.meta).shape[1])
-    return _DEFAULT_ACTION_META_WIDTH
+    return _batching_infer_packed_meta_width(unrolls)
 
 
 def _hash_unroll(*, actions: np.ndarray, rewards: np.ndarray, episode_seed: np.ndarray) -> str:
@@ -8272,16 +6747,10 @@ def _gae_advantages(
     discounts: np.ndarray,
     gae_lambda: float,
 ) -> np.ndarray:
-    rewards_array = np.asarray(rewards, dtype=np.float32)
-    values_array = np.asarray(values, dtype=np.float32)
-    discounts_array = np.asarray(discounts, dtype=np.float32)
-    bootstrap_array = np.asarray(bootstrap_value, dtype=np.float32)
-    advantages = np.zeros_like(rewards_array, dtype=np.float32)
-    gae = np.zeros((rewards_array.shape[1],), dtype=np.float32)
-    next_values = bootstrap_array
-    for timestep in range(rewards_array.shape[0] - 1, -1, -1):
-        delta = rewards_array[timestep] + (discounts_array[timestep] * next_values) - values_array[timestep]
-        gae = delta + (discounts_array[timestep] * float(gae_lambda) * gae)
-        advantages[timestep] = gae
-        next_values = values_array[timestep]
-    return advantages
+    return _batching_gae_advantages(
+        rewards=rewards,
+        values=values,
+        bootstrap_value=bootstrap_value,
+        discounts=discounts,
+        gae_lambda=gae_lambda,
+    )

@@ -14,18 +14,17 @@ import json
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
-
+from typing import Any
 
 DEFAULT_STACK_CONFIG = "configs/residual_eval_s1.yaml"
 DEFAULT_RUN_DIR = "runs/b1_s1_distillonly_u450_to_u455_20260427"
 DEFAULT_B1_BASELINE_RUN_DIR = "runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425"
 DEFAULT_B1_CHECKPOINT = (
-    "runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/"
-    "training/checkpoints/checkpoint_450.pt"
+    "runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt"
 )
 DEFAULT_LABEL_DIRS = [
     "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427",
@@ -146,7 +145,9 @@ def _summarize_labels(label_dirs: Sequence[Path]) -> dict[str, Any]:
     score_deltas: list[float] = []
     for row in rows:
         candidate = row.get("candidate_action")
-        family = str(candidate.get("family") or row.get("positive_family") or "") if isinstance(candidate, Mapping) else ""
+        family = (
+            str(candidate.get("family") or row.get("positive_family") or "") if isinstance(candidate, Mapping) else ""
+        )
         family_counts[family or "unknown"] += 1
         if row.get("episode_seed") is not None:
             seeds.add(int(row["episode_seed"]))
@@ -218,7 +219,9 @@ def main() -> None:
     targets_per_pair = min(int(args.targets_per_pair), 3) if args.quick else int(args.targets_per_pair)
     actions_per_state = min(int(args.actions_per_state), 4) if args.quick else int(args.actions_per_state)
     max_forced_replays = min(int(args.max_forced_replays), 160) if args.quick else int(args.max_forced_replays)
-    stop_after = min(int(args.stop_after_positives_per_cluster), 1) if args.quick else int(args.stop_after_positives_per_cluster)
+    stop_after = (
+        min(int(args.stop_after_positives_per_cluster), 1) if args.quick else int(args.stop_after_positives_per_cluster)
+    )
 
     for cluster_index, cluster in enumerate(clusters):
         artifact = f"b1_cf_labels_s1_big_{args.tag}_{cluster.name}"
@@ -310,4 +313,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

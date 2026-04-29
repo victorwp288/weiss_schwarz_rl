@@ -11,6 +11,10 @@ SEED="${SEED:-20260421}"
 NUM_ENVS="${NUM_ENVS:-2048}"
 UNROLL_LENGTH="${UNROLL_LENGTH:-64}"
 RUNTIME_MODE="${RUNTIME_MODE:-train_async_fast}"
+TORCHRUN_NPROC="${TORCHRUN_NPROC:-0}"
+HARDWARE_PROFILE="${HARDWARE_PROFILE:-local}"
+DDP_BACKEND="${DDP_BACKEND:-nccl}"
+DDP_TIMEOUT_SECONDS="${DDP_TIMEOUT_SECONDS:-1800}"
 SWEEP_UPDATES="${SWEEP_UPDATES:-10}"
 SEED_SLUG="${SEED//[^[:alnum:]_-]/_}"
 SEED_TAG="seed${SEED_SLUG}"
@@ -72,6 +76,10 @@ Environment overrides:
   NUM_ENVS=2048
   UNROLL_LENGTH=64
   RUNTIME_MODE=train_async_fast
+  TORCHRUN_NPROC=0     Set to the visible GPU count on the server, e.g. 4.
+  HARDWARE_PROFILE=local
+  DDP_BACKEND=nccl
+  DDP_TIMEOUT_SECONDS=1800
   SWEEP_UPDATES=10
   B1_BENCHMARK_MINUTES=10
   B1_BENCHMARK_MAX_UPDATES=1000000
@@ -135,6 +143,41 @@ elif [[ -x ".venv/Scripts/python.exe" ]]; then
 else
   echo "Could not find uv, .venv/bin/python, or .venv/Scripts/python.exe" >&2
   exit 1
+fi
+
+TRAIN_ENTRYPOINT=("${PYTHON_RUN[@]}" python/scripts/train.py)
+QUEUE_TRAIN_DDP_ARGS=()
+QUEUE_PROFILE_DDP_ARGS=()
+QUEUE_WRAPPER_DDP_ARGS=()
+if [[ "$TORCHRUN_NPROC" != "0" ]]; then
+  TRAIN_ENTRYPOINT=(
+    "${PYTHON_RUN[@]}"
+    -m torch.distributed.run
+    --standalone
+    --nproc_per_node="$TORCHRUN_NPROC"
+    python/scripts/train.py
+  )
+  QUEUE_TRAIN_DDP_ARGS=(
+    --autoscale
+    --hardware-profile "$HARDWARE_PROFILE"
+    --ddp
+    --ddp-backend "$DDP_BACKEND"
+    --ddp-timeout-seconds "$DDP_TIMEOUT_SECONDS"
+  )
+  QUEUE_PROFILE_DDP_ARGS=(
+    --autoscale
+    --hardware-profile "$HARDWARE_PROFILE"
+    --torchrun-nproc "$TORCHRUN_NPROC"
+    --ddp-backend "$DDP_BACKEND"
+    --ddp-timeout-seconds "$DDP_TIMEOUT_SECONDS"
+  )
+  QUEUE_WRAPPER_DDP_ARGS=(
+    --torchrun-nproc "$TORCHRUN_NPROC"
+    --autoscale
+    --hardware-profile "$HARDWARE_PROFILE"
+    --ddp-backend "$DDP_BACKEND"
+    --ddp-timeout-seconds "$DDP_TIMEOUT_SECONDS"
+  )
 fi
 
 log_step() {
@@ -213,8 +256,7 @@ train_job() {
   assert_run_dir_absent "$run_label"
   run_cmd \
     "Train $run_label" \
-    "${PYTHON_RUN[@]}" \
-    python/scripts/train.py \
+    "${TRAIN_ENTRYPOINT[@]}" \
     --stack-config "$stack_config" \
     --run-label "$run_label" \
     --num-envs "$NUM_ENVS" \
@@ -222,6 +264,7 @@ train_job() {
     --runtime-mode "$RUNTIME_MODE" \
     --max-updates "$max_updates" \
     --seed "$SEED" \
+    "${QUEUE_TRAIN_DDP_ARGS[@]}" \
     "$@"
 }
 
@@ -246,6 +289,7 @@ profiled_train_job() {
     --runtime-mode "$RUNTIME_MODE" \
     --max-updates "$max_updates" \
     --max-wall-clock-minutes "$max_wall_clock_minutes" \
+    "${QUEUE_PROFILE_DDP_ARGS[@]}" \
     "$@"
 }
 
@@ -268,6 +312,7 @@ thesis_job() {
     --runtime-mode "$RUNTIME_MODE" \
     --max-updates "$max_updates" \
     --seed "$SEED" \
+    "${QUEUE_WRAPPER_DDP_ARGS[@]}" \
     --skip-compare \
     "$@"
 }

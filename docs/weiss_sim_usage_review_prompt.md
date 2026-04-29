@@ -18,9 +18,9 @@ The codebase is `weiss_schwarz_rl`.
 
 The simulator dependency is pinned in this repo to:
 
-- `weiss-sim==0.8.1` in `pyproject.toml`
+- `weiss-sim==0.8.2` in `pyproject.toml`
 
-The repo explicitly presents `weiss-sim 0.8.1` as the canonical validation/runtime source for simulator-backed runs.
+The repo explicitly presents `weiss-sim 0.8.2` as the canonical validation/runtime source for simulator-backed runs.
 
 ## Important framing
 
@@ -57,9 +57,9 @@ But it is also tightly coupled to specific low-level simulator APIs:
 
 So the main question is not "does it use `weiss-sim` at all?" It clearly does. The main question is whether this coupling is the right amount of coupling, and whether the boundaries are placed in the right modules.
 
-## Upstream `weiss-sim 0.8.1` surfaces this repo depends on
+## Upstream `weiss-sim 0.8.2` surfaces this repo depends on
 
-I inspected the pinned package wheel for `weiss-sim 0.8.1`.
+I inspected the pinned package wheel for `weiss-sim 0.8.2`.
 
 The repo depends on these public or quasi-public surfaces:
 
@@ -130,7 +130,7 @@ Files:
 
 What happens:
 
-- The repo pins `weiss-sim==0.8.1`.
+- The repo pins `weiss-sim==0.8.2`.
 - Docs present simulator-backed runs as the canonical thesis path.
 - Docs distinguish between scaffold/demo modes and real simulator-backed modes.
 - Operator guidance assumes the simulator is either installed in the current env or discoverable through `WEISS_SIM_PYTHONPATH` and optionally `WEISS_SIM_PYTHON`.

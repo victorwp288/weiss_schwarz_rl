@@ -43,6 +43,13 @@ from weiss_rl.eval.paper_readiness import (
     build_paper_readiness_summary,
     write_paper_readiness_json,
 )
+from weiss_rl.eval.parallel import (
+    policy_ids_for_matchup_shard,
+    resolved_parallel_worker_devices,
+    run_final_eval_matchup_worker,
+    run_parallel_final_eval,
+    shard_matchup_specs,
+)
 from weiss_rl.eval.payoff_folding import (
     PayoffFoldScheme,
     fold_game_payoff,
@@ -57,6 +64,12 @@ from weiss_rl.eval.policy_set import (
     select_final_policy_set_deterministic_v1,
 )
 from weiss_rl.eval.rng_pcg32 import NEXT_U64_ORDER, PCG32_XSH_RR_V1, Pcg32XshRrV1
+from weiss_rl.eval.run_policy_selection import resolve_policy_ids_for_run
+from weiss_rl.eval.run_reports import (
+    effective_manifest_git_commit,
+    persist_policy_selection_in_manifest,
+    update_run_level_reports,
+)
 from weiss_rl.eval.stage2 import Stage2Decision, Stage2StopReason, summarize_stage2_records
 from weiss_rl.eval.uncertainty import (
     EvalUncertaintySummary,
@@ -91,6 +104,7 @@ __all__ = [
     "build_paper_readiness_summary",
     "build_seat_advantage_diagnostics",
     "build_seat_swapped_schedule",
+    "effective_manifest_git_commit",
     "fold_game_payoff",
     "game_result_from_step",
     "load_eval_game_records",
@@ -100,11 +114,17 @@ __all__ = [
     "load_dev_eval_summaries",
     "parse_training_policy_id",
     "paired_seed_uncertainty_summary",
+    "policy_ids_for_matchup_shard",
     "posterior_samples",
+    "persist_policy_selection_in_manifest",
     "recommend_focal_policy_id",
     "resolve_final_policy_set",
+    "resolve_policy_ids_for_run",
+    "resolved_parallel_worker_devices",
+    "run_final_eval_matchup_worker",
     "run_final_eval_matchup",
     "run_final_eval",
+    "run_parallel_final_eval",
     "finalize_final_eval",
     "select_final_policy_set_deterministic_v1",
     "record_completed_game",
@@ -113,6 +133,8 @@ __all__ = [
     "summarize_game_records",
     "summarize_pair_outcomes",
     "summarize_stage2_records",
+    "shard_matchup_specs",
+    "update_run_level_reports",
     "validate_eval_game_records_contract",
     "write_episodes_jsonl",
     "write_leakage_diagnostics_json",

@@ -1,0 +1,656 @@
+# Refactor Progress - 2026-04-28
+
+## Completed Slices
+
+- Stage 0/1 runtime characterization:
+  - Added targeted tests for mask policy-row `source_label` compatibility, mixed heuristic/model central ids sampling, and central `teacher_move_source` preservation.
+  - Fixed `_central_sample_policy_rows_ids()` so model rows are sampled before returning.
+  - Aligned `_apply_policy_rows_mask()` with the ids-path call contract.
+  - Preserved `teacher_move_source` in central `RuntimeUnroll` construction.
+  - Hardened small league-runtime seams found by the full runtime suite: absent optional league config on object-constructed tests, missing actor focal-seat state during pre-collection refresh, and resident-only stale active opponent handling.
+- Stage 1 static hazards:
+  - Imported `Mapping` in `eval/harness.py`.
+  - Removed the duplicate `"raw_b1_top_action_ce"` metrics key in `impala_learner.py`.
+  - Cleaned `python/scripts/train.py` import placement/sorting so the training entrypoint passes Ruff.
+- Structural extraction:
+  - Added `weiss_rl.eval.policy_resolution` for snapshot-registry source-root discovery and copied-registry SHA matching.
+  - Kept `weiss_rl.eval.simulator_runner` compatibility names intact for existing callers/tests.
+  - Added `weiss_rl.training.dev_eval_metrics` for dev-eval scoring, eligibility, confirmatory scheduling decisions, and best-checkpoint comparison helpers; `python/scripts/train.py` now imports compatibility aliases.
+  - Added `weiss_rl.training.snapshot_artifacts` for train snapshot artifact writes, registry retention, pruning, pin/unpin, and registry-entry persistence; `train.py` keeps the old private entrypoints for tests and callers.
+  - Moved async promotion-gate registry mutation/reason-code normalization into `weiss_rl.training.snapshot_artifacts.apply_promotion_gate_payload`; `train.py` now handles only future completion, printing, and unpin cleanup.
+  - Added `weiss_rl.training.checkpoints` for checkpoint tracker load/write and alias-record construction.
+  - Added package-level tests for `weiss_rl.training.checkpoints` so the extracted responsibility is directly covered, not only exercised through `scripts.train`.
+  - Added `weiss_rl.training.checkpoint_guard` for pure checkpoint-guard rollback planning; `train.py` now executes the returned plan instead of owning all rollback eligibility logic.
+  - Added `weiss_rl.training.bootstrap` for training CLI parser construction and deprecated `--run-id`/`--run-label` normalization; `python/scripts/train.py` remains the public compatibility script.
+  - Added `weiss_rl.training.paths` for canonical training path and existing-run artifact reconstruction; `train.py` retains the old private wrappers.
+  - Added `weiss_rl.config.compat` for legacy config path aliases and repo-root/repo-relative path resolution; `config.parse` now imports those compatibility helpers without changing canonical config parsing.
+  - Added `weiss_rl.learners.numeric_faults` for learner numeric fault-bundle construction and finite/gradient checks; `ImpalaLearner` retains the existing private wrapper methods for monkeypatch/test compatibility.
+  - Added `weiss_rl.learners.metric_projection` for learner custom-metric key projection; `ImpalaLearner` retains `_custom_log_metrics()` as a wrapper and public metric keys remain unchanged.
+  - Cleared the remaining repo-wide Ruff findings as a separate static-cleanup slice in B1/residual helper scripts and import-only test/config modules. The `zip()` in `b1_residual_final_eval_report.py` was made explicit with `strict=False` to preserve prior truncating behavior.
+  - Moved B2 dev-eval anchor extraction, recent-score windows, and warning-flag construction into `weiss_rl.training.dev_eval_metrics`.
+  - Moved checkpoint alias publication, secondary B2 tracker updates, and resume-best tracker seeding into `weiss_rl.training.checkpoints`; `train.py` retains wrappers/compatibility aliases.
+  - Moved stall-monitor and early-cutoff JSON state updates into `weiss_rl.training.curriculum_guards`; `train.py` retains the tested private wrapper names.
+  - Moved deterministic periodic-dev-eval and promotion-gate seed formulas plus confirmatory paired-seed expansion into `weiss_rl.training.eval_seeds`.
+  - Added `weiss_rl.training.eval_artifacts` for periodic dev-eval summary persistence, fast-screen cache writes, checkpoint-guard JSONL appends, and B2 disagreement audit request packaging; `train.py` retains wrappers/compatibility entrypoints.
+  - Moved structured main-move checkpoint-guard event packaging into `weiss_rl.training.eval_artifacts`.
+  - Moved periodic dev-eval matchup directory naming and runner-counter aggregation into `weiss_rl.training.eval_artifacts`; `train.py` retains wrappers for existing tests and callers.
+  - Added `weiss_rl.training.eval_schedule` for periodic dev-eval seed-file validation, schedule creation, warmup-gate decisions, async request dataclasses, seed-block job/sharding helpers, and pure async request assembly; `train.py` retains the legacy private wrapper names used by tests and monkeypatches.
+  - Moved parallel final-eval worker execution and metadata planning into `weiss_rl.eval.parallel`; `python/scripts/eval.py` keeps private compatibility wrappers for existing tests and ad hoc imports.
+  - Added `weiss_rl.training.snapshot_imports` for B1 no-league baseline imports, seed snapshot imports, resume-league snapshot imports, and their config/tensor contract checks; `train.py` retains the old private wrapper names.
+  - Added `weiss_rl.training.anchor_resolution` for promotion/dev-eval anchor ID resolution, symbolic snapshot aliases, and anchor-spec materialization; `train.py` retains the old private wrapper names.
+  - Added `weiss_rl.training.guidance_schedules` for entropy, teacher, reference-policy BC, raw-B1 distill, counterfactual-positive, and public-heuristic-bias schedule application; `train.py` retains the old private wrapper names and metric keys.
+  - Moved periodic dev-eval worker-device resolution into `weiss_rl.training.eval_schedule`; `train.py` injects `resolve_actor_device_layout` so existing monkeypatch seams and runtime mode behavior stay intact.
+  - Consolidated the newest `train.py` compatibility import blocks after the extraction work without changing public wrappers or runtime behavior.
+  - Added `weiss_rl.eval.paper_contracts` for manifest-contract and final-eval artifact-contract validation; `paper_readiness.py` now coordinates readiness checks instead of owning the contract implementation.
+  - Moved no-league baseline anchor coordination into `weiss_rl.training.snapshot_imports.ensure_noleague_baseline_anchor`; `train.py` now supplies the checkpoint writer/model payload and keeps the old private wrapper/print behavior.
+  - Added `weiss_rl.training.eval_artifacts.build_periodic_dev_eval_checkpoint_summary` for periodic dev-eval checkpoint-summary assembly, aggregate weighting, parallel metadata, runtime metadata, and evaluation-surface metadata; `train.py` now only gathers runner results and writes the returned summary.
+  - Added `weiss_rl.training.eval_artifacts.build_periodic_dev_eval_seed_usage_payload` so serial and parallel periodic dev-eval seed/protocol payloads share one package-owned artifact schema.
+  - Added `weiss_rl.training.provenance` for git provenance, manifest source-path normalization, JSON-object loading, and 64-bit nonce generation; `train.py` now keeps compatibility wrappers while the package owns the reusable behavior.
+  - Fixed two gate-script CLI surfaces so `check_core_placeholders.py --help` and `verify_repo.py --help` behave like normal entrypoints while imported `main()` calls still ignore ambient pytest arguments.
+  - Added native heuristic rollout API compatibility for the installed `weiss_sim 0.8.1` two-argument `rollout_heuristic_public_into_i16_legal_ids(steps, out)` method while preserving the newer profile-capable three-argument call when available.
+  - Split the structured-v2 action scoring subsystem out of `model.py` into `weiss_rl.structured_action_head`, with shared MLP construction in `weiss_rl.model_layers`; `model.py` now retains the policy/value trunk and compatibility shims for old private test/ad hoc imports.
+  - Split the large training-section parser out of `config/parse.py` into `weiss_rl.config.training_parse`; `parse.py` now coordinates stack loading and the non-training config sections while preserving config hashes and section semantics.
+- Bug fix found during verification:
+  - `_dev_eval_ineligibility_reasons()` now rejects nonzero-but-subthreshold `prob_gt_half` as `confidence_prob` even when `prob_lt_half` is low, while still allowing exact tied anchors with no loss probability.
+
+## Verification
+
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (920 collected).
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (927 collected after adding training-helper tests).
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (933 collected after eval-artifact tests).
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (935 collected after structured-mainmove guard tests).
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (939 collected after eval schedule/request tests).
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (948 collected after training paths, config compat, and learner numeric-fault tests).
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py` (116 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py` (48 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py` (58 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py` (106 passed after training helper extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py` (3 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py` (52 passed after B2 helper extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_train_stall_monitor.py` (111 passed after checkpoint publication extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py` (54 passed after curriculum guard extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py -k "expand_periodic_dev_eval_paired_seeds or eval_seed_helpers"` (2 passed after eval seed extraction).
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/training/curriculum_guards.py python/scripts/train.py`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_seeds.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py` after moving matchup-dir/counter helpers.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/snapshot_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/checkpoint_guard.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/bootstrap.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/config/compat.py python/weiss_rl/config/parse.py python/weiss_rl/tests/test_config_loader.py`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/paths.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/learners/impala_learner.py python/weiss_rl/learners/numeric_faults.py`.
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/learners/impala_learner.py python/weiss_rl/learners/metric_projection.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/runtime.py python/weiss_rl/eval/harness.py python/weiss_rl/eval/simulator_runner.py python/weiss_rl/eval/policy_resolution.py python/weiss_rl/learners/impala_learner.py python/weiss_rl/learners/numeric_faults.py python/weiss_rl/learners/metric_projection.py python/weiss_rl/config/compat.py python/weiss_rl/config/parse.py python/weiss_rl/training python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_config_loader.py`.
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts` after the isolated static-cleanup slice.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "eval_artifacts"` (3 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "eval_artifacts"` (5 passed after structured-mainmove guard extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "eval_artifacts"` (7 passed after moving matchup-dir/counter helpers).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "eval_schedule"` (3 passed after eval schedule/request dataclass extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "eval_schedule"` (4 passed after async request builders moved).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py -k "eval_artifacts or periodic_dev_eval_summary or maybe_request_b2_disagreement_audit or dev_eval_ineligibility"` (10 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py -k "eval_schedule or league_eval_warmup_gate or defer_noleague_baseline_alias_refresh or periodic_dev_eval_single_worker"` (6 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "seed_block_jobs or promotion_gate_seed_block_jobs or parallel_promotion_gate or periodic_dev_eval_seed_block or periodic_dev_eval_single_worker or promotion_gate_seed_block"` (4 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "async_periodic_dev_eval or promotion_gate or seed_block_jobs or periodic_dev_eval_single_worker"` (10 passed after request-builder extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "duplicate_policy_ids or seed_block_jobs or async_periodic_dev_eval"` (5 passed after moving matchup-dir/counter helpers).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "snapshot_artifacts or promotion_gate_payload"` (2 passed after promotion-gate registry extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "failed_async_promotion_gate or drop_stale_pending_promotion_gate"` (3 passed after promotion-gate registry extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "checkpoint_guard_rollback_plan"` (2 passed after checkpoint-guard planning extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "checkpoint_guard_rollback or finalize_from_best_checkpoint"` (2 passed after checkpoint-guard planning extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "training_bootstrap_parser"` (1 passed after CLI parser extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_thesis_run_wrapper.py python/weiss_rl/tests/test_entrypoints.py` (99 passed after CLI parser extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config.py python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_config_overrides.py python/weiss_rl/tests/test_study_config.py python/weiss_rl/tests/test_sweeps.py` (57 passed after config compat extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config_loader.py -k "config_compat or canonical_config_hash_is_stable"` (2 passed after config compat extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "training_paths"` (1 passed after training path extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "pin_and_unpin_snapshot_ids or failed_async_promotion_gate or failed_async_periodic_dev_eval"` (4 passed after training path extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_impala_learner.py -k "nonfinite_forward_logits or nonfinite_gradients or amp_skips_gradient_scan"` (3 passed after learner numeric-fault extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_vtrace.py -k "impala_learner_update_reduces_fixed_batch_loss or impala_learner_logging_persists"` (2 passed after learner numeric-fault extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "metric_projection"` (1 passed after learner metric projection extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_logger.py python/weiss_rl/tests/test_vtrace.py -k "custom_metrics or impala_learner_logging_persists or update_exposes_vtrace_metrics or logs_masked_metrics"` (3 passed after learner metric projection extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_runtime.py` (246 passed after latest Stage 2/6/10 slices).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_impala_learner.py python/weiss_rl/tests/test_vtrace.py python/weiss_rl/tests/test_training_logger.py` (100 passed after learner numeric-fault extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_impala_learner.py python/weiss_rl/tests/test_vtrace.py python/weiss_rl/tests/test_training_logger.py` (100 passed after learner metric projection extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py` (116 passed after eval artifact extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py` (118 passed after structured-mainmove guard extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py` (121 passed after eval schedule/request dataclass extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py` (122 passed after async request-builder extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py` (128 passed after promotion-gate/checkpoint-guard/bootstrap extractions).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py` (116 passed after latest structural extractions).
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (226 passed after B2 helper extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (232 passed after eval artifact extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (234 passed after structured-mainmove guard extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (237 passed after eval schedule/request dataclass extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (238 passed after async request-builder extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/checkpoints.py python/weiss_rl/training/snapshot_artifacts.py python/weiss_rl/training/dev_eval_metrics.py`.
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/training/checkpoints.py`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/dev_eval_metrics.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_thesis_run_wrapper.py python/weiss_rl/tests/test_entrypoints.py` (99 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_policy_set.py` (62 passed after repo-wide Ruff cleanup).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_config_overrides.py` (47 passed after repo-wide Ruff cleanup).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_heuristic_public.py -k "resolve_eval_policies or recursive_registry_search_root or common_search_root"` (14 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_paper_readiness.py python/weiss_rl/tests/test_paper_readiness_fixture.py python/weiss_rl/tests/test_artifact_hygiene.py` (22 passed after artifact contract extraction).
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/artifact_contract.py python/weiss_rl/eval/paper_readiness.py python/weiss_rl/eval/paper_readiness_fixture.py python/weiss_rl/tests/test_paper_readiness_fixture.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_paper_readiness.py python/weiss_rl/tests/test_paper_readiness_fixture.py` (15 passed after separating canonical and compatibility artifact paths).
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/artifact_contract.py python/weiss_rl/tests/test_paper_readiness_fixture.py python/weiss_rl/eval/paper_readiness.py`.
+- Passed: `uv run --extra dev python python/scripts/write_paper_readiness_fixture.py --run-dir runs/refactor_paper_readiness_fixture`.
+- Passed: `uv run --extra dev python python/scripts/paper_readiness_check.py --run-dir runs/refactor_paper_readiness_fixture`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_paper_readiness.py python/weiss_rl/tests/test_paper_readiness_fixture.py python/weiss_rl/tests/test_artifact_hygiene.py` (23 passed after moving run-directory presence audit into `weiss_rl.artifact_contract`).
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/artifact_contract.py python/weiss_rl/eval/paper_readiness.py python/weiss_rl/eval/paper_readiness_fixture.py python/weiss_rl/tests/test_paper_readiness_fixture.py`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "policy_selection"` (6 passed after extracting canonical eval policy-set resolution into `weiss_rl.eval.run_policy_selection`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "parallel_matchup_helpers or policy_selection"` (8 passed after moving pure parallel matchup sharding into `weiss_rl.eval.parallel`).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/eval.py python/weiss_rl/eval/__init__.py python/weiss_rl/eval/parallel.py python/weiss_rl/eval/run_policy_selection.py python/weiss_rl/tests/test_entrypoints.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_thesis_run_wrapper.py python/weiss_rl/tests/test_entrypoints.py` (103 passed after eval packaging).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config.py python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_config_overrides.py python/weiss_rl/tests/test_study_config.py python/weiss_rl/tests/test_sweeps.py` (57 passed after extracting config validation primitives).
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/config/parse.py python/weiss_rl/config/validation.py python/weiss_rl/tests/test_config_loader.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "run_reports or manifest_persistence or policy_selection"` (8 passed after extracting canonical eval run-report helpers).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/eval.py python/weiss_rl/eval/__init__.py python/weiss_rl/eval/run_reports.py python/weiss_rl/tests/test_entrypoints.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py -k "concatenate_legal_actions or concat_optional_time_major_field or runtime_batching or gae_advantages or build_learner_batch or build_ppo_batch"` (12 passed after extracting runtime batching helpers).
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/runtime.py python/weiss_rl/runtime_batching.py python/weiss_rl/tests/test_runtime.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py` (118 passed after runtime batching extraction).
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (957 tests collected).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (249 passed after runtime batching extraction).
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `c4f840aacd1ae71c`, id256 `1ce71acdaa40f8c48a0f0452ea640580ea34a6c7c27135652c0fc4fed2446942`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "parallel_eval_worker_devices or parallel_matchup_helpers"` (4 passed after moving parallel worker device resolution into `weiss_rl.eval.parallel`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "parallel_final_eval or parallel_eval_worker_devices or parallel_matchup_helpers"` (5 passed after moving parallel final-eval execution into `weiss_rl.eval.parallel`).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/eval.py python/weiss_rl/eval/__init__.py python/weiss_rl/eval/parallel.py python/weiss_rl/tests/test_entrypoints.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "noleague or seed_snapshot or resume_league or baseline"` (17 passed after extracting snapshot import services).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py` (58 passed after extracting snapshot import services).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "snapshot_import_helpers or snapshot_artifacts"` (3 passed after adding direct package-level snapshot import helper coverage).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/snapshot_imports.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "anchor_resolution or snapshot_import_helpers"` (2 passed after adding direct package-level anchor resolution coverage).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "periodic_dev_eval_opponents or resolve_periodic_dev_eval_opponent_specs or symbolic_snapshot_aliases or promotion_gate"` (11 passed after extracting anchor resolution).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/anchor_resolution.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_thesis_run_wrapper.py python/weiss_rl/tests/test_entrypoints.py` (105 passed after eval parallel and snapshot import extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (133 passed after anchor resolution extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "guidance_schedule or anchor_resolution"` (2 passed after guidance schedule extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "entropy_coef_for_next_update or reference_policy_bc_coefs"` (2 passed after guidance schedule extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "periodic_worker_devices or eval_schedule"` (5 passed after periodic dev-eval worker-device extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "resolved_periodic_dev_eval_worker_devices or resolve_async_periodic_dev_eval_device"` (2 passed after periodic dev-eval worker-device extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_schedule.py python/weiss_rl/training/guidance_schedules.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (135 passed after guidance/device extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/weiss_rl/eval/paper_readiness.py python/weiss_rl/eval/paper_contracts.py python/weiss_rl/tests/test_paper_readiness.py python/weiss_rl/tests/test_paper_readiness_fixture.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_paper_readiness.py python/weiss_rl/tests/test_paper_readiness_fixture.py python/weiss_rl/tests/test_artifact_hygiene.py` (23 passed after paper contract extraction).
+- Passed: `uv run --extra dev python python/scripts/write_paper_readiness_fixture.py --run-dir runs/refactor_paper_readiness_fixture`.
+- Passed: `uv run --extra dev python python/scripts/paper_readiness_check.py --run-dir runs/refactor_paper_readiness_fixture`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (963 tests collected).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/snapshot_imports.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "snapshot_import"` (2 passed after no-league anchor service extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "ensure_noleague_baseline_anchor"` (6 passed after no-league anchor service extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py python/weiss_rl/tests/test_snapshot_registry.py` (88 passed after no-league anchor service extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (964 tests collected).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (136 passed after no-league anchor service extraction).
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `94ce27ad2789d390`, id256 `90d38927ad27ce94754bc60edc103de982893b318f76a268bdbd3c414c3b5a3e`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "checkpoint_summary or eval_artifacts"` (8 passed after periodic dev-eval checkpoint-summary extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "periodic_dev_eval_single_worker_honors_worker_device_override or weighted_dev_eval_aggregate"` (2 passed after periodic dev-eval checkpoint-summary extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (137 passed after periodic dev-eval checkpoint-summary extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (965 tests collected).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "seed_usage or checkpoint_summary or eval_artifacts"` (9 passed after periodic dev-eval seed-usage extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "periodic_dev_eval_single_worker_honors_worker_device_override"` (1 passed after periodic dev-eval seed-usage extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (138 passed after periodic dev-eval seed-usage extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "seed_usage or checkpoint_summary or eval_artifacts"` (10 passed after periodic dev-eval matchup context/runtime extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "periodic_dev_eval_single_worker_honors_worker_device_override"` (1 passed after periodic dev-eval matchup context/runtime extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "seed_block_matchup or seed_usage or checkpoint_summary or eval_artifacts"` (11 passed after periodic dev-eval seed-block collation extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "periodic_dev_eval_single_worker_honors_worker_device_override or periodic_dev_eval_seed_block"` (2 passed after periodic dev-eval seed-block collation extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (140 passed after periodic dev-eval seed-block collation extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "persist_periodic_result or seed_block_matchup or seed_usage or checkpoint_summary or eval_artifacts"` (12 passed after periodic dev-eval persistence routing extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "periodic_dev_eval_single_worker_honors_worker_device_override or periodic_dev_eval_seed_block"` (2 passed after periodic dev-eval persistence routing extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (141 passed after periodic dev-eval persistence routing extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (969 tests collected).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "promotion_gate_worker_records or persist_periodic_result or seed_block_matchup or eval_artifacts"` (13 passed after promotion-gate worker-record collation extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "parallel_promotion_gate_assembles_seed_block_records_parent_side"` (1 passed after promotion-gate worker-record collation extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (142 passed after promotion-gate worker-record collation extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `04eb7232596a9a96`, id256 `969a6a593272eb04ce78e0450e17f870174a799eadcb7ef61e69a3d9303f9931`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/confirmatory_eval.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "confirmatory_eval_plan or eval_seed_helpers"` (2 passed after confirmatory dev-eval plan extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "confirmatory_dev_eval_request or expand_periodic_dev_eval_paired_seeds"` (3 passed after confirmatory dev-eval plan extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "confirmatory_eval_plan or eval_seed_helpers or eval_schedule_async_request_builders"` (3 passed after confirmatory dev-eval plan extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (143 passed after confirmatory dev-eval plan extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (971 tests collected).
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `afb1997568ed9140`, id256 `4091ed687599b1af8abbf68750eac3a7c685e38f6c3f0e183f6fe93fed6670e2`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/promotion_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "promotion_artifacts or promotion_gate_worker_records"` (2 passed after parallel promotion-gate result assembly extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "parallel_promotion_gate_assembles_seed_block_records_parent_side"` (1 passed after parallel promotion-gate result assembly extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/promotion_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "promotion_artifacts"` (2 passed after promotion-gate policy map extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "parallel_promotion_gate_assembles_seed_block_records_parent_side or failed_async_promotion_gate"` (3 passed after promotion-gate policy map extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/promotion_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "promotion_artifacts"` (3 passed after promotion-gate worker payload extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "parallel_promotion_gate_assembles_seed_block_records_parent_side"` (1 passed after promotion-gate worker payload extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (146 passed after promotion-gate worker payload extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/promotion_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "promotion_artifacts"` (4 passed after parallel promotion-gate plan extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "parallel_promotion_gate_assembles_seed_block_records_parent_side or promotion_gate_seed_block_jobs"` (2 passed after parallel promotion-gate plan extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (147 passed after parallel promotion-gate plan extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/snapshot_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "apply_promotion_gate"` (3 passed after promotion-gate result registry-update extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "promotion_gate"` (5 passed after promotion-gate result registry-update extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "apply_promotion_gate or promotion_artifacts"` (7 passed after removing the unused private retention alias).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (148 passed after promotion-gate registry-update extraction).
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (976 tests collected).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `84960a29817728be`, id256 `be287781290a9684f1ac10e486caeb7ed908b49675cf73554d53ae6bd3e2a6da`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/curriculum_guards.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "curriculum_guard"` (2 passed after stall-monitor application extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "stall_monitor"` (48 passed after stall-monitor application extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (149 passed after stall-monitor application extraction).
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/confirmatory_eval.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "confirmatory_eval"` (2 passed after confirmatory console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "confirmatory_dev_eval_request or expand_periodic_dev_eval_paired_seeds"` (3 passed after confirmatory console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (150 passed after confirmatory console-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (978 tests collected).
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `c4c58cb220be26f9`, id256 `f926be20b28cc5c48f815301378837c7d44a34b9384cef7748246e75911c0c87`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_model_cache.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "eval_model_cache"` (1 passed after eval model cache extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "eval_snapshot_model_cache"` (1 passed after eval model cache extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (151 passed after eval model cache extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (979 tests collected).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "b2_audit_request or confirmatory_eval_message"` (3 passed after B2 audit console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "maybe_request_b2_disagreement_audit or confirmatory_dev_eval_request"` (4 passed after B2 audit console-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/checkpoint_guard.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "checkpoint_guard"` (3 passed after checkpoint-guard rollback console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "checkpoint_candidate_metric or should_not_promote"` (4 passed after checkpoint-guard rollback console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (152 passed after checkpoint-guard rollback console-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_schedule.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "eval_schedule_helpers_report_warmup_gate_failures"` (1 passed after league warmup-gate console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "league_eval_warmup_gate"` (2 passed after league warmup-gate console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (152 passed after league warmup-gate console-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "periodic_dev_eval_console_message or eval_artifacts_persist_summary"` (2 passed after periodic dev-eval console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "periodic_dev_eval"` (14 passed after periodic dev-eval console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (153 passed after periodic dev-eval console-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (981 tests collected).
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `9ae436514c9ed1f8`, id256 `f8d19e4c5136e49ada5ca0d5a09159501f34ae71dc7772fe79cafef6fa7c2947`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/snapshot_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "apply_promotion_gate"` (3 passed after promotion-gate registry-update console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "promotion_gate"` (5 passed after promotion-gate registry-update console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (153 passed after promotion-gate registry-update console-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (981 tests collected after promotion-gate registry-update console-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/promotion_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "promotion_artifacts"` (5 passed after promotion-gate console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "promotion_gate"` (5 passed after promotion-gate console-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (154 passed after promotion-gate console-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/promotion_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "promotion_artifacts_console_messages"` (1 passed after optional heuristic-public promotion notice extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (154 passed after completing promotion-gate console-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/curriculum_guards.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "curriculum_guard"` (3 passed after early-cutoff metric/message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "early_cutoff"` (2 passed after early-cutoff metric/message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (155 passed after early-cutoff metric/message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/session.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "training_session_helpers"` (1 passed after adding the `training.session` lifecycle-helper beachhead).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "early_cutoff or wall_clock"` (3 passed after routing wall-clock helpers through `training.session`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "train or thesis_run"` (14 passed after routing completion output through `training.session`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (156 passed after `training.session` lifecycle-helper extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (984 tests collected).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/bootstrap.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "training_bootstrap"` (2 passed after numeric CLI validator extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "train_entrypoint"` (14 passed after numeric CLI validator extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (157 passed after numeric CLI validator extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `a6215154632ec07b`, id256 `7bc02e63545121a6fa2b9c7acc8e397a94827c34066428958021dcde0b90f23a`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_thesis_run_wrapper.py python/weiss_rl/tests/test_entrypoints.py` (105 passed after train entrypoint/helper extractions).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/eval_artifacts.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "periodic_dev_eval_console_message"` (1 passed after periodic dev-eval scheduled-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "periodic_dev_eval"` (14 passed after periodic dev-eval scheduled-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (157 passed after periodic dev-eval scheduled-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py --fix` (fixed import ordering after bootstrap formatter imports only).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/bootstrap.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "training_bootstrap"` (3 passed after startup/scaffold formatter extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "train_entrypoint"` (14 passed after startup/scaffold formatter extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (158 passed after startup/scaffold formatter extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "resume"` (12 passed after resume lifecycle-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "resume or checkpoint"` (6 passed after resume lifecycle-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py --fix` (fixed import ordering after session formatter imports only).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/session.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "training_session_helpers"` (1 passed after resume lifecycle-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (158 passed after resume lifecycle-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/checkpoint_guard.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "checkpoint_guard"` (3 passed after checkpoint-guard final-selection formatter extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "checkpoint_candidate_metric or should_not_promote or checkpoint"` (6 passed after checkpoint-guard final-selection formatter extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (158 passed after checkpoint-guard final-selection formatter extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/guidance_schedules.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "guidance_schedule"` (1 passed after reference-policy attach-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "reference_policy"` (1 passed after reference-policy attach-message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (158 passed after reference-policy attach-message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/session.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "training_session_helpers"` (1 passed after structured-profiling message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (158 passed after structured-profiling message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/learner_setup.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "learner_setup_compile"` (1 passed after learner compile setup extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (159 passed after learner compile setup extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "train_entrypoint"` (14 passed after learner compile setup extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/profiling.py python/weiss_rl/tests/test_training_helpers.py` (after Ruff import sorting in `python/scripts/train.py`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "training_profiling"` (1 passed after training profiling helper extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "profile_timers or torch_profiler"` (3 passed after training profiling helper extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (160 passed after training profiling helper extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "bootstrap_runtime_resolution or bootstrap_flag_overrides"` (2 passed after bootstrap resolution extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/bootstrap.py python/weiss_rl/tests/test_training_helpers.py` (after Ruff import sorting in `python/scripts/train.py` and `python/weiss_rl/tests/test_training_helpers.py`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_script_entrypoint_smokes.py -k "applies_profile_flags or resolves_cuda_auto"` (2 passed after bootstrap resolution extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_thesis_run_wrapper.py python/weiss_rl/tests/test_entrypoints.py` (105 passed after bootstrap resolution extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (162 passed after bootstrap resolution extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "bootstrap_startup_messages"` (1 passed after startup/demo message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "public_demo or tensorboard or train_entrypoint"` (16 passed after startup/demo message extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/bootstrap.py python/weiss_rl/tests/test_training_helpers.py` (after Ruff import sorting in `python/scripts/train.py`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (162 passed after startup/demo message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "training_session_helpers"` (1 passed after resume config-hash warning extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "resume"` (12 passed after resume config-hash warning extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/session.py python/weiss_rl/tests/test_training_helpers.py` (after Ruff import sorting in `python/scripts/train.py`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (162 passed after resume config-hash warning extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "learner_setup_compile"` (1 passed after trainable main-residual setup message extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (162 passed after trainable main-residual setup message extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (990 tests collected after the latest train-entrypoint thinning slices).
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `116f20b8d607fd59`, id256 `59fd07d6b8206f116dd67c33bdf759dc1c43e328f8415c6a146542d2928cad7d`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/manifest_payloads.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "manifest_payload"` (1 passed after manifest payload helper extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "training_controls or profile_timers or torch_profiler or policy_set_selection or persists_runtime_spec_bundle"` (5 passed after manifest payload helper extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (163 passed after manifest payload helper extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "manifest_payload"` (1 passed after `training_controls` payload extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "training_controls or profile_timers or torch_profiler"` (3 passed after `training_controls` payload extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (163 passed after `training_controls` payload extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "bootstrap_hash_validators"` (1 passed after bootstrap hash-validator extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "spec_mismatch or config_hash or runtime_spec"` (4 passed after bootstrap hash-validator extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/bootstrap.py python/weiss_rl/tests/test_training_helpers.py` (after Ruff import sorting in `python/scripts/train.py` and `python/weiss_rl/tests/test_training_helpers.py`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (164 passed after bootstrap hash-validator extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q --collect-only python/weiss_rl/tests` (960 tests collected before paper contract extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `956b9a350ac30d7d`, id256 `7d0dc30a359a6b9564ca5e20045713dd89081e6f7f9db1015f86e68754c67046`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py -k "provenance"` (1 passed after provenance helper extraction).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py -k "default_run_dir or deprecated_run_id_alias or git_commit"` (3 passed after provenance helper extraction).
+- Passed: `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/provenance.py python/weiss_rl/tests/test_training_helpers.py`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_snapshot_registry.py python/weiss_rl/tests/test_training_helpers.py` (165 passed after provenance helper extraction).
+- Passed: `uv run --extra dev python -m ruff check python tests examples python/scripts`.
+- Passed: `uv run --extra dev python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests` (991 passed, 2 skipped).
+- Passed: `uv run --extra dev python python/scripts/thesis_run.py --list-presets`.
+- Passed: `uv run --extra dev python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` (manifest scaffold only; latest run id64 `9051cda78d253e27`, id256 `273e258da7cd51908fc34baf9b71e1b66153c869872157f2ceae78b873ed6334`; reason: missing config blocks `environment`, `training`, `model`).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_paper_readiness.py python/weiss_rl/tests/test_paper_readiness_fixture.py python/weiss_rl/tests/test_artifact_hygiene.py` (23 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config.py python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_config_overrides.py python/weiss_rl/tests/test_study_config.py python/weiss_rl/tests/test_sweeps.py` (57 passed).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_impala_learner.py python/weiss_rl/tests/test_vtrace.py python/weiss_rl/tests/test_training_logger.py` (100 passed).
+- Passed: `uv run --extra dev python -m compileall -q python/scripts python/weiss_rl`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_entrypoints.py python/weiss_rl/tests/test_script_entrypoint_smokes.py python/weiss_rl/tests/test_thesis_run_wrapper.py` (75 passed).
+- Passed: all `python/scripts/*.py --help` entrypoint smokes (32 scripts, all exit 0).
+- Passed: `uv run --extra dev python -m ruff format --check python tests examples python/scripts` after the dedicated formatting slice.
+- Passed: `uv run --extra dev python python/scripts/verify_repo.py` (Ruff, format check, mypy, Vulture, full pytest, and wrapper dry-runs; latest full pytest inside verifier was 993 passed, 2 skipped).
+- Passed: `uv run --extra dev --extra sim python -c "import weiss_sim; ..."` (`weiss_sim` 0.8.1 imports from the local venv; no local wheel rebuild needed).
+- Passed: `uv run --extra dev --extra sim python python/scripts/train.py --stack-config configs/baselines/noleague_impala.yaml --run-label refactor_entrypoint_b1_baseline_smoke_auto --num-envs 2 --unroll-length 4 --max-updates 1 --runtime-mode train_ordered --device cpu --override 'system.collection_backend="auto"'` (real simulator-backed one-update smoke; loss `0.572921`, policy_loss `0.004541`, value_loss `0.002088`, entropy `0.847337`).
+- Passed: `uv run --extra dev --extra sim python python/scripts/train.py --stack-config configs/main_impala_league_server.yaml --public-demo --run-label refactor_entrypoint_public_demo`.
+- Passed: `uv run --extra dev python python/scripts/eval.py --stack-config configs/main_eval.yaml --public-demo --run-dir runs/refactor_entrypoint_public_demo --public-demo-paired-seeds 2 --public-demo-bootstrap-samples 16`.
+- Passed: `uv run --extra dev python python/scripts/make_figures.py --public-demo --final-eval-dir runs/refactor_entrypoint_public_demo/eval/final_eval --out-dir runs/refactor_entrypoint_public_demo/figures`.
+- Passed: `uv run --extra dev python python/scripts/write_paper_readiness_fixture.py --run-dir runs/refactor_entrypoint_readiness_fixture` followed by `uv run --extra dev python python/scripts/paper_readiness_check.py --run-dir runs/refactor_entrypoint_readiness_fixture`.
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_contracts.py python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_impala_learner.py -k "structured or packed or model or factorized or negative_logits_fill_value or sample_packed_action_scores"` (91 passed after the structured action-head split).
+- Passed: `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config.py python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_config_overrides.py python/weiss_rl/tests/test_study_config.py python/weiss_rl/tests/test_sweeps.py` (57 passed after the training parser split).
+- Passed: `uv run --extra dev python python/scripts/verify_repo.py` after the model/config splits (Ruff, format check, mypy, Vulture, full pytest, and wrapper dry-runs; latest full pytest inside verifier was 993 passed, 2 skipped).
+
+## Failed Ideas / Constraints
+
+- Did not run long training jobs.
+- Repo-wide Ruff cleanup was done as a dedicated static slice after the behavior-preserving refactors, not interleaved with runtime or learner behavior changes.
+- Did not delete legacy surfaces; the work focused on characterization, small bug fixes, and low-risk extractions with compatibility aliases.
+- Artifact contract extraction preserved legacy readiness fallbacks (`eval/final_eval/sensitivity` and `eval/final_eval/matrices/mean.csv`) even though the canonical docs prefer `eval/metagame` and `payoff_matrices/p_mean.csv`.
+- `runs/refactor_paper_readiness_fixture` is a generated fixture for the artifact-contract smoke check; it is not a thesis result.
+- Eval packaging kept script-level wrappers for `_resolve_policy_ids_for_run`, `_shard_matchup_specs`, and `_policy_ids_for_matchup_shard` so existing tests and ad hoc script imports remain compatible.
+- Eval run-report extraction kept script-level wrappers for manifest persistence, git provenance normalization, JSON object loading, and run-summary/determinism updates.
+- Config validation extraction intentionally left section parsing and canonical config assembly in `parse.py`; this avoids hash churn while making the next section split easier.
+- Runtime batching extraction kept private wrapper names in `runtime.py`; collector paths, policy-row routing, and process/shared-memory transport were intentionally left untouched.
+- Snapshot import extraction intentionally left `_ensure_noleague_baseline_anchor()` in `train.py`; that function still coordinates learner state, current-run alias refresh, checkpoint writing, and user-facing prints.
+- Anchor resolution extraction preserved the public anchor names and IDs (`B0 RandomLegal`, `B1 NoLeague baseline`, heuristic-public policy IDs) rather than normalizing the thesis-facing labels.
+- Guidance schedule extraction preserved active metric keys (`*_coef_active`, `public_heuristic_*_scale_active`) and kept model guidance payloads compatible with snapshot metadata.
+- Periodic dev-eval worker-device extraction preserved the training-entrypoint monkeypatch seam by passing the actor-device-layout resolver from `train.py`.
+- Paper contract extraction preserved the existing `paper_readiness_summary_v2` sections and compatibility artifact paths; it only moved validation ownership out of `paper_readiness.py`.
+- No-league baseline anchor extraction preserved the `train.py` private wrapper and the `_write_snapshot_artifact` compatibility alias because snapshot-registry tests and ad hoc fixtures import them directly.
+- Periodic dev-eval checkpoint-summary extraction preserved the `periodic_dev_eval_parallel`, `periodic_dev_eval_runtime`, `evaluation_surface`, aggregate weighting, and anchor payload schemas.
+- Periodic dev-eval seed-usage extraction preserved `seed_usage.json` keys, relative path behavior, scheduled-vs-requested paired seed counts, and optional `parallel_seed_blocks`.
+- Periodic dev-eval matchup context/runtime extraction preserved relative artifact paths, `episodes.jsonl`/`seed_usage.json` path keys, serial runtime keys, and parallel seed-block runtime keys.
+- Periodic dev-eval seed-block collation extraction preserved opponent/block ordering, record ordering by `(pair_index, swap_index)`, parallel seed-block metadata, worker wall-clock aggregation, and runner-counter summation.
+- Periodic dev-eval persistence routing extraction preserved summary-vs-fast-screen behavior and async confirmatory force-summary persistence.
+- Promotion-gate worker-record collation extraction preserved anchor/block sort order and empty anchor buckets before parent-side promotion result assembly.
+- Confirmatory dev-eval plan extraction preserved the private train-script `_confirmatory_dev_eval_request` and `_expand_periodic_dev_eval_paired_seeds` aliases for tests/ad hoc scripts while moving seed-file expansion and reason packaging into `weiss_rl.training.confirmatory_eval`.
+- Parallel promotion-gate result assembly extraction preserved per-anchor episode JSONL paths, anchor ordering, pair-score/posterior computation, truncation aggregation, and promotion record writing.
+- Promotion-gate policy map extraction preserved the split between snapshot-backed anchor models and heuristic-public policies for async and parallel gate workers.
+- Promotion-gate worker payload extraction preserved seed-block payload keys, seat-swapped schedule order, and completed-record hashing/provenance fields.
+- Parallel promotion-gate plan extraction preserved seed-file count validation, ordered promotion anchors, configured worker limits, worker device cycling, and seed-block sharding.
+- Promotion-gate result registry-update extraction preserved pass/fail champion/rejection behavior; the now-unused `_save_snapshot_registry_with_retention` private train-script alias was removed to keep Vulture clean.
+- Stall-monitor application extraction preserved authoritative-summary gating, summary rewrite paths, in-memory `stall_monitor` attachment, and the exact warning text used by both synchronous and async periodic dev-eval completion paths.
+- Confirmatory dev-eval console-message extraction preserved the user-facing update, paired-seed count, four-decimal aggregate, reason ordering, and seed-file basename while moving formatting ownership out of `train.py`.
+- Eval snapshot model cache extraction preserved the train-private cache globals and monkeypatch seam while moving LRU touch/eviction mechanics into `weiss_rl.training.eval_model_cache`.
+- B2 disagreement audit console-message extraction preserved update, reason ordering, and relative episodes path while routing both sync and async periodic dev-eval notices through `weiss_rl.training.eval_artifacts`.
+- Checkpoint-guard rollback console-message extraction preserved update, best update, four-decimal current/best scores, and reason ordering while routing rollback notices through `weiss_rl.training.checkpoint_guard`.
+- League eval warmup-gate console-message extraction preserved the open flag and reason ordering while routing the notice through `weiss_rl.training.eval_schedule`.
+- Periodic dev-eval console-message extraction preserved sync/async labels, update, optional opponent slug, four-decimal aggregate, and anchor ordering while routing formatting through `weiss_rl.training.eval_artifacts`.
+- Promotion-gate registry-update console-message extraction preserved pass/fail wording, update, candidate policy ID, anchor ordering, and reason-code text while routing formatting through `weiss_rl.training.snapshot_artifacts`.
+- Promotion-gate console-message extraction preserved rollback discard, league warmup skip, eval-warmup-gate skip, missing-anchor skip, async scheduling, and optional heuristic-public skip text while routing formatting through `weiss_rl.training.promotion_artifacts`.
+- Early-cutoff extraction preserved trigger metrics and the user-facing trigger/final stop text while routing metric projection and formatting through `weiss_rl.training.curriculum_guards`.
+- Training-session lifecycle-helper extraction preserved wall-clock budget conversion, stop checks, wall-clock budget metrics/text, and final completion text while routing them through the new `weiss_rl.training.session` module.
+- Training bootstrap numeric-validator extraction preserved positive integer/optional float validation and error text while routing validation through `weiss_rl.training.bootstrap`.
+- Periodic dev-eval scheduled-message extraction preserved async scheduling text, worker-device fallback behavior, and anchor ordering while routing formatting through `weiss_rl.training.eval_artifacts`.
+- Startup/scaffold formatter extraction preserved spec-bundle status, loaded-config, manifest-written, resume-run, and manifest-scaffold text while routing formatting through `weiss_rl.training.bootstrap`.
+- Resume lifecycle-message extraction preserved resumed learner, seeded best-alias, and seeded dev-eval summary text while routing formatting through `weiss_rl.training.session`.
+- Checkpoint-guard final-selection formatter extraction preserved final checkpoint-selection text while routing formatting through `weiss_rl.training.checkpoint_guard`.
+- Reference-policy attach-message extraction preserved policy ID, top-action/family coefficients, raw-B1 distill flag, and weights path text while routing formatting through `weiss_rl.training.guidance_schedules`.
+- Structured-profiling message extraction preserved `profile_timers`, `torch_profiler`, `structured_metrics_mode`, `teacher_aux_mode`, and `fixed_opponent_backend` console text while routing formatting through `weiss_rl.training.session`.
+- Learner compile setup extraction preserved compile-disabled behavior, non-CUDA skip text, structured trunk compile success/failure text, missing-hook skip text, and forward-path compile text while moving torch.compile branching into `weiss_rl.training.learner_setup`.
+- Training profiling helper extraction preserved disabled profile blocks, torch-profiler directory/trace behavior, CPU/CUDA profiler activity selection, and trace-written text while moving profiling mechanics into `weiss_rl.training.profiling`.
+- Bootstrap resolution extraction preserved CLI profile/torch-profiler override timing before config hashing, runtime profile/device/seed resolution, CUDA fallback warning text, manifest-scaffold-only reasons, and simulator runtime prerequisite failure text while moving startup gates into `weiss_rl.training.bootstrap`.
+- Mistyped one targeted smoke command as `-k "training_flag_overrides or resolve_device"`; pytest selected no tests (`13 deselected`). Re-ran with the exact test-name fragments and passed.
+- Startup/demo message extraction preserved TensorBoard-disabled stderr text, public-demo staged bundle text, and synthetic-demo disclaimer text while routing formatting through `weiss_rl.training.bootstrap`.
+- Resume config-hash warning extraction preserved the allow-mismatch warning text while routing formatting through `weiss_rl.training.session`.
+- Trainable main-residual setup message extraction preserved base checkpoint, alpha, hidden_dim, residual mode, and `<zero>` initial-state fallback text while routing formatting through `weiss_rl.training.learner_setup`.
+- Manifest payload helper extraction preserved hardware summary keys, actor-device-layout serialization, evaluation pinning schema, and no-config actor-layout behavior while moving manifest payload construction into `weiss_rl.training.manifest_payloads`.
+- `training_controls` payload extraction preserved profile timer/profiler flags, structured metric modes, teacher/fixed-opponent controls, native rollout controls, and the run-summary-only `max_wall_clock_minutes` field while deduplicating run summary and determinism assembly.
+- Bootstrap hash-validator extraction preserved SHA-256 normalization, empty expected-hash behavior, invalid hash error text, and hash mismatch error text while routing startup hash checks through `weiss_rl.training.bootstrap`.
+- Provenance extraction preserved `WEISS_RL_GIT_COMMIT` override behavior, lowercased git commit normalization, dirty-tree fallback behavior, manifest source-path relativity inside the repo root, absolute source paths outside the repo root, JSON-object-only loading, and 64-bit nonce bounds.
+- Dedicated Ruff formatting was run after the behavioral refactors because `verify_repo.py` explicitly enforces `ruff format --check`; this was kept as a standalone cleanup slice.
+- `train.py --stack-config configs/main_impala_league_server.yaml ...` without `--b1-baseline-run-dir` still fails by design with the required B1 baseline contract. The standalone real-run smoke uses the prerequisite no-league baseline config instead.
+- `configs/*` server stacks keep `system.collection_backend: process`; tiny local ordered smokes need an explicit `system.collection_backend="auto"` override because the process backend is intentionally unsupported for that setup.
+- The installed `weiss_sim 0.8.1` native heuristic rollout API does not accept a profile argument; runtime now detects both API shapes. Runs using an installed two-argument simulator can execute, while future profile-capable simulator builds still receive the configured profile.
+- Structured action-head extraction preserved the old `weiss_rl.model` private shims for `_negative_logits_fill_value`, `_sample_packed_action_scores`, `_uniform_from_seeds`, and `_packed_local_cdf` so existing tests and ad hoc monkeypatches continue to work while the real implementation lives in `structured_action_head.py`.
+- Training parser extraction preserved the training section parser name inside `parse.py` as an imported alias and kept `_TRAINING_PUBLIC_HEURISTIC_PROFILES` available for model parsing.
+- The aspirational roadmap file-size targets are not all met after this pass. Current main hotspots remain `python/weiss_rl/runtime.py` (8167 lines), `python/scripts/train.py` (6746 lines), `python/weiss_rl/learners/impala_learner.py` (5893 lines), and the newly isolated `python/weiss_rl/structured_action_head.py` (3842 lines). `python/weiss_rl/model.py` is now 1279 lines and `python/weiss_rl/config/parse.py` is now 1479 lines; further splits should be risk-managed with performance/artifact baselines rather than rushed as formatting churn.
+
+## Current Best Metrics
+
+- Runtime targeted tests: 118 passed.
+- Full package test suite: 993 passed, 2 skipped.
+- Verification ladder subset: more than 7000 focused tests passed across runtime, stall monitor, snapshot registry, training helpers, config loader, config overrides, wrapper, entrypoints, script-entrypoint smokes, learner, V-trace, training logger, policy set, policy resolution, paper readiness, artifact hygiene, eval packaging, config parsing, runtime batching, training-session lifecycle helpers, bootstrap validation, periodic dev-eval scheduling, startup/scaffold formatting, bootstrap hash validation, resume lifecycle messages, resume config-hash warning, checkpoint-guard final selection, reference-policy attach notices, structured-profiling notices, learner compile setup, trainable main-residual setup text, manifest payload helpers, `training_controls` payloads, training profiling, bootstrap resolution helpers, startup/demo notices, provenance helpers, gate-script CLI help, native rollout API compatibility, structured action-head extraction, and training parser extraction; the latest full verifier run was 993 passed / 2 skipped.
+- File-size improvement checkpoint: `model.py` shrank from about 5101 to 1279 lines; `config/parse.py` shrank from about 2598 to 1479 lines; new ownership modules are `structured_action_head.py` (3842 lines), `model_layers.py` (35 lines), and `config/training_parse.py` (1159 lines).
+- Latest thesis-facing smoke: `thesis_run.py --list-presets` passed; `train.py --stack-config configs/stack_smoke.yaml --run-label refactor_stack_smoke` passed as manifest scaffold only with id64 `9051cda78d253e27` and id256 `273e258da7cd51908fc34baf9b71e1b66153c869872157f2ceae78b873ed6334`.
+- Latest real runtime smoke: no-league baseline one-update CPU run passed with run label `refactor_entrypoint_b1_baseline_smoke_auto`; the canonical league stack startup was also exercised and correctly required `--b1-baseline-run-dir`.
+- Latest public-demo eval packaging smoke: train/eval/figures/readiness fixture entrypoints all passed.
+- Static unreachable-code check: clean after the central ids fix.
+
+## Next Hypotheses
+
+- Artifact-contract docs can now be tightened against `weiss_rl.artifact_contract`; avoid changing readiness payloads until paper-readiness fixture and `artifact-contract` make target stay green.
+- Next structural work should target the remaining large modules in separate baselined slices: runtime hot-path decomposition first, then learner/model modularization, then config parser sections behind golden-hash checks.
+- Keep further large splits behind targeted characterization plus at least Ruff, Vulture, focused tests, and the relevant smoke command; the current green suite is the baseline to protect.
+
+## 2026-04-29 Continuation Cleanup
+
+- Split structured-v2 helper ownership again:
+  - Added `python/weiss_rl/structured_observation.py` for observation-contract construction, card bucketing, pooling, and optional embedding helpers.
+  - Added `python/weiss_rl/structured_sampling.py` for masked softmax, entropy, packed CDF/log-Z, and deterministic sampling helpers.
+  - Kept compatibility private names in `python/weiss_rl/structured_action_head.py` and the older `weiss_rl.model` shims, including monkeypatch-friendly `_sample_packed_action_scores`.
+- Split periodic dev-eval runner ownership out of the training entrypoint:
+  - Added `python/weiss_rl/training/dev_eval_runner.py` for `PeriodicDevEvalRunner`, active-game state, and pending async eval/gate dataclasses.
+  - Kept `python/scripts/train.py::_PeriodicDevEvalRunner` as a thin compatibility adapter so tests/ad hoc scripts that monkeypatch `train_script._build_ids_eval_env` still affect runner construction.
+- Current large-file checkpoint after this continuation:
+  - `python/scripts/train.py`: 5856 lines, down from 6746 at the earlier checkpoint.
+  - `python/weiss_rl/runtime.py`: 7164 lines, down from 8167 before the runtime type/shared-memory split.
+  - `python/weiss_rl/structured_action_head.py`: 3459 lines, with `structured_sampling.py` at 177 lines and `structured_observation.py` at 122 lines.
+  - `python/weiss_rl/learners/impala_learner.py`: 3250 lines, with `learners/impala_helpers.py` at 2391 lines.
+  - `python/weiss_rl/model.py`: 1193 lines.
+  - `python/weiss_rl/config/parse.py`: 1428 lines, with `config/training_parse.py` at 1150 lines.
+- Passed after the continuation slices:
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_contracts.py` (52 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_masking.py python/weiss_rl/tests/test_impala_learner.py python/weiss_rl/tests/test_vtrace.py python/weiss_rl/tests/test_training_logger.py` (121 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "periodic_dev_eval_runner"` (4 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "PendingPeriodicDevEval or PendingPromotionGate or periodic_dev_eval"` (14 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_training_helpers.py` (59 passed).
+  - `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/dev_eval_runner.py python/weiss_rl/structured_action_head.py python/weiss_rl/structured_observation.py python/weiss_rl/structured_sampling.py` (passed after formatting).
+  - `uv run --extra dev python python/scripts/verify_repo.py` (core placeholder gate, Ruff, Ruff format check, mypy, Vulture, full pytest, and thesis wrapper dry-runs; full pytest 993 passed, 2 skipped).
+  - `uv run --extra dev --extra sim python python/scripts/train.py --stack-config configs/baselines/noleague_impala.yaml --run-label refactor_entrypoint_b1_baseline_smoke_auto2 --num-envs 2 --unroll-length 4 --max-updates 1 --runtime-mode train_ordered --device cpu --override 'system.collection_backend="auto"'` (real simulator-backed one-update smoke; loss `0.572921`, policy_loss `0.004541`, value_loss `0.002088`, entropy `0.847337`).
+- Remaining simplification hypotheses:
+  - `runtime.py` is still the largest production hotspot; the next safe slice should move central batched collection policy-row sampling and collector lifecycle orchestration behind characterization tests and a short runtime smoke.
+  - `structured_action_head.py` can still be split by factorized legality/scoring plans, but the latest extraction already isolates generic sampling/observation mechanics and keeps behavior stable.
+  - `impala_helpers.py` is intentionally large after the first learner split; a follow-up can separate packed-policy math from auxiliary teacher metrics once the current green verifier baseline is protected.
+
+## 2026-04-29 Large-File Follow-Up
+
+- Split learner-batch construction out of `python/scripts/train.py`:
+  - Added `python/weiss_rl/training/batch_building.py` for `MinimalRollout`, bootstrap value extraction, V-trace learner-batch assembly, runtime batch collection, PPO/IMPALA algorithm groups, and the actor torch-thread prefetch scope.
+  - Kept `scripts.train.MinimalRollout`, `_bootstrap_values`, `_build_learner_batch`, `_collect_training_batch`, `_collect_training_batch_prefetch`, `_IMPALA_ALGORITHMS`, and `_PPO_ALGORITHMS` compatibility surfaces.
+- Split pure runtime legality batching helpers:
+  - Moved ids/mask requirements, batch legal-action concatenation, packed-row slicing, structured legal-batch construction, and packed-meta slicing helpers into `python/weiss_rl/runtime_batching.py`.
+  - Kept the existing private helper names in `python/weiss_rl/runtime.py` as wrappers for tests and ad hoc imports.
+- Split structured factorized helper containers:
+  - Added `python/weiss_rl/structured_factorized.py` for factorized result/plan dataclasses plus row-index/scatter helpers.
+  - Kept aliases in `structured_action_head.py`; neural scoring code remains behavior-preserving.
+- Split learner packed-legal tensor helpers:
+  - Added `python/weiss_rl/learners/packed_legal.py` for packed row slicing, candidate-position mapping, candidate scatter, and observation-context subsetting.
+  - Kept `ImpalaLearner` private methods as wrappers around the extracted helpers.
+- Current line counts after this follow-up:
+  - `python/scripts/train.py`: 5770 lines.
+  - `python/weiss_rl/runtime.py`: 7120 lines.
+  - `python/weiss_rl/structured_action_head.py`: 3415 lines.
+  - `python/weiss_rl/learners/impala_learner.py`: 3215 lines.
+  - New modules: `training/batch_building.py` 163 lines, `runtime_batching.py` 343 lines, `structured_factorized.py` 57 lines, `learners/packed_legal.py` 80 lines.
+- Passed after the large-file follow-up:
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py -k "build_learner_batch"` (1 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py -k "build_learner_batch or bootstrap_values"` (6 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py -k "concatenate_legal_actions or runtime_batching or gae_advantages"` (5 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py -k "central or structured or ids_offsets"` (15 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_contracts.py -k "factorized or structured_legal_policy"` (15 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_impala_learner.py -k "packed or structured"` (22 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_masking.py python/weiss_rl/tests/test_vtrace.py` (38 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_contracts.py python/weiss_rl/tests/test_impala_learner.py python/weiss_rl/tests/test_masking.py python/weiss_rl/tests/test_vtrace.py` (318 passed).
+  - `uv run --extra dev python -m ruff check python/scripts/train.py python/weiss_rl/training/batch_building.py python/weiss_rl/runtime.py python/weiss_rl/runtime_batching.py python/weiss_rl/structured_action_head.py python/weiss_rl/structured_factorized.py python/weiss_rl/learners/impala_learner.py python/weiss_rl/learners/packed_legal.py` (passed).
+- Next simplification hypotheses:
+  - `train.py` should next lose promotion-gate runner/worker orchestration into `weiss_rl.training.promotion_runner`; it is still a major responsibility island.
+  - `runtime.py` should next split collector command/lifecycle handling from collection hot paths. Keep wrappers until all runtime tests and a one-update smoke pass.
+  - `structured_action_head.py` can next split public-heuristic scoring/bias helpers from candidate neural scoring.
+  - `impala_learner.py` can next split raw-B1 distillation and counterfactual-positive loss blocks, but those are behavior-riskier than the packed-legal helper extraction.
+
+## 2026-04-29 Large-File Follow-Up 2
+
+- Split larger remaining responsibility islands out of the four user-flagged files:
+  - Added `python/weiss_rl/runtime_collectors.py` for actor state, performance logging, collector counters, timeout/timing helpers, process debug/command handling, child collector loop, actor device layout, IPC state-dict serialization, model guidance payloads, and actor compile helpers. `weiss_rl.runtime` still re-exports the existing private names used by tests and scripts.
+  - Added `python/weiss_rl/training/promotion_runner.py` for the promotion-gate game runner core. `python/scripts/train.py::_PromotionGateRunner` is now a thin adapter that injects script-local env/legal-id callbacks so existing monkeypatches keep working.
+  - Added `python/weiss_rl/learners/batch_fields.py` for IMPALA batch-field validation/coercion, packed legal views, V-trace bootstrap helpers, hidden-state/seat-field preparation, and numeric-fault handling.
+  - Added `python/weiss_rl/structured_candidate_features.py` for structured-head candidate component resolution and hand/stage/card feature gathering.
+- Current line counts after this follow-up:
+  - `python/weiss_rl/runtime.py`: 6508 lines; `python/weiss_rl/runtime_collectors.py`: 660 lines.
+  - `python/scripts/train.py`: 5668 lines; `python/weiss_rl/training/promotion_runner.py`: 158 lines.
+  - `python/weiss_rl/structured_action_head.py`: 2532 lines; `python/weiss_rl/structured_candidate_features.py`: 176 lines.
+  - `python/weiss_rl/learners/impala_learner.py`: 2324 lines; `python/weiss_rl/learners/batch_fields.py`: 445 lines.
+- Passed after this follow-up:
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_runtime.py` (120 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_snapshot_registry.py -k "PromotionGateRunner or promotion_gate" python/weiss_rl/tests/test_train_stall_monitor.py -k "eval_snapshot_model_cache or load_snapshot_eval_model or promotion_gate"` (12 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_impala_learner.py python/weiss_rl/tests/test_masking.py python/weiss_rl/tests/test_vtrace.py` (98 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_contracts.py -k "structured_legal_policy or factorized or public_heuristic"` (16 passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_contracts.py python/weiss_rl/tests/test_impala_learner.py python/weiss_rl/tests/test_masking.py python/weiss_rl/tests/test_vtrace.py` (318 passed).
+  - `uv run --extra dev python -m ruff check python tests examples python/scripts` (passed).
+  - `uv run --extra dev python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_thesis_run_wrapper.py python/weiss_rl/tests/test_entrypoints.py python/weiss_rl/tests/test_snapshot_registry.py` (163 passed).
+  - `uv run --extra dev python python/scripts/thesis_run.py --list-presets` (passed).
+  - `uv run --extra dev --extra sim python python/scripts/train.py --stack-config configs/baselines/noleague_impala.yaml --run-label refactor_entrypoint_b1_baseline_smoke_auto4 --num-envs 2 --unroll-length 4 --max-updates 1 --runtime-mode train_ordered --device cpu --override 'system.collection_backend="auto"'` (real simulator-backed one-update smoke; loss `0.572921`, policy_loss `0.004541`, value_loss `0.002088`, entropy `0.847337`).
+  - `uv run --extra dev python python/scripts/verify_repo.py` (core placeholder gate, Ruff, Ruff format check, mypy, Vulture, full pytest, and wrapper dry-runs; full pytest 993 passed, 2 skipped).
+- Next simplification hypotheses:
+  - `runtime.py` remains the largest file because the central batched collection/policy-row hot path is still monolithic; the next safe cut is a `runtime_central_collection.py` mixin after another runtime smoke.
+  - `train.py` remains large mainly because periodic dev-eval async workers, promotion-gate workers, checkpoint guard handling, and the main training loop are still in one script. The next safe train cut is the worker execution layer, keeping Windows-spawn worker functions top-level.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,6 +21,7 @@ from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import StackConfig
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
 from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
+from weiss_rl.eval import policy_resolution as _policy_resolution
 from weiss_rl.eval.harness import (
     EvalGameRunner,
     GameResult,
@@ -51,9 +51,13 @@ from weiss_rl.replay.bundles import (
 from weiss_rl.replay.runner import verify_replay_bundle
 from weiss_rl.repro import canonical_json_bytes, stable_hash64
 
-_LEGACY_B1_POLICY_ID = "b1_noleague_baseline"
 _U64_DENOMINATOR = float(1 << 64)
 _TERMINAL_STAGE_SLOT_WIDTH = 7
+_LEGACY_B1_POLICY_ID = _policy_resolution.LEGACY_B1_POLICY_ID
+_resolve_snapshot_registry_run_dir = _policy_resolution.resolve_snapshot_registry_run_dir
+_unique_paths = _policy_resolution.unique_paths
+_is_recursive_registry_search_root = _policy_resolution.is_recursive_registry_search_root
+_should_include_common_search_root = _policy_resolution.should_include_common_search_root
 
 
 def _coerce_spec_int(value: object, *, context: str) -> int:
@@ -109,7 +113,7 @@ class _TerminalObservationLayout:
     opponent_player: _TerminalPlayerObservationLayout
 
     @classmethod
-    def from_spec_bundle(cls, spec_bundle: Mapping[str, object]) -> "_TerminalObservationLayout":
+    def from_spec_bundle(cls, spec_bundle: Mapping[str, object]) -> _TerminalObservationLayout:
         observation_spec = spec_bundle.get("observation")
         if not isinstance(observation_spec, Mapping):
             raise TypeError("spec_bundle.observation must be a mapping")
@@ -358,210 +362,6 @@ def resolve_eval_policies(
         )
 
     return resolved
-
-
-def _resolve_snapshot_registry_run_dir(
-    *,
-    run_dir: Path,
-    registry_path: Path,
-    registry: SnapshotRegistry,
-    policy_ids: list[str],
-) -> Path:
-    resolved_run_dir = Path(run_dir).resolve()
-    resolved_registry_path = Path(registry_path).resolve()
-    resolution_snapshots = _snapshot_registry_resolution_snapshots(registry=registry, policy_ids=policy_ids)
-    canonical_candidate = _canonical_snapshot_registry_run_dir(resolved_registry_path)
-    canonical_search_root: Path | None = None
-    if canonical_candidate is not None:
-        if not resolution_snapshots or _run_dir_contains_registry_snapshots(canonical_candidate, resolution_snapshots):
-            return canonical_candidate
-        canonical_search_root = canonical_candidate.parent
-    if not resolution_snapshots:
-        return resolved_run_dir
-
-    candidate_run_dirs: list[Path] = []
-    for candidate in [resolved_run_dir, resolved_registry_path.parent, *resolved_registry_path.parents]:
-        if _run_dir_matches_registry_snapshots(candidate, resolution_snapshots):
-            candidate_run_dirs.append(candidate.resolve())
-    search_roots = [resolved_run_dir.parent, resolved_registry_path.parent]
-    if canonical_search_root is not None:
-        search_roots.append(canonical_search_root)
-        canonical_common_search_root = _common_search_root([resolved_run_dir, canonical_candidate])
-        if canonical_common_search_root is not None and _is_recursive_registry_search_root(
-            canonical_common_search_root
-        ):
-            search_roots.append(canonical_common_search_root)
-    common_search_root = _common_search_root([resolved_run_dir, resolved_registry_path])
-    if (
-        common_search_root is not None
-        and _is_recursive_registry_search_root(common_search_root)
-        and _should_include_common_search_root(search_roots=search_roots, common_search_root=common_search_root)
-    ):
-        search_roots.append(common_search_root)
-    for search_root in _unique_paths(
-        [search_root for search_root in search_roots if _is_recursive_registry_search_root(search_root)]
-    ):
-        candidate_run_dirs.extend(
-            _discover_snapshot_registry_run_dirs(
-                search_root=search_root,
-                snapshots=resolution_snapshots,
-            )
-        )
-
-    unique_candidates = _unique_paths(candidate_run_dirs)
-    if len(unique_candidates) == 1:
-        return unique_candidates[0]
-    if len(unique_candidates) > 1:
-        if any(candidate == resolved_run_dir for candidate in unique_candidates):
-            return resolved_run_dir
-        matches = ", ".join(candidate.as_posix() for candidate in unique_candidates)
-        raise RuntimeError(
-            "Could not uniquely resolve the source run for snapshot registry "
-            f"{resolved_registry_path}; matching run directories: {matches}"
-        )
-    raise FileNotFoundError(
-        "Could not resolve the source run for snapshot registry "
-        f"{resolved_registry_path}. Provide the canonical <run>/training/snapshots/registry.json path "
-        "or place the copied registry next to matching snapshot artifacts."
-    )
-
-
-def _canonical_snapshot_registry_run_dir(registry_path: Path) -> Path | None:
-    resolved_registry_path = Path(registry_path).resolve()
-    if resolved_registry_path.parts[-3:] != ("training", "snapshots", "registry.json"):
-        return None
-    return resolved_registry_path.parent.parent.parent
-
-
-def _snapshot_registry_resolution_snapshots(
-    *,
-    registry: SnapshotRegistry,
-    policy_ids: list[str],
-) -> list[SnapshotMeta]:
-    snapshots_by_policy_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
-    requested_snapshots: list[SnapshotMeta] = []
-    seen_policy_ids: set[str] = set()
-
-    def _append_snapshot(policy_id: str) -> None:
-        snapshot = snapshots_by_policy_id.get(policy_id)
-        if snapshot is None or snapshot.policy_id in seen_policy_ids:
-            return
-        requested_snapshots.append(snapshot)
-        seen_policy_ids.add(snapshot.policy_id)
-
-    for policy_id in policy_ids:
-        _append_snapshot(policy_id)
-    if NO_LEAGUE_POLICY_ID in policy_ids:
-        _append_snapshot(_LEGACY_B1_POLICY_ID)
-    if requested_snapshots:
-        return requested_snapshots
-    return _spaced_snapshot_resolution_samples(registry.snapshots)
-
-
-def _spaced_snapshot_resolution_samples(snapshots: list[SnapshotMeta]) -> list[SnapshotMeta]:
-    if len(snapshots) <= 3:
-        return list(snapshots)
-    middle_index = len(snapshots) // 2
-    return [
-        snapshots[0],
-        snapshots[middle_index],
-        snapshots[-1],
-    ]
-
-
-def _discover_snapshot_registry_run_dirs(
-    *,
-    search_root: Path,
-    snapshots: list[SnapshotMeta],
-) -> list[Path]:
-    resolved_search_root = Path(search_root).resolve()
-    if not resolved_search_root.is_dir() or not snapshots:
-        return []
-    first_snapshot = snapshots[0]
-    pattern = f"**/training/snapshots/{first_snapshot.policy_id}/weights.pt"
-    candidates: list[Path] = []
-    for weights_path in resolved_search_root.glob(pattern):
-        candidate_run_dir = weights_path.parent.parent.parent.parent
-        if _run_dir_matches_registry_snapshots(candidate_run_dir, snapshots):
-            candidates.append(candidate_run_dir.resolve())
-    return _unique_paths(candidates)
-
-
-def _run_dir_matches_registry_snapshots(
-    candidate_run_dir: Path,
-    snapshots: list[SnapshotMeta],
-) -> bool:
-    resolved_candidate = Path(candidate_run_dir).resolve()
-    for snapshot in snapshots:
-        weights_path = resolved_candidate / snapshot.path
-        if not weights_path.is_file():
-            return False
-        expected_sha256 = str(snapshot.weights_sha256).strip().lower()
-        if expected_sha256 and _sha256_file(weights_path) != expected_sha256:
-            return False
-    return True
-
-
-def _run_dir_contains_registry_snapshots(
-    candidate_run_dir: Path,
-    snapshots: list[SnapshotMeta],
-) -> bool:
-    resolved_candidate = Path(candidate_run_dir).resolve()
-    for snapshot in snapshots:
-        if not (resolved_candidate / snapshot.path).is_file():
-            return False
-    return True
-
-
-def _sha256_file(path: Path) -> str:
-    hasher = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def _unique_paths(paths: list[Path]) -> list[Path]:
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for path in paths:
-        resolved = Path(path).resolve()
-        key = resolved.as_posix()
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(resolved)
-    return unique
-
-
-def _common_search_root(paths: list[Path]) -> Path | None:
-    resolved_paths = [Path(path).resolve() for path in paths]
-    if not resolved_paths:
-        return None
-    common_parts = list(resolved_paths[0].parts)
-    for path in resolved_paths[1:]:
-        shared_prefix_len = 0
-        for left, right in zip(common_parts, path.parts, strict=False):
-            if left != right:
-                break
-            shared_prefix_len += 1
-        common_parts = common_parts[:shared_prefix_len]
-        if not common_parts:
-            return None
-    return Path(*common_parts)
-
-
-def _is_recursive_registry_search_root(path: Path) -> bool:
-    resolved_path = Path(path).resolve()
-    anchor = resolved_path.anchor
-    if anchor and resolved_path == Path(anchor):
-        return False
-    return True
-
-
-def _should_include_common_search_root(*, search_roots: list[Path], common_search_root: Path) -> bool:
-    resolved_common_search_root = Path(common_search_root).resolve()
-    return all(Path(search_root).resolve().parent == resolved_common_search_root for search_root in search_roots)
 
 
 class SimulatorEvalRunner(EvalGameRunner):

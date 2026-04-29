@@ -201,5 +201,3 @@ def test_make_env_pool_from_config_adapts_curriculum_for_high_level_api(monkeypa
     assert captured["mode"] == "fast"
     assert captured["curriculum"] == {"max_no_progress_decisions": 192}
     assert captured["reward_json"] == '{"terminal_win": 1.0}'
-
-

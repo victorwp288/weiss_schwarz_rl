@@ -71,6 +71,13 @@ def test_thesis_run_wrapper_defaults_to_thesis_model_preset_when_stack_config_is
     assert payload["stack_config"].endswith("configs/main_impala_league_server.yaml")
     assert payload["eval_preset"] == "thesis-model-eval-auto-gpu"
     assert payload["eval_stack_config"].endswith("configs/main_eval.yaml")
+    assert payload["server_defaults_applied"] is True
+    command = payload["steps"][0]["command"]
+    assert "--autoscale" in command
+    assert command[command.index("--hardware-profile") + 1] == "local"
+    assert command[command.index("--runtime-mode") + 1] == "train_async_fast"
+    assert command[command.index("--unroll-length") + 1] == "64"
+    assert command[command.index("--max-updates") + 1] == "400"
     assert len(payload["steps"]) == 2
 
 
@@ -175,9 +182,7 @@ def test_thesis_run_wrapper_defaults_to_multideck_eval_surface_for_multideck_pre
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["preset"] == "thesis-model-multideck"
     assert payload["eval_preset"] == "thesis-model-multideck-eval-auto-gpu"
-    assert payload["eval_stack_config"].endswith(
-        "configs/ablations/multideck_eval.yaml"
-    )
+    assert payload["eval_stack_config"].endswith("configs/ablations/multideck_eval.yaml")
 
 
 def test_thesis_run_wrapper_defaults_to_gpu_eval_surface_for_thesis_model_auto_gpu_preset(
@@ -241,9 +246,7 @@ def test_thesis_run_wrapper_defaults_to_gpu_eval_surface_for_server_train_preset
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["preset"] == "thesis-model-server-train"
     assert payload["eval_preset"] == "thesis-model-eval-auto-gpu"
-    assert payload["stack_config"].endswith(
-        "configs/main_impala_league_server.yaml"
-    )
+    assert payload["stack_config"].endswith("configs/main_impala_league_server.yaml")
     assert payload["eval_stack_config"].endswith("configs/main_eval.yaml")
 
 
@@ -275,12 +278,8 @@ def test_thesis_run_wrapper_defaults_b1_anchor_benchmark_to_matching_eval_surfac
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["preset"] == "b1-anchor-benchmark"
     assert payload["eval_preset"] == "b1-anchor-benchmark-eval-auto-gpu"
-    assert payload["stack_config"].endswith(
-        "configs/baselines/noleague_benchmark.yaml"
-    )
-    assert payload["eval_stack_config"].endswith(
-        "configs/baselines/noleague_benchmark_eval.yaml"
-    )
+    assert payload["stack_config"].endswith("configs/baselines/noleague_benchmark.yaml")
+    assert payload["eval_stack_config"].endswith("configs/baselines/noleague_benchmark_eval.yaml")
 
 
 def test_thesis_run_wrapper_defaults_b1_anchor_phase_presets_to_matching_eval_surface(tmp_path: Path) -> None:
@@ -323,9 +322,7 @@ def test_thesis_run_wrapper_defaults_b1_anchor_phase_presets_to_matching_eval_su
         assert payload["preset"] == preset
         assert payload["eval_preset"] == "b1-anchor-benchmark-eval-auto-gpu"
         assert payload["stack_config"].endswith(expected_train_suffix)
-        assert payload["eval_stack_config"].endswith(
-            "configs/baselines/noleague_benchmark_eval.yaml"
-        )
+        assert payload["eval_stack_config"].endswith("configs/baselines/noleague_benchmark_eval.yaml")
 
 
 def test_thesis_run_wrapper_defaults_fullsize_b1_and_b1anchored_league_presets_to_main_eval_surface(
@@ -441,9 +438,7 @@ def test_thesis_run_wrapper_defaults_b1anchored_benchmark_league_to_benchmark_ev
         assert payload["preset"] == preset
         assert payload["eval_preset"] == "b1-anchor-benchmark-eval-auto-gpu"
         assert payload["stack_config"].endswith(expected_train_suffix)
-        assert payload["eval_stack_config"].endswith(
-            "configs/baselines/noleague_benchmark_eval.yaml"
-        )
+        assert payload["eval_stack_config"].endswith("configs/baselines/noleague_benchmark_eval.yaml")
 
 
 def test_thesis_run_wrapper_defaults_ablations_to_matching_eval_surfaces(tmp_path: Path) -> None:
@@ -671,3 +666,93 @@ def test_thesis_run_wrapper_forwards_max_wall_clock_minutes_to_train(tmp_path: P
     assert payload["max_wall_clock_minutes"] == 7.5
     assert "--max-wall-clock-minutes" in payload["steps"][0]["command"]
     assert "7.5" in payload["steps"][0]["command"]
+
+
+def test_thesis_run_wrapper_can_build_torchrun_autoscale_train_command(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "configs").mkdir(parents=True, exist_ok=True)
+    stack_config = repo_root / "configs" / "stack.yaml"
+    stack_config.write_text("components: []\nconfig: {}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            "--repo-root",
+            str(repo_root),
+            "--stack-config",
+            str(stack_config),
+            "--run-label",
+            "server_ddp_plan",
+            "--torchrun-nproc",
+            "4",
+            "--autoscale",
+            "--hardware-profile",
+            "gpu4",
+            "--ddp-backend",
+            "nccl",
+            "--ddp-timeout-seconds",
+            "2400",
+            "--dry-run",
+            "--skip-compare",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads((repo_root / "runs" / "_wrapper_plans" / "server_ddp_plan.json").read_text(encoding="utf-8"))
+    command = payload["steps"][0]["command"]
+    assert command[1:7] == [
+        "-m",
+        "torch.distributed.run",
+        "--standalone",
+        "--nproc_per_node",
+        "4",
+        "python/scripts/train.py",
+    ]
+    assert "--autoscale" in command
+    assert "--num-envs" not in command
+    assert "--ddp" in command
+    assert command[command.index("--hardware-profile") + 1] == "gpu4"
+    assert command[command.index("--ddp-backend") + 1] == "nccl"
+    assert command[command.index("--ddp-timeout-seconds") + 1] == "2400"
+    assert payload["torchrun_nproc"] == 4
+    assert payload["ddp"] is True
+    assert payload["ddp_timeout_seconds"] == 2400
+
+
+def test_thesis_run_wrapper_autoscale_dry_run_skips_eval_plan(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "configs").mkdir(parents=True, exist_ok=True)
+    stack_config = repo_root / "configs" / "stack.yaml"
+    stack_config.write_text("components: []\nconfig: {}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            "--repo-root",
+            str(repo_root),
+            "--stack-config",
+            str(stack_config),
+            "--run-label",
+            "autoscale_only_plan",
+            "--autoscale-dry-run",
+            "--hardware-profile",
+            "gpu4",
+            "--dry-run",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads((repo_root / "runs" / "_wrapper_plans" / "autoscale_only_plan.json").read_text(encoding="utf-8"))
+    assert len(payload["steps"]) == 1
+    assert "--autoscale-dry-run" in payload["steps"][0]["command"]
+    assert payload["autoscale_dry_run"] is True

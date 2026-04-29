@@ -18,31 +18,28 @@ import argparse
 import json
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import yaml
-
 from weiss_rl.config import load_stack_config
-
 
 DEFAULT_BASE_STACK_CONFIG = "configs/residual_league_s1_server.yaml"
 DEFAULT_EVAL_STACK_CONFIG = "configs/residual_eval_s1.yaml"
 DEFAULT_RUN_DIR = "runs/b1_s1_distillonly_u450_to_u455_20260427"
 DEFAULT_B1_BASELINE_RUN_DIR = "runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425"
 DEFAULT_B1_CHECKPOINT = (
-    "runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/"
-    "training/checkpoints/checkpoint_450.pt"
+    "runs/b1_continue_u100_trainheurrows_lowlr_u450_s3_20260425/training/checkpoints/checkpoint_450.pt"
 )
 DEFAULT_INITIAL_RESIDUAL = (
     "runs/b1_s1_distillonly_u450_to_u455_20260427/"
     "eval/b1_residual_adoption_probe_rush_trainlive_mine1_20260428a/residual_state.pt"
 )
 DEFAULT_LABEL_DIR = (
-    "runs/b1_s1_distillonly_u450_to_u455_20260427/"
-    "eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427"
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427"
 )
 
 
@@ -142,12 +139,16 @@ def _promotion_passes(
 ) -> bool:
     if float(focal.get("residual_mean", 0.0)) < float(promote_threshold):
         return False
-    if require_positive_pair_score and int(focal.get("residual_2_0_pairs", 0)) <= int(focal.get("residual_0_2_pairs", 0)):
+    if require_positive_pair_score and int(focal.get("residual_2_0_pairs", 0)) <= int(
+        focal.get("residual_0_2_pairs", 0)
+    ):
         return False
     if reverse is not None:
         if float(reverse.get("residual_mean", 0.0)) < float(promote_threshold):
             return False
-        if require_positive_pair_score and int(reverse.get("residual_2_0_pairs", 0)) <= int(reverse.get("residual_0_2_pairs", 0)):
+        if require_positive_pair_score and int(reverse.get("residual_2_0_pairs", 0)) <= int(
+            reverse.get("residual_0_2_pairs", 0)
+        ):
             return False
     return True
 
@@ -306,7 +307,7 @@ def main() -> None:
             "--runtime-mode",
             "train_ordered",
             "--override",
-            "system.collection_backend=\"auto\"",
+            'system.collection_backend="auto"',
             "--b1-baseline-run-dir",
             args.b1_baseline_run_dir,
         ]
@@ -368,7 +369,9 @@ def main() -> None:
 
         focal_artifact = ""
         reverse_artifact = ""
-        should_confirm = bool(args.dry_run) or float(screen_score.get("residual_mean", 0.0)) >= float(args.promote_threshold)
+        should_confirm = bool(args.dry_run) or float(screen_score.get("residual_mean", 0.0)) >= float(
+            args.promote_threshold
+        )
         if should_confirm:
             focal_artifact = f"b1_residual_league_{iter_tag}_confirm_focal_p{int(args.confirm_pairs)}"
             confirm_cmd = [
@@ -462,7 +465,11 @@ def main() -> None:
                 best_state = str(residual_state)
             if promote:
                 policy_id = f"b1_residual_auto_{args.tag}_iter{index:02d}"
-                role = "b1_residual_auto_confirmed_hard_negative" if confirm else "b1_residual_auto_provisional_hard_negative"
+                role = (
+                    "b1_residual_auto_confirmed_hard_negative"
+                    if confirm
+                    else "b1_residual_auto_provisional_hard_negative"
+                )
                 opponents.append(
                     ResidualOpponent(
                         policy_id=policy_id,
@@ -521,4 +528,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -59,9 +59,7 @@ def test_load_stack_config_rejects_non_fail_fast_component_policies(
     fake_repo = _temp_repo(tmp_path)
     stack_path = fake_repo / "configs" / "typed_thesis_locked.yaml"
     stack_path.write_text(
-        (repo_root / "configs/thesis_locked.yaml")
-        .read_text(encoding="utf-8")
-        .replace(needle, replacement, 1),
+        (repo_root / "configs/thesis_locked.yaml").read_text(encoding="utf-8").replace(needle, replacement, 1),
         encoding="utf-8",
     )
 
@@ -80,5 +78,3 @@ def test_load_stack_config_rejects_string_boolean_flags(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="must be a boolean"):
         load_stack_config(stack_path)
-
-

@@ -31,6 +31,13 @@ def main() -> None:
     parser.add_argument("--max-updates", type=int, default=None)
     parser.add_argument("--max-wall-clock-minutes", type=float, default=None)
     parser.add_argument("--runtime-mode", default=None)
+    parser.add_argument("--autoscale", action="store_true")
+    parser.add_argument("--autoscale-dry-run", action="store_true")
+    parser.add_argument("--hardware-profile", default=None)
+    parser.add_argument("--torchrun-nproc", type=int, default=0)
+    parser.add_argument("--ddp", action="store_true")
+    parser.add_argument("--ddp-backend", default=None)
+    parser.add_argument("--ddp-timeout-seconds", type=int, default=None)
     parser.add_argument("--sample-interval-seconds", type=float, default=2.0)
     parser.add_argument(
         "--python-executable", default=None, help="Optional python executable. Defaults to sys.executable."
@@ -56,14 +63,27 @@ def main() -> None:
     telemetry_path = run_dir / "job_telemetry.jsonl"
     summary_path = run_dir / "job_telemetry_summary.json"
 
-    command = [
-        args.python_executable or sys.executable,
-        "python/scripts/train.py",
-        "--stack-config",
-        args.stack_config,
-        "--run-label",
-        args.run_label,
-    ]
+    python_executable = args.python_executable or sys.executable
+    command = [python_executable]
+    if int(args.torchrun_nproc) > 0:
+        command.extend(
+            [
+                "-m",
+                "torch.distributed.run",
+                "--standalone",
+                "--nproc_per_node",
+                str(int(args.torchrun_nproc)),
+            ]
+        )
+    command.extend(
+        [
+            "python/scripts/train.py",
+            "--stack-config",
+            args.stack_config,
+            "--run-label",
+            args.run_label,
+        ]
+    )
     if args.device:
         command.extend(["--device", args.device])
     if args.profile:
@@ -80,6 +100,18 @@ def main() -> None:
         command.extend(["--max-wall-clock-minutes", str(args.max_wall_clock_minutes)])
     if args.runtime_mode:
         command.extend(["--runtime-mode", args.runtime_mode])
+    if args.autoscale:
+        command.append("--autoscale")
+    if args.autoscale_dry_run:
+        command.append("--autoscale-dry-run")
+    if args.hardware_profile:
+        command.extend(["--hardware-profile", args.hardware_profile])
+    if args.ddp or int(args.torchrun_nproc) > 0:
+        command.append("--ddp")
+    if args.ddp_backend:
+        command.extend(["--ddp-backend", args.ddp_backend])
+    if args.ddp_timeout_seconds is not None:
+        command.extend(["--ddp-timeout-seconds", str(args.ddp_timeout_seconds)])
     for override in args.config_override or []:
         command.extend(["--override", override])
     command.extend(args.train_arg or [])

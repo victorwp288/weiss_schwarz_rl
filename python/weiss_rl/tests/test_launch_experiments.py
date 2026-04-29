@@ -79,7 +79,8 @@ def test_execute_launch_plan_raises_when_any_job_fails(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="failed with 1 job"):
         execute_launch_plan(repo_root=repo_root, plan=plan, dry_run=False)
 
-    payload = json.loads((repo_root / "runs" / "launch_groups" / "bench_fail" / "summary.json").read_text(encoding="utf-8"))
+    payload = json.loads(
+        (repo_root / "runs" / "launch_groups" / "bench_fail" / "summary.json").read_text(encoding="utf-8")
+    )
     assert payload["status"] == "failed"
     assert payload["failed_job_count"] == 1
-

@@ -107,6 +107,7 @@ class PpoLiteLearner(ImpalaLearner):
             loss, loss_metrics, loss_context = self._loss_and_metrics_with_context(batch)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            self._sync_gradients_if_needed()
             grad_norm = clip_grad_norm_(self.model.parameters(), self.grad_norm_clip)
             self._ensure_finite_gradients(batch=batch, context=loss_context, grad_norm=grad_norm)
             optimizer.step()

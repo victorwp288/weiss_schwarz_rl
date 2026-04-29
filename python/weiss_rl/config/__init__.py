@@ -58,11 +58,11 @@ from .models import (
     TrainingPrecisionConfig,
     TrainingResidualOpponentPolicyConfig,
     TrainingRolloutConfig,
+    TrainingScalingConfig,
     TrainingStructuredAuxConfig,
     TrainingStructuredMetricsConfig,
     TrainingStructuredWarmstartConfig,
     TrainingTeacherAuxConfig,
-    TrainingScalingConfig,
     TrainingVTraceConfig,
 )
 from .overrides import apply_stack_overrides, parse_override_tokens

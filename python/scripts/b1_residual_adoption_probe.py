@@ -10,13 +10,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import torch
-from torch import Tensor
 import torch.nn.functional as F
-
+from torch import Tensor
 from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.residual_policy import FrozenStoredLogitResidual
 
@@ -126,8 +126,12 @@ def _prob_and_top(model: FrozenStoredLogitResidual, record: Mapping[str, Any]) -
         "baseline_probability": float(probs[base_index].detach().cpu().item()),
         "base_positive_probability": float(base_probs[pos_index].detach().cpu().item()),
         "base_baseline_probability": float(base_probs[base_index].detach().cpu().item()),
-        "positive_minus_baseline_logit_margin": float((legal_logits[pos_index] - legal_logits[base_index]).detach().cpu().item()),
-        "base_positive_minus_baseline_logit_margin": float((base_logits[pos_index] - base_logits[base_index]).detach().cpu().item()),
+        "positive_minus_baseline_logit_margin": float(
+            (legal_logits[pos_index] - legal_logits[base_index]).detach().cpu().item()
+        ),
+        "base_positive_minus_baseline_logit_margin": float(
+            (base_logits[pos_index] - base_logits[base_index]).detach().cpu().item()
+        ),
         "top_action_id": int(legal_ids[int(torch.argmax(legal_logits).item())].detach().cpu().item()),
         "base_top_action_id": int(legal_ids[int(torch.argmax(base_logits).item())].detach().cpu().item()),
         "residual_l2_norm_legal": float(torch.linalg.vector_norm(residual_legal.detach()).cpu().item()),
@@ -153,7 +157,9 @@ def _train_step(
     base_index = _label_index(legal_ids, baseline_id)
     label_weight = float(torch.as_tensor(record.get("label_weight", 1.0)).item())
     ce = -F.log_softmax(legal_logits, dim=-1)[pos_index] * label_weight
-    margin_loss = F.relu(torch.tensor(float(margin), device=legal_logits.device) - legal_logits[pos_index] + legal_logits[base_index])
+    margin_loss = F.relu(
+        torch.tensor(float(margin), device=legal_logits.device) - legal_logits[pos_index] + legal_logits[base_index]
+    )
     residual_l2 = torch.mean(residual_legal * residual_legal)
     return ce + 0.2 * margin_loss * label_weight + float(residual_l2_coef) * residual_l2
 
@@ -197,7 +203,9 @@ def _adoption_summary(records: Sequence[Mapping[str, Any]], metrics: Sequence[Ma
     }
 
 
-def _split_records(records: Sequence[dict[str, Any]], *, validation_fraction: float) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _split_records(
+    records: Sequence[dict[str, Any]], *, validation_fraction: float
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     fraction = float(validation_fraction)
     if fraction <= 0.0 or len(records) < 2:
         return list(records), []
@@ -319,7 +327,9 @@ def main() -> None:
     train_indices = {id(record) for record in train_records}
     validation_indices = {id(record) for record in validation_records}
     train_after = [metric for record, metric in zip(records, after_metrics, strict=True) if id(record) in train_indices]
-    validation_after = [metric for record, metric in zip(records, after_metrics, strict=True) if id(record) in validation_indices]
+    validation_after = [
+        metric for record, metric in zip(records, after_metrics, strict=True) if id(record) in validation_indices
+    ]
     train_adoption = _adoption_summary(train_records, train_after)
     validation_adoption = _adoption_summary(validation_records, validation_after) if validation_records else None
 

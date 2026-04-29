@@ -21,10 +21,14 @@ This is the frozen training and evaluation surface for the thesis-model run.
 Bootstrap that baseline once with the matching model/environment surface:
 
 ```bash
-uv run python python/scripts/train.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 uv run python -m torch.distributed.run --standalone --nproc_per_node=4 \
+  python/scripts/train.py \
   --stack-config configs/baselines/noleague_impala.yaml \
+  --autoscale \
+  --hardware-profile local \
+  --ddp \
+  --ddp-backend nccl \
   --run-label b1_anchor_thesis_model_seed1 \
-  --num-envs 2048 \
   --unroll-length 64 \
   --runtime-mode train_async_fast \
   --max-updates 200
@@ -41,11 +45,35 @@ uv run python python/scripts/thesis_run.py --list-presets
 Launch the canonical training recipe:
 
 ```bash
+uv run python -m torch.distributed.run --standalone --nproc_per_node=4 \
+  python/scripts/train.py \
+  --stack-config configs/main_impala_league_server.yaml \
+  --autoscale \
+  --hardware-profile local \
+  --ddp \
+  --ddp-backend nccl \
+  --ddp-timeout-seconds 1800 \
+  --run-label thesis_model_seed1 \
+  --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 \
+  --unroll-length 64 \
+  --runtime-mode train_async_fast \
+  --max-updates 400
+```
+
+Set `--nproc_per_node` to the number of learner GPUs exposed through `CUDA_VISIBLE_DEVICES`. Autoscale now fails early if the DDP world size does not match the resolved learner GPU count.
+
+The wrapper can generate or launch the same server command:
+
+```bash
 uv run python python/scripts/thesis_run.py \
   --preset thesis-model-auto-gpu \
   --run-label thesis_model_seed1 \
   --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 \
-  --num-envs 2048 \
+  --torchrun-nproc 4 \
+  --autoscale \
+  --hardware-profile local \
+  --ddp-backend nccl \
+  --ddp-timeout-seconds 1800 \
   --unroll-length 64 \
   --runtime-mode train_async_fast \
   --max-updates 400 \
@@ -54,7 +82,9 @@ uv run python python/scripts/thesis_run.py \
 
 That wrapper call trains with `thesis-model-auto-gpu` and, by default, evaluates with `thesis-model-eval-auto-gpu`.
 
-`thesis-model-auto-gpu` uses `learner_device: cuda:auto`, `actor_device: cuda:auto`, and `collection_backend: process`. On a 2+ GPU node that means the learner takes one GPU and the process collectors round-robin actor inference across the remaining visible GPUs.
+When the wrapper uses one of the server training presets without a custom `--stack-config`, it now applies server defaults for `--autoscale`, `--hardware-profile local`, `--unroll-length 64`, `--runtime-mode train_async_fast`, and `--max-updates 400` unless those flags are explicitly supplied. You still need `--torchrun-nproc <gpu_count>` for a real multi-GPU launch.
+
+`thesis-model-auto-gpu` uses `learner_device: cuda:auto`, `actor_device: cuda:auto`, and `collection_backend: process`. In the DDP server path each rank maps the learner and its local actor collectors to `cuda:LOCAL_RANK`; autoscale divides actors, envs, batch unrolls, and queue capacity across ranks.
 
 Run the richer final thesis evaluation on an existing run:
 
@@ -121,11 +151,11 @@ These are the most defensible next ablations around the current best recipe.
 Suggested wrapper invocations:
 
 ```bash
-uv run python python/scripts/thesis_run.py --preset ablate-no-tactical-bias --run-label ablate_no_tactical_bias_seed1 --b1-baseline-run-dir runs/<matching_b1_run> --device cuda --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset ablate-teacher-fade --run-label ablate_teacher_fade_seed1 --b1-baseline-run-dir runs/<matching_b1_run> --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset ablate-no-b1-cutoff --run-label ablate_no_b1_cutoff_seed1 --b1-baseline-run-dir runs/<matching_b1_run> --device cuda --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset ablate-reward-shaping --run-label ablate_reward_shaping_seed1 --b1-baseline-run-dir runs/<matching_b1_run> --device cuda --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset thesis-model-multideck --run-label ablate_multideck_seed1 --b1-baseline-run-dir runs/<matching_multideck_b1_run> --device cuda --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset ablate-no-tactical-bias --run-label ablate_no_tactical_bias_seed1 --b1-baseline-run-dir runs/<matching_b1_run> --torchrun-nproc 4 --autoscale --hardware-profile local --ddp-backend nccl --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset ablate-teacher-fade --run-label ablate_teacher_fade_seed1 --b1-baseline-run-dir runs/<matching_b1_run> --torchrun-nproc 4 --autoscale --hardware-profile local --ddp-backend nccl --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset ablate-no-b1-cutoff --run-label ablate_no_b1_cutoff_seed1 --b1-baseline-run-dir runs/<matching_b1_run> --torchrun-nproc 4 --autoscale --hardware-profile local --ddp-backend nccl --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset ablate-reward-shaping --run-label ablate_reward_shaping_seed1 --b1-baseline-run-dir runs/<matching_b1_run> --torchrun-nproc 4 --autoscale --hardware-profile local --ddp-backend nccl --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset thesis-model-multideck --run-label ablate_multideck_seed1 --b1-baseline-run-dir runs/<matching_multideck_b1_run> --torchrun-nproc 4 --autoscale --hardware-profile local --ddp-backend nccl --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
 ```
 
 ## What Still Matters

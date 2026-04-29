@@ -200,9 +200,7 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
                     "count": 2,
                 }
             ],
-            "mismatched_family_pair_counts": [
-                {"policy_a_family": "attack", "policy_b_family": "pass", "count": 2}
-            ],
+            "mismatched_family_pair_counts": [{"policy_a_family": "attack", "policy_b_family": "pass", "count": 2}],
             "policy_a_action_label_counts": [
                 {"action_label": "attack(slot=0, attack_type=direct)", "count": 3},
                 {"action_label": "clock_from_hand(hand_index=0)", "count": 1},
@@ -347,9 +345,7 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
     assert summary["variation_by_outcome"][0]["outcome"] == "L"
     assert summary["variation_by_outcome"][0]["mean_total_variation"] == pytest.approx(0.4)
     assert summary["policy_alignment_by_outcome"][0]["outcome"] == "L"
-    assert summary["policy_alignment_by_outcome"][0]["policy_a_matches_policy_b_top_action_rate"] == pytest.approx(
-        0.25
-    )
+    assert summary["policy_alignment_by_outcome"][0]["policy_a_matches_policy_b_top_action_rate"] == pytest.approx(0.25)
     assert summary["policy_alignment_by_outcome"][1]["policy_a_mean_probability_on_policy_b_top_action"] == (
         pytest.approx(0.2)
     )

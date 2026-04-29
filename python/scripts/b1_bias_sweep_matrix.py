@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 _DEFAULT_MATCHUPS = (
     "B1=u480",
     "u480=B1",

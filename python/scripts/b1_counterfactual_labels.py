@@ -11,9 +11,10 @@ import json
 import random
 import subprocess
 import sys
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 import b1_artifact_matrix as matrix
 import torch
@@ -100,7 +101,9 @@ def _load_excluded_label_keys(paths: Sequence[Path]) -> tuple[set[int], set[str]
             positive_id = row.get("positive_action_id", tensor_record.get("positive_action_id"))
             try:
                 if baseline_id is not None and positive_id is not None:
-                    action_pairs.add((int(torch.as_tensor(baseline_id).item()), int(torch.as_tensor(positive_id).item())))
+                    action_pairs.add(
+                        (int(torch.as_tensor(baseline_id).item()), int(torch.as_tensor(positive_id).item()))
+                    )
             except (TypeError, ValueError, RuntimeError):
                 pass
     return pair_indices, fingerprints, action_pairs
@@ -297,7 +300,9 @@ def _write_in_process_load_manifest(
         },
     }
     matrix._write_json(matrix_dir / "policy_load_manifest.json", payload)
-    matrix._write_json(matrix_dir / "resolved_policies.json", {key: policy.to_manifest_dict() for key, policy in ctx.policies.items()})
+    matrix._write_json(
+        matrix_dir / "resolved_policies.json", {key: policy.to_manifest_dict() for key, policy in ctx.policies.items()}
+    )
 
 
 def _run_matrix_in_process(
@@ -653,7 +658,9 @@ def _candidate_actions(
     action_catalog: Any | None,
     family_representatives_per_family: int,
 ) -> list[dict[str, Any]]:
-    selected = _action_id(trace_row.get("selected_action", {}) if isinstance(trace_row.get("selected_action"), Mapping) else {})
+    selected = _action_id(
+        trace_row.get("selected_action", {}) if isinstance(trace_row.get("selected_action"), Mapping) else {}
+    )
     legal_ids = trace_row.get("legal_ids")
     legal_set = {int(item) for item in legal_ids} if isinstance(legal_ids, Sequence) else set()
     candidates: dict[int, dict[str, Any]] = {}
@@ -679,7 +686,11 @@ def _candidate_actions(
         if logit is not None:
             existing["candidate_logits"][source] = float(logit)
 
-    if pass_action_id is not None and isinstance(legal_ids, Sequence) and int(pass_action_id) in {int(item) for item in legal_ids}:
+    if (
+        pass_action_id is not None
+        and isinstance(legal_ids, Sequence)
+        and int(pass_action_id) in {int(item) for item in legal_ids}
+    ):
         add_candidate(int(pass_action_id), source="pass_alternative")
     for key in ("raw_topk_no_public_bias", "final_topk"):
         items = trace_row.get(key)
@@ -723,7 +734,11 @@ def _candidate_actions(
         sources = item.get("candidate_sources", [])
         ranks = item.get("candidate_source_ranks", {})
         best_source_score = min(source_priority.get(str(source), 99) for source in sources) if sources else 99
-        best_rank = min(int(ranks.get(str(source), 999)) for source in sources) if isinstance(ranks, Mapping) and sources else 999
+        best_rank = (
+            min(int(ranks.get(str(source), 999)) for source in sources)
+            if isinstance(ranks, Mapping) and sources
+            else 999
+        )
         return (best_source_score, best_rank, int(item["action_id"]))
 
     unique = sorted(candidates.values(), key=sort_key)
@@ -941,7 +956,9 @@ def _select_targets(
     return targets
 
 
-def _forced_result_for_target(matchup_dir: Path, *, pair_index: int, swap_index: int) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+def _forced_result_for_target(
+    matchup_dir: Path, *, pair_index: int, swap_index: int
+) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
     pair_rows = _read_jsonl(matchup_dir / "pair_table.jsonl")
     target_pair = next((row for row in pair_rows if int(row["pair_index"]) == int(pair_index)), None)
     if target_pair is None:
@@ -1295,7 +1312,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.checkpoint_policy:
-        raise SystemExit("provide at least one --checkpoint-policy alias=checkpoint.pt for b1_artifact_matrix compatibility")
+        raise SystemExit(
+            "provide at least one --checkpoint-policy alias=checkpoint.pt for b1_artifact_matrix compatibility"
+        )
     if int(args.pairs) <= 0:
         raise SystemExit("--pairs must be positive")
 
@@ -1358,9 +1377,9 @@ def main() -> None:
     excluded_candidate_families = _parse_str_set(str(args.exclude_candidate_family))
     excluded_candidate_action_ids = _parse_int_set(str(args.exclude_candidate_action_id))
     require_baseline_families = _parse_str_set(str(args.require_baseline_family))
-    two_step_families = {
-        item.strip() for item in str(args.two_step_target_families).split(",") if item.strip()
-    } or set(allowed_families)
+    two_step_families = {item.strip() for item in str(args.two_step_target_families).split(",") if item.strip()} or set(
+        allowed_families
+    )
     targets = _select_targets(
         trace_rows=baseline_trace,
         episode_baselines=episode_baselines,
@@ -1727,7 +1746,10 @@ def main() -> None:
                     "candidate_action": dict(first_trial["candidate_action"]),
                     "second_candidate_action": dict(second_candidate),
                     "positive_action_id": int(first_trial["positive_action_id"]),
-                    "positive_action_sequence": [int(first_trial["positive_action_id"]), int(second_candidate["action_id"])],
+                    "positive_action_sequence": [
+                        int(first_trial["positive_action_id"]),
+                        int(second_candidate["action_id"]),
+                    ],
                     "baseline_winner_seat": int(first_trial["baseline_winner_seat"]),
                     "forced_winner_seat": None if forced_winner is None else int(forced_winner),
                     "winner_flipped": bool(winner_flipped),

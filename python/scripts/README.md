@@ -23,13 +23,13 @@ The wrapper exposes the main recipe as `thesis-model-auto-gpu`, so the shortest 
 
 ```bash
 uv run python python/scripts/thesis_run.py --list-presets
-uv run python python/scripts/train.py --stack-config configs/baselines/noleague_impala.yaml --run-label b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label thesis_model_seed1 --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 400 --skip-compare
+CUDA_VISIBLE_DEVICES=0,1,2,3 uv run python -m torch.distributed.run --standalone --nproc_per_node=4 python/scripts/train.py --stack-config configs/baselines/noleague_impala.yaml --autoscale --hardware-profile local --ddp --ddp-backend nccl --ddp-timeout-seconds 1800 --run-label b1_anchor_thesis_model_seed1 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label thesis_model_seed1 --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 --torchrun-nproc 4 --autoscale --hardware-profile local --ddp-backend nccl --ddp-timeout-seconds 1800 --unroll-length 64 --runtime-mode train_async_fast --max-updates 400 --skip-compare
 uv run python python/scripts/eval.py --stack-config configs/main_eval.yaml --run-dir runs/<run_dir>
 uv run python python/scripts/play_vs_model.py --run-dir runs/<run_dir>
 ```
 
-`thesis_run.py --preset thesis-model-auto-gpu` trains with the frozen tiny248 thesis recipe, requires `--run-label`, imports the canonical `B1 NoLeague baseline` from `--b1-baseline-run-dir`, and by default evaluates with `structured_acceptance_thesis_model_eval_auto_gpu.yaml`.
+`thesis_run.py --preset thesis-model-auto-gpu` trains with the frozen tiny248 thesis recipe, requires `--run-label`, imports the canonical `B1 NoLeague baseline` from `--b1-baseline-run-dir`, and by default evaluates with `structured_acceptance_thesis_model_eval_auto_gpu.yaml`. Add `--torchrun-nproc <gpu_count>` for the multi-GPU server path; server training presets now apply autoscale, `train_async_fast`, unroll 64, and `max-updates 400` defaults unless you override them.
 
 For the current recommended ablations and what they answer, see `docs/standard_recipe.md`.
 

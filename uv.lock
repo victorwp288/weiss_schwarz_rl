@@ -1630,28 +1630,28 @@ requires-dist = [
     { name = "torch", marker = "(platform_machine == 'AMD64' and platform_python_implementation == 'CPython' and sys_platform == 'win32') or (platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'win32')", specifier = "==2.7.0", index = "https://download.pytorch.org/whl/cu128" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20241230,<7" },
     { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.16,<3" },
-    { name = "weiss-sim", marker = "extra == 'sim'", specifier = "==0.8.1" },
+    { name = "weiss-sim", marker = "extra == 'sim'", specifier = "==0.8.2" },
 ]
 provides-extras = ["dev", "sim"]
 
 [[package]]
 name = "weiss-sim"
-version = "0.8.1"
+version = "0.8.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7a/47/3358f651b6b488da45b869adfad895c4c98fdc72ec21a22fa6d2d828e947/weiss_sim-0.8.1.tar.gz", hash = "sha256:77c013e8bd861f382cfdcf7d58fdeb466c31d677791af46df7bb4e1c758b6589", size = 723483, upload-time = "2026-04-20T12:12:59.751Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/de/34/0fd4a92aa68aacc785c447f5ba0229784992f3aa514d515fbe78f47d88dc/weiss_sim-0.8.2.tar.gz", hash = "sha256:b2d77833d8c9a000367d059648e24827158342b7b2fdc0653d283cc1eccf7d44", size = 724690, upload-time = "2026-04-28T21:06:24.802Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b1/c2/23a0fd4a324e94e97aa1041b2f13dec5d40c98992116f2af26ba7a4774ae/weiss_sim-0.8.1-cp310-cp310-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:8f4538ecb5f9348da18d21b65cec175802a0d2b215352f50d0987599adbe3558", size = 2546877, upload-time = "2026-04-20T12:12:44.141Z" },
-    { url = "https://files.pythonhosted.org/packages/e8/c1/9f74985440b8b2db9ee01b2e70f43a46cd9eada96fb80539688a6673aa6c/weiss_sim-0.8.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:468f18cfb3f32801bdec2f46b1afa8b6b9f6ac9293a64fdce9a8a94173f9e47a", size = 1535360, upload-time = "2026-04-20T12:12:45.975Z" },
-    { url = "https://files.pythonhosted.org/packages/2f/2d/3f2e88f5950c228e5a2ea892a970a0379711e68cf737eeeeaa292d5e4ab1/weiss_sim-0.8.1-cp310-cp310-win_amd64.whl", hash = "sha256:8a0b674aea600132af404e58aca1cd89c9602ee49bf6138f9336bbaf611c07ba", size = 1377655, upload-time = "2026-04-20T12:12:47.888Z" },
-    { url = "https://files.pythonhosted.org/packages/37/d4/4ef167eee0c8945966ec79551611fa185e2ffe52d509b743ed2b40806f73/weiss_sim-0.8.1-cp311-cp311-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:cc7b108c8dcc9a7d7f34f7868d34d669455e225742ba331422e3e4522c769f0c", size = 2547195, upload-time = "2026-04-20T12:12:49.712Z" },
-    { url = "https://files.pythonhosted.org/packages/e8/3d/7a29f89fb5427539c05a2fb8245193b955aa7d711c929ca7546fa0021a0c/weiss_sim-0.8.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a3a03130c69961995c855388d38771527a818df26a45854d3134a3e06c2d8aec", size = 1535441, upload-time = "2026-04-20T12:12:51.43Z" },
-    { url = "https://files.pythonhosted.org/packages/2d/91/d94402283477132c9a7231043dbbbfa2975d11f5d3b61fb80fb6052f7a5c/weiss_sim-0.8.1-cp311-cp311-win_amd64.whl", hash = "sha256:b9b9afcccb8f30e54401ee0ab7d0352468dd5ef820a99b1a5fe1a99d76604527", size = 1377587, upload-time = "2026-04-20T12:12:53.103Z" },
-    { url = "https://files.pythonhosted.org/packages/15/5e/9eefb4117a017af4721f1190f8aa64014fb4d73dee5c9059e54d931d6e52/weiss_sim-0.8.1-cp312-cp312-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:ad00a3f52714bc3041a368380a4b05732c6a804ab0b2f965b810bb0b0189ac84", size = 2546171, upload-time = "2026-04-20T12:12:54.705Z" },
-    { url = "https://files.pythonhosted.org/packages/2f/08/c15102a53e139543e7c011bc3a004b1d55ac0402e4b7e41006626e00fdcd/weiss_sim-0.8.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b9f02f12a2e19d9060a43b5eb274a8c0fa206034657a820a0ace04b22cae0334", size = 1535090, upload-time = "2026-04-20T12:12:56.395Z" },
-    { url = "https://files.pythonhosted.org/packages/bf/3a/fab1c64c3aa3dfdaf1d46d8577b2ee0291d86ae22688ad1f40d3889c7fa7/weiss_sim-0.8.1-cp312-cp312-win_amd64.whl", hash = "sha256:1ca95648ad88efbfb728bed2f5d9bf341e93a1f917272bb66141fe64279e965b", size = 1377731, upload-time = "2026-04-20T12:12:57.81Z" },
+    { url = "https://files.pythonhosted.org/packages/39/82/2c5036b5691dccbe1ef67a2496c949e471c8069ce308659cb8fd24300207/weiss_sim-0.8.2-cp310-cp310-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:6d6a8b33741ffacb9f3982ef4204b546ecf33602acc6c8dde940a9291a572d2e", size = 2531488, upload-time = "2026-04-28T21:06:07.807Z" },
+    { url = "https://files.pythonhosted.org/packages/25/b6/ef1592de0edfe22acd2484ebd0dff722a045707447afec358ffa9014a19b/weiss_sim-0.8.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7fd5cae9ca794cb8db77b1c074d114c870fcdf41749462a741738a4f3940846a", size = 1539773, upload-time = "2026-04-28T21:06:09.735Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/06/9986448fb5163bcc0beaee7854089720b0a8c00a593ac532f84c7d447cc3/weiss_sim-0.8.2-cp310-cp310-win_amd64.whl", hash = "sha256:54057d512eb338f3d4c9922adcfc477a222264a737fbe58fe2504e6be09cbd17", size = 1383594, upload-time = "2026-04-28T21:06:11.548Z" },
+    { url = "https://files.pythonhosted.org/packages/12/43/b0799875c09bcaed745e5224c89ea25b42315b3855795c433eb5216ddc4b/weiss_sim-0.8.2-cp311-cp311-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:afaaa30fae0a62a1ffc4864678f627815e4ee2b3cd686672f1f93a5c810dd88d", size = 2531395, upload-time = "2026-04-28T21:06:13.408Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/d8/a25e5cb426a38b2f942d954b8ba6977184f5219f0330b13a7280a30c80be/weiss_sim-0.8.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:236da1152902689e8ba595c16d0165ed4f9df247420eddf78a42091a2553759f", size = 1539820, upload-time = "2026-04-28T21:06:15.579Z" },
+    { url = "https://files.pythonhosted.org/packages/04/7c/6e956cde1ad7339252fff8a6fd3c4b086d9bcc24940c3cc4ec90656d11b5/weiss_sim-0.8.2-cp311-cp311-win_amd64.whl", hash = "sha256:2fb10abec8f6e0baff45303600988a6f25216c2ea07f93b0b360421c6ec1d79e", size = 1383547, upload-time = "2026-04-28T21:06:17.491Z" },
+    { url = "https://files.pythonhosted.org/packages/04/f6/72fb105aa5ba9f184720ef8fca19b77e42f3fb407a56fd3f7c1da323c741/weiss_sim-0.8.2-cp312-cp312-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:b17f11f0418795d524db8a145a2256829b1b8222a0664d5c948f9e94ad1eafe3", size = 2530415, upload-time = "2026-04-28T21:06:19.397Z" },
+    { url = "https://files.pythonhosted.org/packages/38/8a/15ebdf83c718e47307a272cecf8e5d7859e82fdf49742f54135a6e667e59/weiss_sim-0.8.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a84605f8e27c05f494bb138c79b6ee586e0e9fa5316427c73d4b73c4945d19cf", size = 1540012, upload-time = "2026-04-28T21:06:21.574Z" },
+    { url = "https://files.pythonhosted.org/packages/47/0a/a820cec88dded4540502d69c6c350159cbdcb173bd5bce7f201f7f45da96/weiss_sim-0.8.2-cp312-cp312-win_amd64.whl", hash = "sha256:510de9804254f586aaa33d75071262521e870caad497aa7582497db02abbdf99", size = 1383311, upload-time = "2026-04-28T21:06:23.172Z" },
 ]
 
 [[package]]

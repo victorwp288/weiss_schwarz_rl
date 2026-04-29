@@ -77,4 +77,3 @@ def test_apply_stack_overrides_updates_preserved_canonical_payload(tmp_path: Pat
 
     assert canonical_config_dict(updated)["config"]["rewards"]["discount"]["gamma"] == pytest.approx(0.5)
     assert compute_config_hash256(updated) != compute_config_hash256(loaded)
-

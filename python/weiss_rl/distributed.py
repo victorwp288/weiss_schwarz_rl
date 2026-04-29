@@ -12,6 +12,8 @@ import torch
 import torch.distributed as dist
 from torch import nn
 
+DEFAULT_PROCESS_GROUP_TIMEOUT_SECONDS = 1800
+
 
 @dataclass(frozen=True, slots=True)
 class DistributedContext:
@@ -57,7 +59,11 @@ def distributed_context_from_env(*, force: bool = False, backend: str = "auto") 
     )
 
 
-def init_process_group_if_needed(context: DistributedContext, *, timeout_seconds: int = 120) -> DistributedContext:
+def init_process_group_if_needed(
+    context: DistributedContext,
+    *,
+    timeout_seconds: int = DEFAULT_PROCESS_GROUP_TIMEOUT_SECONDS,
+) -> DistributedContext:
     if not context.enabled:
         return context
     if not dist.is_available():
@@ -126,11 +132,83 @@ def average_gradients(model: nn.Module, *, context: DistributedContext) -> None:
     if world_size <= 1:
         return
     for parameter in model.parameters():
-        grad = parameter.grad
-        if grad is None:
+        if not parameter.requires_grad:
             continue
+        grad = parameter.grad
+        has_grad = torch.tensor(
+            0.0 if grad is None else 1.0,
+            dtype=torch.float32,
+            device=_scalar_all_reduce_device(context),
+        )
+        dist.all_reduce(has_grad, op=dist.ReduceOp.SUM)
+        if float(has_grad.item()) <= 0.0:
+            parameter.grad = None
+            continue
+        if grad is None:
+            grad = torch.zeros_like(parameter, memory_format=torch.preserve_format)
+            parameter.grad = grad
         dist.all_reduce(grad, op=dist.ReduceOp.SUM)
         grad.div_(float(world_size))
+
+
+def _process_group_backend(context: DistributedContext) -> str:
+    if dist.is_available() and dist.is_initialized():
+        try:
+            return str(dist.get_backend()).strip().lower()
+        except RuntimeError:
+            pass
+    return str(context.backend).strip().lower()
+
+
+def _scalar_all_reduce_device(context: DistributedContext) -> torch.device:
+    if _process_group_backend(context) != "nccl":
+        return torch.device("cpu")
+    if not torch.cuda.is_available():
+        raise RuntimeError("NCCL scalar all-reduce requires CUDA")
+    device_count = int(torch.cuda.device_count())
+    if device_count <= 0:
+        raise RuntimeError("NCCL scalar all-reduce requires at least one CUDA device")
+    return torch.device(f"cuda:{int(context.local_rank) % device_count}")
+
+
+def resolve_distributed_learner_device(requested_device: str, *, context: DistributedContext) -> torch.device:
+    """Resolve the learner device for one distributed rank.
+
+    A bare ``cuda`` request follows the rank-local CUDA device selected from
+    ``LOCAL_RANK``. An indexed CUDA override must match that rank-local index;
+    otherwise every rank can silently pile onto cuda:0.
+    """
+
+    requested = str(requested_device).strip().lower()
+    cuda_available = bool(torch.cuda.is_available() and int(torch.cuda.device_count()) > 0)
+    if cuda_available:
+        local_cuda_index = int(context.local_rank) % int(torch.cuda.device_count())
+        rank_device = torch.device(f"cuda:{local_cuda_index}")
+        if requested in {"", "auto", "cuda", "cuda:auto"}:
+            return rank_device
+        try:
+            device = torch.device(requested)
+        except (RuntimeError, TypeError) as exc:
+            raise ValueError(f"invalid DDP learner device override: {requested_device!r}") from exc
+        if device.type == "cuda":
+            if device.index is None:
+                return rank_device
+            if int(device.index) != local_cuda_index:
+                raise ValueError(
+                    "DDP CUDA device override does not match this rank: "
+                    f"LOCAL_RANK={int(context.local_rank)} resolves to {rank_device}, but --device requested {device}"
+                )
+        return device
+
+    if requested in {"", "auto"}:
+        return torch.device("cpu")
+    try:
+        device = torch.device(requested)
+    except (RuntimeError, TypeError) as exc:
+        raise ValueError(f"invalid DDP learner device override: {requested_device!r}") from exc
+    if device.type == "cuda":
+        raise ValueError("DDP CUDA device override was requested, but CUDA is not available")
+    return device
 
 
 def all_reduce_float(value: float, *, context: DistributedContext, op: str = "sum") -> float:
@@ -138,14 +216,15 @@ def all_reduce_float(value: float, *, context: DistributedContext, op: str = "su
         return float(value)
     if not dist.is_available() or not dist.is_initialized():
         raise RuntimeError("float all-reduce requires an initialized process group")
-    tensor = torch.tensor(float(value), dtype=torch.float64)
+    op_name = str(op).strip().lower()
+    if op_name not in {"sum", "mean"}:
+        raise ValueError("op must be 'sum' or 'mean'")
+    tensor = torch.tensor(float(value), dtype=torch.float64, device=_scalar_all_reduce_device(context))
     reduce_op = dist.ReduceOp.SUM
     dist.all_reduce(tensor, op=reduce_op)
     reduced = float(tensor.item())
-    if str(op).strip().lower() == "mean":
+    if op_name == "mean":
         return reduced / float(max(1, int(context.world_size)))
-    if str(op).strip().lower() != "sum":
-        raise ValueError("op must be 'sum' or 'mean'")
     return reduced
 
 

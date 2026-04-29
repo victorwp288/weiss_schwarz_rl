@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from weiss_rl.config import canonical_config_dict, canonical_config_json, compute_config_hash256, load_stack_config
+from weiss_rl.config.compat import resolve_legacy_config_path, resolve_repo_path, resolve_repo_root
 from weiss_rl.repro import canonical_json_bytes, sha256_hex
 
 
@@ -17,6 +18,16 @@ def _temp_repo(tmp_path: Path) -> Path:
     (tmp_path / "configs").mkdir()
     (tmp_path / "python").mkdir()
     return tmp_path
+
+
+def test_config_compat_resolves_legacy_paths_and_repo_relative_paths(tmp_path: Path) -> None:
+    fake_repo = _temp_repo(tmp_path)
+    typed_local = fake_repo / "configs" / "typed_local.yaml"
+    typed_local.write_text("schema_version: 1\n", encoding="utf-8")
+
+    assert resolve_repo_root(typed_local) == fake_repo
+    assert resolve_legacy_config_path(fake_repo / "configs" / "local.yaml") == typed_local
+    assert resolve_repo_path(fake_repo, "configs/typed_local.yaml") == typed_local.resolve()
 
 
 def test_public_compact_config_surface_loads() -> None:
@@ -189,7 +200,9 @@ def test_load_stack_config_supports_baselines_and_ablations() -> None:
     assert norecurrence.config.training is not None
     assert norecurrence.config.training.algorithm == "impala_vtrace_ff"
 
-    norecurrence_noleague = load_stack_config(repo_root / "configs/archive/presets/baselines/norecurrence_impala_noleague.yaml")
+    norecurrence_noleague = load_stack_config(
+        repo_root / "configs/archive/presets/baselines/norecurrence_impala_noleague.yaml"
+    )
     assert norecurrence_noleague.config.experiment is not None
     assert norecurrence_noleague.config.experiment.role == "baseline_noleague"
     assert norecurrence_noleague.config.league is not None
@@ -213,9 +226,7 @@ def test_load_stack_config_supports_baselines_and_ablations() -> None:
     assert ppo.config.training.algorithm == "ppo_lite_masked_v1"
     assert ppo.config.training.ppo_epochs == 4
 
-    reward = load_stack_config(
-        repo_root / "configs/ablations/reward_shaping.yaml"
-    )
+    reward = load_stack_config(repo_root / "configs/ablations/reward_shaping.yaml")
     assert reward.config.experiment is not None
     assert reward.config.experiment.role == "ablation_reward"
     assert reward.config.rewards is not None
@@ -225,9 +236,7 @@ def test_load_stack_config_supports_baselines_and_ablations() -> None:
     assert reward.config.rewards.truncation.reward == pytest.approx(-0.1)
     assert reward.config.rewards.truncation.bootstrap_value is False
 
-    reward_noleague = load_stack_config(
-        repo_root / "configs/baselines/noleague_impala.yaml"
-    )
+    reward_noleague = load_stack_config(repo_root / "configs/baselines/noleague_impala.yaml")
     assert reward_noleague.config.experiment is not None
     assert reward_noleague.config.experiment.role == "baseline_noleague"
     assert reward_noleague.config.league is not None
@@ -340,7 +349,9 @@ def test_load_stack_config_supports_typed_structured_v2_preset() -> None:
 def test_load_stack_config_supports_frozen_thesis_model_auto_gpu_presets() -> None:
     repo_root = _repo_root()
 
-    thesis_model = load_stack_config(repo_root / "configs/archive/presets/structured_acceptance_thesis_model_auto_gpu.yaml")
+    thesis_model = load_stack_config(
+        repo_root / "configs/archive/presets/structured_acceptance_thesis_model_auto_gpu.yaml"
+    )
     assert thesis_model.config.system is not None
     assert thesis_model.config.system.learner_device == "cuda:auto"
     assert thesis_model.config.system.actor_device == "cuda:auto"
@@ -367,9 +378,7 @@ def test_load_stack_config_supports_frozen_thesis_model_auto_gpu_presets() -> No
     assert thesis_model.config.league.promotion_gate.parallel_workers == 6
     assert thesis_model.config.league.promotion_gate.parallel_worker_devices == ()
 
-    thesis_model_noleague = load_stack_config(
-        repo_root / "configs/baselines/noleague_impala.yaml"
-    )
+    thesis_model_noleague = load_stack_config(repo_root / "configs/baselines/noleague_impala.yaml")
     assert thesis_model_noleague.config.experiment is not None
     assert thesis_model_noleague.config.experiment.role == "baseline_noleague"
     assert thesis_model_noleague.config.league is not None
@@ -385,9 +394,7 @@ def test_load_stack_config_supports_frozen_thesis_model_auto_gpu_presets() -> No
     assert thesis_model_noleague.config.model.encoder_mlp_width == 248
     assert thesis_model_noleague.config.model.typed_feature_width == 62
 
-    thesis_model_eval = load_stack_config(
-        repo_root / "configs/main_eval.yaml"
-    )
+    thesis_model_eval = load_stack_config(repo_root / "configs/main_eval.yaml")
     assert thesis_model_eval.config.evaluation is not None
     assert thesis_model_eval.config.evaluation.eval_device == "cuda:auto"
     assert (
@@ -395,12 +402,11 @@ def test_load_stack_config_supports_frozen_thesis_model_auto_gpu_presets() -> No
         in thesis_model_eval.config.evaluation.final_policy_set_selection.fixed_anchor_set_v1.optional_if_available
     )
 
+
 def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     repo_root = _repo_root()
 
-    thesis_multideck = load_stack_config(
-        repo_root / "configs/ablations/multideck.yaml"
-    )
+    thesis_multideck = load_stack_config(repo_root / "configs/ablations/multideck.yaml")
     assert thesis_multideck.config.environment is not None
     assert thesis_multideck.config.environment.deck_pool == (
         "preset:starter_v1",
@@ -421,18 +427,14 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert thesis_multideck.seed_sets["dev_eval"] == repo_root / "configs/seeds/dev_eval_seeds.txt"
     assert thesis_multideck.seed_sets["promotion_gate"] == repo_root / "configs/seeds/promotion_eval_seeds.txt"
 
-    thesis_multideck_eval = load_stack_config(
-        repo_root / "configs/ablations/multideck_eval.yaml"
-    )
+    thesis_multideck_eval = load_stack_config(repo_root / "configs/ablations/multideck_eval.yaml")
     assert thesis_multideck_eval.config.evaluation is not None
     assert (
         "B4 HeuristicPublicControl"
         in thesis_multideck_eval.config.evaluation.final_policy_set_selection.fixed_anchor_set_v1.optional_if_available
     )
 
-    thesis_server_train = load_stack_config(
-        repo_root / "configs/main_impala_league_server.yaml"
-    )
+    thesis_server_train = load_stack_config(repo_root / "configs/main_impala_league_server.yaml")
     assert thesis_server_train.config.evaluation is not None
     assert thesis_server_train.config.evaluation.async_periodic_dev_eval_enabled is False
     assert thesis_server_train.config.evaluation.periodic_dev_eval_interval_updates == 20
@@ -445,9 +447,7 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert thesis_server_train.config.league.promotion.gate.async_enabled is False
     assert thesis_server_train.config.league.promotion.gate.parallel_workers == 6
 
-    teacher_fade = load_stack_config(
-        repo_root / "configs/ablations/teacher_fade.yaml"
-    )
+    teacher_fade = load_stack_config(repo_root / "configs/ablations/teacher_fade.yaml")
     assert teacher_fade.config.training is not None
     assert teacher_fade.config.training.actor_heuristic_start_updates == 40
     assert teacher_fade.config.training.actor_heuristic_end_updates == 140
@@ -466,33 +466,26 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert teacher_fade.config.curriculum is not None
     assert teacher_fade.config.curriculum.early_cutoff.enabled is True
 
-    teacher_fade_eval = load_stack_config(
-        repo_root / "configs/ablations/teacher_fade_eval.yaml"
-    )
+    teacher_fade_eval = load_stack_config(repo_root / "configs/ablations/teacher_fade_eval.yaml")
     assert teacher_fade_eval.config.evaluation is not None
     assert (
         "B3 HeuristicPublicAggro"
         in teacher_fade_eval.config.evaluation.final_policy_set_selection.fixed_anchor_set_v1.optional_if_available
     )
 
-    ablate_no_tactical_bias = load_stack_config(
-        repo_root / "configs/ablations/no_tactical_bias.yaml"
-    )
+    ablate_no_tactical_bias = load_stack_config(repo_root / "configs/ablations/no_tactical_bias.yaml")
     assert ablate_no_tactical_bias.config.model is not None
     assert ablate_no_tactical_bias.config.model.public_heuristic_logit_bias_scale == pytest.approx(1.0)
     assert ablate_no_tactical_bias.config.model.public_heuristic_logit_bias_families == ()
     assert ablate_no_tactical_bias.config.curriculum is not None
     assert ablate_no_tactical_bias.config.curriculum.early_cutoff.enabled is True
 
-    ablate_no_tactical_bias_eval = load_stack_config(
-        repo_root / "configs/ablations/no_tactical_bias_eval.yaml"
-    )
+    ablate_no_tactical_bias_eval = load_stack_config(repo_root / "configs/ablations/no_tactical_bias_eval.yaml")
     assert ablate_no_tactical_bias_eval.config.model is not None
     assert ablate_no_tactical_bias_eval.config.model.public_heuristic_logit_bias_families == ()
 
     combined_teacher_fade_no_tactical = load_stack_config(
-        repo_root
-        / "configs/ablations/teacher_fade_no_tactical_bias.yaml"
+        repo_root / "configs/ablations/teacher_fade_no_tactical_bias.yaml"
     )
     assert combined_teacher_fade_no_tactical.config.experiment is not None
     assert combined_teacher_fade_no_tactical.config.experiment.role == "ablation_teacher_fade_no_tactical_bias"
@@ -507,8 +500,7 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert combined_teacher_fade_no_tactical.config.model.public_heuristic_logit_bias_final_scale == pytest.approx(1.0)
 
     combined_teacher_fade_no_tactical_eval = load_stack_config(
-        repo_root
-        / "configs/ablations/teacher_fade_no_tactical_bias_eval.yaml"
+        repo_root / "configs/ablations/teacher_fade_no_tactical_bias_eval.yaml"
     )
     assert combined_teacher_fade_no_tactical_eval.config.evaluation is not None
     assert (
@@ -516,21 +508,18 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
         in combined_teacher_fade_no_tactical_eval.config.evaluation.final_policy_set_selection.fixed_anchor_set_v1.optional_if_available
     )
 
-    ablate_no_b1_cutoff = load_stack_config(
-        repo_root / "configs/ablations/no_b1_cutoff.yaml"
-    )
+    ablate_no_b1_cutoff = load_stack_config(repo_root / "configs/ablations/no_b1_cutoff.yaml")
     assert ablate_no_b1_cutoff.config.league is not None
     assert ablate_no_b1_cutoff.config.league.sampling.noleague_baseline_mix_end_updates == -1
     assert ablate_no_b1_cutoff.config.curriculum is not None
     assert ablate_no_b1_cutoff.config.curriculum.early_cutoff.enabled is True
 
-    ablate_no_b1_cutoff_eval = load_stack_config(
-        repo_root / "configs/ablations/no_b1_cutoff_eval.yaml"
-    )
+    ablate_no_b1_cutoff_eval = load_stack_config(repo_root / "configs/ablations/no_b1_cutoff_eval.yaml")
     assert ablate_no_b1_cutoff_eval.config.evaluation is not None
 
     thesis_multideck_noleague = load_stack_config(
-        repo_root / "configs/archive/presets/baselines/structured_acceptance_thesis_model_multideck_auto_gpu_noleague.yaml"
+        repo_root
+        / "configs/archive/presets/baselines/structured_acceptance_thesis_model_multideck_auto_gpu_noleague.yaml"
     )
     assert thesis_multideck_noleague.config.experiment is not None
     assert thesis_multideck_noleague.config.experiment.role == "baseline_noleague_multideck"
@@ -568,7 +557,8 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert thesis_teacher_fade_noleague.config.curriculum.early_cutoff.enabled is True
 
     thesis_server_train_noleague = load_stack_config(
-        repo_root / "configs/archive/presets/baselines/structured_acceptance_thesis_model_server_train_auto_gpu_noleague.yaml"
+        repo_root
+        / "configs/archive/presets/baselines/structured_acceptance_thesis_model_server_train_auto_gpu_noleague.yaml"
     )
     assert thesis_server_train_noleague.config.experiment is not None
     assert thesis_server_train_noleague.config.experiment.role == "baseline_noleague"
@@ -580,8 +570,7 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert thesis_server_train_noleague.config.evaluation.periodic_dev_eval_interval_updates == 20
 
     fullsize_noleague_warmup = load_stack_config(
-        repo_root
-        / "configs/archive/presets/baselines/"
+        repo_root / "configs/archive/presets/baselines/"
         "structured_acceptance_thesis_model_server_train_auto_gpu_noleague_aggressive_teacher_warmup.yaml"
     )
     assert fullsize_noleague_warmup.config.model is not None
@@ -595,35 +584,29 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert fullsize_noleague_warmup.config.training.train_on_heuristic_actor_rows is True
     assert fullsize_noleague_warmup.config.training.diverse_opponent_actor_count == 0
     assert fullsize_noleague_warmup.config.training.diverse_model_actor_count == 0
-    assert fullsize_noleague_warmup.config.training.structured_aux.teacher_public_heuristic_profiles == (
-        "aggressive",
+    assert fullsize_noleague_warmup.config.training.structured_aux.teacher_public_heuristic_profiles == ("aggressive",)
+    assert (
+        fullsize_noleague_warmup.config.training.structured_aux.teacher_public_heuristic_label_profile == "aggressive"
     )
     assert (
-        fullsize_noleague_warmup.config.training.structured_aux.teacher_public_heuristic_label_profile
-        == "aggressive"
+        fullsize_noleague_warmup.config.training.structured_aux.teacher_public_heuristic_temperature
+        == pytest.approx(8.0)
     )
-    assert fullsize_noleague_warmup.config.training.structured_aux.teacher_public_heuristic_temperature == pytest.approx(
-        8.0
-    )
-    assert fullsize_noleague_warmup.config.training.structured_aux.teacher_public_main_move_coef == pytest.approx(
-        0.1
-    )
+    assert fullsize_noleague_warmup.config.training.structured_aux.teacher_public_main_move_coef == pytest.approx(0.1)
 
     fullsize_noleague_lowlr = load_stack_config(
-        repo_root
-        / "configs/archive/presets/baselines/"
+        repo_root / "configs/archive/presets/baselines/"
         "structured_acceptance_thesis_model_server_train_auto_gpu_noleague_lowlr_continuation.yaml"
     )
     assert fullsize_noleague_lowlr.config.model is not None
     assert fullsize_noleague_lowlr.config.model.gru_hidden_size == 248
     assert fullsize_noleague_lowlr.config.training is not None
     assert fullsize_noleague_lowlr.config.training.optimizer.learning_rate == pytest.approx(0.00005)
-    assert fullsize_noleague_lowlr.config.training.structured_aux.teacher_public_heuristic_profiles == (
-        "aggressive",
-    )
+    assert fullsize_noleague_lowlr.config.training.structured_aux.teacher_public_heuristic_profiles == ("aggressive",)
 
     b1anchored_league = load_stack_config(
-        repo_root / "configs/archive/presets/structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league.yaml"
+        repo_root
+        / "configs/archive/presets/structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league.yaml"
     )
     assert b1anchored_league.config.league is not None
     assert b1anchored_league.config.league.enabled is True
@@ -633,9 +616,7 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert b1anchored_league.config.training is not None
     assert b1anchored_league.config.training.optimizer.learning_rate == pytest.approx(0.00005)
     assert b1anchored_league.config.training.structured_aux.teacher_public_heuristic_profiles == ("aggressive",)
-    assert (
-        b1anchored_league.config.training.structured_aux.teacher_public_heuristic_label_profile == "aggressive"
-    )
+    assert b1anchored_league.config.training.structured_aux.teacher_public_heuristic_label_profile == "aggressive"
     assert b1anchored_league.config.league.sampling.heuristic_public_mix_fraction == pytest.approx(0.55)
     assert b1anchored_league.config.league.sampling.heuristic_public_variant_mix_fraction == pytest.approx(0.20)
     assert b1anchored_league.config.league.sampling.noleague_baseline_mix_fraction == pytest.approx(0.25)
@@ -649,9 +630,7 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert b1anchored_league_refb1strong_lowlr.config.training.actor_heuristic_fraction == pytest.approx(0.0)
     assert b1anchored_league_refb1strong_lowlr.config.training.train_on_heuristic_actor_rows is False
     assert b1anchored_league_refb1strong_lowlr.config.training.reference_policy_id == "b1_noleague_baseline"
-    assert b1anchored_league_refb1strong_lowlr.config.training.reference_policy_top_action_bc_coef == pytest.approx(
-        0.5
-    )
+    assert b1anchored_league_refb1strong_lowlr.config.training.reference_policy_top_action_bc_coef == pytest.approx(0.5)
     assert b1anchored_league_refb1strong_lowlr.config.training.optimizer.learning_rate == pytest.approx(0.000005)
     assert b1anchored_league_refb1strong_lowlr.config.evaluation is not None
     assert b1anchored_league_refb1strong_lowlr.config.evaluation.periodic_dev_eval_interval_updates == 20
@@ -729,8 +708,9 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert b1anchored_league_benchmark_selfplay.config.training.heuristic_actor_hidden_state_tracking is True
     assert b1anchored_league_benchmark_selfplay.config.training.optimizer.learning_rate == pytest.approx(0.00002)
     assert b1anchored_league_benchmark_selfplay.config.training.entropy_coef == pytest.approx(0.05)
-    assert b1anchored_league_benchmark_selfplay.config.training.structured_aux.teacher_public_heuristic_coef == pytest.approx(
-        0.05
+    assert (
+        b1anchored_league_benchmark_selfplay.config.training.structured_aux.teacher_public_heuristic_coef
+        == pytest.approx(0.05)
     )
     assert (
         b1anchored_league_benchmark_selfplay.seed_sets["promotion_gate"]
@@ -755,8 +735,9 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert b1anchored_league_benchmark_selfplay_refb1.config.training.actor_policy_backend == "model"
     assert b1anchored_league_benchmark_selfplay_refb1.config.training.behavior_action_bc_coef == pytest.approx(0.0)
     assert b1anchored_league_benchmark_selfplay_refb1.config.training.reference_policy_id == "b1_noleague_baseline"
-    assert b1anchored_league_benchmark_selfplay_refb1.config.training.reference_policy_top_action_bc_coef == pytest.approx(
-        0.25
+    assert (
+        b1anchored_league_benchmark_selfplay_refb1.config.training.reference_policy_top_action_bc_coef
+        == pytest.approx(0.25)
     )
     assert b1anchored_league_benchmark_selfplay_refb1.config.training.optimizer.learning_rate == pytest.approx(0.00001)
     assert b1anchored_league_benchmark_selfplay_refb1.config.training.entropy_coef == pytest.approx(0.025)
@@ -770,8 +751,9 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
         b1anchored_league_benchmark_selfplay_refb1strong_lowlr.config.training.reference_policy_top_action_bc_coef
         == pytest.approx(0.5)
     )
-    assert b1anchored_league_benchmark_selfplay_refb1strong_lowlr.config.training.optimizer.learning_rate == pytest.approx(
-        0.000005
+    assert (
+        b1anchored_league_benchmark_selfplay_refb1strong_lowlr.config.training.optimizer.learning_rate
+        == pytest.approx(0.000005)
     )
 
     b1anchored_league_benchmark_selfplay_refb1strong_lowlr_evalguard = load_stack_config(
@@ -788,28 +770,25 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
         == 8
     )
     b1anchored_league_refb1_fade = load_stack_config(
-        repo_root
-        / "configs/archive/presets/"
+        repo_root / "configs/archive/presets/"
         "structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_selfplay_refb1_frontier_family_fade_lowlr_evalguard_localpromo.yaml"
     )
     assert b1anchored_league_refb1_fade.config.training is not None
     assert b1anchored_league_refb1_fade.config.training.reference_policy_top_action_bc_coef == pytest.approx(0.5)
-    assert b1anchored_league_refb1_fade.config.training.reference_policy_top_action_bc_final_coef == pytest.approx(
-        0.05
-    )
+    assert b1anchored_league_refb1_fade.config.training.reference_policy_top_action_bc_final_coef == pytest.approx(0.05)
     assert b1anchored_league_refb1_fade.config.training.reference_policy_top_action_bc_start_updates == 820
     assert b1anchored_league_refb1_fade.config.training.reference_policy_top_action_bc_end_updates == 900
     assert b1anchored_league_refb1_fade.config.training.reference_policy_top_action_family_bc_coef == pytest.approx(
         0.75
     )
-    assert b1anchored_league_refb1_fade.config.training.reference_policy_top_action_family_bc_final_coef == pytest.approx(
-        0.0
+    assert (
+        b1anchored_league_refb1_fade.config.training.reference_policy_top_action_family_bc_final_coef
+        == pytest.approx(0.0)
     )
     assert b1anchored_league_refb1_fade.config.training.reference_policy_top_action_family_bc_start_updates == 820
     assert b1anchored_league_refb1_fade.config.training.reference_policy_top_action_family_bc_end_updates == 900
     freshstudent_refb1_fade = load_stack_config(
-        repo_root
-        / "configs/archive/presets/"
+        repo_root / "configs/archive/presets/"
         "structured_acceptance_thesis_model_server_train_auto_gpu_b1anchored_league_benchmark_freshstudent_refb1_fade_lowlr_evalguard_localpromo.yaml"
     )
     assert freshstudent_refb1_fade.config.training is not None
@@ -861,8 +840,7 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
     assert thesis_server_train_noleague_benchmark.config.model.encoder_mlp_width == 192
     assert thesis_server_train_noleague_benchmark.config.model.typed_feature_width == 48
     thesis_server_train_noleague_benchmark_warmup = load_stack_config(
-        repo_root
-        / "configs/archive/presets/baselines/"
+        repo_root / "configs/archive/presets/baselines/"
         "structured_acceptance_thesis_model_server_train_auto_gpu_noleague_benchmark_aggressive_teacher_warmup.yaml"
     )
     assert thesis_server_train_noleague_benchmark_warmup.config.training is not None
@@ -881,13 +859,15 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
         == "aggressive"
     )
     assert thesis_server_train_noleague_benchmark_warmup.config.model is not None
-    assert thesis_server_train_noleague_benchmark_warmup.config.model.public_heuristic_logit_bias_profile == "aggressive"
-    assert thesis_server_train_noleague_benchmark_warmup.config.model.public_heuristic_logit_bias_scale == pytest.approx(
-        3.0
+    assert (
+        thesis_server_train_noleague_benchmark_warmup.config.model.public_heuristic_logit_bias_profile == "aggressive"
+    )
+    assert (
+        thesis_server_train_noleague_benchmark_warmup.config.model.public_heuristic_logit_bias_scale
+        == pytest.approx(3.0)
     )
     thesis_server_train_noleague_benchmark_lowlr = load_stack_config(
-        repo_root
-        / "configs/archive/presets/baselines/"
+        repo_root / "configs/archive/presets/baselines/"
         "structured_acceptance_thesis_model_server_train_auto_gpu_noleague_benchmark_lowlr_continuation.yaml"
     )
     assert thesis_server_train_noleague_benchmark_lowlr.config.training is not None
@@ -928,7 +908,9 @@ def test_load_stack_config_supports_current_thesis_facing_presets() -> None:
         / "configs/archive/presets/baselines/structured_acceptance_thesis_model_server_train_auto_gpu_noleague_benchmark_native_rollout.yaml"
     )
     assert thesis_server_train_noleague_benchmark_native_rollout.config.training is not None
-    assert thesis_server_train_noleague_benchmark_native_rollout.config.training.heuristic_native_rollout_enabled is True
+    assert (
+        thesis_server_train_noleague_benchmark_native_rollout.config.training.heuristic_native_rollout_enabled is True
+    )
     assert (
         thesis_server_train_noleague_benchmark_native_rollout.config.training.heuristic_actor_hidden_state_tracking
         is False
@@ -1686,8 +1668,7 @@ def test_load_stack_config_supports_prefetch_and_native_rollout_overrides(tmp_pa
     structured_path.write_text(
         structured_path.read_text(encoding="utf-8").replace(
             "    enabled: true\n",
-            "    enabled: true\n"
-            "    teacher_public_heuristic_label_profile: aggressive\n",
+            "    enabled: true\n    teacher_public_heuristic_label_profile: aggressive\n",
             1,
         ),
         encoding="utf-8",
@@ -1718,8 +1699,7 @@ def test_load_stack_config_supports_optimizer_backend_override(tmp_path: Path) -
         .read_text(encoding="utf-8")
         .replace(
             "    value_loss_coef: 0.5\n",
-            "    value_loss_coef: 0.5\n"
-            "    backend: fused\n",
+            "    value_loss_coef: 0.5\n    backend: fused\n",
             1,
         ),
         encoding="utf-8",
@@ -1990,6 +1970,3 @@ def test_load_stack_config_rejects_unsupported_pfsp_stats_source(tmp_path: Path)
 
     with pytest.raises(ValueError, match="pfsp_stats_source currently only supports 'online_outcomes'"):
         load_stack_config(stack_path)
-
-
-

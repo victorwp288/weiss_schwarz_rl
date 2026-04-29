@@ -11,14 +11,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
-
-import torch
-from torch import Tensor
-import torch.nn.functional as F
+from typing import Any
 
 import b1_counterfactual_labels as cf
+import torch
+import torch.nn.functional as F
+from torch import Tensor
 from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.residual_policy import FrozenStoredLogitResidual, TrainableLiveFrozenB1Residual
 
@@ -89,7 +89,9 @@ def _load_records(label_dirs: Sequence[Path], *, max_labels: int) -> list[dict[s
     return records
 
 
-def _split_records(records: Sequence[dict[str, Any]], *, validation_fraction: float) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _split_records(
+    records: Sequence[dict[str, Any]], *, validation_fraction: float
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     fraction = float(validation_fraction)
     if fraction <= 0.0 or len(records) < 2:
         return list(records), []
@@ -166,7 +168,9 @@ def _metric_for_record(
     return {
         "positive_probability": float(probs[pos_index].detach().cpu().item()),
         "baseline_probability": float(probs[base_index].detach().cpu().item()),
-        "positive_minus_baseline_logit_margin": float((legal_logits[pos_index] - legal_logits[base_index]).detach().cpu().item()),
+        "positive_minus_baseline_logit_margin": float(
+            (legal_logits[pos_index] - legal_logits[base_index]).detach().cpu().item()
+        ),
         "top_action_id": int(legal_ids[int(torch.argmax(legal_logits).item())].detach().cpu().item()),
         "residual_l2_norm_legal": float(torch.linalg.vector_norm(residual_legal.detach()).cpu().item()),
         "residual_linf_norm_legal": float(torch.max(torch.abs(residual_legal.detach())).cpu().item()),
@@ -189,7 +193,9 @@ def _train_step(
     base_index = _label_index(legal_ids, baseline_id)
     label_weight = float(torch.as_tensor(record.get("label_weight", 1.0)).item())
     ce = -F.log_softmax(legal_logits, dim=-1)[pos_index] * label_weight
-    margin_loss = F.relu(torch.tensor(float(margin), device=device) - legal_logits[pos_index] + legal_logits[base_index])
+    margin_loss = F.relu(
+        torch.tensor(float(margin), device=device) - legal_logits[pos_index] + legal_logits[base_index]
+    )
     residual_l2 = torch.mean(residual_legal * residual_legal)
     return ce + 0.2 * margin_loss * label_weight + float(residual_l2_coef) * residual_l2
 
@@ -334,10 +340,9 @@ def main() -> None:
                 len(train_metrics_now),
                 1,
             )
-            if (
-                float(train_adoption_now["adoption_rate"]) >= float(args.early_stop_adoption_rate)
-                and mean_positive_prob >= float(args.early_stop_mean_positive_prob)
-            ):
+            if float(train_adoption_now["adoption_rate"]) >= float(
+                args.early_stop_adoption_rate
+            ) and mean_positive_prob >= float(args.early_stop_mean_positive_prob):
                 stopped_at_step = step + 1
                 break
 
@@ -346,7 +351,9 @@ def main() -> None:
     train_ids = {id(record) for record in train_records}
     validation_ids = {id(record) for record in validation_records}
     train_after = [metric for record, metric in zip(records, after_metrics, strict=True) if id(record) in train_ids]
-    validation_after = [metric for record, metric in zip(records, after_metrics, strict=True) if id(record) in validation_ids]
+    validation_after = [
+        metric for record, metric in zip(records, after_metrics, strict=True) if id(record) in validation_ids
+    ]
     adoption = _adoption_summary(records, after_metrics)
     train_adoption = _adoption_summary(train_records, train_after)
     validation_adoption = _adoption_summary(validation_records, validation_after) if validation_records else None
@@ -392,7 +399,9 @@ def main() -> None:
         "margin": float(args.margin),
         "residual_l2_coef": float(args.residual_l2_coef),
         "base_param_delta_l2": float(base_delta_l2),
-        "base_trainable_parameter_count": int(sum(parameter.numel() for parameter in wrapper.base_model.parameters() if parameter.requires_grad)),
+        "base_trainable_parameter_count": int(
+            sum(parameter.numel() for parameter in wrapper.base_model.parameters() if parameter.requires_grad)
+        ),
         "residual_trainable_parameter_count": int(
             sum(parameter.numel() for parameter in wrapper.residual_probe.parameters() if parameter.requires_grad)
         ),

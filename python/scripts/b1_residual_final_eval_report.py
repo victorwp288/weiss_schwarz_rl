@@ -11,9 +11,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import matplotlib
 
@@ -177,9 +178,7 @@ def _write_markdown(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     ]
     for row in rows:
         pair_classes = (
-            f"{row['residual_2_0_pairs']}x 2-0, "
-            f"{row['residual_1_1_pairs']}x 1-1, "
-            f"{row['residual_0_2_pairs']}x 0-2"
+            f"{row['residual_2_0_pairs']}x 2-0, {row['residual_1_1_pairs']}x 1-1, {row['residual_0_2_pairs']}x 0-2"
         )
         lines.append(
             "| {label} | {surface} | {opponent} | {direction} | {pairs} | {win:.4f} | {pair_classes} | {drift:.4f} |".format(
@@ -239,7 +238,7 @@ def _render_figure(path_base: Path, rows: Sequence[Mapping[str, Any]]) -> list[P
     ax.set_xticklabels(labels, rotation=25, ha="right")
     ax.grid(axis="y", color="#d0d4da", linewidth=0.8, alpha=0.7)
     ax.set_axisbelow(True)
-    for bar, row in zip(bars, rows):
+    for bar, row in zip(bars, rows, strict=False):
         height = bar.get_height()
         pair_text = f"{row['residual_2_0_pairs']}-{row['residual_1_1_pairs']}-{row['residual_0_2_pairs']}"
         ax.text(
@@ -283,7 +282,9 @@ def main() -> None:
     )
     _write_markdown(out_dir / "b1_residual_final_eval_summary.md", rows)
     figures = _render_figure(out_dir / "b1_residual_final_eval", rows)
-    print(json.dumps({"out_dir": out_dir.as_posix(), "figure_outputs": [path.as_posix() for path in figures]}, indent=2))
+    print(
+        json.dumps({"out_dir": out_dir.as_posix(), "figure_outputs": [path.as_posix() for path in figures]}, indent=2)
+    )
 
 
 if __name__ == "__main__":

@@ -12,14 +12,45 @@ from typing import cast
 import pytest
 import torch
 
+import weiss_rl.eval.parallel as eval_parallel
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import compute_config_hash256, load_stack_config
+from weiss_rl.eval import (
+    persist_policy_selection_in_manifest,
+    policy_ids_for_matchup_shard,
+    resolve_policy_ids_for_run,
+    resolved_parallel_worker_devices,
+    run_parallel_final_eval,
+    shard_matchup_specs,
+    update_run_level_reports,
+)
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.spec import spec_bundle_hash
 from weiss_rl.toy_public_demo import public_demo_spec_hash256
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_eval_parallel_matchup_helpers_are_order_preserving_and_copy_inputs() -> None:
+    matchup_specs = [
+        {"focal_policy_id": "p0", "opponent_policy_id": "p0", "tag": "a"},
+        {"focal_policy_id": "p0", "opponent_policy_id": "p1", "tag": "b"},
+        {"focal_policy_id": "p1", "opponent_policy_id": "p2", "tag": "c"},
+        {"focal_policy_id": "p2", "opponent_policy_id": "p3", "tag": "d"},
+    ]
+
+    shards = shard_matchup_specs(matchup_specs=matchup_specs, shard_count=3)
+
+    assert [[item["tag"] for item in shard] for shard in shards] == [["a", "d"], ["b"], ["c"]]
+    assert shards[0][0] == matchup_specs[0]
+    assert shards[0][0] is not matchup_specs[0]
+    assert policy_ids_for_matchup_shard(shards[0] + shards[1] + shards[2]) == ["p0", "p2", "p3", "p1"]
+
+
+def test_eval_parallel_matchup_helpers_reject_invalid_shard_count() -> None:
+    with pytest.raises(ValueError, match="shard_count"):
+        shard_matchup_specs(matchup_specs=[], shard_count=0)
 
 
 def _mismatched_sha256(value: str) -> str:
@@ -715,6 +746,41 @@ def test_eval_entrypoint_prefers_run_local_policy_selection_over_manifest_fallba
     assert resolved_dev_eval == layout.training_logs_dir / "periodic_dev_eval_summaries.json"
 
 
+def test_eval_package_resolves_completed_manifest_policy_selection(tmp_path: Path) -> None:
+    _copy_repo_configs(tmp_path)
+    stack_config = _write_eval_only_stack_config(tmp_path)
+    stack = load_stack_config(stack_config)
+    layout = ArtifactLayout.from_run_dir(tmp_path / "runs" / "eval_policy_selection_package")
+    layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.training_logs_dir.mkdir(parents=True, exist_ok=True)
+    layout.run_summary_path.write_text(
+        json.dumps({"kind": "run_summary_v1", "canonical_eval_completed": True}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "policy_set_selection": ["B0 RandomLegal", "policy_locked"],
+        "policy_set_selection_details": {
+            "mode": "deterministic_v1",
+            "status": "resolved",
+        },
+    }
+
+    policy_ids, details, resolved_snapshot_registry, resolved_dev_eval = resolve_policy_ids_for_run(
+        policy_ids=[],
+        stack=stack,
+        manifest=manifest,
+        layout=layout,
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+    )
+
+    assert policy_ids == ["B0 RandomLegal", "policy_locked"]
+    assert details["mode"] == "deterministic_v1"
+    assert details["status"] == "resolved"
+    assert resolved_snapshot_registry is None
+    assert resolved_dev_eval is None
+
+
 def test_eval_entrypoint_honors_completed_manifest_policy_selection(tmp_path: Path) -> None:
     import scripts.eval as eval_script
 
@@ -1028,6 +1094,68 @@ def test_eval_manifest_persistence_records_explicit_cli_policy_selection(tmp_pat
     }
 
 
+def test_eval_package_run_reports_update_summary_and_determinism_report(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "eval_report"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.ensure_directories()
+    layout.run_summary_path.write_text(json.dumps({"kind": "run_summary_v1"}) + "\n", encoding="utf-8")
+    layout.determinism_report_path.write_text(json.dumps({"kind": "determinism_report_v1"}) + "\n", encoding="utf-8")
+    layout.replay_verification_json().write_text(
+        json.dumps({"status": "ok", "verified_episode_count": 3}) + "\n",
+        encoding="utf-8",
+    )
+    layout.final_eval_aggregate_hashes_json().write_text(
+        json.dumps({"kind": "final_eval_artifact_hashes_v1", "artifacts": {"eval/final_eval/summary.json": "ab" * 32}})
+        + "\n",
+        encoding="utf-8",
+    )
+    figure_path = layout.figures_paper_dir / "fig_matchup_heatmap.pdf"
+    figure_path.write_text("pdf\n", encoding="utf-8")
+
+    update_run_level_reports(
+        layout=layout,
+        run_dir=run_dir,
+        policy_ids=["B0 RandomLegal", "policy_000300"],
+        selection_details={"mode": "deterministic_v1"},
+        final_eval_payload={"matchups": [{"focal_policy_id": "B0 RandomLegal"}]},
+        metagame_payload={"kind": "metagame_summary_v1"},
+        figure_paths=(figure_path,),
+        readiness_payload={"passed": True},
+    )
+
+    run_summary = json.loads(layout.run_summary_path.read_text(encoding="utf-8"))
+    determinism = json.loads(layout.determinism_report_path.read_text(encoding="utf-8"))
+    assert run_summary["canonical_eval_completed"] is True
+    assert run_summary["paper_grade"] is True
+    assert run_summary["figure_outputs"] == ["figures/paper/fig_matchup_heatmap.pdf"]
+    assert determinism["policy_selection_mode"] == "deterministic_v1"
+    assert determinism["replay_verification"]["status"] == "ok"
+    assert determinism["final_eval"]["matchup_count"] == 1
+    assert determinism["canonical_artifact_hashes"] == {"eval/final_eval/summary.json": "ab" * 32}
+
+
+def test_eval_package_manifest_persistence_matches_script_wrapper(tmp_path: Path) -> None:
+    layout = ArtifactLayout.from_run_dir(tmp_path / "runs" / "eval_manifest_package")
+    layout.run_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {"policy_set_selection": ["old"]}
+
+    persist_policy_selection_in_manifest(
+        layout=layout,
+        manifest=manifest,
+        policy_ids=["policy_new"],
+        selection_details={"mode": "explicit_cli"},
+    )
+
+    persisted = json.loads(layout.manifest_path.read_text(encoding="utf-8"))
+    assert persisted["policy_set_selection"] == ["policy_new"]
+    assert persisted["policy_set_selection_details"] == {
+        "mode": "explicit_cli",
+        "policy_count": 1,
+        "resolved_by": "canonical_eval_pipeline_v1",
+        "status": "resolved",
+    }
+
+
 def test_eval_pipeline_persists_policy_selection_before_run_final_eval(tmp_path: Path, monkeypatch) -> None:
     import scripts.eval as eval_script
 
@@ -1270,21 +1398,26 @@ def test_eval_pipeline_uses_parallel_helper_when_requested(tmp_path: Path, monke
 def test_parallel_eval_worker_devices_treat_auto_as_cuda_auto(monkeypatch) -> None:
     import scripts.eval as eval_script
 
-    monkeypatch.setattr(eval_script.torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(eval_script.torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr(eval_parallel.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(eval_parallel.torch.cuda, "device_count", lambda: 2)
 
     assert eval_script._resolved_parallel_worker_devices(
         parallel_workers=5,
         explicit_worker_devices=(),
         eval_device="auto",
     ) == ("cuda:0", "cuda:1", "cuda:0", "cuda:1", "cuda:0")
+    assert resolved_parallel_worker_devices(
+        parallel_workers=3,
+        explicit_worker_devices=("cuda:1", "cuda:0"),
+        eval_device="cpu",
+    ) == ("cuda:1", "cuda:0", "cuda:1")
 
 
 def test_parallel_eval_worker_devices_reject_invalid_explicit_cuda(monkeypatch) -> None:
     import scripts.eval as eval_script
 
-    monkeypatch.setattr(eval_script.torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(eval_script.torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(eval_parallel.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(eval_parallel.torch.cuda, "device_count", lambda: 1)
 
     with pytest.raises(ValueError, match="only 1 CUDA device"):
         eval_script._resolved_parallel_worker_devices(
@@ -1367,6 +1500,43 @@ def test_parallel_final_eval_falls_back_to_serial_for_single_matchup(
     assert parallel_eval["enabled"] is False
     assert parallel_eval["fallback_reason"] == "single_matchup"
     assert observed["matchup_results"] == [{"focal_index": 0, "opponent_index": 1, "summary": {"games": 1}}]
+
+    observed.clear()
+    package_payload = run_parallel_final_eval(
+        stack_config_path=stack_config.resolve(),
+        stack=stack,
+        run_dir=run_dir,
+        layout=layout,
+        policy_ids=("policy_a", "policy_b"),
+        paired_seeds=(1,),
+        stage1_paired_seeds=1,
+        max_paired_seeds=1,
+        stop_rules=stack.config.evaluation.stop_rules,
+        run_id256="ab" * 32,
+        config_hash256="cd" * 32,
+        spec_hash256="ef" * 32,
+        scheme=cast(object, stack.config.evaluation.final_policy_set_selection.folding),
+        sample_count=8,
+        snapshot_registry_path=None,
+        b1_baseline_run_dir=None,
+        metadata={},
+        seed_file_path=None,
+        parallel_workers=4,
+        parallel_worker_devices=("cuda:1", "cuda:2"),
+        matchup_builder=lambda *, policy_ids: [
+            {
+                "focal_index": 0,
+                "opponent_index": 1,
+                "focal_policy_id": str(policy_ids[0]),
+                "opponent_policy_id": str(policy_ids[1]),
+            }
+        ],
+        matchup_worker=_fake_worker,
+        finalizer=_fake_finalize_final_eval,
+    )
+
+    assert package_payload == {"status": "ok"}
+    assert observed["worker_eval_device"] == str(stack.config.evaluation.eval_device)
 
 
 def test_eval_git_commit_override_does_not_mutate_manifest_payload() -> None:
@@ -1505,14 +1675,14 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
             (
                 json.dumps(
                     {
-                            "pair_index": 0,
-                            "swap_index": 0,
-                            "episode_index": 0,
-                            "episode_seed": 7,
-                            "episode_key": "01" * 32,
-                            "episode_key64": 1,
-                            "config_hash256": config_hash256,
-                            "spec_hash256": spec_hash256,
+                        "pair_index": 0,
+                        "swap_index": 0,
+                        "episode_index": 0,
+                        "episode_seed": 7,
+                        "episode_key": "01" * 32,
+                        "episode_key64": 1,
+                        "config_hash256": config_hash256,
+                        "spec_hash256": spec_hash256,
                         "focal_policy_id": "champion",
                         "opponent_policy_id": "baseline",
                         "seat0_policy_id": "champion",
@@ -1536,14 +1706,14 @@ def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:
                 ),
                 json.dumps(
                     {
-                            "pair_index": 0,
-                            "swap_index": 1,
-                            "episode_index": 1,
-                            "episode_seed": 7,
-                            "episode_key": "02" * 32,
-                            "episode_key64": 2,
-                            "config_hash256": config_hash256,
-                            "spec_hash256": spec_hash256,
+                        "pair_index": 0,
+                        "swap_index": 1,
+                        "episode_index": 1,
+                        "episode_seed": 7,
+                        "episode_key": "02" * 32,
+                        "episode_key64": 2,
+                        "config_hash256": config_hash256,
+                        "spec_hash256": spec_hash256,
                         "focal_policy_id": "champion",
                         "opponent_policy_id": "baseline",
                         "seat0_policy_id": "baseline",
@@ -2577,4 +2747,3 @@ def test_make_figures_entrypoint_public_demo_writes_clearly_labeled_bundle(tmp_p
     assert manifest["demo_only"] is True
     assert manifest["public_safe"] is True
     assert "Wrote public-demo placeholder figure bundle" in result.stdout
-

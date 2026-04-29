@@ -6,12 +6,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from weiss_rl.artifact_contract import REQUIRED_SENSITIVITY_CASE_IDS
 from weiss_rl.artifacts import ArtifactLayout
 
 __all__ = ["write_paper_readiness_run_fixture"]
 
 _POLICY_IDS = ("B0 RandomLegal", "policy_000300")
-_SENSITIVITY_CASE_IDS = ("S0", "S1", "S2")
 
 
 def write_paper_readiness_run_fixture(run_dir: Path) -> Path:
@@ -222,9 +222,9 @@ def _write_diagnostics(layout: ArtifactLayout) -> None:
 def _write_metagame_tree(layout: ArtifactLayout) -> None:
     _write_json(
         layout.metagame_dir / "summary.json",
-        {"policy_ids": list(_POLICY_IDS), "cases": {case_id: {} for case_id in _SENSITIVITY_CASE_IDS}},
+        {"policy_ids": list(_POLICY_IDS), "cases": {case_id: {} for case_id in REQUIRED_SENSITIVITY_CASE_IDS}},
     )
-    for case_id in _SENSITIVITY_CASE_IDS:
+    for case_id in REQUIRED_SENSITIVITY_CASE_IDS:
         case_dir = layout.metagame_dir / case_id
         (case_dir / "payoff").mkdir(parents=True, exist_ok=True)
         (case_dir / "nash").mkdir(parents=True, exist_ok=True)

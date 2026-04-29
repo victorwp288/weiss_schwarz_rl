@@ -14,7 +14,7 @@ Goal: get a fresh clone to a successful verification run without needing a 1:1 w
 The repo now supports three useful lanes:
 
 - `configs/stack_smoke.yaml` with `make train-min` is the explicit scaffold-only path. It proves config loading, simulator provenance capture, and run-manifest writing, but it does not claim thesis-grade training.
-- `python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` is the frozen simulator-backed thesis path once the dedicated B1 anchor exists.
+- `python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label <run> --b1-baseline-run-dir runs/<baseline_run> --torchrun-nproc <gpu_count>` is the frozen simulator-backed thesis path once the dedicated B1 anchor exists.
 - `configs/thesis_locked.yaml` and `configs/local.yaml` remain available as lower-level legacy/compatibility stack surfaces.
 - `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline.
 
@@ -27,7 +27,7 @@ Repo paths in this guide are relative to the repo root.
 - Python >= 3.10, < 3.13
 - `uv` installed and available in your terminal (`pip install uv`)
 - Access to `weiss_sim` with `export_spec_bundle()` available.
-  - `uv sync --extra dev --extra sim` installs `weiss-sim 0.8.1`, which matches the current repo expectations.
+  - `uv sync --extra dev --extra sim` installs `weiss-sim 0.8.2`, which matches the current repo expectations.
   - If `weiss_sim` is already installed in your active Python environment, the probe uses that first.
   - Otherwise it checks `WEISS_SIM_PYTHONPATH` if set.
   - Otherwise it looks for a sibling checkout at `../weiss-schwarz-simulator/python` relative to this repo.
@@ -98,20 +98,20 @@ If you use `make train-min` instead, expect the same contract/manifest scaffold 
 
 ## Canonical simulator-backed run
 
-Use this for the real thesis-oriented train/eval path. It exercises the single-node queue runtime through the `DecisionBoundaryEnv` contract and validates against `weiss-sim 0.8.1`.
+Use this for the real thesis-oriented train/eval path. It exercises the single-node queue runtime through the `DecisionBoundaryEnv` contract and validates against `weiss-sim 0.8.2`.
 
 Requirements:
 
-- use `python/scripts/thesis_run.py --preset thesis-model-auto-gpu` for the frozen multi-GPU thesis path
-- install `weiss-sim 0.8.1` with `uv sync --extra dev --extra sim`, or otherwise ensure the active interpreter can import the same validated `weiss_sim`
+- use the `torch.distributed.run` + `--autoscale` commands below for the frozen multi-GPU thesis path
+- install `weiss-sim 0.8.2` with `uv sync --extra dev --extra sim`, or otherwise ensure the active interpreter can import the same validated `weiss_sim`
 - keep the run on a single machine for the canonical path
 - prepare a dedicated `baseline_noleague` run first and pass it through `--b1-baseline-run-dir`
 
 Run:
 
 ```bash
-uv run python python/scripts/train.py --stack-config configs/baselines/noleague_impala.yaml --run-label b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label thesis_model_seed1 --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 --num-envs 2048 --unroll-length 64 --runtime-mode train_async_fast --max-updates 400 --skip-compare
+CUDA_VISIBLE_DEVICES=0,1,2,3 uv run python -m torch.distributed.run --standalone --nproc_per_node=4 python/scripts/train.py --stack-config configs/baselines/noleague_impala.yaml --autoscale --hardware-profile local --ddp --ddp-backend nccl --ddp-timeout-seconds 1800 --run-label b1_anchor_thesis_model_seed1 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/thesis_run.py --preset thesis-model-auto-gpu --run-label thesis_model_seed1 --b1-baseline-run-dir runs/b1_anchor_thesis_model_seed1 --torchrun-nproc 4 --autoscale --hardware-profile local --ddp-backend nccl --ddp-timeout-seconds 1800 --unroll-length 64 --runtime-mode train_async_fast --max-updates 400 --skip-compare
 uv run python python/scripts/make_figures.py --run-dir runs/thesis_model_seed1
 ```
 

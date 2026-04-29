@@ -25,9 +25,7 @@ from weiss_rl.model import PolicyValueModel
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-NOLEAGUE_BASELINE_STACK_CONFIG = (
-    REPO_ROOT / "configs" / "baselines" / "noleague_impala.yaml"
-)
+NOLEAGUE_BASELINE_STACK_CONFIG = REPO_ROOT / "configs" / "baselines" / "noleague_impala.yaml"
 
 
 def _fake_terminal_eval_batch(*, seed: int, terminated: bool = False, reward: float = 0.0) -> DecisionBoundaryBatch:
@@ -1771,9 +1769,7 @@ def test_seed_checkpoint_tracker_from_resume_best_carries_dev_eval_best(tmp_path
         dev_eval_summary={
             "aggregate_score": 0.8333333333333334,
             "anchors": {
-                "B0 RandomLegal": {
-                    "uncertainty": {"prob_gt_half": 1.0, "prob_lt_half": 0.0, "ci_half_width": 0.0}
-                }
+                "B0 RandomLegal": {"uncertainty": {"prob_gt_half": 1.0, "prob_lt_half": 0.0, "ci_half_width": 0.0}}
             },
             "stall_monitor": {"worst_truncation_rate": 0.0},
         },
@@ -1929,9 +1925,7 @@ def test_seed_checkpoint_tracker_from_resume_best_skips_config_mismatch(tmp_path
         dev_eval_summary={
             "aggregate_score": 0.75,
             "anchors": {
-                "B0 RandomLegal": {
-                    "uncertainty": {"prob_gt_half": 1.0, "prob_lt_half": 0.0, "ci_half_width": 0.0}
-                }
+                "B0 RandomLegal": {"uncertainty": {"prob_gt_half": 1.0, "prob_lt_half": 0.0, "ci_half_width": 0.0}}
             },
         },
     )
@@ -3085,9 +3079,7 @@ def test_simulator_eval_runner_does_not_reuse_env_when_replay_capture_enabled(tm
     second.close()
 
 
-def test_simulator_eval_runner_honors_cuda_auto_eval_device(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_simulator_eval_runner_honors_cuda_auto_eval_device(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class FakeModel(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -3107,7 +3099,9 @@ def test_simulator_eval_runner_honors_cuda_auto_eval_device(
     layout = ArtifactLayout.from_run_dir(tmp_path)
     layout.ensure_directories()
     runner = SimulatorEvalRunner(
-        stack=SimpleNamespace(config=SimpleNamespace(curriculum=None, evaluation=SimpleNamespace(eval_device="cuda:auto"))),
+        stack=SimpleNamespace(
+            config=SimpleNamespace(curriculum=None, evaluation=SimpleNamespace(eval_device="cuda:auto"))
+        ),
         policies={
             "candidate": ResolvedEvalPolicy(
                 policy_id="candidate",
@@ -3127,4 +3121,3 @@ def test_simulator_eval_runner_honors_cuda_auto_eval_device(
 
     assert model.to_calls[-1] == "cuda:0"
     assert str(cast(Any, runner)._device) == "cuda:0"
-

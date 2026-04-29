@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
 import train as train_script
 from weiss_rl.eval.simulator_runner import SimulatorEvalRunner
 
@@ -118,9 +117,7 @@ def main() -> None:
             if str(spec.display_name) in requested or str(spec.policy_id) in requested
         )
         if not opponent_specs:
-            available = ", ".join(
-                f"{spec.display_name} ({spec.policy_id})" for spec in (*resolved_specs, *extra_specs)
-            )
+            available = ", ".join(f"{spec.display_name} ({spec.policy_id})" for spec in (*resolved_specs, *extra_specs))
             raise SystemExit(f"--only-anchor did not match any configured anchor. Available: {available}")
     elif extra_specs:
         opponent_specs = tuple(extra_specs)
