@@ -1,0 +1,23 @@
+Traceback (most recent call last):
+  File "/workspace/weiss_schwarz_rl/python/scripts/profile_train_job.py", line 140, in main
+    time.sleep(max(float(args.sample_interval_seconds), 0.25))
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/weiss_schwarz_rl/python/scripts/profile_train_job.py", line 163, in <module>
+    main()
+  File "/workspace/weiss_schwarz_rl/python/scripts/profile_train_job.py", line 151, in main
+    exit_code = int(process.wait())
+                    ^^^^^^^^^^^^^^
+  File "/.uv/python_install/cpython-3.11.15-linux-x86_64-gnu/lib/python3.11/subprocess.py", line 1264, in wait
+    return self._wait(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/.uv/python_install/cpython-3.11.15-linux-x86_64-gnu/lib/python3.11/subprocess.py", line 2053, in _wait
+    (pid, sts) = self._try_wait(0)
+                 ^^^^^^^^^^^^^^^^^
+  File "/.uv/python_install/cpython-3.11.15-linux-x86_64-gnu/lib/python3.11/subprocess.py", line 2011, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

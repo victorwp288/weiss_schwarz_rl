@@ -10,6 +10,7 @@ import torch
 from torch import Tensor, nn
 
 import weiss_rl.structured_action_head as _structured_action_head
+from weiss_rl import structured_sampling as _structured_sampling
 from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.card_table import cached_runtime_card_table
 from weiss_rl.config.models import ModelConfig
@@ -38,7 +39,7 @@ def _negative_logits_fill_value(dtype: torch.dtype) -> float:
 
 
 def _packed_local_cdf(probabilities: Tensor, offsets: Tensor) -> Tensor:
-    return _structured_action_head._packed_local_cdf(probabilities, offsets)
+    return _structured_sampling.packed_local_cdf(probabilities, offsets)
 
 
 def _sample_packed_action_scores(*args: Any, **kwargs: Any) -> tuple[Tensor, Tensor]:

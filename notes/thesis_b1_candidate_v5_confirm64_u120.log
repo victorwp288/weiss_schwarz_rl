@@ -1,0 +1,1 @@
+manual confirm done run_dir=runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429 update=120 pairs=64 aggregate=0.875000 unweighted=0.875000 focal_action_mode=sample anchors={'B0 RandomLegal': 1.0, 'B1 NoLeague baseline': 0.5078125, 'B2 HeuristicPublic': 1.0, 'B3 HeuristicPublicAggro': 0.875, 'B4 HeuristicPublicControl': 0.9921875}

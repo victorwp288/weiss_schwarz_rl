@@ -1,0 +1,131 @@
+diff --git a/configs/main_impala_league_server_v2_anchor_variant.yaml b/configs/main_impala_league_server_v2_anchor_variant.yaml
+--- a/configs/main_impala_league_server_v2_anchor_variant.yaml
++++ b/configs/main_impala_league_server_v2_anchor_variant.yaml
+@@ -45,11 +45,11 @@ training:
+   optimizer:
+     name: Adam
+     backend: auto
+-    learning_rate: 0.0002
++    learning_rate: 0.00005
+     grad_norm_clip: 40.0
+     value_loss_coef: 0.5
+   exploration:
+-    entropy_coef: 0.03
++    entropy_coef: 0.02
+     entropy_anneal_to: 0.01
+     entropy_anneal_steps_updates: 300000
+   precision:
+@@ -70,7 +70,7 @@ training:
+   checkpointing:
+     checkpoint_interval_updates: 20
+     snapshot_interval_updates: 20
+-    actor_reload_interval_updates: 50
++    actor_reload_interval_updates: 10
+   vtrace:
+     rho_bar: 1.0
+     c_bar: 1.0
+@@ -134,12 +134,12 @@ training:
+     margin_coef: 0.2
+     margin: 1.0
+     max_labels: 0
+-  actor_policy_backend: heuristic_public
+-  actor_heuristic_fraction: 1.0
+-  actor_heuristic_start_updates: 80
+-  actor_heuristic_end_updates: 240
+-  actor_heuristic_final_fraction: 0.35
+-  heuristic_native_rollout_enabled: true
++  actor_policy_backend: model
++  actor_heuristic_fraction: 0.0
++  actor_heuristic_start_updates: 0
++  actor_heuristic_end_updates: 0
++  actor_heuristic_final_fraction: 0.0
++  heuristic_native_rollout_enabled: false
+   heuristic_actor_hidden_state_tracking: true
+ environment:
+   observation_visibility: public
+@@ -193,27 +193,30 @@ league:
+   enabled: true
+   pool:
+-    recent_size: 24
+-    champion_size: 4
++    recent_size: 32
++    champion_size: 8
+     champion_max_age_updates: 120
+   sampling:
+     opponent_sampling: PFSP
+     pfsp_power: 1.5
+     pfsp_epsilon_uniform: 0.3
+     pfsp_stats_source: online_outcomes
+     pfsp_window_episodes: 25000
+     heuristic_public_start_updates: 0
+-    heuristic_public_mix_fraction: 1.0
+-    heuristic_public_mix_end_updates: 240
+-    champion_mix_fraction: 0.35
+-    hard_negative_mix_fraction: 0.25
++    heuristic_public_mix_fraction: 0.25
++    heuristic_public_mix_end_updates: 400
++    heuristic_public_final_mix_fraction: 0.15
++    heuristic_public_variant_mix_fraction: 0.35
++    heuristic_public_variant_mix_end_updates: 400
++    heuristic_public_variant_final_mix_fraction: 0.25
++    champion_mix_fraction: 0.25
++    hard_negative_mix_fraction: 0.20
+     hard_negative_min_samples: 16
+     hard_negative_max_win_rate: 0.45
+-    heuristic_public_final_mix_fraction: 0.35
+-    noleague_baseline_mix_fraction: 0.15
+-    noleague_baseline_mix_end_updates: 160
++    noleague_baseline_mix_fraction: 0.25
++    noleague_baseline_mix_end_updates: 400
+   warmup:
+-    first_updates: 200
++    first_updates: 120
+     initial_window_episodes: 5000
+     ramp_target_updates: 600
+     ramp_target_window_episodes: 15000
+@@ -254,6 +257,12 @@ evaluation:
+     promotion_gate: configs/seeds/promotion_eval_seeds.txt
+   periodic_dev_eval_interval_updates: 40
+   periodic_dev_eval_paired_seeds: 16
++  periodic_dev_eval_anchor_weights:
++    B0 RandomLegal: 0.25
++    B1 NoLeague baseline: 3.0
++    B2 HeuristicPublic: 0.25
++    B3 HeuristicPublicAggro: 3.0
++    B4 HeuristicPublicControl: 1.0
+   final_policy_set_size: 10
+   final_matrix_stage1_paired_seeds: 64
+   final_matrix_stage2_adaptive_max_paired_seeds: 256
+diff --git a/scripts/run_thesis_main_v2_anchor_variant_20260429.sh b/scripts/run_thesis_main_v2_anchor_variant_20260429.sh
+new file mode 100755
+--- /dev/null
++++ b/scripts/run_thesis_main_v2_anchor_variant_20260429.sh
+@@ -0,0 +1,27 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++cd /workspace/weiss_schwarz_rl
++
++ulimit -n 1048576
++export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
++export PYTHONUNBUFFERED=1
++
++RUN_LABEL="${RUN_LABEL:-thesis_main_candidate_v2_anchor_variant_cf81_20260429}"
++MAX_UPDATES="${MAX_UPDATES:-240}"
++STACK_CONFIG="${STACK_CONFIG:-configs/main_impala_league_server_v2_anchor_variant.yaml}"
++B1_DIR="runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429"
++
++.venv/bin/python python/scripts/profile_train_job.py \
++  --run-label "$RUN_LABEL" \
++  --stack-config "$STACK_CONFIG" \
++  --seed 20260429 \
++  --runtime-mode train_async_fast \
++  --max-updates "$MAX_UPDATES" \
++  --autoscale \
++  --hardware-profile local \
++  --torchrun-nproc 4 \
++  --ddp-backend gloo \
++  --ddp-timeout-seconds 1800 \
++  --sample-interval-seconds 30 \
++  --train-arg=--b1-baseline-run-dir \
++  --train-arg="$B1_DIR"

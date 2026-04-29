@@ -1,0 +1,352 @@
+schema_version: 2
+description: Thesis v10 B1-plus continuation from v9c champion pool with stronger B1 preservation.
+experiment:
+  role: main
+system:
+  profile:
+    training: fast
+    local_iteration: fast
+    ci_invariant_testing: debug
+  mp_start_method: spawn
+  learner_device: cuda:auto
+  actor_device: cuda:auto
+  actor_process_count: 32
+  envs_per_actor: 8
+  total_envs: 96
+  actor_torch_threads: 1
+  learner_torch_threads: 16
+  actor_queue_capacity_unrolls: 256
+  learner_prefetch_batches: 4
+  collection_backend: process
+model:
+  gru_hidden_size: 512
+  encoder_mlp_width: 512
+  encoder_mlp_layers: 2
+  encoder_kind: structured_v2
+  typed_feature_width: 62
+  recurrent_core: gru
+  layer_norm: true
+  dropout:
+    family_a: 0.0
+    ablation: 0.1
+  cuda_learner_candidate_scoring_chunk_size: 1048576
+  public_heuristic_logit_bias_scale: 2.0
+  public_heuristic_actor_logit_bias_scale: 1.0
+  public_heuristic_logit_bias_final_scale: 2.0
+  public_heuristic_logit_bias_families:
+  - main_play_character
+  - main_move
+  - attack
+training:
+  algorithm: impala_vtrace_structured_v1
+  rollout:
+    unroll_length: 160
+    batch_unrolls_per_update: 64
+  optimizer:
+    name: Adam
+    backend: auto
+    learning_rate: 0.000025
+    grad_norm_clip: 40.0
+    value_loss_coef: 0.5
+  exploration:
+    entropy_coef: 0.016
+    entropy_anneal_to: 0.008
+    entropy_anneal_steps_updates: 800
+  precision:
+    mixed_precision: true
+    compile_learner: false
+    compile_actor_inference: false
+    masking_math_float32: true
+  scaling:
+    learner_parallelism: auto
+    learner_gpu_count: auto
+    actor_topology: auto
+    target_envs_per_gpu: 384
+    min_envs_per_actor: 32
+    max_envs_per_actor: 64
+    max_actor_process_count: 64
+    reserve_cpu_cores: 4
+    learner_cpu_cores_per_gpu: 2
+    queue_depth_multiplier: 2
+    ram_queue_fraction: 0.25
+    vram_fraction: 0.85
+  checkpointing:
+    checkpoint_interval_updates: 20
+    snapshot_interval_updates: 20
+    actor_reload_interval_updates: 10
+  vtrace:
+    rho_bar: 1.0
+    c_bar: 1.0
+  ppo:
+    clip_epsilon: 0.2
+    value_clip_epsilon: 0.2
+    gae_lambda: 0.95
+    epochs: 4
+    target_kl: 0.03
+    normalize_advantages: true
+  profile_timers: true
+  structured_metrics:
+    mode: sampled
+  teacher_aux:
+    mode: always
+  reference_policy_id: b1_noleague_baseline
+  reference_policy_top_action_bc_coef: 0.36
+  reference_policy_top_action_bc_final_coef: 0.26
+  reference_policy_top_action_bc_start_updates: 0
+  reference_policy_top_action_bc_end_updates: 1000
+  fixed_opponent_backend: simulator_native
+  structured_aux:
+    enabled: true
+    teacher_family_coef: 0.2
+    teacher_slot_coef: 0.1
+    teacher_attack_type_coef: 0.05
+    teacher_action_coef: 0.1
+    teacher_public_heuristic_coef: 0.1
+    teacher_public_heuristic_final_coef: 0.1
+    teacher_public_heuristic_profiles:
+    - base
+    - aggressive
+    - control
+    teacher_public_heuristic_profile_mode: cycle
+  structured_warmstart:
+    enabled: true
+    updates: 1
+    teacher_family_coef: 0.75
+    teacher_slot_coef: 0.35
+    teacher_attack_type_coef: 0.2
+    teacher_action_coef: 0.5
+    teacher_public_heuristic_coef: 0.5
+    teacher_public_heuristic_profiles:
+    - base
+    - aggressive
+    - control
+    teacher_public_heuristic_profile_mode: cycle
+  counterfactual_positive:
+    enabled: true
+    label_dirs:
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_mine50_20260429_broad_twostep
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50_20260429_pass_repair
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_attack_event
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_broad_a
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_broad_b
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_pass_repair
+    coef: 1.35
+    final_coef: 0.45
+    start_updates: 0
+    end_updates: 1000
+    margin_coef: 0.2
+    margin: 1.0
+    max_labels: 0
+  actor_policy_backend: model
+  actor_heuristic_fraction: 0.0
+  actor_heuristic_start_updates: 0
+  actor_heuristic_end_updates: 0
+  actor_heuristic_final_fraction: 0.0
+  heuristic_native_rollout_enabled: false
+  heuristic_actor_hidden_state_tracking: true
+environment:
+  observation_visibility: public
+  visibility: public
+  truncate_on_max_steps: true
+  max_raw_decisions_per_episode: 4000
+  max_decisions: 2000
+  max_decisions_per_episode: 2000
+  max_learner_steps_per_episode: 2000
+  max_ticks: 100000
+  deck_set_size:
+    bring_up: 2
+    paper: 8
+rewards:
+  objective: terminal_pm1
+  discount:
+    gamma: 0.99
+  shaping:
+    enable_damage_shaping: true
+    damage_reward: 0.05
+    level_reward: 0.0
+    board_reward: 0.0
+    no_progress_penalty: 0.0
+  truncation:
+    reward: -0.1
+    bootstrap_value: false
+    bootstrap_rule: if truncated and not terminated, bootstrap from V(next_state);
+      if terminated, no bootstrap
+curriculum:
+  simulator: {}
+  stall_monitor:
+    enabled: false
+    truncation_rate_threshold: 0.25
+    consecutive_evals: 2
+  checkpoint_guard:
+    enabled: false
+    rollback_score_margin: 0.01
+    rollback_truncation_rate_threshold: 0.25
+    rollback_max_prob_lt_half: 0.7
+    min_best_score: 0.55
+    promote_min_prob_gt_half: 0.6
+    promote_max_ci_half_width: 0.24
+    cooldown_updates: 20
+  early_cutoff:
+    enabled: true
+    warmup_updates: 240
+    patience_updates: 240
+    min_improvement: 0.005
+    stall_patience_evals: 4
+    stall_rate_threshold: 0.25
+league:
+  enabled: true
+  pool:
+    recent_size: 32
+    champion_size: 12
+    champion_max_age_updates: 800
+  sampling:
+    opponent_sampling: PFSP
+    pfsp_power: 1.5
+    pfsp_epsilon_uniform: 0.25
+    pfsp_stats_source: online_outcomes
+    pfsp_window_episodes: 50000
+    heuristic_public_start_updates: 0
+    heuristic_public_mix_fraction: 0.05
+    heuristic_public_mix_end_updates: 600
+    heuristic_public_final_mix_fraction: 0.03
+    heuristic_public_variant_mix_fraction: 0.16
+    heuristic_public_variant_mix_end_updates: 600
+    heuristic_public_variant_final_mix_fraction: 0.10
+    warmup_snapshot_mix_fraction: 0.0
+    champion_mix_fraction: 0.10
+    hard_negative_mix_fraction: 0.03
+    hard_negative_min_samples: 24
+    hard_negative_max_win_rate: 0.48
+    noleague_baseline_mix_fraction: 0.50
+    noleague_baseline_mix_end_updates: -1
+    noleague_baseline_reward_scale: 2.0
+  warmup:
+    first_updates: 220
+    initial_window_episodes: 5000
+    ramp_target_updates: 800
+    ramp_target_window_episodes: 30000
+  promotion:
+    enabled: true
+    paired_seeds: 64
+    threshold: P(p_anchor > 0.55) > 0.95 using AnchorSet_v1
+    anchor_set_v1:
+      required:
+      - B0 RandomLegal
+      - B1 NoLeague baseline
+      optional_if_available:
+      - B2 HeuristicPublic
+      - B3 HeuristicPublicAggro
+      - B4 HeuristicPublicControl
+      - Previous champion snapshot
+      - Previous recent snapshot
+    seed_file: configs/seeds/promotion_eval_seeds.txt
+    gate:
+      uncertainty_method: bayesian_bootstrap_seedlevel_v1
+      weighting: uniform_across_anchors
+      seat_swap: true
+      folding: S0
+      guardrails:
+        max_prob_anchor_loss_below_0_45: 0.25
+        max_truncation_rate: 0.05
+      target_min_anchor_scores:
+        B1 NoLeague baseline: 0.46
+        B3 HeuristicPublicAggro: 0.53
+        B4 HeuristicPublicControl: 0.80
+      record_file: promotion_gate.json
+      parallel_workers: 6
+      async_enabled: false
+evaluation:
+  seat_swap: true
+  eval_device: cuda:auto
+  eval_inference_mode: true
+  eval_sampling_algorithm: pinned_cdf_pcg_v1
+  eval_assert_sorted_legal_ids: true
+  seed_files:
+    dev_eval: configs/seeds/dev_eval_seeds.txt
+    report_eval: configs/seeds/report_eval_seeds.txt
+    promotion_gate: configs/seeds/promotion_eval_seeds.txt
+  periodic_dev_eval_interval_updates: 80
+  periodic_dev_eval_paired_seeds: 16
+  periodic_dev_eval_anchor_weights:
+    B0 RandomLegal: 0.25
+    B1 NoLeague baseline: 3.0
+    B2 HeuristicPublic: 0.25
+    B3 HeuristicPublicAggro: 3.0
+    B4 HeuristicPublicControl: 1.0
+  final_policy_set_size: 10
+  final_matrix_stage1_paired_seeds: 64
+  final_matrix_stage2_adaptive_max_paired_seeds: 256
+  stop_rules:
+    stop_delta_ci_half_width: 0.03
+    stop_confidence: 0.95
+  replay_capture_rate_eval: 0.001
+  regression_capture_count: 50
+  legal_fingerprint_checks:
+    enabled: true
+    version: legal_fingerprint_v1
+    require_strictly_increasing_legal_ids: true
+    mismatch_policy: hard_fail
+  decision_kind_tagging:
+    required_for_training: false
+    enable_python_derived_debug_tag: false
+  final_policy_set_selection:
+    version: deterministic_v1
+    include_random_legal_baseline_b0: true
+    include_no_league_baseline_b1: true
+    include_heuristic_public_b2_if_exists: true
+    include_final_champion_snapshot: true
+    include_spaced_snapshots_near_percent_updates:
+    - 25
+    - 50
+    - 75
+    remaining_slots_strategy: top_dev_performers_vs_anchor_set_v1
+    fixed_anchor_set_v1:
+      required:
+      - B0 RandomLegal
+      - B1 NoLeague baseline
+      optional_if_available:
+      - B2 HeuristicPublic
+    seed_file: configs/seeds/dev_eval_seeds.txt
+    folding: S0
+    seat_swap: true
+    tie_break: lowest_policy_id
+  async_periodic_dev_eval_enabled: false
+  periodic_dev_eval_parallel_workers: 8
+  periodic_dev_eval_batched_inference_enabled: false
+reproducibility:
+  spec_bundle:
+    require_export_spec_bundle: true
+    persist_in_manifest: true
+    fail_on_spec_mismatch: true
+  ids:
+    run_id_hash: sha256
+    config_hash: sha256
+    spec_hash: sha256
+    store_full_256_bit_ids: true
+    store_short_64_bit_ids_for_filenames: true
+  seed_derivation:
+    base_seed64: 20260212
+    actor_seed_formula: hash64(base_seed64, actor_id)
+    episode_seed_formula: hash64(actor_seed64, env_id, episode_index)
+  seed_files:
+    dev_eval: configs/seeds/dev_eval_seeds.txt
+    report_eval: configs/seeds/report_eval_seeds.txt
+    promotion_gate: configs/seeds/promotion_eval_seeds.txt
+  determinism_requirements:
+  - simulator_build_and_spec_bundle_match
+  - environment_config_match
+  - episode_seeds_match
+  - action_sequence_match
+  - evaluation_sampler_rng_and_algorithm_match
+  legal_fingerprint:
+    version: legal_fingerprint_v1
+    compute_in_rl_layer: true
+    canonical_bytes:
+    - b'legal_fp_v1'
+    - spec_hash256
+    - u32_le_decision_id
+    - u32_le_legal_ids_len
+    - u32_le_each_legal_id
+    replay_eval_mismatch_policy: hard_fail

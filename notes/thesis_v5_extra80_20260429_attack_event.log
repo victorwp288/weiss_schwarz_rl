@@ -1,0 +1,50 @@
+B1 NoLeague baseline vs B1 NoLeague baseline: mean=0.49107142857142855 wins=55 losses=57 pair_classes={'2-0': 1, '1-1': 53, '0-2': 2, 'mixed': 0}
+Traceback (most recent call last):
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_counterfactual_labels.py", line 1864, in <module>
+    main()
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_counterfactual_labels.py", line 1510, in main
+    forced_episode, counters = _run_forced_episode_in_process(
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_counterfactual_labels.py", line 497, in _run_forced_episode_in_process
+    result = runner.run_game(scheduled_game)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_artifact_matrix.py", line 575, in run_game
+    return super().run_game(scheduled_game)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/weiss_rl/eval/simulator_runner.py", line 509, in run_game
+    action, next_hidden = self._select_action(
+                          ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_artifact_matrix.py", line 838, in _select_action
+    raw_logits, logits, next_seat_hidden, bias_report = self._forward_raw_and_final_logits(
+                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_artifact_matrix.py", line 634, in _forward_raw_and_final_logits
+    final_logits, next_hidden = self._forward_model_logits(
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_artifact_matrix.py", line 593, in _forward_model_logits
+    logits_tensor, _value_tensor, next_seat_hidden = policy.model.forward_seat_aware(
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/weiss_rl/model.py", line 728, in forward_seat_aware
+    logits = self.policy_head(
+             ^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/weiss_rl/structured_action_head.py", line 717, in forward
+    return self.score_legal_actions(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/weiss_rl/structured_action_head.py", line 561, in score_legal_actions
+    else self._build_state_representation(latent, obs=obs, observation_context=observation_context)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/weiss_rl/structured_action_head.py", line 533, in _build_state_representation
+    self._encode_observation_context(obs_batch) if observation_context is None else dict(observation_context)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/weiss_rl/structured_action_head.py", line 745, in _encode_observation_context
+    self_stage_ctx, self_stage_numeric = self._encode_stage_slice(obs_batch, self._observation_contract.self_stage)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/weiss_rl/structured_action_head.py", line 804, in _encode_stage_slice
+    occupied = (card_ids > max(self._observation_contract.sentinel_empty_card, 0)).to(dtype=dtype)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

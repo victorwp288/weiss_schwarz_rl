@@ -4,3 +4,5 @@ examples/__pycache__/
 python/scripts/__pycache__/
 python/weiss_rl/__pycache__/
 python/weiss_schwarz_rl.egg-info/
+runs/
+._*

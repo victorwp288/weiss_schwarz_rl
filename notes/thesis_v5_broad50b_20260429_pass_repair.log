@@ -1,0 +1,90 @@
+B1 NoLeague baseline vs B1 NoLeague baseline: mean=0.4895833333333333 wins=47 losses=49 pair_classes={'2-0': 0, '1-1': 47, '0-2': 1, 'mixed': 0}
+{
+  "attempted_forced_replays": 384,
+  "baseline_artifact_dir": "eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_pass_repair_baseline",
+  "baseline_matchup_dir": "eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_pass_repair_baseline/B1_NoLeague_baseline__vs__B1_NoLeague_baseline",
+  "exclude_labels": [
+    "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend/counterfactual_labels.jsonl",
+    "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax/counterfactual_labels.jsonl",
+    "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_mine50_20260429_broad_twostep/counterfactual_labels.jsonl",
+    "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50_20260429_attack_event/counterfactual_labels.jsonl",
+    "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50_20260429_broad_a/counterfactual_labels.jsonl",
+    "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50_20260429_broad_b/counterfactual_labels.jsonl",
+    "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50_20260429_pass_repair/counterfactual_labels.jsonl"
+  ],
+  "excluded_action_pairs": [
+    [
+      102,
+      51
+    ],
+    [
+      105,
+      51
+    ],
+    [
+      106,
+      51
+    ],
+    [
+      475,
+      51
+    ]
+  ],
+  "excluded_candidate_action_ids": [],
+  "excluded_candidate_families": [],
+  "excluded_legal_fingerprints": [
+    "2a9794fb880d6c5105455a90e2513054ea984698fc5949b25c4abf8b652d3a67",
+    "4d1279105007b880ab39b9ae3d643d2b6bb13a08ad299f27f9be7f486e292328",
+    "77525e76db0e5a3a119ec01be02985b1b48e3725ac9193948ae679930b73c3c2",
+    "b033dfce59e81c959e3e0cd08689e967737acc21d7dba9c6805c92b423733444"
+  ],
+  "excluded_pair_indices": [],
+  "execution_mode": "in_process",
+  "family_representatives_per_family": 3,
+  "forced_misses": 0,
+  "format": "b1_counterfactual_labels_summary_v1",
+  "ignore_excluded_label_pair_indices": true,
+  "labels_path": "eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_pass_repair/counterfactual_labels.jsonl",
+  "margin_positive_labels": 19,
+  "margin_positive_threshold": 0.05,
+  "max_actions_per_state": 14,
+  "max_forced_replays": 6000,
+  "max_target_states": 420,
+  "max_targets_per_pair": 8,
+  "pairs": 48,
+  "positive_labels": 19,
+  "randomize_target_order": true,
+  "require_baseline_families": [],
+  "require_pass_legal": true,
+  "score_delta_stats": {
+    "max": 2.235,
+    "mean": 0.03067532467532464,
+    "min": -0.2300000000000002
+  },
+  "target_families": [
+    "main_move",
+    "main_play_character",
+    "pass"
+  ],
+  "target_random_seed": 63300,
+  "target_states": 384,
+  "trace_rows": 7680,
+  "trials_path": "eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_pass_repair/counterfactual_trials.jsonl",
+  "two_step_attempted_replays": 1,
+  "two_step_beam_targets": 12,
+  "two_step_forced_misses": 0,
+  "two_step_include_positive_first": true,
+  "two_step_max_replays": 6000,
+  "two_step_min_first_delta": 0.02,
+  "two_step_second_actions": 6,
+  "two_step_target_families": [
+    "attack",
+    "climax_play",
+    "main_move",
+    "main_play_character",
+    "main_play_event",
+    "pass"
+  ],
+  "two_step_window": 40,
+  "winner_flip_labels": 9
+}

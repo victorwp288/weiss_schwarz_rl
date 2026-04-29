@@ -1,0 +1,11 @@
+B1 NoLeague baseline vs B1 NoLeague baseline: mean=0.5104166666666666 wins=49 losses=47 pair_classes={'2-0': 2, '1-1': 45, '0-2': 1, 'mixed': 0}
+Traceback (most recent call last):
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_counterfactual_labels.py", line 1854, in <module>
+    main()
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_counterfactual_labels.py", line 1600, in main
+    tensor_ref = _write_label_tensor_record(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/weiss_schwarz_rl/python/scripts/b1_counterfactual_labels.py", line 1132, in _write_label_tensor_record
+    "episode_seed": torch.tensor(int(label_row.get("episode_seed", -1)), dtype=torch.long),
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Overflow when unpacking long

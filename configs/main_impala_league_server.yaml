@@ -19,8 +19,8 @@ system:
   learner_prefetch_batches: 4
   collection_backend: process
 model:
-  gru_hidden_size: 248
-  encoder_mlp_width: 248
+  gru_hidden_size: 512
+  encoder_mlp_width: 512
   encoder_mlp_layers: 2
   encoder_kind: structured_v2
   typed_feature_width: 62
@@ -40,7 +40,7 @@ model:
 training:
   algorithm: impala_vtrace_structured_v1
   rollout:
-    unroll_length: 64
+    unroll_length: 160
     batch_unrolls_per_update: 64
   optimizer:
     name: Adam
@@ -61,7 +61,7 @@ training:
     learner_parallelism: auto
     learner_gpu_count: auto
     actor_topology: auto
-    target_envs_per_gpu: 512
+    target_envs_per_gpu: 384
     min_envs_per_actor: 32
     max_envs_per_actor: 64
     max_actor_process_count: 64
@@ -116,10 +116,31 @@ training:
     - aggressive
     - control
     teacher_public_heuristic_profile_mode: cycle
+  counterfactual_positive:
+    enabled: true
+    label_dirs:
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_mine50_20260429_broad_twostep
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50_20260429_pass_repair
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_attack_event
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_broad_a
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_broad_b
+    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_pass_repair
+    coef: 1.0
+    final_coef: 0.1
+    start_updates: 0
+    end_updates: 160
+    margin_coef: 0.2
+    margin: 1.0
+    max_labels: 0
   actor_policy_backend: heuristic_public
   actor_heuristic_fraction: 1.0
+  actor_heuristic_start_updates: 80
+  actor_heuristic_end_updates: 240
+  actor_heuristic_final_fraction: 0.35
   heuristic_native_rollout_enabled: true
-  heuristic_actor_hidden_state_tracking: false
+  heuristic_actor_hidden_state_tracking: true
 environment:
   observation_visibility: public
   visibility: public
@@ -163,7 +184,7 @@ curriculum:
     promote_max_ci_half_width: 0.24
     cooldown_updates: 20
   early_cutoff:
-    enabled: true
+    enabled: false
     warmup_updates: 120
     patience_updates: 120
     min_improvement: 0.01
@@ -183,13 +204,14 @@ league:
     pfsp_window_episodes: 25000
     heuristic_public_start_updates: 0
     heuristic_public_mix_fraction: 1.0
+    heuristic_public_mix_end_updates: 240
     champion_mix_fraction: 0.35
     hard_negative_mix_fraction: 0.25
     hard_negative_min_samples: 16
     hard_negative_max_win_rate: 0.45
-    heuristic_public_final_mix_fraction: 1.0
+    heuristic_public_final_mix_fraction: 0.35
     noleague_baseline_mix_fraction: 0.15
-    noleague_baseline_mix_end_updates: 10
+    noleague_baseline_mix_end_updates: 160
   warmup:
     first_updates: 200
     initial_window_episodes: 5000
@@ -231,8 +253,8 @@ evaluation:
     dev_eval: configs/seeds/dev_eval_seeds.txt
     report_eval: configs/seeds/report_eval_seeds.txt
     promotion_gate: configs/seeds/promotion_eval_seeds.txt
-  periodic_dev_eval_interval_updates: 20
-  periodic_dev_eval_paired_seeds: 32
+  periodic_dev_eval_interval_updates: 40
+  periodic_dev_eval_paired_seeds: 16
   final_policy_set_size: 10
   final_matrix_stage1_paired_seeds: 64
   final_matrix_stage2_adaptive_max_paired_seeds: 256

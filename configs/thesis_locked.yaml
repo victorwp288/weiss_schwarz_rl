@@ -18,8 +18,8 @@ system:
   actor_queue_capacity_unrolls: 256
   learner_prefetch_batches: 4
 model:
-  gru_hidden_size: 256
-  encoder_mlp_width: 256
+  gru_hidden_size: 512
+  encoder_mlp_width: 512
   encoder_mlp_layers: 2
   encoder_kind: typed_v1
   typed_feature_width: 64
@@ -31,8 +31,8 @@ model:
 training:
   algorithm: impala_vtrace_gru
   rollout:
-    unroll_length: 64
-    batch_unrolls_per_update: 128
+    unroll_length: 160
+    batch_unrolls_per_update: 64
   optimizer:
     name: Adam
     backend: auto
@@ -52,7 +52,7 @@ training:
     learner_parallelism: auto
     learner_gpu_count: auto
     actor_topology: auto
-    target_envs_per_gpu: 512
+    target_envs_per_gpu: 384
     min_envs_per_actor: 32
     max_envs_per_actor: 64
     max_actor_process_count: 64
@@ -160,8 +160,8 @@ evaluation:
     dev_eval: configs/seeds/dev_eval_seeds.txt
     report_eval: configs/seeds/report_eval_seeds.txt
     promotion_gate: configs/seeds/promotion_eval_seeds.txt
-  periodic_dev_eval_interval_updates: 50000
-  periodic_dev_eval_paired_seeds: 64
+  periodic_dev_eval_interval_updates: 40
+  periodic_dev_eval_paired_seeds: 16
   final_policy_set_size: 10
   final_matrix_stage1_paired_seeds: 64
   final_matrix_stage2_adaptive_max_paired_seeds: 256

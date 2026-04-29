@@ -2,12 +2,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 import torch
 import train as train_script
 from weiss_rl.eval.simulator_runner import SimulatorEvalRunner
+
+
+def _round_robin_cuda_worker_devices(worker_count: int) -> tuple[str, ...]:
+    workers = max(1, int(worker_count))
+    visible = str(os.environ.get("CUDA_VISIBLE_DEVICES", "")).strip()
+    visible_count = len([part for part in visible.split(",") if part.strip()]) if visible else 0
+    cuda_count = int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
+    device_count = max(visible_count, cuda_count)
+    if device_count <= 0:
+        return ("cpu",) * workers
+    return tuple(f"cuda:{index % device_count}" for index in range(workers))
 
 
 def _manifest_value(manifest: dict[str, object], *keys: str) -> str:
@@ -167,7 +179,7 @@ def main() -> None:
             artifact_scope=str(args.artifact_dir_name),
             paired_seeds_override=paired_seeds,
             parallel_workers_override=int(args.workers),
-            parallel_worker_devices_override=("cuda:0",) * int(args.workers),
+            parallel_worker_devices_override=_round_robin_cuda_worker_devices(int(args.workers)),
             batched_inference_override=False,
             opponent_specs=opponent_specs,
         )

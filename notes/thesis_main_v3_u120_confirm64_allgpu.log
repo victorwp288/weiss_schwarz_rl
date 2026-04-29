@@ -1,0 +1,1 @@
+manual confirm done run_dir=runs/thesis_main_candidate_v3_b1_b3_repair_cf81_20260429 update=120 pairs=64 aggregate=0.573958 unweighted=0.770312 focal_action_mode=sample anchors={'B0 RandomLegal': 1.0, 'B1 NoLeague baseline': 0.4140625, 'B2 HeuristicPublic': 1.0, 'B3 HeuristicPublicAggro': 0.5625, 'B4 HeuristicPublicControl': 0.875}

@@ -1,0 +1,226 @@
+
+$ /workspace/weiss_schwarz_rl/.venv/bin/python python/scripts/b1_counterfactual_labels.py --stack-config configs/baselines/noleague_impala.yaml --run-dir runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429 --b1-baseline-run-dir runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429 --checkpoint-policy u120=runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt --pairs 8 --artifact-dir-name b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend --seed-scope b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend --device cuda:0 --public-heuristic-bias-scale 1.0 --max-target-states 32 --max-targets-per-pair 3 --max-actions-per-state 4 --family-representatives-per-family 1 --max-forced-replays 160 --progress-every 25 --stop-after-positive-labels 1 --randomize-target-order --target-random-seed 42850 --target-families main_play_character --execution-mode in_process --ignore-excluded-label-pair-indices --margin-positive-threshold 0.15 --require-pass-legal --require-baseline-family main_play_character --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_mainmove_no_pass_p8_t20_a2_stop1_20260427/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude2_p8_t80_a8_stop5_20260428/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_nonpass_exclude6_p16_t120_a8_stop3_20260428/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude7_p16_t100_a4_stop3_20260428/counterfactual_labels.jsonl
+B1 NoLeague baseline vs B1 NoLeague baseline: mean=0.5 wins=8 losses=8 pair_classes={'2-0': 0, '1-1': 8, '0-2': 0, 'mixed': 0}
+{
+  "attempted_forced_replays": 17,
+  "baseline_artifact_dir": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend_baseline",
+  "baseline_matchup_dir": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend_baseline/B1_NoLeague_baseline__vs__B1_NoLeague_baseline",
+  "exclude_labels": [
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_mainmove_no_pass_p8_t20_a2_stop1_20260427/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude2_p8_t80_a8_stop5_20260428/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_nonpass_exclude6_p16_t120_a8_stop3_20260428/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude7_p16_t100_a4_stop3_20260428/counterfactual_labels.jsonl"
+  ],
+  "excluded_action_pairs": [],
+  "excluded_candidate_action_ids": [],
+  "excluded_candidate_families": [],
+  "excluded_legal_fingerprints": [],
+  "excluded_pair_indices": [],
+  "execution_mode": "in_process",
+  "family_representatives_per_family": 1,
+  "forced_misses": 0,
+  "format": "b1_counterfactual_labels_summary_v1",
+  "ignore_excluded_label_pair_indices": true,
+  "labels_path": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend/counterfactual_labels.jsonl",
+  "margin_positive_labels": 1,
+  "margin_positive_threshold": 0.15,
+  "max_actions_per_state": 4,
+  "max_forced_replays": 160,
+  "max_target_states": 32,
+  "max_targets_per_pair": 3,
+  "pairs": 8,
+  "positive_labels": 1,
+  "randomize_target_order": true,
+  "require_baseline_families": [
+    "main_play_character"
+  ],
+  "require_pass_legal": true,
+  "score_delta_stats": {
+    "max": 2.215,
+    "mean": 0.12999999999999998,
+    "min": -0.14000000000000012
+  },
+  "target_families": [
+    "main_play_character"
+  ],
+  "target_random_seed": 42850,
+  "target_states": 24,
+  "trace_rows": 1280,
+  "trials_path": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend/counterfactual_trials.jsonl",
+  "two_step_attempted_replays": 0,
+  "two_step_beam_targets": 0,
+  "two_step_forced_misses": 0,
+  "two_step_include_positive_first": false,
+  "two_step_max_replays": 64,
+  "two_step_min_first_delta": 0.05,
+  "two_step_second_actions": 4,
+  "two_step_target_families": [
+    "attack",
+    "climax_play",
+    "main_move",
+    "main_play_character",
+    "main_play_event",
+    "pass"
+  ],
+  "two_step_window": 40,
+  "winner_flip_labels": 1
+}
+
+$ /workspace/weiss_schwarz_rl/.venv/bin/python python/scripts/b1_counterfactual_labels.py --stack-config configs/baselines/noleague_impala.yaml --run-dir runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429 --b1-baseline-run-dir runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429 --checkpoint-policy u120=runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt --pairs 8 --artifact-dir-name b1_cf_labels_s1_big_thesis_v5_quick2_20260429_main_nonpass --seed-scope b1_cf_labels_s1_big_thesis_v5_quick2_20260429_main_nonpass --device cuda:0 --public-heuristic-bias-scale 1.0 --max-target-states 32 --max-targets-per-pair 3 --max-actions-per-state 4 --family-representatives-per-family 2 --max-forced-replays 160 --progress-every 25 --stop-after-positive-labels 1 --randomize-target-order --target-random-seed 42851 --target-families main_play_character,main_move --execution-mode in_process --ignore-excluded-label-pair-indices --margin-positive-threshold 0.15 --exclude-candidate-family pass --exclude-candidate-action-id 51 --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_mainmove_no_pass_p8_t20_a2_stop1_20260427/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude2_p8_t80_a8_stop5_20260428/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_nonpass_exclude6_p16_t120_a8_stop3_20260428/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude7_p16_t100_a4_stop3_20260428/counterfactual_labels.jsonl --exclude-labels runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend/counterfactual_labels.jsonl
+B1 NoLeague baseline vs B1 NoLeague baseline: mean=0.5 wins=8 losses=8 pair_classes={'2-0': 0, '1-1': 8, '0-2': 0, 'mixed': 0}
+{
+  "attempted_forced_replays": 72,
+  "baseline_artifact_dir": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_main_nonpass_baseline",
+  "baseline_matchup_dir": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_main_nonpass_baseline/B1_NoLeague_baseline__vs__B1_NoLeague_baseline",
+  "exclude_labels": [
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_mainmove_no_pass_p8_t20_a2_stop1_20260427/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude2_p8_t80_a8_stop5_20260428/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_nonpass_exclude6_p16_t120_a8_stop3_20260428/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude7_p16_t100_a4_stop3_20260428/counterfactual_labels.jsonl",
+    "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend/counterfactual_labels.jsonl"
+  ],
+  "excluded_action_pairs": [
+    [
+      105,
+      51
+    ]
+  ],
+  "excluded_candidate_action_ids": [
+    51
+  ],
+  "excluded_candidate_families": [
+    "pass"
+  ],
+  "excluded_legal_fingerprints": [
+    "4d1279105007b880ab39b9ae3d643d2b6bb13a08ad299f27f9be7f486e292328"
+  ],
+  "excluded_pair_indices": [],
+  "execution_mode": "in_process",
+  "family_representatives_per_family": 2,
+  "forced_misses": 0,
+  "format": "b1_counterfactual_labels_summary_v1",
+  "ignore_excluded_label_pair_indices": true,
+  "labels_path": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_main_nonpass/counterfactual_labels.jsonl",
+  "margin_positive_labels": 0,
+  "margin_positive_threshold": 0.15,
+  "max_actions_per_state": 4,
+  "max_forced_replays": 160,
+  "max_target_states": 32,
+  "max_targets_per_pair": 3,
+  "pairs": 8,
+  "positive_labels": 0,
+  "randomize_target_order": true,
+  "require_baseline_families": [],
+  "require_pass_legal": false,
+  "score_delta_stats": {
+    "max": 0.0,
+    "mean": -0.008472222222222235,
+    "min": -0.13500000000000023
+  },
+  "target_families": [
+    "main_move",
+    "main_play_character"
+  ],
+  "target_random_seed": 42851,
+  "target_states": 24,
+  "trace_rows": 1280,
+  "trials_path": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_main_nonpass/counterfactual_trials.jsonl",
+  "two_step_attempted_replays": 0,
+  "two_step_beam_targets": 0,
+  "two_step_forced_misses": 0,
+  "two_step_include_positive_first": false,
+  "two_step_max_replays": 64,
+  "two_step_min_first_delta": 0.05,
+  "two_step_second_actions": 4,
+  "two_step_target_families": [
+    "attack",
+    "climax_play",
+    "main_move",
+    "main_play_character",
+    "main_play_event",
+    "pass"
+  ],
+  "two_step_window": 40,
+  "winner_flip_labels": 0
+}
+
+$ /workspace/weiss_schwarz_rl/.venv/bin/python python/scripts/b1_counterfactual_labels.py --stack-config configs/baselines/noleague_impala.yaml --run-dir runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429 --b1-baseline-run-dir runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429 --checkpoint-policy u120=runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt --pairs 8 --artifact-dir-name b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax --seed-scope b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax --device cuda:0 --public-heuristic-bias-scale 1.0 --max-target-states 32 --max-targets-per-pair 3 --max-actions-per-state 4 --family-representatives-per-family 2 --max-forced-replays 160 --progress-every 25 --stop-after-positive-labels 1 --randomize-target-order --target-random-seed 42852 --target-families attack,climax_play,main_play_event --execution-mode in_process --ignore-excluded-label-pair-indices --margin-positive-threshold 0.15 --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_mainmove_no_pass_p8_t20_a2_stop1_20260427/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude2_p8_t80_a8_stop5_20260428/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_nonpass_exclude6_p16_t120_a8_stop3_20260428/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude7_p16_t100_a4_stop3_20260428/counterfactual_labels.jsonl --exclude-labels runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend/counterfactual_labels.jsonl
+B1 NoLeague baseline vs B1 NoLeague baseline: mean=0.5 wins=8 losses=8 pair_classes={'2-0': 0, '1-1': 8, '0-2': 0, 'mixed': 0}
+{
+  "attempted_forced_replays": 13,
+  "baseline_artifact_dir": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax_baseline",
+  "baseline_matchup_dir": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax_baseline/B1_NoLeague_baseline__vs__B1_NoLeague_baseline",
+  "exclude_labels": [
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_mainmove_no_pass_p8_t20_a2_stop1_20260427/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude2_p8_t80_a8_stop5_20260428/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_nonpass_exclude6_p16_t120_a8_stop3_20260428/counterfactual_labels.jsonl",
+    "runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude7_p16_t100_a4_stop3_20260428/counterfactual_labels.jsonl",
+    "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend/counterfactual_labels.jsonl"
+  ],
+  "excluded_action_pairs": [
+    [
+      105,
+      51
+    ]
+  ],
+  "excluded_candidate_action_ids": [],
+  "excluded_candidate_families": [],
+  "excluded_legal_fingerprints": [
+    "4d1279105007b880ab39b9ae3d643d2b6bb13a08ad299f27f9be7f486e292328"
+  ],
+  "excluded_pair_indices": [],
+  "execution_mode": "in_process",
+  "family_representatives_per_family": 2,
+  "forced_misses": 0,
+  "format": "b1_counterfactual_labels_summary_v1",
+  "ignore_excluded_label_pair_indices": true,
+  "labels_path": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax/counterfactual_labels.jsonl",
+  "margin_positive_labels": 1,
+  "margin_positive_threshold": 0.15,
+  "max_actions_per_state": 4,
+  "max_forced_replays": 160,
+  "max_target_states": 32,
+  "max_targets_per_pair": 3,
+  "pairs": 8,
+  "positive_labels": 1,
+  "randomize_target_order": true,
+  "require_baseline_families": [],
+  "require_pass_legal": false,
+  "score_delta_stats": {
+    "max": 2.079999999999999,
+    "mean": 0.15461538461538454,
+    "min": -0.13000000000000012
+  },
+  "target_families": [
+    "attack",
+    "climax_play",
+    "main_play_event"
+  ],
+  "target_random_seed": 42852,
+  "target_states": 24,
+  "trace_rows": 1280,
+  "trials_path": "eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax/counterfactual_trials.jsonl",
+  "two_step_attempted_replays": 0,
+  "two_step_beam_targets": 0,
+  "two_step_forced_misses": 0,
+  "two_step_include_positive_first": false,
+  "two_step_max_replays": 64,
+  "two_step_min_first_delta": 0.05,
+  "two_step_second_actions": 4,
+  "two_step_target_families": [
+    "attack",
+    "climax_play",
+    "main_move",
+    "main_play_character",
+    "main_play_event",
+    "pass"
+  ],
+  "two_step_window": 40,
+  "winner_flip_labels": 1
+}
+
+$ /workspace/weiss_schwarz_rl/.venv/bin/python python/scripts/b1_counterfactual_labels.py --stack-config configs/baselines/noleague_impala.yaml --run-dir runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429 --b1-baseline-run-dir runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429 --checkpoint-policy u120=runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt --pairs 8 --artifact-dir-name b1_cf_labels_s1_big_thesis_v5_quick2_20260429_level_clock --seed-scope b1_cf_labels_s1_big_thesis_v5_quick2_20260429_level_clock --device cuda:0 --public-heuristic-bias-scale 1.0 --max-target-states 32 --max-targets-per-pair 3 --max-actions-per-state 4 --family-representatives-per-family 2 --max-forced-replays 160 --progress-every 25 --stop-after-positive-labels 1 --randomize-target-order --target-random-seed 42853 --target-families level_up,clock_from_hand --execution-mode in_process --ignore-excluded-label-pair-indices --margin-positive-threshold 0.15 --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_candidate_reps_p8_t24_a6_tensor_20260427/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_mainmove_no_pass_p8_t20_a2_stop1_20260427/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude2_p8_t80_a8_stop5_20260428/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_nonpass_exclude6_p16_t120_a8_stop3_20260428/counterfactual_labels.jsonl --exclude-labels runs/b1_s1_distillonly_u450_to_u455_20260427/eval/b1_cf_labels_s1_pass_overextend_exclude7_p16_t100_a4_stop3_20260428/counterfactual_labels.jsonl --exclude-labels runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend/counterfactual_labels.jsonl --exclude-labels runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax/counterfactual_labels.jsonl
+B1 NoLeague baseline vs B1 NoLeague baseline: mean=0.5 wins=8 losses=8 pair_classes={'2-0': 0, '1-1': 8, '0-2': 0, 'mixed': 0}

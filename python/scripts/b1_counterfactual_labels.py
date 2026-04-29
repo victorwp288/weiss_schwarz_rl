@@ -1052,6 +1052,15 @@ def _label_tensor_ref(label_id: str) -> str:
     return f"states/{label_id}.pt"
 
 
+def _signed_i64_tensor(value: Any) -> torch.Tensor:
+    raw = int(value)
+    if raw >= 2**63:
+        raw -= 2**64
+    if raw < -(2**63) or raw >= 2**63:
+        raise OverflowError(f"value is outside signed int64 range after conversion: {value}")
+    return torch.tensor(raw, dtype=torch.long)
+
+
 def _trace_action_id(trace_row: Mapping[str, Any], key: str = "selected_action") -> int | None:
     payload = trace_row.get(key)
     if not isinstance(payload, Mapping):
@@ -1129,7 +1138,8 @@ def _write_label_tensor_record(
         ),
         "pair_index": torch.tensor(int(label_row.get("pair_index", -1)), dtype=torch.long),
         "swap_index": torch.tensor(int(label_row.get("swap_index", -1)), dtype=torch.long),
-        "episode_seed": torch.tensor(int(label_row.get("episode_seed", -1)), dtype=torch.long),
+        "episode_seed": _signed_i64_tensor(label_row.get("episode_seed", -1)),
+        "episode_seed_u64": int(label_row.get("episode_seed", -1)),
         "decision_index": torch.tensor(int(label_row.get("decision_index", -1)), dtype=torch.long),
         "decision_id": torch.tensor(int(label_row.get("decision_id", -1)), dtype=torch.long),
         "selected_family": str(label_row.get("selected_family", "")),
