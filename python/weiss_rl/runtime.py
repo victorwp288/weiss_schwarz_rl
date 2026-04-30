@@ -706,6 +706,14 @@ class QueueRuntime:
         if self._use_process_collectors:
             self._start_process_collectors(model)
             self.refresh_opponent_pool()
+            fixed_slots = self._fixed_opponent_policy_slots()
+            forced_policy_ids = self._configured_fixed_opponent_policy_ids()
+            if fixed_slots is not None and forced_policy_ids:
+                self._set_process_collector_fixed_opponents(
+                    slots=fixed_slots,
+                    forced_policy_ids=forced_policy_ids,
+                    activate_teacher_heuristic=HEURISTIC_PUBLIC_POLICY_ID in forced_policy_ids,
+                )
         elif not bool(defer_initial_opponent_pool_refresh):
             self.refresh_opponent_pool()
 

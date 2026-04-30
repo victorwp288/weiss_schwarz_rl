@@ -2260,3 +2260,130 @@ Next likely move:
 
 - Stop spending compute on mix/BC coefficient changes.
 - Either move to final evaluation and figures with v14 u160 as the constrained-league candidate plus B1 v5 as the strongest anchor, or implement true B1-replayed recurrent distillation / reference hidden state plumbing.
+
+## 2026-04-30 - Main v16 B1 anchor-only row masking
+
+Purpose:
+
+- Test GPT Pro's next implementation hypothesis: B1 rows should not be normal RL/teacher/value training rows.
+- Use B1 matchup rows only for B1 reference exact/family BC and raw B1 KL/top-action CE.
+- Use non-B1 rows for normal RL/value/public-teacher training.
+
+Code patch:
+
+- Added `training.b1_opponent_anchor_only`.
+- Added B1 anchor/RL mask split in `ImpalaLearner`.
+- In anchor-only mode:
+  - policy loss uses `rl_loss_mask`
+  - value loss uses `rl_loss_mask`
+  - entropy uses `rl_loss_mask`
+  - behavior BC uses `rl_loss_mask`
+  - structured/public teacher aux uses `rl_loss_mask`
+  - reference exact/family B1 BC uses `b1_anchor_mask`
+  - raw B1 distill uses `b1_anchor_mask`
+- Added metrics:
+  - `b1_opponent_anchor_only_active`
+  - `b1_anchor_row_fraction`
+  - `rl_row_fraction`
+- Fixed mixed-precision dtype bugs exposed by B1-only raw distill subsets:
+  - `_segment_logsumexp` casts scatter/assignment sources to the destination dtype.
+  - packed selected-action logp assignment casts to destination dtype.
+  - raw distill row-KL accumulator uses the source term dtype.
+- Found a real process-collector runtime issue:
+  - `noleague_baseline_mix_fraction` and even reserved no-league slots did not create B1 rows in early process-collector batches.
+  - Root cause: process collectors were started before the fixed B1 opponent model was active and did not receive a fixed-opponent reset after the parent refreshed the opponent pool.
+  - Patched `QueueRuntime.__init__` to push fixed-opponent slots to process collectors after `refresh_opponent_pool()`.
+
+Config:
+
+- `configs/main_impala_league_server_v16_b1_anchor_only_rows.yaml`
+
+Key settings:
+
+- Resume from:
+  - `runs/thesis_main_candidate_v14_b1init_anchor_stabilize_20260430/training/checkpoints/checkpoint_160.pt`
+- Reset optimizer.
+- Keep v15 frozen trunk:
+  - `encoder`
+  - `gru`
+  - `feedforward_core`
+- `b1_opponent_anchor_only: true`
+- B1 lane made explicit through reserved fixed no-league slots:
+  - `noleague_baseline_reserved_envs_per_actor: 27`
+  - `noleague_baseline_mix_fraction: 0.0`
+- Raw B1 distill kept from v15:
+  - coef/final `0.35`
+  - top-action CE `0.50`
+- policy loss coef:
+  - `0.10`
+- CF:
+  - `0.05`
+
+Smoke validation:
+
+- Before the fixed-opponent runtime patch:
+  - `b1_anchor_row_fraction` stayed `0.0`
+  - `collector_b1_opponent_env_steps` stayed `0.0`
+  - reserved B1 slots were not actually active in process collectors.
+- After the runtime patch:
+  - u162: anchor rows about `0.204`
+  - u164/u165: anchor rows about `0.425`
+  - RL rows about `0.575`
+  - raw B1 distill row fraction about `0.20-0.21`
+  - raw B1 top1 about `0.963-0.972`
+
+Launch:
+
+```bash
+cd /workspace/weiss_schwarz_rl
+ulimit -n 1048576
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export PYTHONUNBUFFERED=1
+
+RUN_LABEL=thesis_main_candidate_v16_b1_anchor_only_rows_20260430 \
+MAX_UPDATES=320 \
+STACK_CONFIG=configs/main_impala_league_server_v16_b1_anchor_only_rows.yaml \
+RESUME_FROM=runs/thesis_main_candidate_v14_b1init_anchor_stabilize_20260430/training/checkpoints/checkpoint_160.pt \
+RESUME_RESET_OPTIMIZER=1 \
+scripts/run_thesis_main_v13_b1init_long_variant_20260430.sh
+```
+
+Runtime sanity:
+
+- B1 anchor row fraction stayed around `0.40-0.43`.
+- RL row fraction stayed around `0.57-0.60`.
+- Raw B1 top1 stayed around `0.94-0.96`.
+- `vtrace_rho_p99` had occasional spikes, but was back around `70` near u236/u259.
+- Training was stopped after u240 eval; stop landed at u259.
+- GPUs were freed afterward.
+
+Results:
+
+- Manual confirm64 B1-only at u240:
+  - B1 `0.4921875`
+- Manual confirm64 all anchors at u240:
+  - aggregate `0.669792`
+  - unweighted `0.829688`
+  - B0 `1.000`
+  - B1 `0.4609375`
+  - B2 `1.000`
+  - B3 `0.7265625`
+  - B4 `0.9609375`
+
+Interpretation:
+
+- v16 did not produce a better candidate.
+- It did reveal and fix a genuine runtime problem: no-league/B1 fixed lanes were not active in process collectors until the fixed-opponent reset patch.
+- Once B1 rows were truly active and anchor-only, the model still failed to beat v14 u160.
+- Best main candidate remains:
+  - `runs/thesis_main_candidate_v14_b1init_anchor_stabilize_20260430/training/checkpoints/checkpoint_160.pt`
+- Best overall thesis anchor remains:
+  - `runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt`
+
+Next likely move:
+
+- Stop iterative training unless there is a very specific new patch.
+- Move to final evaluation/figures:
+  - B1 v5 u120 as the strongest anchor/no-league result.
+  - v14 u160 as the best constrained-main/league-style candidate.
+  - v14b/v15/v16 as documented ablations showing that additional continuation pressure did not reliably improve beyond v14 u160.

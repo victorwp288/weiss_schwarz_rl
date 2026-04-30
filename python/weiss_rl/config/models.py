@@ -262,6 +262,7 @@ class TrainingConfig:
     train_on_heuristic_actor_rows: bool = True
     policy_loss_coef: float = 1.0
     behavior_action_bc_coef: float = 0.0
+    b1_opponent_anchor_only: bool = False
     reference_policy_top_action_bc_coef: float = 0.0
     reference_policy_top_action_bc_final_coef: float = 0.0
     reference_policy_top_action_bc_start_updates: int = 0

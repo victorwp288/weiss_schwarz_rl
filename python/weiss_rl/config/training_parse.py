@@ -97,6 +97,7 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             "train_on_heuristic_actor_rows",
             "policy_loss_coef",
             "behavior_action_bc_coef",
+            "b1_opponent_anchor_only",
             "reference_policy_top_action_bc_coef",
             "reference_policy_top_action_bc_final_coef",
             "reference_policy_top_action_bc_start_updates",
@@ -348,6 +349,10 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
     )
     if behavior_action_bc_coef < 0.0:
         raise ValueError("training.behavior_action_bc_coef must be >= 0.0")
+    b1_opponent_anchor_only = _require_bool(
+        body.get("b1_opponent_anchor_only", False),
+        field_name="training.b1_opponent_anchor_only",
+    )
     reference_policy_top_action_bc_coef = _require_float(
         body.get("reference_policy_top_action_bc_coef", 0.0),
         field_name="training.reference_policy_top_action_bc_coef",
@@ -1140,6 +1145,7 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         train_on_heuristic_actor_rows=train_on_heuristic_actor_rows,
         policy_loss_coef=policy_loss_coef,
         behavior_action_bc_coef=behavior_action_bc_coef,
+        b1_opponent_anchor_only=b1_opponent_anchor_only,
         reference_policy_top_action_bc_coef=reference_policy_top_action_bc_coef,
         reference_policy_top_action_bc_final_coef=reference_policy_top_action_bc_final_coef,
         reference_policy_top_action_bc_start_updates=reference_policy_top_action_bc_start_updates,

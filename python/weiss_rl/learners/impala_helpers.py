@@ -143,12 +143,12 @@ def _segment_logsumexp(values: Tensor, keys: Tensor, num_segments: int) -> Tenso
     if keys.numel() == 0:
         return max_per
     gathered_max = max_per.index_select(0, keys.to(dtype=torch.long))
-    shifted = torch.exp(values - gathered_max)
+    shifted = torch.exp(values - gathered_max).to(dtype=values.dtype)
     sumexp = torch.zeros((num_segments,), dtype=values.dtype, device=values.device)
     sumexp.scatter_add_(0, keys.to(dtype=torch.long), shifted)
     valid = torch.isfinite(max_per) & (sumexp > 0)
     out = torch.full((num_segments,), -torch.inf, dtype=values.dtype, device=values.device)
-    out[valid] = torch.log(sumexp[valid]) + max_per[valid]
+    out[valid] = (torch.log(sumexp[valid]) + max_per[valid]).to(dtype=values.dtype)
     return out
 
 
@@ -2404,11 +2404,13 @@ def _packed_selected_action_logp(
             lengths=non_empty_widths,
         )
         if strict:
-            selected_logp[non_empty_rows] = selected_non_empty
+            selected_logp[non_empty_rows] = selected_non_empty.to(dtype=selected_logp.dtype)
         else:
             supported_rows = match_counts == 1.0
             if bool(supported_rows.any().item()):
-                selected_logp[non_empty_rows[supported_rows]] = selected_non_empty[supported_rows]
+                selected_logp[non_empty_rows[supported_rows]] = selected_non_empty[supported_rows].to(
+                    dtype=selected_logp.dtype
+                )
 
     if bool(empty_rows.any().item()):
         if pass_action_id is None:

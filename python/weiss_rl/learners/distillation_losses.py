@@ -87,11 +87,11 @@ class ImpalaDistillationLossMixin:
         teacher_logp = scaled_teacher - teacher_log_z.index_select(0, row_indices)
         teacher_probs = torch.exp(teacher_logp)
         row_kl_terms = teacher_probs * (teacher_logp - student_logp)
-        row_kl = torch.zeros((row_count,), dtype=student_logits.dtype, device=student_logits.device)
+        row_kl = torch.zeros((row_count,), dtype=row_kl_terms.dtype, device=student_logits.device)
         row_kl.scatter_add_(0, row_indices, row_kl_terms)
 
-        flat_mask = loss_mask.reshape(-1).to(device=student_logits.device, dtype=student_logits.dtype)
-        active_mask = flat_mask * (widths > 0).to(device=student_logits.device, dtype=student_logits.dtype)
+        flat_mask = loss_mask.reshape(-1).to(device=student_logits.device, dtype=row_kl.dtype)
+        active_mask = flat_mask * (widths > 0).to(device=student_logits.device, dtype=row_kl.dtype)
         denominator = torch.clamp(active_mask.sum(), min=1.0)
         kl_loss = (row_kl * active_mask).sum() / denominator
         loss = kl_loss

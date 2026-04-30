@@ -1726,6 +1726,7 @@ def _build_training_learner(
         "teacher_public_heuristic_profile_mode": training_config.teacher_public_heuristic_profile_mode,
         "teacher_public_heuristic_profiles_end_updates": training_config.teacher_public_heuristic_profiles_end_updates,
         "behavior_action_bc_coef": float(getattr(training_config, "behavior_action_bc_coef", 0.0)),
+        "b1_opponent_anchor_only": bool(getattr(training_config, "b1_opponent_anchor_only", False)),
         "reference_policy_top_action_bc_coef": float(
             getattr(training_config, "reference_policy_top_action_bc_coef", 0.0)
         ),

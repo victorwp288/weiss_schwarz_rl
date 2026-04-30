@@ -86,6 +86,7 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
     teacher_public_heuristic_profiles_end_updates: int = -1
     policy_loss_coef: float = 1.0
     behavior_action_bc_coef: float = 0.0
+    b1_opponent_anchor_only: bool = False
     reference_policy_top_action_bc_coef: float = 0.0
     b1_opponent_reference_policy_top_action_bc_coef: float = 0.0
     b1_second_seat_positive_advantage_policy_coef: float = 0.0
@@ -163,6 +164,42 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
 
     def set_raw_b1_distill_coef(self, value: float) -> None:
         self.raw_b1_distill_coef = float(value)
+
+    def _split_anchor_and_rl_masks(self, batch: Any, loss_mask: Tensor) -> tuple[Tensor, Tensor, dict[str, float]]:
+        metrics = {
+            "b1_opponent_anchor_only_active": 0.0,
+            "b1_anchor_row_fraction": 0.0,
+            "rl_row_fraction": 1.0,
+        }
+        if not bool(self.b1_opponent_anchor_only):
+            return loss_mask, loss_mask, metrics
+
+        metrics["b1_opponent_anchor_only_active"] = 1.0
+        raw_b1_mask = _batch_value(batch, "b1_opponent_mask")
+        if raw_b1_mask is None:
+            metrics["rl_row_fraction"] = float((loss_mask > 0.0).to(dtype=loss_mask.dtype).mean().detach().item())
+            return loss_mask, loss_mask.new_zeros(loss_mask.shape), metrics
+
+        b1_mask = self._optional_time_major_loss_mask(
+            raw_b1_mask,
+            expected_shape=loss_mask.shape,
+            like=loss_mask,
+        )
+        if b1_mask is None:
+            metrics["rl_row_fraction"] = float((loss_mask > 0.0).to(dtype=loss_mask.dtype).mean().detach().item())
+            return loss_mask, loss_mask.new_zeros(loss_mask.shape), metrics
+
+        b1_mask = (b1_mask > 0.5).to(device=loss_mask.device, dtype=loss_mask.dtype)
+        anchor_mask = loss_mask * b1_mask
+        rl_mask = loss_mask * (1.0 - b1_mask)
+        total_rows = torch.clamp((loss_mask > 0.0).to(dtype=loss_mask.dtype).sum(), min=1.0)
+        metrics["b1_anchor_row_fraction"] = float(
+            (((anchor_mask > 0.0).to(dtype=loss_mask.dtype).sum() / total_rows).detach().item())
+        )
+        metrics["rl_row_fraction"] = float(
+            (((rl_mask > 0.0).to(dtype=loss_mask.dtype).sum() / total_rows).detach().item())
+        )
+        return rl_mask, anchor_mask, metrics
 
     def set_counterfactual_positive_coef(self, value: float) -> None:
         self.counterfactual_positive_coef = float(value)
@@ -959,6 +996,7 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
         )
         if loss_mask is None:
             loss_mask = torch.ones(obs.shape[:2], dtype=obs.dtype, device=obs.device)
+        rl_loss_mask, b1_anchor_mask, anchor_mask_metrics = self._split_anchor_and_rl_masks(batch, loss_mask)
         action_catalog = getattr(self.model, "action_catalog", None)
         teacher_aux_active = isinstance(action_catalog, ActionCatalog) and self._teacher_aux_active(
             auxiliary_update=False
@@ -1022,7 +1060,7 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
                 if float(self.teacher_public_main_move_coef) != 0.0
                 else self._teacher_public_heuristic_rows(
                     batch,
-                    loss_mask=loss_mask,
+                    loss_mask=rl_loss_mask,
                     expected_shape=obs.shape[:2],
                     action_catalog=action_catalog,
                 )
@@ -1032,7 +1070,7 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
                     self._factorized_public_heuristic_teacher_view(
                         batch,
                         obs=obs,
-                        loss_mask=loss_mask,
+                        loss_mask=rl_loss_mask,
                         packed_legal=packed_legal,
                         active_rows=public_target_rows,
                     )
@@ -1043,7 +1081,7 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
                     public_heuristic_target_logits = self._packed_public_heuristic_target_logits(
                         forward_model=forward_model,
                         obs=obs,
-                        loss_mask=loss_mask,
+                        loss_mask=rl_loss_mask,
                         packed_legal=packed_legal,
                         observation_context=forward_observation_context,
                         active_rows=public_target_rows,
@@ -1156,17 +1194,19 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
         context["vtrace_rhos"] = rhos_for_metrics.detach()
         context["rewards"] = rewards_for_metrics.detach()
         context["policy_train_mask"] = loss_mask.detach()
-        loss_denominator = torch.clamp(loss_mask.sum(), min=1.0)
+        context["rl_train_mask"] = rl_loss_mask.detach()
+        context["b1_anchor_mask"] = b1_anchor_mask.detach()
+        loss_denominator = torch.clamp(rl_loss_mask.sum(), min=1.0)
 
-        policy_loss = -((action_logp * advantages) * loss_mask).sum() / loss_denominator
-        value_loss = (((values - targets) ** 2) * loss_mask).sum() / loss_denominator
-        entropy_mean = (entropy * loss_mask).sum() / loss_denominator
-        behavior_action_bc_loss = -(action_logp * loss_mask).sum() / loss_denominator
+        policy_loss = -((action_logp * advantages) * rl_loss_mask).sum() / loss_denominator
+        value_loss = (((values - targets) ** 2) * rl_loss_mask).sum() / loss_denominator
+        entropy_mean = (entropy * rl_loss_mask).sum() / loss_denominator
+        behavior_action_bc_loss = -(action_logp * rl_loss_mask).sum() / loss_denominator
         reference_policy_top_action_bc_loss, reference_policy_top_action_family_bc_loss = (
             self._reference_policy_top_action_bc_losses(
                 batch,
                 obs=obs,
-                loss_mask=loss_mask,
+                loss_mask=b1_anchor_mask,
                 forward_model=forward_model,
                 packed_legal=packed_legal,
                 legal_mask=legal_mask,
@@ -1177,7 +1217,7 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
         raw_b1_distill_loss, raw_b1_distill_metrics = self._raw_b1_distill_loss_and_metrics(
             batch,
             obs=obs,
-            loss_mask=loss_mask,
+            loss_mask=b1_anchor_mask,
             packed_legal=packed_legal,
             legal_mask=legal_mask,
         )
@@ -1365,7 +1405,7 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
                     field_name="teacher_valid",
                     expected_shape=values.shape,
                 ),
-                loss_mask=loss_mask,
+                loss_mask=rl_loss_mask,
                 action_catalog=action_catalog,
                 family_coef=float(self.teacher_family_coef),
                 slot_coef=float(self.teacher_slot_coef),
@@ -1564,6 +1604,7 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
             "vtrace_rho_clip_rate": float((rhos_for_metrics.detach() > rho_bar).float().mean().item()),
             "vtrace_c_clip_rate": float((rhos_for_metrics.detach() > c_bar).float().mean().item()),
         }
+        metrics.update(anchor_mask_metrics)
         metrics.update(teacher_metrics)
         if isinstance(action_catalog, ActionCatalog) and emit_structured_metrics:
             structured_legal_mask = (
