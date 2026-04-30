@@ -2474,3 +2474,35 @@ Interpretation:
   - `reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.csv`
   - `reports/thesis_final_eval_20260430/selected_policy_confirm128_anchor_bars.png`
   - `reports/thesis_final_eval_20260430/top_two_confirm256_b1b3b4.json`
+
+## 2026-04-30 follow-up: recurrence interpretation and simulator state audit
+
+The no-recurrence B1-recipe ablation slightly outscored the recurrent GRU B1 anchor on confirm128, but this should not be over-interpreted as proof that recurrence is generally worse. The current anchor suite may be largely solvable from the current public observation, especially against deterministic public heuristic opponents. We need to audit exactly what the simulator exposes in the observation/spec bundle before writing the recurrence discussion:
+
+- Which public state features are directly encoded: phase, decision kind, level, clock, deck count, waiting room, memory count, stage slots, power/soul/status, attack context, recent reveal/context bits, etc.
+- Which opponent/private features are hidden versus exposed as counts only: hand count, stock count, memory/public zones, deck/climax information.
+- Whether the observation already includes enough history/proxy information that a feed-forward policy can match the GRU on B1/B3/B4 anchors.
+- Whether hidden-state benefits would require different benchmarks: held-out human-like policies, longer-horizon self-play opponents, stochastic/private-information stress tests, or specific replay probes.
+
+Working interpretation for thesis: recurrence did not provide a clear measurable advantage on the current confirm128/256 anchor suite under the time-limited training setup; this may reflect the benchmark/observation surface rather than a universal statement about Weiss Schwarz policy learning.
+
+## 2026-04-30 baseline reminder: PPO-lite result
+
+Do not omit PPO from final comparison. PPO-lite B1-recipe baseline was trained/evaluated as a deliberately comparable algorithm baseline and performed much worse than IMPALA:
+
+- Run: `runs/thesis_baseline_ppo_b1recipe_1gpu_20260430/training/checkpoints/checkpoint_160.pt`
+- Eval config: `configs/ablations/ppo_b1recipe_eval_20260430.yaml`
+- Confirm128 key slice: B1 `0.2266`, B3 `0.5039`, B4 `0.9375`, mean `0.5560`.
+- Training diagnostics showed unstable PPO behavior with large KL/clip fraction, supporting the choice of IMPALA/V-trace for this environment and distributed setup.
+
+Updated comparison rows to keep in the final report:
+
+| Model / ablation | B1 | B3 | B4 | Aggregate / mean |
+|---|---:|---:|---:|---:|
+| B1 anchor GRU confirm128 five-anchor | 0.4922 | 0.8984 | 0.9922 | 0.8766 five-anchor |
+| No recurrence B1 recipe confirm128 five-anchor | 0.4961 | 0.9219 | 1.0000 | 0.8836 five-anchor |
+| v17e residual league confirm128 five-anchor | 0.5000 | 0.8516 | 0.9922 | 0.8688 five-anchor |
+| State reward knobs confirm128 five-anchor | 0.5039 | 0.8516 | 0.9922 | 0.8695 five-anchor |
+| No reward shaping confirm128 five-anchor | 0.5078 | 0.8555 | 0.9922 | 0.8711 five-anchor |
+| No behavior BC confirm128 five-anchor | 0.5117 | 0.8477 | 0.9883 | 0.8695 five-anchor |
+| PPO-lite B1 recipe confirm128 key slice | 0.2266 | 0.5039 | 0.9375 | 0.5560 B1/B3/B4 mean |

@@ -1,0 +1,16 @@
+[
+  {
+    "label": "B1 GRU anchor",
+    "B1 NoLeague baseline": 0.498046875,
+    "B3 HeuristicPublicAggro": 0.888671875,
+    "B4 HeuristicPublicControl": 0.998046875,
+    "mean": 0.794921875
+  },
+  {
+    "label": "No recurrence B1 recipe",
+    "B1 NoLeague baseline": 0.498046875,
+    "B3 HeuristicPublicAggro": 0.900390625,
+    "B4 HeuristicPublicControl": 0.990234375,
+    "mean": 0.7962239583333334
+  }
+]

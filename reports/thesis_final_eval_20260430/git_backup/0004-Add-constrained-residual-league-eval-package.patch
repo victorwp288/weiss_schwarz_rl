@@ -1,0 +1,3211 @@
+From 5fda2903374a9a64e67a700248c2f874b6a8dfb3 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Thu, 30 Apr 2026 10:19:13 +0000
+Subject: [PATCH 4/4] Add constrained residual league eval package
+
+---
+ ...a_league_server_v17_b1_residual_guard.yaml | 390 ++++++++++++++++++
+ ...league_server_v17_zero_residual_smoke.yaml | 390 ++++++++++++++++++
+ .../thesis_final_execution_plan_2026-04-30.md |  90 ++++
+ notes/weiss_thesis_progress_2026-04-29.md     |  64 +++
+ python/scripts/train.py                       |  72 +++-
+ python/weiss_rl/config/models.py              |   3 +
+ python/weiss_rl/config/training_parse.py      |  28 +-
+ python/weiss_rl/eval/simulator_runner.py      |  44 ++
+ python/weiss_rl/learners/impala_learner.py    |  28 ++
+ python/weiss_rl/residual_policy.py            | 269 +++++++++++-
+ python/weiss_rl/runtime.py                    |  44 ++
+ python/weiss_rl/runtime_collectors.py         |  92 ++++-
+ ...selected_policy_confirm128_anchor_bars.pdf | Bin 0 -> 16345 bytes
+ ...selected_policy_confirm128_anchor_bars.png | Bin 0 -> 67694 bytes
+ .../selected_policy_confirm128_matrix.csv     |   4 +
+ .../selected_policy_confirm128_matrix.json    | 161 ++++++++
+ .../selected_policy_confirm128_matrix.md      |  21 +
+ 17 files changed, 1672 insertions(+), 28 deletions(-)
+ create mode 100644 configs/main_impala_league_server_v17_b1_residual_guard.yaml
+ create mode 100644 configs/main_impala_league_server_v17_zero_residual_smoke.yaml
+ create mode 100644 notes/thesis_final_execution_plan_2026-04-30.md
+ create mode 100644 reports/thesis_final_eval_20260430/selected_policy_confirm128_anchor_bars.pdf
+ create mode 100644 reports/thesis_final_eval_20260430/selected_policy_confirm128_anchor_bars.png
+ create mode 100644 reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.csv
+ create mode 100644 reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.json
+ create mode 100644 reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.md
+
+diff --git a/configs/main_impala_league_server_v17_b1_residual_guard.yaml b/configs/main_impala_league_server_v17_b1_residual_guard.yaml
+new file mode 100644
+index 0000000..8bef8b3
+--- /dev/null
++++ b/configs/main_impala_league_server_v17_b1_residual_guard.yaml
+@@ -0,0 +1,390 @@
++schema_version: 2
++description: Thesis v17 radical B1-base trainable residual adapter with hard B1 guard.
++experiment:
++  role: main
++system:
++  profile:
++    training: fast
++    local_iteration: fast
++    ci_invariant_testing: debug
++  mp_start_method: spawn
++  learner_device: cuda:auto
++  actor_device: cuda:auto
++  actor_process_count: 32
++  envs_per_actor: 8
++  total_envs: 96
++  actor_torch_threads: 1
++  learner_torch_threads: 16
++  actor_queue_capacity_unrolls: 256
++  learner_prefetch_batches: 4
++  collection_backend: process
++model:
++  gru_hidden_size: 512
++  encoder_mlp_width: 512
++  encoder_mlp_layers: 2
++  encoder_kind: structured_v2
++  typed_feature_width: 62
++  recurrent_core: gru
++  layer_norm: true
++  dropout:
++    family_a: 0.0
++    ablation: 0.1
++  cuda_learner_candidate_scoring_chunk_size: 1048576
++  public_heuristic_logit_bias_scale: 2.0
++  public_heuristic_actor_logit_bias_scale: -1.0
++  public_heuristic_logit_bias_final_scale: 2.0
++  public_heuristic_logit_bias_families:
++  - main_play_character
++  - main_move
++  - attack
++training:
++  algorithm: impala_vtrace_structured_v1
++  rollout:
++    unroll_length: 160
++    batch_unrolls_per_update: 64
++  optimizer:
++    name: Adam
++    backend: auto
++    learning_rate: 0.0001
++    grad_norm_clip: 40.0
++    value_loss_coef: 0.0
++  policy_loss_coef: 1.0
++  b1_opponent_anchor_only: true
++  exploration:
++    entropy_coef: 0.010
++    entropy_anneal_to: 0.004
++    entropy_anneal_steps_updates: 800
++  precision:
++    mixed_precision: true
++    compile_learner: false
++    compile_actor_inference: false
++    masking_math_float32: true
++  scaling:
++    learner_parallelism: auto
++    learner_gpu_count: auto
++    actor_topology: auto
++    target_envs_per_gpu: 384
++    min_envs_per_actor: 32
++    max_envs_per_actor: 64
++    max_actor_process_count: 64
++    reserve_cpu_cores: 4
++    learner_cpu_cores_per_gpu: 2
++    queue_depth_multiplier: 2
++    ram_queue_fraction: 0.25
++    vram_fraction: 0.85
++  checkpointing:
++    checkpoint_interval_updates: 20
++    snapshot_interval_updates: 20
++    actor_reload_interval_updates: 10
++  vtrace:
++    rho_bar: 1.0
++    c_bar: 1.0
++  ppo:
++    clip_epsilon: 0.2
++    value_clip_epsilon: 0.2
++    gae_lambda: 0.95
++    epochs: 4
++    target_kl: 0.03
++    normalize_advantages: true
++  profile_timers: true
++  freeze_parameter_prefixes: []
++  structured_metrics:
++    mode: sampled
++  teacher_aux:
++    mode: always
++  main_residual_policy:
++    enabled: true
++    base_snapshot_path: runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt
++    initial_residual_state_path: ""
++    public_heuristic_bias_scale: 2.0
++    hidden_dim: 512
++    alpha: 0.35
++    residual_mode: family_gated
++    gate_bias: -2.5
++    guard_enabled: true
++    guard_top_gap: 0.35
++    guard_families:
++    - main_play_character
++    - main_move
++    - attack
++    - clock_from_hand
++  reference_policy_id: b1_noleague_baseline
++  reference_policy_top_action_bc_coef: 1.0
++  reference_policy_top_action_bc_final_coef: 1.0
++  reference_policy_top_action_bc_start_updates: 0
++  reference_policy_top_action_bc_end_updates: -1
++  reference_policy_top_action_family_bc_coef: 1.0
++  reference_policy_top_action_family_bc_final_coef: 1.0
++  reference_policy_top_action_family_bc_start_updates: 0
++  reference_policy_top_action_family_bc_end_updates: -1
++  raw_b1_distill:
++    enabled: true
++    teacher_policy_id: b1_noleague_baseline
++    teacher_surface: raw_s0
++    student_surface: raw_s0
++    coef: 1.0
++    final_coef: 1.0
++    start_updates: 0
++    end_updates: -1
++    top_k: 16
++    temperature: 1.0
++    top_action_ce_coef: 1.0
++    teacher_public_heuristic_bias_scale: 2.0
++    student_public_heuristic_bias_scale: 2.0
++  fixed_opponent_backend: simulator_native
++  structured_aux:
++    enabled: true
++    teacher_family_coef: 0.2
++    teacher_slot_coef: 0.1
++    teacher_attack_type_coef: 0.05
++    teacher_action_coef: 0.1
++    teacher_public_heuristic_coef: 0.1
++    teacher_public_heuristic_final_coef: 0.1
++    teacher_public_heuristic_profiles:
++    - base
++    - aggressive
++    - control
++    teacher_public_heuristic_profile_mode: cycle
++  structured_warmstart:
++    enabled: true
++    updates: 1
++    teacher_family_coef: 0.75
++    teacher_slot_coef: 0.35
++    teacher_attack_type_coef: 0.2
++    teacher_action_coef: 0.5
++    teacher_public_heuristic_coef: 0.5
++    teacher_public_heuristic_profiles:
++    - base
++    - aggressive
++    - control
++    teacher_public_heuristic_profile_mode: cycle
++  counterfactual_positive:
++    enabled: false
++    label_dirs:
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_mine50_20260429_broad_twostep
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50_20260429_pass_repair
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_attack_event
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_broad_a
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_broad_b
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_pass_repair
++    coef: 0.0
++    final_coef: 0.0
++    start_updates: 0
++    end_updates: -1
++    margin_coef: 0.2
++    margin: 1.0
++    max_labels: 0
++  actor_policy_backend: model
++  actor_heuristic_fraction: 0.0
++  actor_heuristic_start_updates: 0
++  actor_heuristic_end_updates: 0
++  actor_heuristic_final_fraction: 0.0
++  heuristic_native_rollout_enabled: false
++  heuristic_actor_hidden_state_tracking: true
++environment:
++  observation_visibility: public
++  visibility: public
++  truncate_on_max_steps: true
++  max_raw_decisions_per_episode: 4000
++  max_decisions: 2000
++  max_decisions_per_episode: 2000
++  max_learner_steps_per_episode: 2000
++  max_ticks: 100000
++  deck_set_size:
++    bring_up: 2
++    paper: 8
++rewards:
++  objective: terminal_pm1
++  discount:
++    gamma: 0.99
++  shaping:
++    enable_damage_shaping: true
++    damage_reward: 0.0
++    level_reward: 0.0
++    board_reward: 0.0
++    no_progress_penalty: 0.0
++  truncation:
++    reward: -0.1
++    bootstrap_value: false
++    bootstrap_rule: if truncated and not terminated, bootstrap from V(next_state);
++      if terminated, no bootstrap
++curriculum:
++  simulator: {}
++  stall_monitor:
++    enabled: false
++    truncation_rate_threshold: 0.25
++    consecutive_evals: 2
++  checkpoint_guard:
++    enabled: false
++    rollback_score_margin: 0.01
++    rollback_truncation_rate_threshold: 0.25
++    rollback_max_prob_lt_half: 0.7
++    min_best_score: 0.55
++    promote_min_prob_gt_half: 0.6
++    promote_max_ci_half_width: 0.24
++    cooldown_updates: 20
++  early_cutoff:
++    enabled: true
++    warmup_updates: 240
++    patience_updates: 240
++    min_improvement: 0.005
++    stall_patience_evals: 4
++    stall_rate_threshold: 0.25
++league:
++  enabled: true
++  pool:
++    recent_size: 32
++    champion_size: 12
++    champion_max_age_updates: 800
++  sampling:
++    opponent_sampling: PFSP
++    pfsp_power: 1.5
++    pfsp_epsilon_uniform: 0.25
++    pfsp_stats_source: online_outcomes
++    pfsp_window_episodes: 50000
++    heuristic_public_start_updates: 0
++    heuristic_public_mix_fraction: 0.03
++    heuristic_public_mix_end_updates: -1
++    heuristic_public_final_mix_fraction: 0.03
++    heuristic_public_variant_mix_fraction: 0.25
++    heuristic_public_variant_mix_end_updates: -1
++    heuristic_public_variant_final_mix_fraction: 0.25
++    warmup_snapshot_mix_fraction: 0.0
++    champion_mix_fraction: 0.0
++    hard_negative_mix_fraction: 0.0
++    hard_negative_min_samples: 24
++    hard_negative_max_win_rate: 0.48
++    noleague_baseline_reserved_envs_per_actor: 27
++    noleague_baseline_mix_fraction: 0.40
++    noleague_baseline_mix_end_updates: -1
++    noleague_baseline_reward_scale: 1.0
++  warmup:
++    first_updates: 1000
++    initial_window_episodes: 5000
++    ramp_target_updates: 800
++    ramp_target_window_episodes: 30000
++  promotion:
++    enabled: true
++    paired_seeds: 64
++    threshold: P(p_anchor > 0.55) > 0.95 using AnchorSet_v1
++    anchor_set_v1:
++      required:
++      - B0 RandomLegal
++      - B1 NoLeague baseline
++      optional_if_available:
++      - B2 HeuristicPublic
++      - B3 HeuristicPublicAggro
++      - B4 HeuristicPublicControl
++      - Previous champion snapshot
++      - Previous recent snapshot
++    seed_file: configs/seeds/promotion_eval_seeds.txt
++    gate:
++      uncertainty_method: bayesian_bootstrap_seedlevel_v1
++      weighting: uniform_across_anchors
++      seat_swap: true
++      folding: S0
++      guardrails:
++        max_prob_anchor_loss_below_0_45: 0.25
++        max_truncation_rate: 0.05
++      target_min_anchor_scores:
++        B1 NoLeague baseline: 0.46
++        B3 HeuristicPublicAggro: 0.53
++        B4 HeuristicPublicControl: 0.80
++      record_file: promotion_gate.json
++      parallel_workers: 6
++      async_enabled: false
++evaluation:
++  seat_swap: true
++  eval_device: cuda:auto
++  eval_inference_mode: true
++  eval_sampling_algorithm: pinned_cdf_pcg_v1
++  eval_assert_sorted_legal_ids: true
++  seed_files:
++    dev_eval: configs/seeds/dev_eval_seeds.txt
++    report_eval: configs/seeds/report_eval_seeds.txt
++    promotion_gate: configs/seeds/promotion_eval_seeds.txt
++  periodic_dev_eval_interval_updates: 80
++  periodic_dev_eval_paired_seeds: 16
++  periodic_dev_eval_anchor_weights:
++    B0 RandomLegal: 0.25
++    B1 NoLeague baseline: 3.0
++    B2 HeuristicPublic: 0.25
++    B3 HeuristicPublicAggro: 3.0
++    B4 HeuristicPublicControl: 1.0
++  final_policy_set_size: 10
++  final_matrix_stage1_paired_seeds: 64
++  final_matrix_stage2_adaptive_max_paired_seeds: 256
++  stop_rules:
++    stop_delta_ci_half_width: 0.03
++    stop_confidence: 0.95
++  replay_capture_rate_eval: 0.001
++  regression_capture_count: 50
++  legal_fingerprint_checks:
++    enabled: true
++    version: legal_fingerprint_v1
++    require_strictly_increasing_legal_ids: true
++    mismatch_policy: hard_fail
++  decision_kind_tagging:
++    required_for_training: false
++    enable_python_derived_debug_tag: false
++  final_policy_set_selection:
++    version: deterministic_v1
++    include_random_legal_baseline_b0: true
++    include_no_league_baseline_b1: true
++    include_heuristic_public_b2_if_exists: true
++    include_final_champion_snapshot: true
++    include_spaced_snapshots_near_percent_updates:
++    - 25
++    - 50
++    - 75
++    remaining_slots_strategy: top_dev_performers_vs_anchor_set_v1
++    fixed_anchor_set_v1:
++      required:
++      - B0 RandomLegal
++      - B1 NoLeague baseline
++      optional_if_available:
++      - B2 HeuristicPublic
++    seed_file: configs/seeds/dev_eval_seeds.txt
++    folding: S0
++    seat_swap: true
++    tie_break: lowest_policy_id
++  async_periodic_dev_eval_enabled: false
++  periodic_dev_eval_parallel_workers: 8
++  periodic_dev_eval_batched_inference_enabled: false
++reproducibility:
++  spec_bundle:
++    require_export_spec_bundle: true
++    persist_in_manifest: true
++    fail_on_spec_mismatch: true
++  ids:
++    run_id_hash: sha256
++    config_hash: sha256
++    spec_hash: sha256
++    store_full_256_bit_ids: true
++    store_short_64_bit_ids_for_filenames: true
++  seed_derivation:
++    base_seed64: 20260212
++    actor_seed_formula: hash64(base_seed64, actor_id)
++    episode_seed_formula: hash64(actor_seed64, env_id, episode_index)
++  seed_files:
++    dev_eval: configs/seeds/dev_eval_seeds.txt
++    report_eval: configs/seeds/report_eval_seeds.txt
++    promotion_gate: configs/seeds/promotion_eval_seeds.txt
++  determinism_requirements:
++  - simulator_build_and_spec_bundle_match
++  - environment_config_match
++  - episode_seeds_match
++  - action_sequence_match
++  - evaluation_sampler_rng_and_algorithm_match
++  legal_fingerprint:
++    version: legal_fingerprint_v1
++    compute_in_rl_layer: true
++    canonical_bytes:
++    - b'legal_fp_v1'
++    - spec_hash256
++    - u32_le_decision_id
++    - u32_le_legal_ids_len
++    - u32_le_each_legal_id
++    replay_eval_mismatch_policy: hard_fail
+diff --git a/configs/main_impala_league_server_v17_zero_residual_smoke.yaml b/configs/main_impala_league_server_v17_zero_residual_smoke.yaml
+new file mode 100644
+index 0000000..09bca89
+--- /dev/null
++++ b/configs/main_impala_league_server_v17_zero_residual_smoke.yaml
+@@ -0,0 +1,390 @@
++schema_version: 2
++description: Thesis v17 zero-residual identity smoke for residual/eval path validation.
++experiment:
++  role: main
++system:
++  profile:
++    training: fast
++    local_iteration: fast
++    ci_invariant_testing: debug
++  mp_start_method: spawn
++  learner_device: cuda:auto
++  actor_device: cuda:auto
++  actor_process_count: 32
++  envs_per_actor: 8
++  total_envs: 96
++  actor_torch_threads: 1
++  learner_torch_threads: 16
++  actor_queue_capacity_unrolls: 256
++  learner_prefetch_batches: 4
++  collection_backend: process
++model:
++  gru_hidden_size: 512
++  encoder_mlp_width: 512
++  encoder_mlp_layers: 2
++  encoder_kind: structured_v2
++  typed_feature_width: 62
++  recurrent_core: gru
++  layer_norm: true
++  dropout:
++    family_a: 0.0
++    ablation: 0.1
++  cuda_learner_candidate_scoring_chunk_size: 1048576
++  public_heuristic_logit_bias_scale: 2.0
++  public_heuristic_actor_logit_bias_scale: -1.0
++  public_heuristic_logit_bias_final_scale: 2.0
++  public_heuristic_logit_bias_families:
++  - main_play_character
++  - main_move
++  - attack
++training:
++  algorithm: impala_vtrace_structured_v1
++  rollout:
++    unroll_length: 160
++    batch_unrolls_per_update: 64
++  optimizer:
++    name: Adam
++    backend: auto
++    learning_rate: 0.0001
++    grad_norm_clip: 40.0
++    value_loss_coef: 0.0
++  policy_loss_coef: 0.0
++  b1_opponent_anchor_only: true
++  exploration:
++    entropy_coef: 0.010
++    entropy_anneal_to: 0.004
++    entropy_anneal_steps_updates: 800
++  precision:
++    mixed_precision: true
++    compile_learner: false
++    compile_actor_inference: false
++    masking_math_float32: true
++  scaling:
++    learner_parallelism: auto
++    learner_gpu_count: auto
++    actor_topology: auto
++    target_envs_per_gpu: 384
++    min_envs_per_actor: 32
++    max_envs_per_actor: 64
++    max_actor_process_count: 64
++    reserve_cpu_cores: 4
++    learner_cpu_cores_per_gpu: 2
++    queue_depth_multiplier: 2
++    ram_queue_fraction: 0.25
++    vram_fraction: 0.85
++  checkpointing:
++    checkpoint_interval_updates: 20
++    snapshot_interval_updates: 20
++    actor_reload_interval_updates: 10
++  vtrace:
++    rho_bar: 1.0
++    c_bar: 1.0
++  ppo:
++    clip_epsilon: 0.2
++    value_clip_epsilon: 0.2
++    gae_lambda: 0.95
++    epochs: 4
++    target_kl: 0.03
++    normalize_advantages: true
++  profile_timers: true
++  freeze_parameter_prefixes: []
++  structured_metrics:
++    mode: sampled
++  teacher_aux:
++    mode: always
++  main_residual_policy:
++    enabled: true
++    base_snapshot_path: runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt
++    initial_residual_state_path: ""
++    public_heuristic_bias_scale: 2.0
++    hidden_dim: 512
++    alpha: 0.0
++    residual_mode: family_gated
++    gate_bias: -2.5
++    guard_enabled: true
++    guard_top_gap: 0.35
++    guard_families:
++    - main_play_character
++    - main_move
++    - attack
++    - clock_from_hand
++  reference_policy_id: b1_noleague_baseline
++  reference_policy_top_action_bc_coef: 1.0
++  reference_policy_top_action_bc_final_coef: 1.0
++  reference_policy_top_action_bc_start_updates: 0
++  reference_policy_top_action_bc_end_updates: -1
++  reference_policy_top_action_family_bc_coef: 1.0
++  reference_policy_top_action_family_bc_final_coef: 1.0
++  reference_policy_top_action_family_bc_start_updates: 0
++  reference_policy_top_action_family_bc_end_updates: -1
++  raw_b1_distill:
++    enabled: true
++    teacher_policy_id: b1_noleague_baseline
++    teacher_surface: raw_s0
++    student_surface: raw_s0
++    coef: 1.0
++    final_coef: 1.0
++    start_updates: 0
++    end_updates: -1
++    top_k: 16
++    temperature: 1.0
++    top_action_ce_coef: 1.0
++    teacher_public_heuristic_bias_scale: 2.0
++    student_public_heuristic_bias_scale: 2.0
++  fixed_opponent_backend: simulator_native
++  structured_aux:
++    enabled: true
++    teacher_family_coef: 0.2
++    teacher_slot_coef: 0.1
++    teacher_attack_type_coef: 0.05
++    teacher_action_coef: 0.1
++    teacher_public_heuristic_coef: 0.1
++    teacher_public_heuristic_final_coef: 0.1
++    teacher_public_heuristic_profiles:
++    - base
++    - aggressive
++    - control
++    teacher_public_heuristic_profile_mode: cycle
++  structured_warmstart:
++    enabled: true
++    updates: 1
++    teacher_family_coef: 0.75
++    teacher_slot_coef: 0.35
++    teacher_attack_type_coef: 0.2
++    teacher_action_coef: 0.5
++    teacher_public_heuristic_coef: 0.5
++    teacher_public_heuristic_profiles:
++    - base
++    - aggressive
++    - control
++    teacher_public_heuristic_profile_mode: cycle
++  counterfactual_positive:
++    enabled: false
++    label_dirs:
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_attack_climax
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_quick2_20260429_pass_overextend
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_mine50_20260429_broad_twostep
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50_20260429_pass_repair
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_attack_event
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_broad_a
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_broad_b
++    - runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/eval/b1_cf_labels_s1_big_thesis_v5_broad50b_20260429_pass_repair
++    coef: 0.0
++    final_coef: 0.0
++    start_updates: 0
++    end_updates: -1
++    margin_coef: 0.2
++    margin: 1.0
++    max_labels: 0
++  actor_policy_backend: model
++  actor_heuristic_fraction: 0.0
++  actor_heuristic_start_updates: 0
++  actor_heuristic_end_updates: 0
++  actor_heuristic_final_fraction: 0.0
++  heuristic_native_rollout_enabled: false
++  heuristic_actor_hidden_state_tracking: true
++environment:
++  observation_visibility: public
++  visibility: public
++  truncate_on_max_steps: true
++  max_raw_decisions_per_episode: 4000
++  max_decisions: 2000
++  max_decisions_per_episode: 2000
++  max_learner_steps_per_episode: 2000
++  max_ticks: 100000
++  deck_set_size:
++    bring_up: 2
++    paper: 8
++rewards:
++  objective: terminal_pm1
++  discount:
++    gamma: 0.99
++  shaping:
++    enable_damage_shaping: true
++    damage_reward: 0.0
++    level_reward: 0.0
++    board_reward: 0.0
++    no_progress_penalty: 0.0
++  truncation:
++    reward: -0.1
++    bootstrap_value: false
++    bootstrap_rule: if truncated and not terminated, bootstrap from V(next_state);
++      if terminated, no bootstrap
++curriculum:
++  simulator: {}
++  stall_monitor:
++    enabled: false
++    truncation_rate_threshold: 0.25
++    consecutive_evals: 2
++  checkpoint_guard:
++    enabled: false
++    rollback_score_margin: 0.01
++    rollback_truncation_rate_threshold: 0.25
++    rollback_max_prob_lt_half: 0.7
++    min_best_score: 0.55
++    promote_min_prob_gt_half: 0.6
++    promote_max_ci_half_width: 0.24
++    cooldown_updates: 20
++  early_cutoff:
++    enabled: true
++    warmup_updates: 240
++    patience_updates: 240
++    min_improvement: 0.005
++    stall_patience_evals: 4
++    stall_rate_threshold: 0.25
++league:
++  enabled: true
++  pool:
++    recent_size: 32
++    champion_size: 12
++    champion_max_age_updates: 800
++  sampling:
++    opponent_sampling: PFSP
++    pfsp_power: 1.5
++    pfsp_epsilon_uniform: 0.25
++    pfsp_stats_source: online_outcomes
++    pfsp_window_episodes: 50000
++    heuristic_public_start_updates: 0
++    heuristic_public_mix_fraction: 0.03
++    heuristic_public_mix_end_updates: -1
++    heuristic_public_final_mix_fraction: 0.03
++    heuristic_public_variant_mix_fraction: 0.25
++    heuristic_public_variant_mix_end_updates: -1
++    heuristic_public_variant_final_mix_fraction: 0.25
++    warmup_snapshot_mix_fraction: 0.0
++    champion_mix_fraction: 0.0
++    hard_negative_mix_fraction: 0.0
++    hard_negative_min_samples: 24
++    hard_negative_max_win_rate: 0.48
++    noleague_baseline_reserved_envs_per_actor: 27
++    noleague_baseline_mix_fraction: 0.40
++    noleague_baseline_mix_end_updates: -1
++    noleague_baseline_reward_scale: 1.0
++  warmup:
++    first_updates: 1000
++    initial_window_episodes: 5000
++    ramp_target_updates: 800
++    ramp_target_window_episodes: 30000
++  promotion:
++    enabled: true
++    paired_seeds: 64
++    threshold: P(p_anchor > 0.55) > 0.95 using AnchorSet_v1
++    anchor_set_v1:
++      required:
++      - B0 RandomLegal
++      - B1 NoLeague baseline
++      optional_if_available:
++      - B2 HeuristicPublic
++      - B3 HeuristicPublicAggro
++      - B4 HeuristicPublicControl
++      - Previous champion snapshot
++      - Previous recent snapshot
++    seed_file: configs/seeds/promotion_eval_seeds.txt
++    gate:
++      uncertainty_method: bayesian_bootstrap_seedlevel_v1
++      weighting: uniform_across_anchors
++      seat_swap: true
++      folding: S0
++      guardrails:
++        max_prob_anchor_loss_below_0_45: 0.25
++        max_truncation_rate: 0.05
++      target_min_anchor_scores:
++        B1 NoLeague baseline: 0.46
++        B3 HeuristicPublicAggro: 0.53
++        B4 HeuristicPublicControl: 0.80
++      record_file: promotion_gate.json
++      parallel_workers: 6
++      async_enabled: false
++evaluation:
++  seat_swap: true
++  eval_device: cuda:auto
++  eval_inference_mode: true
++  eval_sampling_algorithm: pinned_cdf_pcg_v1
++  eval_assert_sorted_legal_ids: true
++  seed_files:
++    dev_eval: configs/seeds/dev_eval_seeds.txt
++    report_eval: configs/seeds/report_eval_seeds.txt
++    promotion_gate: configs/seeds/promotion_eval_seeds.txt
++  periodic_dev_eval_interval_updates: 80
++  periodic_dev_eval_paired_seeds: 16
++  periodic_dev_eval_anchor_weights:
++    B0 RandomLegal: 0.25
++    B1 NoLeague baseline: 3.0
++    B2 HeuristicPublic: 0.25
++    B3 HeuristicPublicAggro: 3.0
++    B4 HeuristicPublicControl: 1.0
++  final_policy_set_size: 10
++  final_matrix_stage1_paired_seeds: 64
++  final_matrix_stage2_adaptive_max_paired_seeds: 256
++  stop_rules:
++    stop_delta_ci_half_width: 0.03
++    stop_confidence: 0.95
++  replay_capture_rate_eval: 0.001
++  regression_capture_count: 50
++  legal_fingerprint_checks:
++    enabled: true
++    version: legal_fingerprint_v1
++    require_strictly_increasing_legal_ids: true
++    mismatch_policy: hard_fail
++  decision_kind_tagging:
++    required_for_training: false
++    enable_python_derived_debug_tag: false
++  final_policy_set_selection:
++    version: deterministic_v1
++    include_random_legal_baseline_b0: true
++    include_no_league_baseline_b1: true
++    include_heuristic_public_b2_if_exists: true
++    include_final_champion_snapshot: true
++    include_spaced_snapshots_near_percent_updates:
++    - 25
++    - 50
++    - 75
++    remaining_slots_strategy: top_dev_performers_vs_anchor_set_v1
++    fixed_anchor_set_v1:
++      required:
++      - B0 RandomLegal
++      - B1 NoLeague baseline
++      optional_if_available:
++      - B2 HeuristicPublic
++    seed_file: configs/seeds/dev_eval_seeds.txt
++    folding: S0
++    seat_swap: true
++    tie_break: lowest_policy_id
++  async_periodic_dev_eval_enabled: false
++  periodic_dev_eval_parallel_workers: 8
++  periodic_dev_eval_batched_inference_enabled: false
++reproducibility:
++  spec_bundle:
++    require_export_spec_bundle: true
++    persist_in_manifest: true
++    fail_on_spec_mismatch: true
++  ids:
++    run_id_hash: sha256
++    config_hash: sha256
++    spec_hash: sha256
++    store_full_256_bit_ids: true
++    store_short_64_bit_ids_for_filenames: true
++  seed_derivation:
++    base_seed64: 20260212
++    actor_seed_formula: hash64(base_seed64, actor_id)
++    episode_seed_formula: hash64(actor_seed64, env_id, episode_index)
++  seed_files:
++    dev_eval: configs/seeds/dev_eval_seeds.txt
++    report_eval: configs/seeds/report_eval_seeds.txt
++    promotion_gate: configs/seeds/promotion_eval_seeds.txt
++  determinism_requirements:
++  - simulator_build_and_spec_bundle_match
++  - environment_config_match
++  - episode_seeds_match
++  - action_sequence_match
++  - evaluation_sampler_rng_and_algorithm_match
++  legal_fingerprint:
++    version: legal_fingerprint_v1
++    compute_in_rl_layer: true
++    canonical_bytes:
++    - b'legal_fp_v1'
++    - spec_hash256
++    - u32_le_decision_id
++    - u32_le_legal_ids_len
++    - u32_le_each_legal_id
++    replay_eval_mismatch_policy: hard_fail
+diff --git a/notes/thesis_final_execution_plan_2026-04-30.md b/notes/thesis_final_execution_plan_2026-04-30.md
+new file mode 100644
+index 0000000..7fba125
+--- /dev/null
++++ b/notes/thesis_final_execution_plan_2026-04-30.md
+@@ -0,0 +1,90 @@
++# Thesis final execution plan, 2026-04-30
++
++## Main objective
++Produce a defensible thesis data package under time pressure. We will give the v17 residual-guard main run a real chance, but we will not let it consume all remaining time if it stops showing signal.
++
++## Current policy choices
++
++### Locked final anchor
++- Run: `runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429`
++- Checkpoint: `training/checkpoints/checkpoint_120.pt`
++- Confirm64: B1 `0.5078`, B3 `0.8750`, B4 `0.9922`, aggregate about `0.875`
++- Role: strongest no-league/B1 anchor and likely final policy if league does not beat it.
++
++### Best league/main fallback
++- Run: `runs/thesis_main_candidate_v14_b1init_anchor_stabilize_20260430`
++- Checkpoint: `training/checkpoints/checkpoint_160.pt`
++- Confirm64: B1 `0.5000`, B3 `0.8594`, B4 `1.0000`, unweighted `0.8719`
++- Role: best constrained league-style candidate so far if v17 fails.
++
++### Current hail mary
++- Run: `runs/thesis_main_candidate_v17e_b1_residual_guard_continue20_20260430`
++- Starts from: v17d residual checkpoint u20
++- Config: `configs/main_impala_league_server_v17_b1_residual_guard.yaml`
++- Design: frozen B1 base + trainable residual adapter + B1 hard guard + B1 anchor-only rows + raw B1 distillation.
++- Keep running only while B1 remains alive and B3/B4 do not collapse.
++
++## v17 decision rule
++
++At each available checkpoint:
++
++1. Run B1-only confirm64 first.
++2. If B1 is below `0.484`, stop v17 and pivot.
++3. If B1 is `0.484-0.500`, run full confirm64 only if training metrics still look healthy.
++4. If B1 is at least `0.500`, run full confirm64 and continue.
++5. If full confirm shows B3/B4 collapse, stop or reduce pressure; do not spend hours on a dead branch.
++
++Useful targets:
++- Acceptable early: B1 >= `0.492`
++- Strong: B1 >= `0.500`, B3 >= `0.875`, B4 >= `0.984`
++- Thesis-useful improvement: v17 matches B1 on B1 and improves/holds B3/B4 versus B1 anchor or v14 u160.
++
++## If v17 works
++
++Use v17 as final main/constrained league model. Then run:
++
++1. confirm128 or confirm256 for B1 v5 u120, v14 u160, and best v17 checkpoint.
++2. Full anchor matrix against B0/B1/B2/B3/B4 plus important snapshots/champions if available.
++3. Minimal v17 ablations if time permits, one change at a time:
++   - no hard guard
++   - no raw B1 distill
++   - no B1 anchor-only rows
++   - smaller/no residual alpha
++
++## If v17 fails
++
++Stop main-model iteration. Final story:
++
++1. B1 v5 u120 is the primary final policy.
++2. v14 u160 is the best league-style candidate.
++3. v15/v16/v17 are ablations/negative results showing that unconstrained or partially constrained league updates still drift or fail to improve the anchor.
++
++Then produce data package:
++
++1. Confirm matrix on B1 v5 u120 and v14 u160.
++2. Confirm matrix on representative failed/ablation checkpoints:
++   - v14 u240 drift checkpoint
++   - v15 u240 frozen trunk + KL
++   - v16 u240 B1 anchor-only rows
++   - best v17 checkpoint if any
++3. Baselines/evals:
++   - B0 RandomLegal
++   - B2 HeuristicPublic
++   - B3 HeuristicPublicAggro
++   - B4 HeuristicPublicControl
++4. Figures from `python/scripts/make_figures.py` and any matrix/report scripts.
++
++## Config discipline
++
++- Use the locked 512/server configs already in `configs/`.
++- For any new ablation, copy from the closest final config and change only one conceptual setting.
++- Save exact command lines and run labels in this notes file.
++- Do not use the old queue script for final thesis runs unless absolutely necessary.
++
++## Shutdown rule
++
++Once final evals/figures are generated:
++
++1. Commit/push the branch.
++2. Copy/verify critical artifacts.
++3. Shut down the Vast machine to avoid extra compute cost.
+diff --git a/notes/weiss_thesis_progress_2026-04-29.md b/notes/weiss_thesis_progress_2026-04-29.md
+index effe164..9fcb140 100644
+--- a/notes/weiss_thesis_progress_2026-04-29.md
++++ b/notes/weiss_thesis_progress_2026-04-29.md
+@@ -2387,3 +2387,67 @@ Next likely move:
+   - B1 v5 u120 as the strongest anchor/no-league result.
+   - v14 u160 as the best constrained-main/league-style candidate.
+   - v14b/v15/v16 as documented ablations showing that additional continuation pressure did not reliably improve beyond v14 u160.
++
++### 2026-04-30 v17/v17b residual-guard hail mary
++- Implemented trainable B1-base residual wrapper with packed sequence/sampling support and hard B1 guard config (`main_residual_policy.guard_*`).
++- Added collector-side support for residual wrapper state dicts.
++- Fixed B1 baseline import validation for residual wrappers by validating against `base_model.state_dict()`.
++- Fixed process collector B1 lane startup: B1 is excluded from normal opponent pool, so fixed-lane collectors now receive the imported B1 snapshot directly and initialize fixed opponents before first unroll.
++- Config: `configs/main_impala_league_server_v17_b1_residual_guard.yaml`; base is B1 v5 u120, zero residual, alpha 0.35, family-gated residual, hard guard on play/move/attack/clock.
++- Smoke6 verified B1 lane is live from update 1: `collector_b1_opponent_env_steps ~= 1560`, `collector_b1_opponent_train_rows ~= 800`, `b1_anchor_row_fraction ~= 0.386`, `rl_row_fraction ~= 0.614`.
++- Raw B1 distill still logs row fraction 0, likely wrapper/packed-surface mismatch, but exact and family B1 BC are active on B1 anchor rows.
++- Launched real run: `RUN_LABEL=thesis_main_candidate_v17b_b1_residual_guard_20260430 MAX_UPDATES=240 STACK_CONFIG=configs/main_impala_league_server_v17_b1_residual_guard.yaml RESUME_FROM=` via `scripts/run_thesis_main_v13_b1init_long_variant_20260430.sh`.
++- First decision: monitor early scalars for B1 lane, then B1-only confirm64 at u80; stop if B1 < 0.492.
++
++### 2026-04-30 decision rule after v17 residual hail mary
++Plan from user/supervisor prep:
++- Give v17 residual-guard main run a real chance only while it shows positive signal.
++- Evaluate early checkpoints, especially B1 preservation first; continue only if B1 stays alive and B3/B4 remain competitive.
++- If v17 fails or stops looking promising, stop main-model iteration and pivot to thesis production:
++  - final B1/no-league anchor: B1 v5 u120
++  - best league/main candidate so far: v14 u160 unless v17 improves
++  - then run aligned baselines, ablations, eval matrices, and figures.
++- For baselines/ablations, use matched configs and change one setting at a time wherever possible.
++- After data/figures are generated, push branch to GitHub and shut down the Vast machine to save compute.
++
++### 2026-04-30 v17e live eval updates
++- v17e continues v17d u20 with residual guard fully wired.
++- B1-only confirm64:
++  - u20: B1 `0.5000`
++  - u40: B1 `0.4921875`
++  - u80: B1 `0.5000`
++  - u100: B1 `0.4921875`
++  - u120: B1 `0.5078125`
++  - u140: B1 `0.5000`
++  - u160: B1 `0.4921875`
++- Targeted u80 B3/B4 confirm64:
++  - B3 `0.8828125`
++  - B4 `0.9921875`
++- Targeted u120 B3/B4 confirm64:
++  - B3 `0.8125`
++  - B4 `0.9921875`
++- Targeted u140 B3/B4 confirm64:
++  - B3 `0.8046875`
++  - B4 `1.0`
++- Training reached `MAX_UPDATES=160`; workers were stopped afterward and GPUs were idle.
++- Interpretation: v17e finally demonstrates that the residual guard can preserve the fragile B1 matchup through about u140, unlike earlier league attempts. However, later updates trade away B3 strength, so the best v17 checkpoint is currently u80, not the final u160 checkpoint.
++- Current candidate ordering:
++  - strongest overall/simple final anchor: B1 v5 u120 (`B1 0.5078`, `B3 0.8750`, `B4 0.9922`)
++  - best league-style fallback before residual: v14 u160 (`B1 0.5000`, `B3 0.8594`, `B4 1.0000`)
++  - best residual/guard candidate: v17e u80 (`B1 0.5000`, `B3 0.8828`, `B4 0.9922`)
++- Next action: stop extending v17e; move to confirm128/confirm256 and final thesis data package for B1 v5, v14 u160, and v17e u80.
++
++### 2026-04-30 confirm128 comparison slice: B1/B3/B4
++Same 128 paired-seed slice against the key thesis anchors:
++
++| candidate | checkpoint | B1 | B3 | B4 | mean |
++| --- | --- | ---: | ---: | ---: | ---: |
++| B1 v5 no-league anchor | `thesis_b1_candidate_v5.../checkpoint_120.pt` | `0.4921875` | `0.8984375` | `0.9921875` | `0.794271` |
++| v14 B1-init anchor-stabilized league | `thesis_main_candidate_v14.../checkpoint_160.pt` | `0.50390625` | `0.81640625` | `0.9921875` | `0.770833` |
++| v17e B1 residual guard | `thesis_main_candidate_v17e.../checkpoint_80.pt` | `0.5` | `0.8515625` | `0.9921875` | `0.78125` |
++
++Interpretation:
++- B1 v5 remains the strongest simple/no-league final policy, especially versus B3.
++- v17e u80 is the best league-style/constrained residual candidate on this slice: it preserves B1 exactly at `0.5` and beats v14 on B3.
++- v14 u160 is slightly stronger than v17e on B1 but meaningfully weaker on B3.
++- None of the league variants clearly beats the B1 anchor overall; the defensible story is anchor policy as primary result, with v17e showing the most successful constrained league/residual stabilization attempt.
+diff --git a/python/scripts/train.py b/python/scripts/train.py
+index 28ab17b..bc89612 100644
+--- a/python/scripts/train.py
++++ b/python/scripts/train.py
+@@ -2313,7 +2313,11 @@ def _ensure_noleague_baseline_anchor(
+         stack=stack,
+         training_paths=training_paths,
+         run_dir=run_dir,
+-        model_state_dict=learner.model.state_dict(),
++        model_state_dict=(
++            learner.model.base_model.state_dict()
++            if hasattr(learner.model, "base_model") and isinstance(getattr(learner.model, "base_model"), nn.Module)
++            else learner.model.state_dict()
++        ),
+         learner_update_count=int(learner.update_count),
+         device=device,
+         config_hash256=config_hash256,
+@@ -2357,6 +2361,12 @@ def _remember_eval_snapshot_model(cache_key: tuple[Any, ...], eval_model: Policy
+     )
+ 
+ 
++def _state_dict_looks_main_residual(model_state_dict: Mapping[str, Any]) -> bool:
++    return any(str(name).startswith("base_model.") for name in model_state_dict) and any(
++        str(name).startswith("residual_probe.") for name in model_state_dict
++    )
++
++
+ def _load_snapshot_eval_model(
+     *,
+     run_dir: Path,
+@@ -2392,13 +2402,24 @@ def _load_snapshot_eval_model(
+     if model_config is None:
+         raise RuntimeError("The locked stack is missing the model config block")
+ 
+-    eval_model = build_policy_value_model(
+-        observation_dim=observation_dim,
+-        config=model_config,
+-        action_dim=action_dim,
+-        observation_spec=observation_spec,
+-        spec_bundle=spec_bundle,
+-    ).to(resolved_eval_device)
++    eval_model = None
++    if _state_dict_looks_main_residual(model_state_dict):
++        eval_model = _maybe_build_main_residual_model(
++            stack=stack,
++            observation_dim=observation_dim,
++            action_dim=action_dim,
++            observation_spec=observation_spec,
++            spec_bundle={} if spec_bundle is None else spec_bundle,
++            device=torch.device(resolved_eval_device),
++        )
++    if eval_model is None:
++        eval_model = build_policy_value_model(
++            observation_dim=observation_dim,
++            config=model_config,
++            action_dim=action_dim,
++            observation_spec=observation_spec,
++            spec_bundle=spec_bundle,
++        ).to(resolved_eval_device)
+     eval_model.load_state_dict(
+         {name: value.detach().to(device=resolved_eval_device).clone() for name, value in model_state_dict.items()}
+     )
+@@ -2428,13 +2449,24 @@ def _load_checkpoint_eval_model(
+         raise RuntimeError("The locked stack is missing the model config block")
+ 
+     resolved_eval_device = _resolve_eval_device(stack, eval_device=eval_device)
+-    eval_model = build_policy_value_model(
+-        observation_dim=observation_dim,
+-        config=model_config,
+-        action_dim=action_dim,
+-        observation_spec=observation_spec,
+-        spec_bundle=spec_bundle,
+-    ).to(resolved_eval_device)
++    eval_model = None
++    if _state_dict_looks_main_residual(model_state_dict):
++        eval_model = _maybe_build_main_residual_model(
++            stack=stack,
++            observation_dim=observation_dim,
++            action_dim=action_dim,
++            observation_spec=observation_spec,
++            spec_bundle={} if spec_bundle is None else spec_bundle,
++            device=torch.device(resolved_eval_device),
++        )
++    if eval_model is None:
++        eval_model = build_policy_value_model(
++            observation_dim=observation_dim,
++            config=model_config,
++            action_dim=action_dim,
++            observation_spec=observation_spec,
++            spec_bundle=spec_bundle,
++        ).to(resolved_eval_device)
+     eval_model.load_state_dict(
+         {name: value.detach().to(device=resolved_eval_device).clone() for name, value in model_state_dict.items()}
+     )
+@@ -2610,7 +2642,13 @@ def _maybe_build_main_residual_model(
+             family_count=family_count,
+             gate_bias=float(getattr(residual_config, "gate_bias", 0.0)),
+         ).to(device)
+-    wrapper = TrainableLiveFrozenB1Residual(base_model=base_model, residual_probe=residual).to(device)
++    wrapper = TrainableLiveFrozenB1Residual(
++        base_model=base_model,
++        residual_probe=residual,
++        guard_enabled=bool(getattr(residual_config, "guard_enabled", False)),
++        guard_top_gap=float(getattr(residual_config, "guard_top_gap", 0.35)),
++        guard_families=tuple(getattr(residual_config, "guard_families", ()) or ()),
++    ).to(device)
+     print(
+         _format_trainable_main_residual_policy_enabled_message_impl(
+             checkpoint_path=checkpoint_path,
+@@ -5421,7 +5459,7 @@ def _run_minimal_training(
+                                         candidate_policy_id=candidate_policy_id,
+                                     )
+                                 )
+-                    else:
++                    elif not main_residual_policy_enabled:
+                         promotion_passed = _run_snapshot_promotion_gate(
+                             stack=stack,
+                             contract=contract,
+diff --git a/python/weiss_rl/config/models.py b/python/weiss_rl/config/models.py
+index 2d26a34..a78aa5a 100644
+--- a/python/weiss_rl/config/models.py
++++ b/python/weiss_rl/config/models.py
+@@ -232,6 +232,9 @@ class TrainingMainResidualPolicyConfig:
+     alpha: float = 0.1
+     residual_mode: str = "plain"
+     gate_bias: float = 0.0
++    guard_enabled: bool = False
++    guard_top_gap: float = 0.35
++    guard_families: tuple[str, ...] = field(default_factory=tuple)
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+diff --git a/python/weiss_rl/config/training_parse.py b/python/weiss_rl/config/training_parse.py
+index 29fd7e7..3abb0f5 100644
+--- a/python/weiss_rl/config/training_parse.py
++++ b/python/weiss_rl/config/training_parse.py
+@@ -600,6 +600,9 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
+             "alpha",
+             "residual_mode",
+             "gate_bias",
++            "guard_enabled",
++            "guard_top_gap",
++            "guard_families",
+         },
+         context="training.main_residual_policy",
+     )
+@@ -627,12 +630,30 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
+         main_residual_policy.get("gate_bias", 0.0),
+         field_name="training.main_residual_policy.gate_bias",
+     )
++    main_residual_guard_enabled = _require_bool(
++        main_residual_policy.get("guard_enabled", False),
++        field_name="training.main_residual_policy.guard_enabled",
++    )
++    main_residual_guard_top_gap = _require_float(
++        main_residual_policy.get("guard_top_gap", 0.35),
++        field_name="training.main_residual_policy.guard_top_gap",
++    )
++    main_residual_guard_families = tuple(
++        family.strip()
++        for family in _require_str_list(
++            main_residual_policy.get("guard_families", []),
++            field_name="training.main_residual_policy.guard_families",
++        )
++        if family.strip()
++    )
+     if main_residual_enabled and not main_residual_base_snapshot_path:
+         raise ValueError("training.main_residual_policy.base_snapshot_path must be non-empty when enabled")
+     if main_residual_bias_scale < 0.0:
+         raise ValueError("training.main_residual_policy.public_heuristic_bias_scale must be >= 0.0")
+-    if main_residual_alpha <= 0.0:
+-        raise ValueError("training.main_residual_policy.alpha must be > 0.0")
++    if main_residual_alpha < 0.0:
++        raise ValueError("training.main_residual_policy.alpha must be >= 0.0")
++    if main_residual_guard_top_gap < 0.0:
++        raise ValueError("training.main_residual_policy.guard_top_gap must be >= 0.0")
+     if main_residual_mode not in {"plain", "gated", "family_gated"}:
+         raise ValueError("training.main_residual_policy.residual_mode must be plain, gated, or family_gated")
+     main_residual_policy_config = TrainingMainResidualPolicyConfig(
+@@ -644,6 +665,9 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
+         alpha=main_residual_alpha,
+         residual_mode=main_residual_mode,
+         gate_bias=main_residual_gate_bias,
++        guard_enabled=main_residual_guard_enabled,
++        guard_top_gap=main_residual_guard_top_gap,
++        guard_families=main_residual_guard_families,
+     )
+     diverse_opponent_actor_count = _require_int(
+         body.get("diverse_opponent_actor_count", 0),
+diff --git a/python/weiss_rl/eval/simulator_runner.py b/python/weiss_rl/eval/simulator_runner.py
+index 3f668eb..af6f7c1 100644
+--- a/python/weiss_rl/eval/simulator_runner.py
++++ b/python/weiss_rl/eval/simulator_runner.py
+@@ -39,6 +39,7 @@ from weiss_rl.eval.policy_set import (
+ )
+ from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
+ from weiss_rl.league.registry import SnapshotMeta, SnapshotRegistry
++from weiss_rl.legal_actions import LegalActionBatch
+ from weiss_rl.masking import assert_strictly_increasing_legal_ids
+ from weiss_rl.model import PolicyValueModel, build_policy_value_model
+ from weiss_rl.replay.bundles import (
+@@ -612,6 +613,29 @@ class SimulatorEvalRunner(EvalGameRunner):
+             return action, seat_hidden
+         if seat_hidden is None:
+             raise RuntimeError(f"Missing hidden state for eval policy {current_policy_id!r}")
++
++        forward_packed = getattr(policy.model, "forward_packed_seat_aware", None)
++        if callable(forward_packed):
++            legal_actions = self._legal_action_batch_for_eval_row(batch=batch, legal_ids=legal_ids)
++            with torch.inference_mode():
++                packed_logits, _value_tensor, next_seat_hidden = forward_packed(
++                    torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
++                    torch.as_tensor([current_seat], device=self._device, dtype=torch.long),
++                    seat_hidden,
++                    legal_actions=legal_actions,
++                    scoring_mode="learner",
++                )
++            logits = np.full_like(self._baseline_logits, -1.0e9)
++            logits[np.asarray(legal_ids, dtype=np.int64)] = (
++                packed_logits.detach().cpu().numpy().astype(np.float32, copy=False)
++            )
++            action, _logp = sample_action_pinned(
++                logits,
++                legal_ids,
++                rng=rng,
++            )
++            return action, next_seat_hidden
++
+         with torch.inference_mode():
+             logits_tensor, _value_tensor, next_seat_hidden = policy.model.forward_seat_aware(
+                 torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
+@@ -627,6 +651,26 @@ class SimulatorEvalRunner(EvalGameRunner):
+         )
+         return action, next_seat_hidden
+ 
++    def _legal_action_batch_for_eval_row(
++        self,
++        *,
++        batch: DecisionBoundaryBatch,
++        legal_ids: np.ndarray,
++    ) -> LegalActionBatch:
++        offsets = np.asarray([0, len(legal_ids)], dtype=np.uint32)
++        meta = None
++        if batch.legal_action_meta is not None and batch.ids_offsets is not None:
++            _packed_ids, legal_offsets = batch.ids_offsets
++            start = int(legal_offsets[0])
++            end = int(legal_offsets[1])
++            meta = np.asarray(batch.legal_action_meta[start:end], dtype=np.uint16)
++        return LegalActionBatch.from_packed(
++            np.asarray(legal_ids, dtype=np.uint32),
++            offsets,
++            meta=meta,
++            action_space=int(self._baseline_logits.shape[0]),
++        )
++
+     def _initial_hidden(self, policy_id: str) -> torch.Tensor | None:
+         policy = self.policies.get(policy_id)
+         if policy is None or policy.model is None:
+diff --git a/python/weiss_rl/learners/impala_learner.py b/python/weiss_rl/learners/impala_learner.py
+index ef88a14..05bd0a3 100644
+--- a/python/weiss_rl/learners/impala_learner.py
++++ b/python/weiss_rl/learners/impala_learner.py
+@@ -1802,6 +1802,34 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
+                 values=torch.as_tensor(values),
+                 observation_context=observation_context,
+             )
++        if (
++            acting_seat is not None
++            and structured_legal_actions
++            and legal_actions is not None
++            and hasattr(forward_model, "forward_sequence_packed_seat_aware")
++        ):
++            packed_logits, values, _next_hidden = forward_model.forward_sequence_packed_seat_aware(
++                obs,
++                acting_seat,
++                self._prepare_seat_hidden_state(initial_hidden_state, batch_size=batch_size, like=obs),
++                legal_actions=legal_actions,
++                scoring_mode="learner",
++            )
++            self._record_timing_ms("learner_forward_time_major", time.perf_counter() - sequence_started)
++            packed_rows = int(legal_actions.offsets.shape[0] - 1)
++            packed_candidates = int(legal_actions.ids.shape[0]) if legal_actions.ids is not None else 0
++            if self._active_timing_metrics is not None:
++                self._active_timing_metrics.update(
++                    {
++                        "packed_candidate_count": float(packed_candidates),
++                        "packed_candidate_rows": float(packed_rows),
++                        "avg_legal_actions_per_row": float(packed_candidates / max(packed_rows, 1)),
++                    }
++                )
++            return _ForwardTimeMajorResult(
++                packed_logits=torch.as_tensor(packed_logits),
++                values=torch.as_tensor(values),
++            )
+         if acting_seat is not None and hasattr(forward_model, "forward_sequence_seat_aware"):
+             logits, values, _next_hidden = forward_model.forward_sequence_seat_aware(
+                 obs,
+diff --git a/python/weiss_rl/residual_policy.py b/python/weiss_rl/residual_policy.py
+index 8f0aec9..b9d1bed 100644
+--- a/python/weiss_rl/residual_policy.py
++++ b/python/weiss_rl/residual_policy.py
+@@ -15,6 +15,8 @@ from typing import Any
+ import torch
+ from torch import Tensor, nn
+ 
++from weiss_rl.legal_actions import LegalActionBatch
++
+ 
+ class FrozenStoredLogitResidual(nn.Module):
+     """Small residual head trained from tensorized counterfactual labels."""
+@@ -257,17 +259,37 @@ class TrainableLiveFrozenB1Residual(nn.Module):
+         *,
+         base_model: nn.Module,
+         residual_probe: FrozenStoredLogitResidual,
++        guard_enabled: bool = False,
++        guard_top_gap: float = 0.35,
++        guard_families: tuple[str, ...] = (),
+     ) -> None:
+         super().__init__()
+         self.base_model = base_model
+         self.residual_probe = residual_probe
+         self.forward_calls = 0
++        self.residual_applied_rows = 0
++        self.residual_suppressed_rows = 0
++        self.guard_enabled = bool(guard_enabled)
++        self.guard_top_gap = float(guard_top_gap)
++        self.guard_families = tuple(str(name) for name in guard_families)
++        self.action_dim = int(getattr(base_model, "action_dim", residual_probe.action_dim))
++        self.hidden_size = int(getattr(base_model, "hidden_size", 1))
++        self.action_catalog = getattr(base_model, "action_catalog", None)
++        self.supports_legal_candidate_scoring = bool(
++            getattr(base_model, "supports_legal_candidate_scoring", False)
++        )
++        self.supports_factorized_legal_policy = False
+         for parameter in self.base_model.parameters():
+             parameter.requires_grad_(False)
+         for parameter in self.residual_probe.parameters():
+             parameter.requires_grad_(True)
+         self.base_model.eval()
+ 
++    def train(self, mode: bool = True) -> TrainableLiveFrozenB1Residual:
++        super().train(mode)
++        self.base_model.eval()
++        return self
++
+     def initial_seat_hidden(
+         self,
+         batch_size: int,
+@@ -304,16 +326,257 @@ class TrainableLiveFrozenB1Residual(nn.Module):
+                     legal_actions=legal_actions,
+                 )
+         actor = acting_seat if torch.is_tensor(acting_seat) else torch.as_tensor([acting_seat], device=obs.device)
+-        actor = actor.to(device=obs.device, dtype=torch.long).reshape(-1)
++        actor = self._actor_flat(actor, rows=int(obs.shape[0]), device=obs.device)
+         self.forward_calls += int(obs.shape[0])
+         residual = self.residual_probe.residual_logits(obs, actor)
++        self.residual_applied_rows += int(obs.shape[0])
+         return base_logits.detach() + float(self.residual_probe.alpha) * residual, value.detach(), next_hidden.detach()
+ 
++    def _actor_flat(self, acting_seat: int | Tensor, *, rows: int, device: torch.device) -> Tensor:
++        actor = acting_seat if torch.is_tensor(acting_seat) else torch.as_tensor([acting_seat], device=device)
++        actor = actor.to(device=device, dtype=torch.long).reshape(-1)
++        if int(actor.numel()) == 1 and int(rows) != 1:
++            actor = actor.expand(int(rows))
++        if int(actor.numel()) != int(rows):
++            raise ValueError(f"acting_seat rows mismatch: expected {int(rows)}, got {int(actor.numel())}")
++        return actor
++
++    def _packed_row_indices(self, offsets: Tensor, *, device: torch.device) -> Tensor:
++        offsets = offsets.to(device=device, dtype=torch.long)
++        widths = offsets[1:] - offsets[:-1]
++        return torch.repeat_interleave(
++            torch.arange(max(int(offsets.numel()) - 1, 0), device=device, dtype=torch.long),
++            widths,
++        )
++
++    def _packed_residual_logits(
++        self,
++        *,
++        obs_flat: Tensor,
++        actor_flat: Tensor,
++        legal_actions: LegalActionBatch,
++    ) -> Tensor:
++        if legal_actions.ids is None or legal_actions.offsets is None:
++            raise ValueError("B1 residual packed path requires legal_actions.ids and offsets")
++        ids = torch.as_tensor(legal_actions.ids, device=obs_flat.device, dtype=torch.long)
++        offsets = torch.as_tensor(legal_actions.offsets, device=obs_flat.device, dtype=torch.long)
++        row_indices = self._packed_row_indices(offsets, device=obs_flat.device)
++        residual_full = self.residual_probe.residual_logits(obs_flat, actor_flat)
++        if ids.numel() == 0:
++            return residual_full.new_zeros((0,))
++        return residual_full[row_indices, ids]
++
++    def _apply_packed_b1_guard(
++        self,
++        *,
++        base_logits: Tensor,
++        mixed_logits: Tensor,
++        legal_actions: LegalActionBatch,
++    ) -> Tensor:
++        if not self.guard_enabled:
++            self.residual_applied_rows += int(max(int(legal_actions.row_count), 0))
++            return mixed_logits
++        if legal_actions.ids is None or legal_actions.offsets is None:
++            self.residual_applied_rows += int(max(int(legal_actions.row_count), 0))
++            return mixed_logits
++
++        offsets = torch.as_tensor(legal_actions.offsets, device=base_logits.device, dtype=torch.long)
++        row_indices = self._packed_row_indices(offsets, device=base_logits.device)
++        row_count = max(int(offsets.numel()) - 1, 0)
++        if row_count <= 0 or int(base_logits.numel()) == 0:
++            return mixed_logits
++
++        top = base_logits.new_full((row_count,), -torch.inf)
++        top.scatter_reduce_(0, row_indices, base_logits, reduce="amax", include_self=True)
++        top_mask = base_logits >= (top.index_select(0, row_indices) - 1.0e-6)
++
++        second_candidates = torch.where(top_mask, torch.full_like(base_logits, -torch.inf), base_logits)
++        second = base_logits.new_full((row_count,), -torch.inf)
++        second.scatter_reduce_(0, row_indices, second_candidates, reduce="amax", include_self=True)
++        guarded_rows = (top - second) >= float(self.guard_top_gap)
++
++        if self.guard_families:
++            allowed_family_ids: set[int] = set()
++            if self.action_catalog is not None:
++                family_index = {family.name: idx for idx, family in enumerate(self.action_catalog.families)}
++                allowed_family_ids = {
++                    int(family_index[name])
++                    for name in self.guard_families
++                    if name in family_index
++                }
++            if not allowed_family_ids:
++                guarded_rows = torch.zeros_like(guarded_rows)
++            else:
++                if legal_actions.meta is not None:
++                    meta = torch.as_tensor(legal_actions.meta, device=base_logits.device, dtype=torch.long)
++                    candidate_family_ids = meta[:, 0]
++                else:
++                    ids_cpu = torch.as_tensor(legal_actions.ids, dtype=torch.long).detach().cpu().tolist()
++                    family_index = {family.name: idx for idx, family in enumerate(self.action_catalog.families)}
++                    candidate_family_ids = torch.as_tensor(
++                        [
++                            int(family_index.get(self.action_catalog.decode(int(action_id)).family, -1))
++                            for action_id in ids_cpu
++                        ],
++                        device=base_logits.device,
++                        dtype=torch.long,
++                    )
++
++                top_family = torch.full((row_count,), -1, device=base_logits.device, dtype=torch.long)
++                top_positions = torch.nonzero(top_mask, as_tuple=False).squeeze(1)
++                if top_positions.numel() > 0:
++                    top_rows = row_indices.index_select(0, top_positions)
++                    top_families = candidate_family_ids.index_select(0, top_positions)
++                    top_family.scatter_(0, top_rows, top_families)
++                allowed = torch.zeros_like(guarded_rows)
++                for family_id in allowed_family_ids:
++                    allowed = allowed | (top_family == int(family_id))
++                guarded_rows = guarded_rows & allowed
++
++        guarded_candidate_mask = guarded_rows.index_select(0, row_indices)
++        guarded_row_count = int(guarded_rows.sum().detach().item())
++        self.residual_suppressed_rows += guarded_row_count
++        self.residual_applied_rows += max(row_count - guarded_row_count, 0)
++        if not bool(guarded_candidate_mask.any().detach().item()):
++            return mixed_logits
++        return torch.where(guarded_candidate_mask, base_logits.detach(), mixed_logits)
++
++    def forward_sequence_packed_seat_aware(
++        self,
++        obs: Tensor,
++        acting_seat: Tensor,
++        seat_hidden_state: Tensor | None = None,
++        *,
++        legal_actions: LegalActionBatch,
++        scoring_mode: str = "learner",
++    ) -> tuple[Tensor, Tensor, Tensor]:
++        with torch.no_grad():
++            base_logits, value, next_hidden = self.base_model.forward_sequence_packed_seat_aware(
++                obs,
++                acting_seat,
++                seat_hidden_state,
++                legal_actions=legal_actions,
++                scoring_mode=scoring_mode,
++            )
++        obs_flat = obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2])
++        actor_flat = acting_seat.reshape(-1).to(device=obs_flat.device, dtype=torch.long)
++        residual = self._packed_residual_logits(
++            obs_flat=obs_flat,
++            actor_flat=actor_flat,
++            legal_actions=legal_actions,
++        )
++        self.forward_calls += int(obs_flat.shape[0])
++        mixed = base_logits.detach() + float(self.residual_probe.alpha) * residual
++        mixed = self._apply_packed_b1_guard(
++            base_logits=base_logits.detach(),
++            mixed_logits=mixed,
++            legal_actions=legal_actions,
++        )
++        return mixed, value.detach(), next_hidden.detach()
++
++    def forward_packed_seat_aware(
++        self,
++        obs: Tensor,
++        acting_seat: int | Tensor,
++        seat_hidden_state: Tensor | None = None,
++        *,
++        legal_actions: LegalActionBatch,
++        scoring_mode: str = "learner",
++    ) -> tuple[Tensor, Tensor, Tensor]:
++        with torch.no_grad():
++            base_logits, value, next_hidden = self.base_model.forward_packed_seat_aware(
++                obs,
++                acting_seat,
++                seat_hidden_state,
++                legal_actions=legal_actions,
++                scoring_mode=scoring_mode,
++            )
++        obs_flat = obs.reshape(obs.shape[0], obs.shape[-1])
++        actor_flat = self._actor_flat(acting_seat, rows=int(obs_flat.shape[0]), device=obs_flat.device)
++        residual = self._packed_residual_logits(
++            obs_flat=obs_flat,
++            actor_flat=actor_flat,
++            legal_actions=legal_actions,
++        )
++        self.forward_calls += int(obs_flat.shape[0])
++        mixed = base_logits.detach() + float(self.residual_probe.alpha) * residual
++        mixed = self._apply_packed_b1_guard(
++            base_logits=base_logits.detach(),
++            mixed_logits=mixed,
++            legal_actions=legal_actions,
++        )
++        return mixed, value.detach(), next_hidden.detach()
++
++    def sample_packed_seat_aware(
++        self,
++        obs: Tensor,
++        acting_seat: int | Tensor,
++        seat_hidden_state: Tensor | None = None,
++        *,
++        legal_actions: LegalActionBatch,
++        sample_seeds: Tensor,
++        pass_action_id: int,
++    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
++        from weiss_rl.model import _sample_packed_action_scores
++
++        packed_logits, value, next_hidden = self.forward_packed_seat_aware(
++            obs,
++            acting_seat,
++            seat_hidden_state,
++            legal_actions=legal_actions,
++            scoring_mode="actor",
++        )
++        if legal_actions.ids is None or legal_actions.offsets is None:
++            raise ValueError("B1 residual sampling requires packed legal actions")
++        actions, logp = _sample_packed_action_scores(
++            packed_logits,
++            torch.as_tensor(legal_actions.ids, device=packed_logits.device, dtype=torch.long),
++            torch.as_tensor(legal_actions.offsets, device=packed_logits.device, dtype=torch.long),
++            sample_seeds.to(device=packed_logits.device, dtype=torch.long),
++            pass_action_id=int(pass_action_id),
++        )
++        return actions, logp, value, next_hidden
++
++    def forward_sequence_seat_aware(
++        self,
++        obs: Tensor,
++        acting_seat: Tensor,
++        seat_hidden_state: Tensor | None = None,
++        *,
++        legal_actions: LegalActionBatch | None = None,
++    ) -> tuple[Tensor, Tensor, Tensor]:
++        with torch.no_grad():
++            base_logits, value, next_hidden = self.base_model.forward_sequence_seat_aware(
++                obs,
++                acting_seat,
++                seat_hidden_state,
++                legal_actions=legal_actions,
++            )
++        obs_flat = obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2])
++        actor_flat = acting_seat.reshape(-1).to(device=obs_flat.device, dtype=torch.long)
++        residual = self.residual_probe.residual_logits(obs_flat, actor_flat).reshape_as(base_logits)
++        self.forward_calls += int(obs_flat.shape[0])
++        self.residual_applied_rows += int(obs_flat.shape[0])
++        mixed = base_logits.detach() + float(self.residual_probe.alpha) * residual
++        return mixed, value.detach(), next_hidden.detach()
++
++    def value_seat_aware(
++        self,
++        obs: Tensor,
++        acting_seat: int | Tensor,
++        seat_hidden_state: Tensor | None = None,
++    ) -> Tensor:
++        with torch.no_grad():
++            return self.base_model.value_seat_aware(obs, acting_seat, seat_hidden_state).detach()
++
+     def residual_gate_counters(self) -> dict[str, Any]:
+         return {
+             "forward_rows": int(self.forward_calls),
+-            "residual_applied_rows": int(self.forward_calls),
+-            "residual_suppressed_rows": 0,
++            "residual_applied_rows": int(self.residual_applied_rows),
++            "residual_suppressed_rows": int(self.residual_suppressed_rows),
++            "guard_enabled": bool(self.guard_enabled),
++            "guard_top_gap": float(self.guard_top_gap),
++            "guard_families": list(self.guard_families),
+         }
+ 
+     def set_public_heuristic_logit_bias_scale(
+diff --git a/python/weiss_rl/runtime.py b/python/weiss_rl/runtime.py
+index f7f7c60..6878368 100644
+--- a/python/weiss_rl/runtime.py
++++ b/python/weiss_rl/runtime.py
+@@ -776,6 +776,23 @@ class QueueRuntime:
+         if self._collector_result_queue is None:
+             return
+         baseline_model = self._opponent_models.get(_NOLEAGUE_BASELINE_POLICY_ID)
++        if (
++            baseline_model is None
++            and _NOLEAGUE_BASELINE_POLICY_ID in forced_policy_ids
++            and self._run_dir is not None
++        ):
++            baseline_weights_path = (
++                Path(self._run_dir)
++                / "training"
++                / "snapshots"
++                / _NOLEAGUE_BASELINE_POLICY_ID
++                / "weights.pt"
++            )
++            if baseline_weights_path.is_file():
++                baseline_model = self._load_snapshot_model_from_path(
++                    baseline_weights_path,
++                    display_path=baseline_weights_path.relative_to(self._run_dir).as_posix(),
++                )
+         baseline_state_dict = (
+             None
+             if baseline_model is None or _NOLEAGUE_BASELINE_POLICY_ID not in forced_policy_ids
+@@ -1874,6 +1891,28 @@ class QueueRuntime:
+             {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+         )
+         model_guidance_payload = _model_guidance_payload(model)
++        initial_fixed_slots = self._fixed_opponent_policy_slots()
++        initial_forced_policy_ids = self._configured_fixed_opponent_policy_ids()
++        initial_noleague_baseline_state_dict = None
++        if _NOLEAGUE_BASELINE_POLICY_ID in initial_forced_policy_ids:
++            baseline_model = self._opponent_models.get(_NOLEAGUE_BASELINE_POLICY_ID)
++            if baseline_model is None and self._run_dir is not None:
++                baseline_weights_path = (
++                    Path(self._run_dir)
++                    / "training"
++                    / "snapshots"
++                    / _NOLEAGUE_BASELINE_POLICY_ID
++                    / "weights.pt"
++                )
++                if baseline_weights_path.is_file():
++                    baseline_model = self._load_snapshot_model_from_path(
++                        baseline_weights_path,
++                        display_path=baseline_weights_path.relative_to(self._run_dir).as_posix(),
++                    )
++            if baseline_model is not None:
++                initial_noleague_baseline_state_dict = _serialize_state_dict_for_ipc(
++                    {key: value.detach().cpu().clone() for key, value in baseline_model.state_dict().items()}
++                )
+         slot_configs: dict[int, list[dict[str, Any]]] = {}
+         if self._use_shared_collector_transport:
+             hidden_size = int(getattr(model, "hidden_size", 1))
+@@ -1938,6 +1977,11 @@ class QueueRuntime:
+                         None if not self._use_shared_collector_transport else slot_configs[int(actor_id)]
+                     ),
+                     "initial_learner_update": int(self._current_learner_update),
++                    "initial_fixed_opponent_policy_id_by_env": (
++                        None if initial_fixed_slots is None else np.asarray(initial_fixed_slots, dtype=object).tolist()
++                    ),
++                    "initial_forced_policy_ids": tuple(str(policy_id) for policy_id in initial_forced_policy_ids),
++                    "initial_noleague_baseline_state_dict": initial_noleague_baseline_state_dict,
+                 },
+                 daemon=True,
+             )
+diff --git a/python/weiss_rl/runtime_collectors.py b/python/weiss_rl/runtime_collectors.py
+index e7dfdff..1029d6a 100644
+--- a/python/weiss_rl/runtime_collectors.py
++++ b/python/weiss_rl/runtime_collectors.py
+@@ -21,6 +21,7 @@ from weiss_rl.config import StackConfig
+ from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
+ from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
+ from weiss_rl.model import PolicyValueModel, build_policy_value_model
++from weiss_rl.residual_policy import FrozenStoredLogitResidual, TrainableLiveFrozenB1Residual
+ from weiss_rl.runtime_shared import (
+     _open_shared_collector_slot,
+     _shared_unroll_metadata,
+@@ -93,6 +94,68 @@ def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload
+     set_bias_scale(resolved_learner_scale, actor_value=resolved_actor_scale)
+ 
+ 
++def _action_family_ids_from_model(base_model: torch.nn.Module, *, action_dim: int) -> tuple[torch.Tensor | None, int]:
++    action_catalog = getattr(base_model, "action_catalog", None)
++    if action_catalog is None:
++        return None, 0
++    try:
++        family_names = tuple(family.name for family in action_catalog.families)
++        family_index = {name: index for index, name in enumerate(family_names)}
++        ids = torch.full((int(action_dim),), -1, dtype=torch.long)
++        for action_id in range(int(action_dim)):
++            decoded = action_catalog.decode(int(action_id))
++            ids[action_id] = int(family_index.get(decoded.family, -1))
++        return ids, len(family_names)
++    except Exception:
++        return None, 0
++
++
++def _build_collector_model(
++    *,
++    stack: StackConfig,
++    observation_dim: int,
++    action_dim: int,
++    observation_spec: dict[str, Any] | None,
++    spec_bundle: dict[str, Any] | None,
++) -> torch.nn.Module:
++    model_config = stack.config.model
++    if model_config is None:
++        raise RuntimeError("stack config is missing model config")
++    base_model = build_policy_value_model(
++        observation_dim=int(observation_dim),
++        config=model_config,
++        action_dim=int(action_dim),
++        observation_spec=observation_spec,
++        spec_bundle=spec_bundle,
++    ).to(torch.device("cpu"))
++    training_config = stack.config.training
++    residual_config = None if training_config is None else getattr(training_config, "main_residual_policy", None)
++    if residual_config is None or not bool(getattr(residual_config, "enabled", False)):
++        return base_model
++
++    action_family_ids: torch.Tensor | None = None
++    family_count = 0
++    if str(getattr(residual_config, "residual_mode", "plain")) == "family_gated":
++        action_family_ids, family_count = _action_family_ids_from_model(base_model, action_dim=int(action_dim))
++    residual = FrozenStoredLogitResidual(
++        obs_dim=int(observation_dim),
++        action_dim=int(action_dim),
++        hidden_dim=int(getattr(residual_config, "hidden_dim", 256)),
++        alpha=float(getattr(residual_config, "alpha", 0.1)),
++        residual_mode=str(getattr(residual_config, "residual_mode", "plain")),
++        action_family_ids=action_family_ids,
++        family_count=family_count,
++        gate_bias=float(getattr(residual_config, "gate_bias", 0.0)),
++    )
++    return TrainableLiveFrozenB1Residual(
++        base_model=base_model,
++        residual_probe=residual,
++        guard_enabled=bool(getattr(residual_config, "guard_enabled", False)),
++        guard_top_gap=float(getattr(residual_config, "guard_top_gap", 0.35)),
++        guard_families=tuple(getattr(residual_config, "guard_families", ()) or ()),
++    )
++
++
+ def _is_cuda_auto_request(requested: str) -> bool:
+     normalized = str(requested).strip().lower()
+     return normalized in {"auto", "cuda:auto", "cuda:all", "all"}
+@@ -549,6 +612,9 @@ def _collector_process_main(
+     result_queue: Any,
+     shared_slot_configs: list[dict[str, Any]] | None,
+     initial_learner_update: int = 0,
++    initial_fixed_opponent_policy_id_by_env: list[str] | None = None,
++    initial_forced_policy_ids: tuple[str, ...] = (),
++    initial_noleague_baseline_state_dict: dict[str, Any] | None = None,
+ ) -> None:
+     from weiss_rl.runtime import QueueRuntime
+ 
+@@ -583,16 +649,13 @@ def _collector_process_main(
+         system_config = stack_for_child.config.system
+     if system_config is not None:
+         _configure_runtime_actor_torch_threads(int(getattr(system_config, "actor_torch_threads", 1)))
+-    model_config = stack_for_child.config.model
+-    if model_config is None:
+-        raise RuntimeError("stack config is missing model config")
+-    model = build_policy_value_model(
++    model = _build_collector_model(
++        stack=stack_for_child,
+         observation_dim=int(observation_dim),
+-        config=model_config,
+         action_dim=int(action_dim),
+         observation_spec=observation_spec,
+         spec_bundle=spec_bundle,
+-    ).to(torch.device("cpu"))
++    )
+     model.load_state_dict(_deserialize_state_dict_from_ipc(model_state_dict))
+     _restore_model_guidance_from_payload(model, model_guidance_payload)
+     model.eval()
+@@ -637,6 +700,23 @@ def _collector_process_main(
+         runtime._actors[0] = runtime._build_actor_state(model=model, actor_id=int(actor_id))
+     actor = runtime._actors[0]
+     runtime.refresh_opponent_pool()
++    if initial_noleague_baseline_state_dict is not None:
++        baseline_model = build_policy_value_model(
++            observation_dim=int(runtime.observation_dim),
++            config=runtime.stack.config.model,
++            action_dim=int(runtime.action_dim),
++            observation_spec=runtime._observation_spec,
++            spec_bundle=runtime._spec_bundle,
++        ).to(runtime._device)
++        baseline_model.load_state_dict(_deserialize_state_dict_from_ipc(initial_noleague_baseline_state_dict))
++        baseline_model.eval()
++        runtime._opponent_models[_NOLEAGUE_BASELINE_POLICY_ID] = baseline_model
++        runtime._opponent_model_locks[_NOLEAGUE_BASELINE_POLICY_ID] = threading.Lock()
++    if initial_forced_policy_ids:
++        runtime._forced_fixed_opponent_policy_ids = tuple(str(policy_id) for policy_id in initial_forced_policy_ids)
++    if initial_fixed_opponent_policy_id_by_env is not None:
++        actor.fixed_opponent_policy_id_by_env = np.asarray(initial_fixed_opponent_policy_id_by_env, dtype=object)
++        runtime._reset_actor_state_for_fixed_opponents(actor)
+     _process_debug_log(
+         run_dir=(None if run_dir is None else Path(run_dir)),
+         actor_id=int(actor_id),
+diff --git a/reports/thesis_final_eval_20260430/selected_policy_confirm128_anchor_bars.pdf b/reports/thesis_final_eval_20260430/selected_policy_confirm128_anchor_bars.pdf
+new file mode 100644
+index 0000000000000000000000000000000000000000..5432801e4f70115a5d2400570d27804e83f86073
+GIT binary patch
+literal 16345
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/reports/thesis_final_eval_20260430/selected_policy_confirm128_anchor_bars.png b/reports/thesis_final_eval_20260430/selected_policy_confirm128_anchor_bars.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..686dcfb00e3dc23cbc9d7db92312abaedb81b349
+GIT binary patch
+literal 67694
+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
+I?)~Av0jQ1PssI20
+
+literal 0
+HcmV?d00001
+
+diff --git a/reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.csv b/reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.csv
+new file mode 100644
+index 0000000..b40961e
+--- /dev/null
++++ b/reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.csv
+@@ -0,0 +1,4 @@
++candidate_id,label,mean_5_anchor,mean_b1_b3_b4,B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic,B3 HeuristicPublicAggro,B4 HeuristicPublicControl,checkpoint,notes
++b1_v5_u120,B1 v5 no-league anchor,0.8765625,0.7942708333333334,1.0,0.4921875,1.0,0.8984375,0.9921875,runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt,Primary final/simple policy. Strongest overall mean; trained without league continuation.
++v14_u160,v14 B1-init anchor-stabilized league,0.8625,0.7708333333333334,1.0,0.50390625,1.0,0.81640625,0.9921875,runs/thesis_main_candidate_v14_b1init_anchor_stabilize_20260430/training/checkpoints/checkpoint_160.pt,Best pre-residual league-style checkpoint; slightly best B1 score but weaker B3.
++v17e_u80,v17e B1 residual guard,0.86875,0.78125,1.0,0.5,1.0,0.8515625,0.9921875,runs/thesis_main_candidate_v17e_b1_residual_guard_continue20_20260430/training/checkpoints/checkpoint_80.pt,Best constrained residual/league candidate; first approach to stabilize B1 while keeping B3 reasonably high.
+diff --git a/reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.json b/reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.json
+new file mode 100644
+index 0000000..2f42994
+--- /dev/null
++++ b/reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.json
+@@ -0,0 +1,161 @@
++{
++  "anchors": [
++    "B0 RandomLegal",
++    "B1 NoLeague baseline",
++    "B2 HeuristicPublic",
++    "B3 HeuristicPublicAggro",
++    "B4 HeuristicPublicControl"
++  ],
++  "rows": [
++    {
++      "candidate_id": "b1_v5_u120",
++      "label": "B1 v5 no-league anchor",
++      "checkpoint": "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt",
++      "notes": "Primary final/simple policy. Strongest overall mean; trained without league continuation.",
++      "mean_5_anchor": 0.8765625,
++      "mean_b1_b3_b4": 0.7942708333333334,
++      "B0 RandomLegal": 1.0,
++      "B1 NoLeague baseline": 0.4921875,
++      "B2 HeuristicPublic": 1.0,
++      "B3 HeuristicPublicAggro": 0.8984375,
++      "B4 HeuristicPublicControl": 0.9921875,
++      "details": {
++        "B0 RandomLegal": {
++          "wins": 256,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 1.0,
++          "ci_high": 1.0
++        },
++        "B2 HeuristicPublic": {
++          "wins": 256,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 1.0,
++          "ci_high": 1.0
++        },
++        "B1 NoLeague baseline": {
++          "wins": 126,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 0.47401355893423996,
++          "ci_high": 0.5068971773563378
++        },
++        "B3 HeuristicPublicAggro": {
++          "wins": 230,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 0.86335517696153,
++          "ci_high": 0.9332673926990307
++        },
++        "B4 HeuristicPublicControl": {
++          "wins": 254,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 0.9794668435580316,
++          "ci_high": 0.9990834781307296
++        }
++      }
++    },
++    {
++      "candidate_id": "v14_u160",
++      "label": "v14 B1-init anchor-stabilized league",
++      "checkpoint": "runs/thesis_main_candidate_v14_b1init_anchor_stabilize_20260430/training/checkpoints/checkpoint_160.pt",
++      "notes": "Best pre-residual league-style checkpoint; slightly best B1 score but weaker B3.",
++      "mean_5_anchor": 0.8625,
++      "mean_b1_b3_b4": 0.7708333333333334,
++      "B0 RandomLegal": 1.0,
++      "B1 NoLeague baseline": 0.50390625,
++      "B2 HeuristicPublic": 1.0,
++      "B3 HeuristicPublicAggro": 0.81640625,
++      "B4 HeuristicPublicControl": 0.9921875,
++      "details": {
++        "B0 RandomLegal": {
++          "wins": 256,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 1.0,
++          "ci_high": 1.0
++        },
++        "B2 HeuristicPublic": {
++          "wins": 256,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 1.0,
++          "ci_high": 1.0
++        },
++        "B1 NoLeague baseline": {
++          "wins": 129,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 0.5000679227738999,
++          "ci_high": 0.513070217463853
++        },
++        "B3 HeuristicPublicAggro": {
++          "wins": 209,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 0.7736667764905752,
++          "ci_high": 0.8580600999300105
++        },
++        "B4 HeuristicPublicControl": {
++          "wins": 254,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 0.979397534617507,
++          "ci_high": 0.9992012183728725
++        }
++      }
++    },
++    {
++      "candidate_id": "v17e_u80",
++      "label": "v17e B1 residual guard",
++      "checkpoint": "runs/thesis_main_candidate_v17e_b1_residual_guard_continue20_20260430/training/checkpoints/checkpoint_80.pt",
++      "notes": "Best constrained residual/league candidate; first approach to stabilize B1 while keeping B3 reasonably high.",
++      "mean_5_anchor": 0.86875,
++      "mean_b1_b3_b4": 0.78125,
++      "B0 RandomLegal": 1.0,
++      "B1 NoLeague baseline": 0.5,
++      "B2 HeuristicPublic": 1.0,
++      "B3 HeuristicPublicAggro": 0.8515625,
++      "B4 HeuristicPublicControl": 0.9921875,
++      "details": {
++        "B0 RandomLegal": {
++          "wins": 256,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 1.0,
++          "ci_high": 1.0
++        },
++        "B2 HeuristicPublic": {
++          "wins": 256,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 1.0,
++          "ci_high": 1.0
++        },
++        "B1 NoLeague baseline": {
++          "wins": 128,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 0.5,
++          "ci_high": 0.5
++        },
++        "B3 HeuristicPublicAggro": {
++          "wins": 218,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 0.8121497748613401,
++          "ci_high": 0.8880238843456509
++        },
++        "B4 HeuristicPublicControl": {
++          "wins": 254,
++          "games": 256,
++          "paired_seeds": 128,
++          "ci_low": 0.9787667348526969,
++          "ci_high": 0.9991532222797443
++        }
++      }
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.md b/reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.md
+new file mode 100644
+index 0000000..3500518
+--- /dev/null
++++ b/reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.md
+@@ -0,0 +1,21 @@
++# Thesis Final Eval Snapshot - 2026-04-30
++Confirm128 results use 128 paired seeds, seat-swapped for 256 games per anchor.
++
++## Selected Policies
++| candidate | mean 5-anchor | B1/B3/B4 mean | B0 | B1 | B2 | B3 | B4 | interpretation |
++| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
++| B1 v5 no-league anchor | 0.8766 | 0.7943 | 1.0000 | 0.4922 | 1.0000 | 0.8984 | 0.9922 | Primary final/simple policy. Strongest overall mean; trained without league continuation. |
++| v14 B1-init anchor-stabilized league | 0.8625 | 0.7708 | 1.0000 | 0.5039 | 1.0000 | 0.8164 | 0.9922 | Best pre-residual league-style checkpoint; slightly best B1 score but weaker B3. |
++| v17e B1 residual guard | 0.8688 | 0.7812 | 1.0000 | 0.5000 | 1.0000 | 0.8516 | 0.9922 | Best constrained residual/league candidate; first approach to stabilize B1 while keeping B3 reasonably high. |
++
++## Current Decision
++- Use B1 v5 u120 as the primary final policy: it has the best five-anchor mean and strongest B3 score.
++- Use v17e u80 as the main league/constrained residual candidate: it is B1-safe at 0.5000 and beats v14 on B3.
++- Use v14 u160 as the pre-residual league comparator: slightly better on B1, weaker on B3.
++- Thesis framing: league/self-play did not clearly surpass the B1 anchor under time constraints, but the residual guard solved most of the B1 drift failure and gives a defensible constrained-league ablation.
++
++## Important Negative Results
++- v14 continued past u160 drifted on B1.
++- v15 frozen trunk + B1 KL did not recover the anchor; u240 B1-only was about 0.4766.
++- v16 B1 anchor-only rows did not beat v14; confirm64 u240 had B1 0.4609, B3 0.7266, B4 0.9609.
++- v17e later checkpoints preserved B1 for a while but traded off B3: u120 B3 0.8125, u140 B3 0.8047, u160 B1 0.4922.
+-- 
+2.43.0
+

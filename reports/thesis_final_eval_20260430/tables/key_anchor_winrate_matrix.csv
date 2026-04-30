@@ -1,0 +1,9 @@
+candidate,B1,B3,B4
+B1 GRU anchor,0.492188,0.898438,0.992188
+No recurrence B1 recipe,0.496094,0.921875,1.000000
+v14 B1-init league,0.503906,0.816406,0.992188
+v17e residual league,0.500000,0.851562,0.992188
+State reward knobs,0.503906,0.851562,0.992188
+No reward shaping,0.507812,0.855469,0.992188
+No behavior BC,0.511719,0.847656,0.988281
+PPO-lite B1 recipe,0.226562,0.503906,0.937500

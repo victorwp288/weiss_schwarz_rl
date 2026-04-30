@@ -18,6 +18,7 @@ from .impala_learner import (
     _batch_value,
     _masked_action_logp_and_entropy,
     _packed_action_logp_and_entropy,
+    _packed_scores_action_logp_and_entropy,
 )
 
 
@@ -135,13 +136,16 @@ class PpoLiteLearner(ImpalaLearner):
 
         obs = self._require_obs(_batch_value(batch, "obs"))
         actions = self._require_actions(_batch_value(batch, "actions"), expected_shape=obs.shape[:2])
-        logits, values = self._forward_time_major(
+        forward = self._forward_time_major(
             obs,
             initial_hidden_state=_batch_value(batch, "initial_hidden_state"),
             to_play_seat=_batch_value(batch, "to_play_seat"),
             actor=_batch_value(batch, "actor"),
             legal_actions=_batch_value(batch, "legal_actions"),
         )
+        logits = forward.logits
+        packed_logits = forward.packed_logits
+        values = forward.values
         packed_legal = self._resolve_packed_legal_actions(batch, expected_shape=obs.shape[:2])
         legal_mask = (
             None
@@ -149,27 +153,42 @@ class PpoLiteLearner(ImpalaLearner):
             else self._resolve_legal_mask(
                 batch,
                 expected_shape=obs.shape[:2],
-                action_dim=logits.shape[-1],
+                action_dim=logits.shape[-1] if logits is not None else 0,
             )
         )
         context: dict[str, Any] = {
-            "logits": logits.detach(),
+            "logits": None if logits is None else logits.detach(),
+            "packed_logits": None if packed_logits is None else packed_logits.detach(),
             "values": values.detach(),
         }
-        self._ensure_finite_tensor("forward_logits", logits, batch=batch, context=context)
+        if logits is not None:
+            self._ensure_finite_tensor("forward_logits", logits, batch=batch, context=context)
+        if packed_logits is not None:
+            self._ensure_finite_tensor("forward_packed_logits", packed_logits, batch=batch, context=context)
         self._ensure_finite_tensor("forward_values", values, batch=batch, context=context)
 
         if packed_legal is not None:
             packed_ids, packed_offsets = packed_legal
-            action_logp, entropy = _packed_action_logp_and_entropy(
-                logits,
-                packed_ids,
-                packed_offsets,
-                actions,
-                pass_action_id=self.pass_action_id,
-            )
+            if packed_logits is not None:
+                action_logp, entropy = _packed_scores_action_logp_and_entropy(
+                    packed_logits,
+                    packed_ids,
+                    packed_offsets,
+                    actions,
+                    pass_action_id=self.pass_action_id,
+                )
+            else:
+                assert logits is not None
+                action_logp, entropy = _packed_action_logp_and_entropy(
+                    logits,
+                    packed_ids,
+                    packed_offsets,
+                    actions,
+                    pass_action_id=self.pass_action_id,
+                )
         else:
             assert legal_mask is not None
+            assert logits is not None
             action_logp, entropy = _masked_action_logp_and_entropy(
                 logits,
                 legal_mask,

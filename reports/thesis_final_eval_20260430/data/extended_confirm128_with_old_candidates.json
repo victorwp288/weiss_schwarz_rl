@@ -179,6 +179,39 @@
       "mean_b1_b3_b4": 0.5559895833333334,
       "min_b1_b3_b4": 0.2265625,
       "b3_minus_b1": 0.27734375
+    },
+    {
+      "id": "old_v2_b1_specialist",
+      "label": "Old v2 B1-specialist",
+      "family": "Old/debug",
+      "checkpoint": "u40",
+      "interpretation": "Old early B1-focused config; very strong vs B1 but weak vs B3 aggro.",
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.96875,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.6328125,
+      "B4 HeuristicPublicControl": 0.99609375,
+      "mean_5_anchor": 0.91953125,
+      "mean_b1_b3_b4": 0.8658854166666666,
+      "min_b1_b3_b4": 0.6328125,
+      "b3_minus_b1": -0.3359375
+    },
+    {
+      "id": "old_v3b_profile_cycle",
+      "label": "Old v3b profile-cycle",
+      "family": "Old/debug",
+      "checkpoint": "u40",
+      "interpretation": "Old profile-cycle/no-guard config; B1-heavy but trades off B3 strength.",
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.796875,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.72265625,
+      "B4 HeuristicPublicControl": 0.99609375,
+      "mean_5_anchor": 0.903125,
+      "mean_b1_b3_b4": 0.8385416666666666,
+      "min_b1_b3_b4": 0.72265625,
+      "b3_minus_b1": -0.07421875
     }
-  ]
+  ],
+  "old_candidate_note": "Old v2/v3b are appendix B1-specialist/tradeoff baselines, not main final models."
 }
