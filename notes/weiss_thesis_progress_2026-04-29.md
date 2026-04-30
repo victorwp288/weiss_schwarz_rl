@@ -2451,3 +2451,26 @@ Interpretation:
 - v17e u80 is the best league-style/constrained residual candidate on this slice: it preserves B1 exactly at `0.5` and beats v14 on B3.
 - v14 u160 is slightly stronger than v17e on B1 but meaningfully weaker on B3.
 - None of the league variants clearly beats the B1 anchor overall; the defensible story is anchor policy as primary result, with v17e showing the most successful constrained league/residual stabilization attempt.
+
+### 2026-04-30 no-recurrence one-change baseline
+- User requested apples-to-apples ablations where only one setting changes.
+- First attempted `configs/baselines/norecurrence_noleague.yaml`, but stopped it because it changed too many recipe settings relative to B1 v5.
+- Relaunched a true one-change ablation from the B1 v5 command/recipe:
+  - base config: `configs/baselines/noleague_impala.yaml`
+  - same B1 v5 overrides: aggressive heuristic profile, behavior BC `0.15`, LR `5e-5`, entropy `0.015 -> 0.01`, checkpoint guard off
+  - only conceptual model change: `model.recurrent_core="none"` and `training.algorithm="impala_vtrace_ff"`
+  - run: `runs/thesis_ablation_norecurrence_b1recipe_20260430`
+  - eval config snapshot generated from canonical run config: `configs/ablations/norecurrence_b1recipe_eval_20260430.yaml`
+- Runtime: reached u160 in roughly 4 minutes, much faster than the recurrent model.
+- Confirm128 five-anchor result:
+  - B0 `1.0000`, B1 `0.4961`, B2 `1.0000`, B3 `0.9219`, B4 `1.0000`
+  - mean5 `0.8836`, B1/B3/B4 mean `0.8060`
+- Confirm256 top-two/key-slice result:
+  - no-recurrence u160: B1 `0.4980`, B3 `0.9004`, B4 `0.9902`, mean `0.7962`
+  - B1 v5 u120: B1 `0.4980`, B3 `0.8887`, B4 `0.9980`, mean `0.7949`
+- Interpretation: no-recurrence is a strong baseline/ablation and effectively tied with the locked recurrent B1 anchor on confirm256. This suggests recurrent memory was not necessary for the anchor suite under the thesis recipe; do not reopen main-model training because of this, but include it prominently in the final comparison.
+- Updated report artifacts:
+  - `reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.md`
+  - `reports/thesis_final_eval_20260430/selected_policy_confirm128_matrix.csv`
+  - `reports/thesis_final_eval_20260430/selected_policy_confirm128_anchor_bars.png`
+  - `reports/thesis_final_eval_20260430/top_two_confirm256_b1b3b4.json`

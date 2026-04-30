@@ -9,16 +9,11 @@
   "rows": [
     {
       "candidate_id": "b1_v5_u120",
-      "label": "B1 v5 no-league anchor",
+      "label": "B1 v5 no-league GRU anchor",
       "checkpoint": "runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt",
-      "notes": "Primary final/simple policy. Strongest overall mean; trained without league continuation.",
+      "notes": "Locked recurrent GRU/no-league policy; strongest B3 among recurrent candidates.",
       "mean_5_anchor": 0.8765625,
       "mean_b1_b3_b4": 0.7942708333333334,
-      "B0 RandomLegal": 1.0,
-      "B1 NoLeague baseline": 0.4921875,
-      "B2 HeuristicPublic": 1.0,
-      "B3 HeuristicPublicAggro": 0.8984375,
-      "B4 HeuristicPublicControl": 0.9921875,
       "details": {
         "B0 RandomLegal": {
           "wins": 256,
@@ -55,7 +50,62 @@
           "ci_low": 0.9794668435580316,
           "ci_high": 0.9990834781307296
         }
-      }
+      },
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.4921875,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.8984375,
+      "B4 HeuristicPublicControl": 0.9921875
+    },
+    {
+      "candidate_id": "norecurrence_b1recipe_u160",
+      "label": "No-recurrence B1-recipe baseline",
+      "checkpoint": "runs/thesis_ablation_norecurrence_b1recipe_20260430/training/checkpoints/checkpoint_160.pt",
+      "notes": "One-change ablation from B1 recipe: recurrent_core=none; strongest mean on this anchor suite.",
+      "mean_5_anchor": 0.88359375,
+      "mean_b1_b3_b4": 0.8059895833333334,
+      "details": {
+        "B0 RandomLegal": {
+          "wins": 256,
+          "games": 256,
+          "paired_seeds": 128,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "B2 HeuristicPublic": {
+          "wins": 256,
+          "games": 256,
+          "paired_seeds": 128,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "B1 NoLeague baseline": {
+          "wins": 127,
+          "games": 256,
+          "paired_seeds": 128,
+          "ci_low": 0.48548899967386744,
+          "ci_high": 0.49990554397131604
+        },
+        "B3 HeuristicPublicAggro": {
+          "wins": 236,
+          "games": 256,
+          "paired_seeds": 128,
+          "ci_low": 0.8884065530817622,
+          "ci_high": 0.9487186142626002
+        },
+        "B4 HeuristicPublicControl": {
+          "wins": 256,
+          "games": 256,
+          "paired_seeds": 128,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        }
+      },
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.49609375,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.921875,
+      "B4 HeuristicPublicControl": 1.0
     },
     {
       "candidate_id": "v14_u160",
@@ -64,11 +114,6 @@
       "notes": "Best pre-residual league-style checkpoint; slightly best B1 score but weaker B3.",
       "mean_5_anchor": 0.8625,
       "mean_b1_b3_b4": 0.7708333333333334,
-      "B0 RandomLegal": 1.0,
-      "B1 NoLeague baseline": 0.50390625,
-      "B2 HeuristicPublic": 1.0,
-      "B3 HeuristicPublicAggro": 0.81640625,
-      "B4 HeuristicPublicControl": 0.9921875,
       "details": {
         "B0 RandomLegal": {
           "wins": 256,
@@ -105,20 +150,20 @@
           "ci_low": 0.979397534617507,
           "ci_high": 0.9992012183728725
         }
-      }
+      },
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.50390625,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.81640625,
+      "B4 HeuristicPublicControl": 0.9921875
     },
     {
       "candidate_id": "v17e_u80",
       "label": "v17e B1 residual guard",
       "checkpoint": "runs/thesis_main_candidate_v17e_b1_residual_guard_continue20_20260430/training/checkpoints/checkpoint_80.pt",
-      "notes": "Best constrained residual/league candidate; first approach to stabilize B1 while keeping B3 reasonably high.",
+      "notes": "Best constrained residual/league candidate; stabilizes B1 while retaining reasonable B3.",
       "mean_5_anchor": 0.86875,
       "mean_b1_b3_b4": 0.78125,
-      "B0 RandomLegal": 1.0,
-      "B1 NoLeague baseline": 0.5,
-      "B2 HeuristicPublic": 1.0,
-      "B3 HeuristicPublicAggro": 0.8515625,
-      "B4 HeuristicPublicControl": 0.9921875,
       "details": {
         "B0 RandomLegal": {
           "wins": 256,
@@ -155,7 +200,12 @@
           "ci_low": 0.9787667348526969,
           "ci_high": 0.9991532222797443
         }
-      }
+      },
+      "B0 RandomLegal": 1.0,
+      "B1 NoLeague baseline": 0.5,
+      "B2 HeuristicPublic": 1.0,
+      "B3 HeuristicPublicAggro": 0.8515625,
+      "B4 HeuristicPublicControl": 0.9921875
     }
   ]
 }
