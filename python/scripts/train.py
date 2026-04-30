@@ -4681,6 +4681,33 @@ def _run_snapshot_promotion_gate(
     return False
 
 
+def _apply_freeze_parameter_prefixes(model: nn.Module, prefixes: Sequence[str]) -> dict[str, int]:
+    normalized = tuple(str(prefix).strip() for prefix in prefixes if str(prefix).strip())
+    if not normalized:
+        return {"frozen": 0, "trainable": sum(1 for _ in model.parameters())}
+
+    frozen = 0
+    trainable = 0
+    for name, param in model.named_parameters():
+        should_freeze = any(name == prefix or name.startswith(prefix + ".") for prefix in normalized)
+        param.requires_grad_(not should_freeze)
+        if should_freeze:
+            frozen += 1
+        else:
+            trainable += 1
+
+    if trainable <= 0:
+        raise RuntimeError(
+            "freeze_parameter_prefixes froze every parameter; at least one trainable parameter is required"
+        )
+
+    print(
+        "Applied parameter freeze: "
+        f"prefixes={list(normalized)} frozen_tensors={frozen} trainable_tensors={trainable}"
+    )
+    return {"frozen": frozen, "trainable": trainable}
+
+
 def _run_minimal_training(
     *,
     stack: StackConfig,
@@ -4810,6 +4837,9 @@ def _run_minimal_training(
                     aggregate_score=float(_dev_eval_aggregate_score(resume_dev_eval_summary) or 0.0),
                 )
             )
+
+    freeze_prefixes = tuple(getattr(training_config, "freeze_parameter_prefixes", ()) or ())
+    _apply_freeze_parameter_prefixes(model, freeze_prefixes)
 
     config_hash256 = compute_config_hash256(stack)
     if rank0:

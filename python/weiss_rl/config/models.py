@@ -290,6 +290,7 @@ class TrainingConfig:
     heuristic_actor_hidden_state_tracking: bool = True
     profile_timers: bool = False
     torch_profiler: bool = False
+    freeze_parameter_prefixes: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def unroll_length(self) -> int:

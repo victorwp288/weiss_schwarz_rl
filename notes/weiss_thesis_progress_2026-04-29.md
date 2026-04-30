@@ -2158,3 +2158,105 @@ Next decision:
 - Either:
   - select v14 u160 as the main constrained league candidate and move to final eval/figures, or
   - try one sharper diagnostic/code-level fix that addresses recurrent B1 target mismatch or the persistent family/trajectory drift before another training run.
+
+## 2026-04-30 - Main v15 frozen trunk + raw B1 KL test
+
+Purpose:
+
+- Test GPT Pro's concrete implementation hypothesis that the remaining issue is recurrent representation drift under mixed actor-critic gradients.
+- Freeze the B1-safe recurrent trunk from v14 u160 so continuation gradients can update heads without changing the recurrent hidden-state basin.
+- Add existing full-distribution raw B1 distillation in addition to exact/family B1 BC.
+
+Code patch:
+
+- Added `training.freeze_parameter_prefixes` to the config model and parser.
+- Added `_apply_freeze_parameter_prefixes(...)` in `python/scripts/train.py`.
+- The helper is applied after checkpoint resume and before training continues.
+- One-update smoke confirmed the prefixes match the real model:
+  - frozen tensors: `172`
+  - trainable tensors: `65`
+
+Config:
+
+- `configs/main_impala_league_server_v15_frozen_trunk_b1kl.yaml`
+
+Key settings:
+
+- Resume from:
+  - `runs/thesis_main_candidate_v14_b1init_anchor_stabilize_20260430/training/checkpoints/checkpoint_160.pt`
+- Reset optimizer.
+- Freeze:
+  - `encoder`
+  - `gru`
+  - `feedforward_core`
+- LR:
+  - `5e-6`
+- `policy_loss_coef`:
+  - `0.10`
+- Exact B1 BC:
+  - `0.25` constant
+- Family B1 BC:
+  - `0.40` constant
+- Raw B1 distill:
+  - enabled
+  - coef/final `0.35`
+  - `top_k: 16`
+  - `temperature: 1.25`
+  - `top_action_ce_coef: 0.50`
+  - teacher/student public heuristic bias scale `2.0`
+- CF:
+  - `0.05` constant
+- Sampling copied from v14b:
+  - B1 `0.42`
+  - base heuristic `0.04`
+  - heuristic variants `0.12`
+  - no champions/hard negatives/recents
+
+Launch:
+
+```bash
+cd /workspace/weiss_schwarz_rl
+ulimit -n 1048576
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export PYTHONUNBUFFERED=1
+
+RUN_LABEL=thesis_main_candidate_v15_frozen_trunk_b1kl_20260430 \
+MAX_UPDATES=320 \
+STACK_CONFIG=configs/main_impala_league_server_v15_frozen_trunk_b1kl.yaml \
+RESUME_FROM=runs/thesis_main_candidate_v14_b1init_anchor_stabilize_20260430/training/checkpoints/checkpoint_160.pt \
+RESUME_RESET_OPTIMIZER=1 \
+scripts/run_thesis_main_v13_b1init_long_variant_20260430.sh
+```
+
+Runtime sanity:
+
+- Smoke at u161:
+  - freeze applied on all 4 ranks
+  - raw B1 distill active `0.35`
+  - raw B1 top1 match about `0.962`
+  - raw B1 KL about `0.147`
+- Main run around u236:
+  - `vtrace_rho_p99` about `91`
+  - raw B1 KL about `0.112`
+  - raw B1 top1 match about `0.939`
+- The run was stopped after u240 B1 confirm; stop landed after u256.
+- GPUs were freed afterward.
+
+Result:
+
+- Manual confirm64 B1-only at u240:
+  - B1 `0.4765625`
+
+Interpretation:
+
+- v15 did not rescue the main model.
+- Freezing the recurrent trunk plus adding raw B1 KL kept the explicit B1-distill metrics healthy, but did not preserve actual B1 matchup strength enough.
+- This weakens the "simple representation drift only" hypothesis.
+- The best main candidate remains:
+  - `runs/thesis_main_candidate_v14_b1init_anchor_stabilize_20260430/training/checkpoints/checkpoint_160.pt`
+- Do not run v15 longer without a more structural patch.
+
+Next likely move:
+
+- Stop spending compute on mix/BC coefficient changes.
+- Either move to final evaluation and figures with v14 u160 as the constrained-league candidate plus B1 v5 as the strongest anchor, or implement true B1-replayed recurrent distillation / reference hidden state plumbing.

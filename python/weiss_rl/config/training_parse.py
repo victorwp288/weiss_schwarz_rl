@@ -78,6 +78,7 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             "scaling",
             "profile_timers",
             "torch_profiler",
+            "freeze_parameter_prefixes",
             "checkpointing",
             "vtrace",
             "ppo",
@@ -283,6 +284,14 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
 
     profile_timers = _require_bool(body.get("profile_timers", False), field_name="training.profile_timers")
     torch_profiler = _require_bool(body.get("torch_profiler", False), field_name="training.torch_profiler")
+    freeze_parameter_prefixes = tuple(
+        prefix.strip()
+        for prefix in _require_str_list(
+            body.get("freeze_parameter_prefixes", []),
+            field_name="training.freeze_parameter_prefixes",
+        )
+        if prefix.strip()
+    )
     fixed_opponent_backend = _require_choice(
         body.get("fixed_opponent_backend", "python_scalar"),
         field_name="training.fixed_opponent_backend",
@@ -924,6 +933,7 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         ),
         profile_timers=profile_timers,
         torch_profiler=torch_profiler,
+        freeze_parameter_prefixes=freeze_parameter_prefixes,
         checkpointing=TrainingCheckpointingConfig(
             checkpoint_interval_updates=_require_int(
                 checkpointing["checkpoint_interval_updates"],
