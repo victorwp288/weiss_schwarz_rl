@@ -2313,7 +2313,11 @@ def _ensure_noleague_baseline_anchor(
         stack=stack,
         training_paths=training_paths,
         run_dir=run_dir,
-        model_state_dict=learner.model.state_dict(),
+        model_state_dict=(
+            learner.model.base_model.state_dict()
+            if hasattr(learner.model, "base_model") and isinstance(getattr(learner.model, "base_model"), nn.Module)
+            else learner.model.state_dict()
+        ),
         learner_update_count=int(learner.update_count),
         device=device,
         config_hash256=config_hash256,
@@ -2357,6 +2361,12 @@ def _remember_eval_snapshot_model(cache_key: tuple[Any, ...], eval_model: Policy
     )
 
 
+def _state_dict_looks_main_residual(model_state_dict: Mapping[str, Any]) -> bool:
+    return any(str(name).startswith("base_model.") for name in model_state_dict) and any(
+        str(name).startswith("residual_probe.") for name in model_state_dict
+    )
+
+
 def _load_snapshot_eval_model(
     *,
     run_dir: Path,
@@ -2392,13 +2402,24 @@ def _load_snapshot_eval_model(
     if model_config is None:
         raise RuntimeError("The locked stack is missing the model config block")
 
-    eval_model = build_policy_value_model(
-        observation_dim=observation_dim,
-        config=model_config,
-        action_dim=action_dim,
-        observation_spec=observation_spec,
-        spec_bundle=spec_bundle,
-    ).to(resolved_eval_device)
+    eval_model = None
+    if _state_dict_looks_main_residual(model_state_dict):
+        eval_model = _maybe_build_main_residual_model(
+            stack=stack,
+            observation_dim=observation_dim,
+            action_dim=action_dim,
+            observation_spec=observation_spec,
+            spec_bundle={} if spec_bundle is None else spec_bundle,
+            device=torch.device(resolved_eval_device),
+        )
+    if eval_model is None:
+        eval_model = build_policy_value_model(
+            observation_dim=observation_dim,
+            config=model_config,
+            action_dim=action_dim,
+            observation_spec=observation_spec,
+            spec_bundle=spec_bundle,
+        ).to(resolved_eval_device)
     eval_model.load_state_dict(
         {name: value.detach().to(device=resolved_eval_device).clone() for name, value in model_state_dict.items()}
     )
@@ -2428,13 +2449,24 @@ def _load_checkpoint_eval_model(
         raise RuntimeError("The locked stack is missing the model config block")
 
     resolved_eval_device = _resolve_eval_device(stack, eval_device=eval_device)
-    eval_model = build_policy_value_model(
-        observation_dim=observation_dim,
-        config=model_config,
-        action_dim=action_dim,
-        observation_spec=observation_spec,
-        spec_bundle=spec_bundle,
-    ).to(resolved_eval_device)
+    eval_model = None
+    if _state_dict_looks_main_residual(model_state_dict):
+        eval_model = _maybe_build_main_residual_model(
+            stack=stack,
+            observation_dim=observation_dim,
+            action_dim=action_dim,
+            observation_spec=observation_spec,
+            spec_bundle={} if spec_bundle is None else spec_bundle,
+            device=torch.device(resolved_eval_device),
+        )
+    if eval_model is None:
+        eval_model = build_policy_value_model(
+            observation_dim=observation_dim,
+            config=model_config,
+            action_dim=action_dim,
+            observation_spec=observation_spec,
+            spec_bundle=spec_bundle,
+        ).to(resolved_eval_device)
     eval_model.load_state_dict(
         {name: value.detach().to(device=resolved_eval_device).clone() for name, value in model_state_dict.items()}
     )
@@ -2610,7 +2642,13 @@ def _maybe_build_main_residual_model(
             family_count=family_count,
             gate_bias=float(getattr(residual_config, "gate_bias", 0.0)),
         ).to(device)
-    wrapper = TrainableLiveFrozenB1Residual(base_model=base_model, residual_probe=residual).to(device)
+    wrapper = TrainableLiveFrozenB1Residual(
+        base_model=base_model,
+        residual_probe=residual,
+        guard_enabled=bool(getattr(residual_config, "guard_enabled", False)),
+        guard_top_gap=float(getattr(residual_config, "guard_top_gap", 0.35)),
+        guard_families=tuple(getattr(residual_config, "guard_families", ()) or ()),
+    ).to(device)
     print(
         _format_trainable_main_residual_policy_enabled_message_impl(
             checkpoint_path=checkpoint_path,
@@ -5421,7 +5459,7 @@ def _run_minimal_training(
                                         candidate_policy_id=candidate_policy_id,
                                     )
                                 )
-                    else:
+                    elif not main_residual_policy_enabled:
                         promotion_passed = _run_snapshot_promotion_gate(
                             stack=stack,
                             contract=contract,

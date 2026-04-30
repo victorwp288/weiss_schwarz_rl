@@ -600,6 +600,9 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             "alpha",
             "residual_mode",
             "gate_bias",
+            "guard_enabled",
+            "guard_top_gap",
+            "guard_families",
         },
         context="training.main_residual_policy",
     )
@@ -627,12 +630,30 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         main_residual_policy.get("gate_bias", 0.0),
         field_name="training.main_residual_policy.gate_bias",
     )
+    main_residual_guard_enabled = _require_bool(
+        main_residual_policy.get("guard_enabled", False),
+        field_name="training.main_residual_policy.guard_enabled",
+    )
+    main_residual_guard_top_gap = _require_float(
+        main_residual_policy.get("guard_top_gap", 0.35),
+        field_name="training.main_residual_policy.guard_top_gap",
+    )
+    main_residual_guard_families = tuple(
+        family.strip()
+        for family in _require_str_list(
+            main_residual_policy.get("guard_families", []),
+            field_name="training.main_residual_policy.guard_families",
+        )
+        if family.strip()
+    )
     if main_residual_enabled and not main_residual_base_snapshot_path:
         raise ValueError("training.main_residual_policy.base_snapshot_path must be non-empty when enabled")
     if main_residual_bias_scale < 0.0:
         raise ValueError("training.main_residual_policy.public_heuristic_bias_scale must be >= 0.0")
-    if main_residual_alpha <= 0.0:
-        raise ValueError("training.main_residual_policy.alpha must be > 0.0")
+    if main_residual_alpha < 0.0:
+        raise ValueError("training.main_residual_policy.alpha must be >= 0.0")
+    if main_residual_guard_top_gap < 0.0:
+        raise ValueError("training.main_residual_policy.guard_top_gap must be >= 0.0")
     if main_residual_mode not in {"plain", "gated", "family_gated"}:
         raise ValueError("training.main_residual_policy.residual_mode must be plain, gated, or family_gated")
     main_residual_policy_config = TrainingMainResidualPolicyConfig(
@@ -644,6 +665,9 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
         alpha=main_residual_alpha,
         residual_mode=main_residual_mode,
         gate_bias=main_residual_gate_bias,
+        guard_enabled=main_residual_guard_enabled,
+        guard_top_gap=main_residual_guard_top_gap,
+        guard_families=main_residual_guard_families,
     )
     diverse_opponent_actor_count = _require_int(
         body.get("diverse_opponent_actor_count", 0),

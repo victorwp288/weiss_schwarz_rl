@@ -776,6 +776,23 @@ class QueueRuntime:
         if self._collector_result_queue is None:
             return
         baseline_model = self._opponent_models.get(_NOLEAGUE_BASELINE_POLICY_ID)
+        if (
+            baseline_model is None
+            and _NOLEAGUE_BASELINE_POLICY_ID in forced_policy_ids
+            and self._run_dir is not None
+        ):
+            baseline_weights_path = (
+                Path(self._run_dir)
+                / "training"
+                / "snapshots"
+                / _NOLEAGUE_BASELINE_POLICY_ID
+                / "weights.pt"
+            )
+            if baseline_weights_path.is_file():
+                baseline_model = self._load_snapshot_model_from_path(
+                    baseline_weights_path,
+                    display_path=baseline_weights_path.relative_to(self._run_dir).as_posix(),
+                )
         baseline_state_dict = (
             None
             if baseline_model is None or _NOLEAGUE_BASELINE_POLICY_ID not in forced_policy_ids
@@ -1874,6 +1891,28 @@ class QueueRuntime:
             {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
         )
         model_guidance_payload = _model_guidance_payload(model)
+        initial_fixed_slots = self._fixed_opponent_policy_slots()
+        initial_forced_policy_ids = self._configured_fixed_opponent_policy_ids()
+        initial_noleague_baseline_state_dict = None
+        if _NOLEAGUE_BASELINE_POLICY_ID in initial_forced_policy_ids:
+            baseline_model = self._opponent_models.get(_NOLEAGUE_BASELINE_POLICY_ID)
+            if baseline_model is None and self._run_dir is not None:
+                baseline_weights_path = (
+                    Path(self._run_dir)
+                    / "training"
+                    / "snapshots"
+                    / _NOLEAGUE_BASELINE_POLICY_ID
+                    / "weights.pt"
+                )
+                if baseline_weights_path.is_file():
+                    baseline_model = self._load_snapshot_model_from_path(
+                        baseline_weights_path,
+                        display_path=baseline_weights_path.relative_to(self._run_dir).as_posix(),
+                    )
+            if baseline_model is not None:
+                initial_noleague_baseline_state_dict = _serialize_state_dict_for_ipc(
+                    {key: value.detach().cpu().clone() for key, value in baseline_model.state_dict().items()}
+                )
         slot_configs: dict[int, list[dict[str, Any]]] = {}
         if self._use_shared_collector_transport:
             hidden_size = int(getattr(model, "hidden_size", 1))
@@ -1938,6 +1977,11 @@ class QueueRuntime:
                         None if not self._use_shared_collector_transport else slot_configs[int(actor_id)]
                     ),
                     "initial_learner_update": int(self._current_learner_update),
+                    "initial_fixed_opponent_policy_id_by_env": (
+                        None if initial_fixed_slots is None else np.asarray(initial_fixed_slots, dtype=object).tolist()
+                    ),
+                    "initial_forced_policy_ids": tuple(str(policy_id) for policy_id in initial_forced_policy_ids),
+                    "initial_noleague_baseline_state_dict": initial_noleague_baseline_state_dict,
                 },
                 daemon=True,
             )

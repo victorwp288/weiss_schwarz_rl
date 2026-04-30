@@ -232,6 +232,9 @@ class TrainingMainResidualPolicyConfig:
     alpha: float = 0.1
     residual_mode: str = "plain"
     gate_bias: float = 0.0
+    guard_enabled: bool = False
+    guard_top_gap: float = 0.35
+    guard_families: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)

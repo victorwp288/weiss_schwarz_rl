@@ -2387,3 +2387,67 @@ Next likely move:
   - B1 v5 u120 as the strongest anchor/no-league result.
   - v14 u160 as the best constrained-main/league-style candidate.
   - v14b/v15/v16 as documented ablations showing that additional continuation pressure did not reliably improve beyond v14 u160.
+
+### 2026-04-30 v17/v17b residual-guard hail mary
+- Implemented trainable B1-base residual wrapper with packed sequence/sampling support and hard B1 guard config (`main_residual_policy.guard_*`).
+- Added collector-side support for residual wrapper state dicts.
+- Fixed B1 baseline import validation for residual wrappers by validating against `base_model.state_dict()`.
+- Fixed process collector B1 lane startup: B1 is excluded from normal opponent pool, so fixed-lane collectors now receive the imported B1 snapshot directly and initialize fixed opponents before first unroll.
+- Config: `configs/main_impala_league_server_v17_b1_residual_guard.yaml`; base is B1 v5 u120, zero residual, alpha 0.35, family-gated residual, hard guard on play/move/attack/clock.
+- Smoke6 verified B1 lane is live from update 1: `collector_b1_opponent_env_steps ~= 1560`, `collector_b1_opponent_train_rows ~= 800`, `b1_anchor_row_fraction ~= 0.386`, `rl_row_fraction ~= 0.614`.
+- Raw B1 distill still logs row fraction 0, likely wrapper/packed-surface mismatch, but exact and family B1 BC are active on B1 anchor rows.
+- Launched real run: `RUN_LABEL=thesis_main_candidate_v17b_b1_residual_guard_20260430 MAX_UPDATES=240 STACK_CONFIG=configs/main_impala_league_server_v17_b1_residual_guard.yaml RESUME_FROM=` via `scripts/run_thesis_main_v13_b1init_long_variant_20260430.sh`.
+- First decision: monitor early scalars for B1 lane, then B1-only confirm64 at u80; stop if B1 < 0.492.
+
+### 2026-04-30 decision rule after v17 residual hail mary
+Plan from user/supervisor prep:
+- Give v17 residual-guard main run a real chance only while it shows positive signal.
+- Evaluate early checkpoints, especially B1 preservation first; continue only if B1 stays alive and B3/B4 remain competitive.
+- If v17 fails or stops looking promising, stop main-model iteration and pivot to thesis production:
+  - final B1/no-league anchor: B1 v5 u120
+  - best league/main candidate so far: v14 u160 unless v17 improves
+  - then run aligned baselines, ablations, eval matrices, and figures.
+- For baselines/ablations, use matched configs and change one setting at a time wherever possible.
+- After data/figures are generated, push branch to GitHub and shut down the Vast machine to save compute.
+
+### 2026-04-30 v17e live eval updates
+- v17e continues v17d u20 with residual guard fully wired.
+- B1-only confirm64:
+  - u20: B1 `0.5000`
+  - u40: B1 `0.4921875`
+  - u80: B1 `0.5000`
+  - u100: B1 `0.4921875`
+  - u120: B1 `0.5078125`
+  - u140: B1 `0.5000`
+  - u160: B1 `0.4921875`
+- Targeted u80 B3/B4 confirm64:
+  - B3 `0.8828125`
+  - B4 `0.9921875`
+- Targeted u120 B3/B4 confirm64:
+  - B3 `0.8125`
+  - B4 `0.9921875`
+- Targeted u140 B3/B4 confirm64:
+  - B3 `0.8046875`
+  - B4 `1.0`
+- Training reached `MAX_UPDATES=160`; workers were stopped afterward and GPUs were idle.
+- Interpretation: v17e finally demonstrates that the residual guard can preserve the fragile B1 matchup through about u140, unlike earlier league attempts. However, later updates trade away B3 strength, so the best v17 checkpoint is currently u80, not the final u160 checkpoint.
+- Current candidate ordering:
+  - strongest overall/simple final anchor: B1 v5 u120 (`B1 0.5078`, `B3 0.8750`, `B4 0.9922`)
+  - best league-style fallback before residual: v14 u160 (`B1 0.5000`, `B3 0.8594`, `B4 1.0000`)
+  - best residual/guard candidate: v17e u80 (`B1 0.5000`, `B3 0.8828`, `B4 0.9922`)
+- Next action: stop extending v17e; move to confirm128/confirm256 and final thesis data package for B1 v5, v14 u160, and v17e u80.
+
+### 2026-04-30 confirm128 comparison slice: B1/B3/B4
+Same 128 paired-seed slice against the key thesis anchors:
+
+| candidate | checkpoint | B1 | B3 | B4 | mean |
+| --- | --- | ---: | ---: | ---: | ---: |
+| B1 v5 no-league anchor | `thesis_b1_candidate_v5.../checkpoint_120.pt` | `0.4921875` | `0.8984375` | `0.9921875` | `0.794271` |
+| v14 B1-init anchor-stabilized league | `thesis_main_candidate_v14.../checkpoint_160.pt` | `0.50390625` | `0.81640625` | `0.9921875` | `0.770833` |
+| v17e B1 residual guard | `thesis_main_candidate_v17e.../checkpoint_80.pt` | `0.5` | `0.8515625` | `0.9921875` | `0.78125` |
+
+Interpretation:
+- B1 v5 remains the strongest simple/no-league final policy, especially versus B3.
+- v17e u80 is the best league-style/constrained residual candidate on this slice: it preserves B1 exactly at `0.5` and beats v14 on B3.
+- v14 u160 is slightly stronger than v17e on B1 but meaningfully weaker on B3.
+- None of the league variants clearly beats the B1 anchor overall; the defensible story is anchor policy as primary result, with v17e showing the most successful constrained league/residual stabilization attempt.

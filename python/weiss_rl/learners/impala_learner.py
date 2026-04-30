@@ -1802,6 +1802,34 @@ class ImpalaLearner(_ImpalaBatchFieldsMixin, _ImpalaDistillationLossMixin):
                 values=torch.as_tensor(values),
                 observation_context=observation_context,
             )
+        if (
+            acting_seat is not None
+            and structured_legal_actions
+            and legal_actions is not None
+            and hasattr(forward_model, "forward_sequence_packed_seat_aware")
+        ):
+            packed_logits, values, _next_hidden = forward_model.forward_sequence_packed_seat_aware(
+                obs,
+                acting_seat,
+                self._prepare_seat_hidden_state(initial_hidden_state, batch_size=batch_size, like=obs),
+                legal_actions=legal_actions,
+                scoring_mode="learner",
+            )
+            self._record_timing_ms("learner_forward_time_major", time.perf_counter() - sequence_started)
+            packed_rows = int(legal_actions.offsets.shape[0] - 1)
+            packed_candidates = int(legal_actions.ids.shape[0]) if legal_actions.ids is not None else 0
+            if self._active_timing_metrics is not None:
+                self._active_timing_metrics.update(
+                    {
+                        "packed_candidate_count": float(packed_candidates),
+                        "packed_candidate_rows": float(packed_rows),
+                        "avg_legal_actions_per_row": float(packed_candidates / max(packed_rows, 1)),
+                    }
+                )
+            return _ForwardTimeMajorResult(
+                packed_logits=torch.as_tensor(packed_logits),
+                values=torch.as_tensor(values),
+            )
         if acting_seat is not None and hasattr(forward_model, "forward_sequence_seat_aware"):
             logits, values, _next_hidden = forward_model.forward_sequence_seat_aware(
                 obs,

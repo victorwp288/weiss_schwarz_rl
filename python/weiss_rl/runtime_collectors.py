@@ -21,6 +21,7 @@ from weiss_rl.config import StackConfig
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
 from weiss_rl.model import PolicyValueModel, build_policy_value_model
+from weiss_rl.residual_policy import FrozenStoredLogitResidual, TrainableLiveFrozenB1Residual
 from weiss_rl.runtime_shared import (
     _open_shared_collector_slot,
     _shared_unroll_metadata,
@@ -91,6 +92,68 @@ def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload
             return
         resolved_learner_scale = float(get_bias_scale(scoring_mode="learner"))
     set_bias_scale(resolved_learner_scale, actor_value=resolved_actor_scale)
+
+
+def _action_family_ids_from_model(base_model: torch.nn.Module, *, action_dim: int) -> tuple[torch.Tensor | None, int]:
+    action_catalog = getattr(base_model, "action_catalog", None)
+    if action_catalog is None:
+        return None, 0
+    try:
+        family_names = tuple(family.name for family in action_catalog.families)
+        family_index = {name: index for index, name in enumerate(family_names)}
+        ids = torch.full((int(action_dim),), -1, dtype=torch.long)
+        for action_id in range(int(action_dim)):
+            decoded = action_catalog.decode(int(action_id))
+            ids[action_id] = int(family_index.get(decoded.family, -1))
+        return ids, len(family_names)
+    except Exception:
+        return None, 0
+
+
+def _build_collector_model(
+    *,
+    stack: StackConfig,
+    observation_dim: int,
+    action_dim: int,
+    observation_spec: dict[str, Any] | None,
+    spec_bundle: dict[str, Any] | None,
+) -> torch.nn.Module:
+    model_config = stack.config.model
+    if model_config is None:
+        raise RuntimeError("stack config is missing model config")
+    base_model = build_policy_value_model(
+        observation_dim=int(observation_dim),
+        config=model_config,
+        action_dim=int(action_dim),
+        observation_spec=observation_spec,
+        spec_bundle=spec_bundle,
+    ).to(torch.device("cpu"))
+    training_config = stack.config.training
+    residual_config = None if training_config is None else getattr(training_config, "main_residual_policy", None)
+    if residual_config is None or not bool(getattr(residual_config, "enabled", False)):
+        return base_model
+
+    action_family_ids: torch.Tensor | None = None
+    family_count = 0
+    if str(getattr(residual_config, "residual_mode", "plain")) == "family_gated":
+        action_family_ids, family_count = _action_family_ids_from_model(base_model, action_dim=int(action_dim))
+    residual = FrozenStoredLogitResidual(
+        obs_dim=int(observation_dim),
+        action_dim=int(action_dim),
+        hidden_dim=int(getattr(residual_config, "hidden_dim", 256)),
+        alpha=float(getattr(residual_config, "alpha", 0.1)),
+        residual_mode=str(getattr(residual_config, "residual_mode", "plain")),
+        action_family_ids=action_family_ids,
+        family_count=family_count,
+        gate_bias=float(getattr(residual_config, "gate_bias", 0.0)),
+    )
+    return TrainableLiveFrozenB1Residual(
+        base_model=base_model,
+        residual_probe=residual,
+        guard_enabled=bool(getattr(residual_config, "guard_enabled", False)),
+        guard_top_gap=float(getattr(residual_config, "guard_top_gap", 0.35)),
+        guard_families=tuple(getattr(residual_config, "guard_families", ()) or ()),
+    )
 
 
 def _is_cuda_auto_request(requested: str) -> bool:
@@ -549,6 +612,9 @@ def _collector_process_main(
     result_queue: Any,
     shared_slot_configs: list[dict[str, Any]] | None,
     initial_learner_update: int = 0,
+    initial_fixed_opponent_policy_id_by_env: list[str] | None = None,
+    initial_forced_policy_ids: tuple[str, ...] = (),
+    initial_noleague_baseline_state_dict: dict[str, Any] | None = None,
 ) -> None:
     from weiss_rl.runtime import QueueRuntime
 
@@ -583,16 +649,13 @@ def _collector_process_main(
         system_config = stack_for_child.config.system
     if system_config is not None:
         _configure_runtime_actor_torch_threads(int(getattr(system_config, "actor_torch_threads", 1)))
-    model_config = stack_for_child.config.model
-    if model_config is None:
-        raise RuntimeError("stack config is missing model config")
-    model = build_policy_value_model(
+    model = _build_collector_model(
+        stack=stack_for_child,
         observation_dim=int(observation_dim),
-        config=model_config,
         action_dim=int(action_dim),
         observation_spec=observation_spec,
         spec_bundle=spec_bundle,
-    ).to(torch.device("cpu"))
+    )
     model.load_state_dict(_deserialize_state_dict_from_ipc(model_state_dict))
     _restore_model_guidance_from_payload(model, model_guidance_payload)
     model.eval()
@@ -637,6 +700,23 @@ def _collector_process_main(
         runtime._actors[0] = runtime._build_actor_state(model=model, actor_id=int(actor_id))
     actor = runtime._actors[0]
     runtime.refresh_opponent_pool()
+    if initial_noleague_baseline_state_dict is not None:
+        baseline_model = build_policy_value_model(
+            observation_dim=int(runtime.observation_dim),
+            config=runtime.stack.config.model,
+            action_dim=int(runtime.action_dim),
+            observation_spec=runtime._observation_spec,
+            spec_bundle=runtime._spec_bundle,
+        ).to(runtime._device)
+        baseline_model.load_state_dict(_deserialize_state_dict_from_ipc(initial_noleague_baseline_state_dict))
+        baseline_model.eval()
+        runtime._opponent_models[_NOLEAGUE_BASELINE_POLICY_ID] = baseline_model
+        runtime._opponent_model_locks[_NOLEAGUE_BASELINE_POLICY_ID] = threading.Lock()
+    if initial_forced_policy_ids:
+        runtime._forced_fixed_opponent_policy_ids = tuple(str(policy_id) for policy_id in initial_forced_policy_ids)
+    if initial_fixed_opponent_policy_id_by_env is not None:
+        actor.fixed_opponent_policy_id_by_env = np.asarray(initial_fixed_opponent_policy_id_by_env, dtype=object)
+        runtime._reset_actor_state_for_fixed_opponents(actor)
     _process_debug_log(
         run_dir=(None if run_dir is None else Path(run_dir)),
         actor_id=int(actor_id),

@@ -39,6 +39,7 @@ from weiss_rl.eval.policy_set import (
 )
 from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
 from weiss_rl.league.registry import SnapshotMeta, SnapshotRegistry
+from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.masking import assert_strictly_increasing_legal_ids
 from weiss_rl.model import PolicyValueModel, build_policy_value_model
 from weiss_rl.replay.bundles import (
@@ -612,6 +613,29 @@ class SimulatorEvalRunner(EvalGameRunner):
             return action, seat_hidden
         if seat_hidden is None:
             raise RuntimeError(f"Missing hidden state for eval policy {current_policy_id!r}")
+
+        forward_packed = getattr(policy.model, "forward_packed_seat_aware", None)
+        if callable(forward_packed):
+            legal_actions = self._legal_action_batch_for_eval_row(batch=batch, legal_ids=legal_ids)
+            with torch.inference_mode():
+                packed_logits, _value_tensor, next_seat_hidden = forward_packed(
+                    torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
+                    torch.as_tensor([current_seat], device=self._device, dtype=torch.long),
+                    seat_hidden,
+                    legal_actions=legal_actions,
+                    scoring_mode="learner",
+                )
+            logits = np.full_like(self._baseline_logits, -1.0e9)
+            logits[np.asarray(legal_ids, dtype=np.int64)] = (
+                packed_logits.detach().cpu().numpy().astype(np.float32, copy=False)
+            )
+            action, _logp = sample_action_pinned(
+                logits,
+                legal_ids,
+                rng=rng,
+            )
+            return action, next_seat_hidden
+
         with torch.inference_mode():
             logits_tensor, _value_tensor, next_seat_hidden = policy.model.forward_seat_aware(
                 torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
@@ -626,6 +650,26 @@ class SimulatorEvalRunner(EvalGameRunner):
             rng=rng,
         )
         return action, next_seat_hidden
+
+    def _legal_action_batch_for_eval_row(
+        self,
+        *,
+        batch: DecisionBoundaryBatch,
+        legal_ids: np.ndarray,
+    ) -> LegalActionBatch:
+        offsets = np.asarray([0, len(legal_ids)], dtype=np.uint32)
+        meta = None
+        if batch.legal_action_meta is not None and batch.ids_offsets is not None:
+            _packed_ids, legal_offsets = batch.ids_offsets
+            start = int(legal_offsets[0])
+            end = int(legal_offsets[1])
+            meta = np.asarray(batch.legal_action_meta[start:end], dtype=np.uint16)
+        return LegalActionBatch.from_packed(
+            np.asarray(legal_ids, dtype=np.uint32),
+            offsets,
+            meta=meta,
+            action_space=int(self._baseline_logits.shape[0]),
+        )
 
     def _initial_hidden(self, policy_id: str) -> torch.Tensor | None:
         policy = self.policies.get(policy_id)
