@@ -1940,3 +1940,114 @@ Interpretation:
 - The objective is likely pulling away from B1 despite the BC term.
 - The worsening B1 BC loss while the policy is being trained supports objective conflict rather than simple undertraining.
 - The very high V-trace tail ratios suggest off-policy / recurrent-policy-lag instability may be contributing, although the current logs are not per-opponent enough to prove B1-specific critic confusion.
+
+## Main Thesis Anchor Stabilization v14
+
+Prepared and launched after GPT Pro diagnosis. Purpose: test whether actor/learner public heuristic bias mismatch plus lack of family-level B1 BC caused the v12/v13 drift.
+
+Config:
+
+```text
+configs/main_impala_league_server_v14_b1init_anchor_stabilize.yaml
+```
+
+Launch command:
+
+```bash
+cd /workspace/weiss_schwarz_rl
+ulimit -n 1048576
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export PYTHONUNBUFFERED=1
+
+RUN_LABEL=thesis_main_candidate_v14_b1init_anchor_stabilize_20260430 \
+MAX_UPDATES=240 \
+STACK_CONFIG=configs/main_impala_league_server_v14_b1init_anchor_stabilize.yaml \
+RESUME_FROM=runs/thesis_b1_candidate_v5_aggressive_bc015_lowlr_20260429/training/checkpoints/checkpoint_120.pt \
+RESUME_RESET_OPTIMIZER=1 \
+scripts/run_thesis_main_v13_b1init_long_variant_20260430.sh
+```
+
+Main v14 changes from v13:
+
+- Matched actor/learner public heuristic bias:
+  - `public_heuristic_actor_logit_bias_scale: 1.0 -> -1.0`
+  - observed active actor bias became `2.0`, matching learner.
+- Lowered LR:
+  - `1.5e-5 -> 7.5e-6`
+- Reduced RL pressure:
+  - `policy_loss_coef: 0.50`
+- Made B1 exact top-action BC non-decaying:
+  - `0.25 -> 0.25`, end updates `-1`
+- Enabled family-level B1 BC:
+  - `reference_policy_top_action_family_bc_coef: 0.40`
+  - final `0.40`, end updates `-1`
+- Reduced CF pressure:
+  - `0.75 -> 0.10`, final `0.25 -> 0.10`
+- Removed damage shaping:
+  - `damage_reward: 0.025 -> 0.0`
+- Reduced early heuristic variant pressure:
+  - variants `0.30 -> 0.08`
+- Increased B1 opponent mix:
+  - `0.30 -> 0.45`
+- Removed champion/hard-negative pressure:
+  - champion `0.03 -> 0.0`
+  - hard negative `0.02 -> 0.0`
+- Delayed league promotion/self-play:
+  - warmup first updates `1000`
+
+Sanity metrics:
+
+- Actor bias active logged as `2.0`.
+- Learner bias active logged as `2.0`.
+- Family BC active logged as `0.40`.
+- PFSP weights logged as:
+  - B1 `0.45`
+  - variants `0.08`
+  - champions/hard negatives `0.0`
+- V-trace tail improved dramatically after actor reloads:
+  - early resumed updates: p99 in the thousands to tens of thousands
+  - u186: p99 about `204`
+  - u219: p99 about `74`
+  - u233-u240: p99 roughly `21-71`
+
+Results:
+
+- Seeded resume dev eval at u120:
+  - aggregate `0.8688`
+- Manual confirm64 B1-only at u140:
+  - B1 `0.500`
+- Automatic 16-pair dev eval at u160:
+  - aggregate `0.750`
+  - unweighted `0.875`
+  - B1 `0.500`
+  - B3 `0.875`
+  - B4 `1.000`
+- Manual confirm64 all anchors at u160:
+  - aggregate `0.743750`
+  - unweighted `0.871875`
+  - B0 `1.000`
+  - B1 `0.500`
+  - B2 `1.000`
+  - B3 `0.859375`
+  - B4 `1.000`
+- Automatic 16-pair dev eval at u240:
+  - aggregate `0.700`
+  - B1 `0.500`
+  - B3 `0.750`
+  - B4 `1.000`
+- Manual confirm64 all anchors at u240:
+  - aggregate `0.667708`
+  - unweighted `0.832812`
+  - B0 `1.000`
+  - B1 `0.4609375`
+  - B2 `1.000`
+  - B3 `0.7109375`
+  - B4 `0.9921875`
+
+Interpretation:
+
+- v14 strongly supports the actor/learner bias mismatch hypothesis: matching actor bias to learner bias collapsed the V-trace tail after reloads.
+- v14 also supports the family-BC/low-variant-pressure stabilization hypothesis: u140/u160 preserve B1 at `0.500` while holding excellent B3/B4.
+- The run still drifts by u240 on confirm64, so longer stabilization with this exact objective is not monotonic.
+- Current best main candidate is v14 u160, not u240.
+- Next likely move: start a v14b continuation from v14 u160, not u240, and introduce league/variant pressure very gently while keeping actor/learner bias parity and family BC active.
