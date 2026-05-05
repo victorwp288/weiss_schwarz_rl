@@ -1,0 +1,6 @@
+schema_version: 2
+description: clean sim-0.8.1 main League GRU with checkpoint guard disabled after conservative rollback stopped the guarded run at update 50
+extends: overnight_081_clean_main_gru_sim081.yaml
+curriculum:
+  checkpoint_guard:
+    enabled: false
