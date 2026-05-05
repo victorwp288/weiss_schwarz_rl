@@ -1,0 +1,10 @@
+schema_version: 2
+description: clean sim-0.8.1 reward-shaping ablation for overnight-081 main League recipe
+extends: overnight_081_clean_main_gru_sim081.yaml
+rewards:
+  shaping:
+    enable_damage_shaping: true
+    damage_reward: 0.05
+    level_reward: 0.05
+    board_reward: 0.02
+    no_progress_penalty: 0.005

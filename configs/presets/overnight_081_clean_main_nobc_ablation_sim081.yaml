@@ -1,0 +1,15 @@
+schema_version: 2
+description: clean sim-0.8.1 no-BC/teacher ablation for overnight-081 main League recipe
+extends: overnight_081_clean_main_gru_sim081.yaml
+model:
+  public_heuristic_logit_bias_scale: 0.0
+  public_heuristic_actor_logit_bias_scale: 0.0
+  public_heuristic_logit_bias_final_scale: 0.0
+training:
+  teacher_aux:
+    mode: "off"
+  structured_aux:
+    enabled: false
+  structured_warmstart:
+    enabled: false
+    updates: 0

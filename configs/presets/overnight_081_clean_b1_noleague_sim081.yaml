@@ -1,0 +1,21 @@
+schema_version: 2
+description: clean sim-0.8.1 no-league B1 anchor for overnight-081 baseline
+extends: structured_acceptance_standard_auto_gpu.yaml
+experiment:
+  role: baseline_noleague
+system:
+  collection_backend: auto
+league:
+  enabled: false
+training:
+  fixed_opponent_backend: simulator_native
+  actor_policy_backend: model
+  actor_heuristic_fraction: 0.0
+  actor_heuristic_final_fraction: 0.0
+  train_on_heuristic_actor_rows: false
+  structured_warmstart:
+    enabled: true
+    updates: 32
+evaluation:
+  periodic_dev_eval_interval_updates: 25
+  periodic_dev_eval_paired_seeds: 8
