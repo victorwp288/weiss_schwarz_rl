@@ -37,9 +37,9 @@ Known 32-game targeted confirmation before adding fixed B3/B4:
 
 | Opponent | Result |
 |---|---:|
-| B0 RandomLegal | 32/32 = 100.00% |
+| B0 RandomLegal | 32/32 = 100.00%; later confirmed at 128/128 |
 | B1 NoLeague baseline | 26/32 = 81.25% |
-| B2 HeuristicPublic | 32/32 = 100.00% |
+| B2 HeuristicPublic | 32/32 = 100.00%; later confirmed at 128/128 |
 | Legacy p11 | 18/32 = 56.25% |
 | Legacy p12 | 17/32 = 53.12% |
 | Legacy p14 | 18/32 = 56.25% |
@@ -53,6 +53,8 @@ Fixed B3/B4 confirm64 artifact:
 - Summary: `/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/p21_b3b4_loopfix_confirm64/targeted_confirm64_summary.json`
 - B3 row summary: `/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__01_b3_heuristicpublicaggro/matchup_summary.json`
 - B4 row summary: `/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__02_b4_heuristicpubliccontrol/matchup_summary.json`
+- B0 confirm64 row summary: `/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__01_b0_randomlegal/matchup_summary.json`
+- B2 confirm64 row summary: `/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__03_b2_heuristicpublic/matchup_summary.json`
 
 ## B3/B4 Fix Evidence
 
@@ -106,9 +108,23 @@ Report:
 - B3/B4 from the fixed confirm64 rows.
 - Explicitly state that B3/B4 evaluation required a heuristic-loop correction because the previous rows were all natural truncations, not losses.
 
+## Figures Ready Locally
+
+Generated figure directory:
+
+- `/Users/vwp/Documents/Codex/2026-05-06/hey-buddy-i-really-need-your/thesis_figures_final`
+
+Recommended figures:
+
+- `fig_main_targeted_robustness`: primary result figure with B0/B1/B2, fixed B3/B4 confirm64, and legacy league rows.
+- `fig_b3b4_fixed_validation`: shows B3/B4 confirm64 rows complete cleanly and are no longer timeout artifacts.
+- `fig_b3b4_seat_balance`: shows p21 remains above 50% against B3/B4 from both first and second seat.
+- `fig_anchor_retention`: development anchor retention for the main run and ablations.
+- `fig_baseline_fixed_grid`: fixed-opponent comparison for main, No-GRU, and PPO-lite.
+
 Avoid claiming:
 
-- That the model has a clean full confirm64 table across all 10 opponents, unless we rerun it later.
+- That the model has a clean full confirm64 table across all 10 opponents. B0/B2/B3/B4 have confirm64 rows; B1 and legacy rows currently rely on the 32-game targeted table.
 - That No-GRU/PPO are full league robustness baselines.
 - That the B3/B4 fix changes training quality; it fixes opponent behavior/evaluation validity.
 
@@ -117,5 +133,5 @@ Avoid claiming:
 1. Regenerate result figures using fixed B3/B4 rows.
 2. Keep B3/B4 in the plots, but mark the B3/B4 data as `confirm64 after heuristic loop fix`.
 3. Update Section 7 text to avoid old stale B3/B4 claims and avoid reporting invalid timeout rows.
-4. If time allows, rerun full p21 confirm64 with lower parallelism or overnight.
+4. If time allows, rerun full p21 confirm64 overnight. An attempted core/legacy confirm64 completed B0 and B2 but was stopped because B1/legacy rows were too slow for the current work block.
 5. Commit the heuristic fix and report before any more risky experiments.
