@@ -1,0 +1,39 @@
+% Section 7 figure/table snippets generated 2026-05-07.
+% Adjust labels if your thesis already defines these names.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{thesis_figures_final/fig_main_targeted_robustness.pdf}
+    \caption{Targeted evaluation of the selected main League GRU policy, policy\_000021. B0, B2, B3, and B4 use confirm64 rows; B1 and legacy league opponents use confirm32 rows.}
+    \label{fig:main-targeted-robustness}
+\end{figure}
+
+\input{thesis_figures_final/main_p21_results_table.tex}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_b3b4_fixed_validation.pdf}
+    \caption{Validation of the corrected B3/B4 evaluation rows. All B3/B4 confirm64 games completed without truncation, and policy\_000021 beat both heuristic variants.}
+    \label{fig:b3b4-fixed-validation}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_b3b4_seat_balance.pdf}
+    \caption{Seat-swapped B3/B4 diagnostic. Policy\_000021 remains above parity from both first and second seat.}
+    \label{fig:b3b4-seat-balance}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{thesis_figures_final/fig_anchor_retention.pdf}
+    \caption{Development evaluation on fixed anchors for the selected model and B1-pressure ablations. Solid lines show aggregate anchor score; dashed lines show B1 no-league retention.}
+    \label{fig:anchor-retention}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_baseline_fixed_grid.pdf}
+    \caption{Fixed-opponent baseline sanity checks. No-GRU and PPO-lite are included as weaker fixed-opponent baselines rather than full league-robustness comparisons.}
+    \label{fig:baseline-fixed-grid}
+\end{figure}
