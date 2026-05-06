@@ -1,0 +1,28 @@
+schema_version: 2
+description: clean no-league B1 anchor candidate with larger GRU/MLP capacity and B0/B2/B3/B4 robust dev anchors
+extends: overnight_081_clean_b1_noleague_sim081.yaml
+model:
+  recurrent_core: gru
+  gru_hidden_size: 128
+  encoder_mlp_width: 128
+  typed_feature_width: 32
+league:
+  promotion:
+    anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+evaluation:
+  periodic_dev_eval_interval_updates: 25
+  periodic_dev_eval_paired_seeds: 16
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
