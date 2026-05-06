@@ -14,10 +14,6 @@ The main model substantially solves the fixed public anchors and retains positiv
 
 Recommended wording:
 
-> The selected League GRU policy maintains perfect performance against the random and public heuristic anchors in higher-seed confirmation (`128/128` against both B0 RandomLegal and B2 HeuristicPublic). It also beats the no-league B1 baseline in the targeted confirmation set (`26/32`, 81.25%). Against older promoted league snapshots, performance is more modest but remains above parity in each targeted row, with individual win rates between 53.1% and 56.3%.
-
-Updated with confirm32:
-
 > The selected League GRU policy maintains perfect performance against the random and public heuristic anchors in higher-seed confirmation (`128/128` against both B0 RandomLegal and B2 HeuristicPublic). It also beats the no-league B1 baseline in confirm32 (`50/64`, 78.1%). Against older promoted league snapshots, performance is more modest but remains above parity in each confirm32 row, with individual win rates between 51.6% and 62.5%.
 
 ## B3/B4 Correction
