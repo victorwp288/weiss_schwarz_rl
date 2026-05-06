@@ -416,7 +416,17 @@ class SimulatorEvalRunner(EvalGameRunner):
         self.replay_capture_rate = float(replay_capture_rate)
         self.regression_capture_count = int(regression_capture_count)
         self._capture_count = 0
-        self._device = torch.device("cpu")
+        evaluation_config = getattr(self.stack.config, "evaluation", None)
+        requested_device = str(getattr(evaluation_config, "eval_device", "cpu") or "cpu").strip().lower()
+        if requested_device in {"", "auto", "cuda:auto"}:
+            requested_device = "cuda" if torch.cuda.is_available() else "cpu"
+        if requested_device.startswith("cuda") and not torch.cuda.is_available():
+            requested_device = "cpu"
+        self._device = torch.device(requested_device)
+        for policy in self.policies.values():
+            if policy.model is not None:
+                policy.model.to(self._device)
+                policy.model.eval()
         self._baseline_logits = np.zeros((int(action_dim),), dtype=np.float32)
 
     def run_game(self, scheduled_game: ScheduledGame) -> GameResult:

@@ -1,0 +1,5 @@
+schema_version: 2
+description: weak-B1 no-reserved-lane ablation with auto collection backend for Vast legacy runtime
+extends: structured_acceptance_standard_auto_gpu_exp029_champion_b1_guardrail.yaml
+system:
+  collection_backend: auto

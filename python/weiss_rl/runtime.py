@@ -1525,6 +1525,19 @@ class QueueRuntime:
             "" if training_config is None else str(getattr(training_config, "algorithm", "")).strip().lower()
         )
         self._actor_behavior_values_required = "ppo" in algorithm_name
+        self._action_catalog: ActionCatalog | None = None
+        self._action_family_index: dict[str, int] = {}
+        self._action_attack_type_index: dict[str, int] = {}
+        if self._spec_bundle is not None:
+            with suppress(Exception):
+                self._action_catalog = ActionCatalog.from_spec_bundle(self._spec_bundle)
+        if self._action_catalog is not None:
+            self._action_family_index = {
+                family.name: index for index, family in enumerate(self._action_catalog.families)
+            }
+            self._action_attack_type_index = {
+                name: index for index, name in enumerate(self._action_catalog.attack_type_names)
+            }
         self._teacher_policy: HeuristicPublicPolicy | None = None
         self._teacher_action_catalog: ActionCatalog | None = None
         self._teacher_family_index: dict[str, int] = {}
@@ -1534,7 +1547,7 @@ class QueueRuntime:
                 raise RuntimeError("structured_aux.enabled requires the runtime spec bundle")
             try:
                 self._teacher_policy = HeuristicPublicPolicy.from_spec_bundle(self._spec_bundle)
-                self._teacher_action_catalog = ActionCatalog.from_spec_bundle(self._spec_bundle)
+                self._teacher_action_catalog = self._action_catalog or ActionCatalog.from_spec_bundle(self._spec_bundle)
             except Exception as exc:
                 raise RuntimeError(
                     "Structured teacher guidance requires a heuristic-compatible simulator contract"
@@ -2819,6 +2832,11 @@ class QueueRuntime:
                 enabled=self._compile_actor_inference,
             )
         current_batch = env.reset(seed=_actor_seed(self.config.base_seed, actor_id))
+        if current_batch.ids_offsets is not None and current_batch.legal_action_meta is None:
+            legal_action_meta = self._legal_action_meta_from_ids(current_batch.ids_offsets[0])
+            if legal_action_meta is not None:
+                current_batch = replace(current_batch, legal_action_meta=legal_action_meta)
+                env._last_batch = current_batch
         state = _ActorState(
             actor_id=actor_id,
             env=env,
@@ -3171,9 +3189,23 @@ class QueueRuntime:
         return bool(self._opponent_candidate_ids) and bool(self._opponent_models)
 
     def _heuristic_opponent_policy(self, policy_id: str) -> HeuristicPublicPolicy | None:
-        heuristic_policy = getattr(self, "_opponent_heuristic_policies", {}).get(str(policy_id))
-        if heuristic_policy is None and str(policy_id) == HEURISTIC_PUBLIC_POLICY_ID:
+        policy_key = str(policy_id)
+        heuristic_policies = getattr(self, "_opponent_heuristic_policies", {})
+        heuristic_policy = heuristic_policies.get(policy_key)
+        if heuristic_policy is None and policy_key == HEURISTIC_PUBLIC_POLICY_ID:
             heuristic_policy = getattr(self, "_teacher_policy", None)
+        if heuristic_policy is None and self._spec_bundle is not None:
+            profile_name = heuristic_public_profile_name_for_policy_id(policy_key)
+            if profile_name is not None:
+                try:
+                    heuristic_policy = HeuristicPublicPolicy.from_spec_bundle(
+                        self._spec_bundle,
+                        scoring_profile=profile_name,
+                    )
+                except Exception:
+                    heuristic_policy = None
+                else:
+                    heuristic_policies[policy_key] = heuristic_policy
         return heuristic_policy
 
     def _heuristic_public_actions_from_ids(
@@ -4038,9 +4070,51 @@ class QueueRuntime:
             pool=pool,
             copy_arrays=False,
         )
+        if batch.ids_offsets is not None and batch.legal_action_meta is None:
+            legal_action_meta = self._legal_action_meta_from_ids(batch.ids_offsets[0])
+            if legal_action_meta is not None:
+                batch = replace(batch, legal_action_meta=legal_action_meta)
         actor.current_batch = batch
         actor.env._last_batch = batch
         return batch
+
+    def _legal_action_meta_from_ids(self, legal_ids: np.ndarray) -> np.ndarray | None:
+        action_catalog = getattr(self, "_action_catalog", None)
+        if action_catalog is None:
+            return None
+        legal_ids_array = np.asarray(legal_ids, dtype=np.uint32)
+        unused = np.iinfo(np.uint16).max
+        width = max(int(getattr(self, "_action_meta_width", _DEFAULT_ACTION_META_WIDTH)), _DEFAULT_ACTION_META_WIDTH)
+        rows = np.full((int(legal_ids_array.shape[0]), width), unused, dtype=np.uint16)
+        family_index = getattr(self, "_action_family_index", {})
+        attack_type_index = getattr(self, "_action_attack_type_index", {})
+        for row_index, action_id in enumerate(legal_ids_array.astype(np.int64, copy=False).tolist()):
+            decoded = action_catalog.decode(int(action_id))
+            rows[row_index, 0] = np.uint16(family_index[decoded.family])
+            if decoded.hand_index is not None:
+                rows[row_index, 1] = np.uint16(decoded.hand_index)
+            if decoded.stage_slot is not None:
+                rows[row_index, 2] = np.uint16(decoded.stage_slot)
+            if decoded.from_slot is not None:
+                rows[row_index, 1] = np.uint16(decoded.from_slot)
+            if decoded.to_slot is not None:
+                rows[row_index, 2] = np.uint16(decoded.to_slot)
+            if decoded.slot is not None:
+                rows[row_index, 1] = np.uint16(decoded.slot)
+            if decoded.attack_type is not None:
+                rows[row_index, 2] = np.uint16(attack_type_index[decoded.attack_type])
+            if decoded.index is not None:
+                rows[row_index, 1] = np.uint16(decoded.index)
+        return rows
+
+    def _ensure_legal_action_meta(
+        self,
+        legal_ids: np.ndarray,
+        legal_action_meta: np.ndarray | None,
+    ) -> np.ndarray | None:
+        if legal_action_meta is not None:
+            return np.asarray(legal_action_meta, dtype=np.uint16)
+        return self._legal_action_meta_from_ids(legal_ids)
 
     def _apply_policy_rows_ids(
         self,
@@ -4061,14 +4135,16 @@ class QueueRuntime:
         sample_actions: bool = True,
         source_label: str = "policy_rows",
     ) -> None:
+        supports_structured_candidates = bool(getattr(model, "supports_legal_candidate_scoring", False))
+        structured_meta = self._ensure_legal_action_meta(legal_ids, legal_action_meta) if supports_structured_candidates else None
         legal_actions = (
             _structured_legal_batch_from_packed(
                 legal_ids,
                 legal_offsets,
                 row_indices,
-                legal_action_meta,
+                structured_meta,
             )
-            if bool(getattr(model, "supports_legal_candidate_scoring", False))
+            if supports_structured_candidates
             else None
         )
         with (
@@ -4525,7 +4601,7 @@ class QueueRuntime:
             if row_indices.size == 0:
                 continue
             legal_ids, legal_offsets = _require_ids_offsets(batch)
-            legal_action_meta = _optional_legal_action_meta(batch)
+            legal_action_meta = self._ensure_legal_action_meta(legal_ids, _optional_legal_action_meta(batch))
             subset_ids, subset_offsets, subset_meta = _slice_packed_rows_with_meta(
                 legal_ids,
                 legal_offsets,
@@ -4644,7 +4720,7 @@ class QueueRuntime:
             if row_indices.size == 0:
                 continue
             legal_ids, legal_offsets = _require_ids_offsets(batch)
-            legal_action_meta = _optional_legal_action_meta(batch)
+            legal_action_meta = self._ensure_legal_action_meta(legal_ids, _optional_legal_action_meta(batch))
             chosen_actions = self._heuristic_public_actions_from_ids(
                 actor=actor,
                 heuristic_policy=heuristic_policy,
@@ -5067,7 +5143,9 @@ class QueueRuntime:
                                 obs_step=obs_step,
                                 legal_ids=legal_ids,
                                 legal_offsets=legal_offsets,
-                                legal_action_meta=_optional_legal_action_meta(batch),
+                                legal_action_meta=self._ensure_legal_action_meta(
+                                    legal_ids, _optional_legal_action_meta(batch)
+                                ),
                             )
                             self._maybe_debug_validate_sampled_packed_actions(
                                 source_label=f"central:opponent:{policy_id}:heuristic",
@@ -5104,7 +5182,9 @@ class QueueRuntime:
                                 legal_ids,
                                 legal_offsets,
                                 row_indices,
-                                legal_action_meta=_optional_legal_action_meta(batch),
+                                legal_action_meta=self._ensure_legal_action_meta(
+                                    legal_ids, _optional_legal_action_meta(batch)
+                                ),
                             )
                             offset_base = int(packed_offsets[-1][-1])
                             packed_ids.append(subset_ids)
@@ -5373,7 +5453,7 @@ class QueueRuntime:
                     strict=True,
                 ):
                     legal_ids, legal_offsets = _require_ids_offsets(batch)
-                    legal_action_meta = _optional_legal_action_meta(batch)
+                    legal_action_meta = self._ensure_legal_action_meta(legal_ids, _optional_legal_action_meta(batch))
                     if fuse_mirror_policy_rows:
                         if heuristic_rows.size > 0:
                             self._apply_opponent_rows_ids(
@@ -5472,7 +5552,7 @@ class QueueRuntime:
                 )
                 if actor.layout_name == "i16_legal_ids":
                     legal_ids, legal_offsets = _require_ids_offsets(batch)
-                    legal_action_meta = _optional_legal_action_meta(batch)
+                    legal_action_meta = self._ensure_legal_action_meta(legal_ids, _optional_legal_action_meta(batch))
                     teacher_started = time.perf_counter()
                     (
                         teacher_family,
@@ -6016,9 +6096,10 @@ class QueueRuntime:
         current_legal_ids, current_legal_offsets = _require_ids_offsets(batch)
         current_legal_ids = np.asarray(current_legal_ids, dtype=np.uint32)
         current_legal_offsets = np.asarray(current_legal_offsets, dtype=np.uint32)
-        current_legal_action_meta = _optional_legal_action_meta(batch)
-        if current_legal_action_meta is not None:
-            current_legal_action_meta = np.asarray(current_legal_action_meta, dtype=np.uint16)
+        current_legal_action_meta = self._ensure_legal_action_meta(
+            current_legal_ids,
+            _optional_legal_action_meta(batch),
+        )
 
         all_rows = np.arange(N, dtype=np.int64)
         for step_index in range(T):
@@ -6192,6 +6273,7 @@ class QueueRuntime:
             current_legal_ids, current_legal_offsets, current_legal_action_meta = _packed_legal_views_from_step_out(
                 step_out
             )
+            current_legal_action_meta = self._ensure_legal_action_meta(current_legal_ids, current_legal_action_meta)
 
         batch = self._sync_actor_batch_from_step_out(
             actor=actor,
@@ -6349,7 +6431,7 @@ class QueueRuntime:
 
             if actor.layout_name == "i16_legal_ids":
                 legal_ids, legal_offsets = _require_ids_offsets(batch)
-                legal_action_meta = _optional_legal_action_meta(batch)
+                legal_action_meta = self._ensure_legal_action_meta(legal_ids, _optional_legal_action_meta(batch))
                 teacher_started = time.perf_counter()
                 (
                     teacher_family_step,
