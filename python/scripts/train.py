@@ -1864,8 +1864,15 @@ def _restore_learner_from_checkpoint(
     payload_config_hash = str(payload.get("config_hash256", "")).strip().lower()
     expected_config_hash = compute_config_hash256(stack)
     if payload_config_hash != expected_config_hash:
-        raise RuntimeError(
-            f"checkpoint config hash mismatch for {checkpoint_path}: expected {expected_config_hash}, got {payload_config_hash}"
+        if os.environ.get("WEISS_RL_ALLOW_RESUME_CONFIG_MISMATCH", "").strip() != "1":
+            raise RuntimeError(
+                f"checkpoint config hash mismatch for {checkpoint_path}: expected {expected_config_hash}, got {payload_config_hash}"
+            )
+        print(
+            "Warning: allowing checkpoint config hash mismatch because "
+            "WEISS_RL_ALLOW_RESUME_CONFIG_MISMATCH=1: "
+            f"expected {expected_config_hash}, got {payload_config_hash}",
+            file=sys.stderr,
         )
     payload_spec_hash = payload.get("spec_hash256")
     if payload_spec_hash is not None and str(payload_spec_hash).strip().lower() != expected_spec_hash256:

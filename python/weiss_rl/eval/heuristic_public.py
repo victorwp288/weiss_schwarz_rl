@@ -606,7 +606,13 @@ class HeuristicPublicPolicy:
                 bonus[(valid_to == 1) & (valid_from != 1)] += profile.move_center_bonus
                 legal = self_occupied[valid_rows, valid_from] & ~self_occupied[valid_rows, valid_to]
                 move_score[valid] = np.where(legal, improvement + bonus, -1000)
-            score0[move_mask] = profile.move_priority
+            # Aggressive/control profiles intentionally like good repositioning, but a neutral
+            # or bad move must not outrank pass or the policy can main_move forever.
+            score0[move_mask] = np.where(
+                move_score > 0,
+                profile.move_priority,
+                min(profile.move_priority, profile.pass_priority - 1),
+            )
             score1[move_mask] = move_score
 
         next_page_mask = family_ids == self._next_page_family_id
@@ -765,7 +771,13 @@ class HeuristicPublicPolicy:
         if family == "mulligan_confirm":
             return (profile.mulligan_confirm_priority, 0, 0, 0)
         if family == "main_move":
-            return (profile.move_priority, self._score_move(action, board), 0, 0)
+            move_score = self._score_move(action, board)
+            move_priority = (
+                profile.move_priority
+                if move_score > 0
+                else min(profile.move_priority, profile.pass_priority - 1)
+            )
+            return (move_priority, move_score, 0, 0)
         if family == "choice_next_page":
             remaining = max(board.choice_total - (board.choice_page_start + 16), 0)
             return (profile.pager_priority, remaining, 0, 0)
