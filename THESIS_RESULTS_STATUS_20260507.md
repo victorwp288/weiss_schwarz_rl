@@ -33,20 +33,22 @@ Main candidate:
 - Python: `3.11.15`
 - Torch: `2.7.0+cu128`
 
-Known 32-game targeted confirmation before adding fixed B3/B4:
+Strengthened targeted confirmation after B3/B4 fix:
 
 | Opponent | Result |
 |---|---:|
-| B0 RandomLegal | 32/32 = 100.00%; later confirmed at 128/128 |
-| B1 NoLeague baseline | 26/32 = 81.25% |
-| B2 HeuristicPublic | 32/32 = 100.00%; later confirmed at 128/128 |
-| Legacy p11 | 18/32 = 56.25% |
-| Legacy p12 | 17/32 = 53.12% |
-| Legacy p14 | 18/32 = 56.25% |
-| Legacy p15 | 17/32 = 53.12% |
-| Legacy p16 | 18/32 = 56.25% |
+| B0 RandomLegal | 128/128 = 100.00% |
+| B1 NoLeague baseline | 50/64 = 78.12% |
+| B2 HeuristicPublic | 128/128 = 100.00% |
+| B3 HeuristicPublicAggro | 82/128 = 64.06% |
+| B4 HeuristicPublicControl | 83/128 = 64.84% |
+| Legacy p11 | 40/64 = 62.50% |
+| Legacy p12 | 34/64 = 53.12% |
+| Legacy p14 | 36/64 = 56.25% |
+| Legacy p15 | 34/64 = 53.12% |
+| Legacy p16 | 33/64 = 51.56% |
 
-Aggregate from that 32-game table: `178/256 = 69.53%`. Legacy champion/recent subset: `88/160 = 55.00%`.
+B1 plus legacy confirm32 block: `227/384 = 59.11%`. Legacy-only confirm32 subset: `177/320 = 55.31%`.
 
 Fixed B3/B4 confirm64 artifact:
 
@@ -55,6 +57,7 @@ Fixed B3/B4 confirm64 artifact:
 - B4 row summary: `/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__02_b4_heuristicpubliccontrol/matchup_summary.json`
 - B0 confirm64 row summary: `/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__01_b0_randomlegal/matchup_summary.json`
 - B2 confirm64 row summary: `/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__03_b2_heuristicpublic/matchup_summary.json`
+- B1/legacy confirm32 summary: `/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/p21_b1_legacy_confirm32_loopfix/targeted_confirm32_summary.json`
 
 ## B3/B4 Fix Evidence
 
@@ -95,7 +98,7 @@ Important caveat: No-GRU and PPO-lite are weaker fixed-opponent baselines. Their
   - `python/weiss_rl/eval/heuristic_public.py`: B3/B4 move-loop fix.
   - `python/scripts/train.py`: emergency resume-config-mismatch bypass added earlier for rescue attempts.
 - The B3/B4 fix is narrow and evidence-backed, but it changes evaluation behavior. The thesis should frame this as correcting an invalid heuristic loop, not as improving the learned model.
-- The full 10-opponent confirm64 was attempted with 8 workers but was stopped because it was too slow under CPU contention. The critical B3/B4 confirm64 completed successfully.
+- A full 10-opponent confirm64 remains expensive. The final package now uses confirm64 for fixed anchors/B3/B4 and confirm32 for B1 plus legacy neural opponents.
 - Old B3/B4 rows from before the fix must not be used.
 
 ## Recommended Thesis Use
@@ -104,8 +107,8 @@ Use `policy_000021` as the main league GRU model for now.
 
 Report:
 
-- B0/B1/B2 + legacy champion/recent robustness from the existing targeted 32-game table.
-- B3/B4 from the fixed confirm64 rows.
+- B0/B2/B3/B4 from confirm64 rows.
+- B1 plus legacy champion/recent robustness from the confirm32 table.
 - Explicitly state that B3/B4 evaluation required a heuristic-loop correction because the previous rows were all natural truncations, not losses.
 
 ## Figures Ready Locally
@@ -124,7 +127,7 @@ Recommended figures:
 
 Avoid claiming:
 
-- That the model has a clean full confirm64 table across all 10 opponents. B0/B2/B3/B4 have confirm64 rows; B1 and legacy rows currently rely on the 32-game targeted table.
+- That the model has a clean full confirm64 table across all 10 opponents. B0/B2/B3/B4 have confirm64 rows; B1 and legacy rows have confirm32 rows.
 - That No-GRU/PPO are full league robustness baselines.
 - That the B3/B4 fix changes training quality; it fixes opponent behavior/evaluation validity.
 
@@ -133,5 +136,5 @@ Avoid claiming:
 1. Regenerate result figures using fixed B3/B4 rows.
 2. Keep B3/B4 in the plots, but mark the B3/B4 data as `confirm64 after heuristic loop fix`.
 3. Update Section 7 text to avoid old stale B3/B4 claims and avoid reporting invalid timeout rows.
-4. If time allows, rerun full p21 confirm64 overnight. An attempted core/legacy confirm64 completed B0 and B2 but was stopped because B1/legacy rows were too slow for the current work block.
+4. If time allows, rerun full p21 confirm64 overnight. The current package is already stronger than the original 32-game table because every row is now at least confirm32 and four fixed/heuristic rows are confirm64.
 5. Commit the heuristic fix and report before any more risky experiments.

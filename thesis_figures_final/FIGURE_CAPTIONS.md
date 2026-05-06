@@ -1,7 +1,7 @@
 # Thesis Figure Captions
 
 ## fig_main_targeted_robustness
-Targeted evaluation of the selected main league GRU model (`policy_000021`) against fixed anchors and legacy league opponents. B0/B2/B3/B4 use completed confirm64 rows; B1 and legacy rows currently use the 32-game targeted confirmation table. The model scores 178/256 overall (69.5%) on the original targeted table, 88/160 (55.0%) on the legacy champion/recent subset, and 165/256 (64.5%) on B3/B4 confirm64.
+Targeted evaluation of the selected main league GRU model (`policy_000021`) against fixed anchors and legacy league opponents. B0/B2/B3/B4 use completed confirm64 rows; B1 and legacy league rows use completed confirm32 rows. The B1 plus legacy block scores 227/384 (59.1%), and B3/B4 score 165/256 (64.5%).
 
 ## fig_anchor_retention
 Periodic development evaluation on fixed anchors for the main model and B1-pressure ablations. Solid lines show aggregate anchor score; dashed lines show B1 no-league retention. Use this to argue that the selected model retains anchor strength while entering league training.
