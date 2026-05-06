@@ -518,4 +518,3 @@ Rule: prior runs/checkpoints/evals/figures/logs are locked backup artifacts; rea
 
 6. Exact commands and run ids
 - train.py --stack-config configs/presets/overnight_081_clean_main_gru_noguard_sim081.yaml --run-label overnight-081-baseline-20260506-001345-clean-main-gru-noguard-u320 --b1-baseline-run-dir runs/overnight-081-baseline-20260506-001345-clean-b1-anchor-u220 --num-envs 4 --max-updates 320 --runtime-mode train_ordered --device cuda:auto --checkpoint-interval-updates 20
-
