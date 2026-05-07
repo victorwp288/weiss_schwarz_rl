@@ -23,3 +23,9 @@ Validation figure for the corrected B3/B4 evaluation rows. It shows that all B3/
 
 ## fig_b3b4_seat_balance
 Seat-swapped B3/B4 robustness diagnostic. `policy_000021` remains above 50% both when moving first and when moving second, which supports using the paired-seat evaluation rather than a single-seat result.
+
+## fig_p21_seat_advantage
+Headline-table seat sensitivity diagnostic for `policy_000021`. Positive values mean the policy won more often from the second seat than the first seat for that opponent. Across the headline table, p21 scored 313/448 from first seat and 335/448 from second seat, indicating a modest second-seat advantage in these artifacts.
+
+## fig_p21_seat_advantage
+Headline-table seat sensitivity diagnostic for `policy_000021`. Positive values mean the policy won more often from the second seat than the first seat for that opponent. The aggregate row is first seat 313/448 and second seat 335/448, so there is a modest second-seat advantage in these artifacts.

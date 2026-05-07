@@ -56,6 +56,7 @@ Main figures:
 - `thesis_figures_final/fig_main_targeted_robustness.pdf`
 - `thesis_figures_final/fig_b3b4_fixed_validation.pdf`
 - `thesis_figures_final/fig_b3b4_seat_balance.pdf`
+- `thesis_figures_final/fig_p21_seat_advantage.pdf`
 - `thesis_figures_final/fig_anchor_retention.pdf`
 - `thesis_figures_final/fig_baseline_fixed_grid.pdf`
 
@@ -130,6 +131,18 @@ Post-fix B3/B4 rows:
 - B3: `82/128`, `0` truncations.
 - B4: `83/128`, `0` truncations.
 - Seat diagnostics: p21 remains above 50% from both first and second seat.
+
+## Seat Advantage
+
+The headline evaluations are seat-swapped, so first/second-seat effects can be measured directly from diagnostics.
+
+For `policy_000021` across the headline table:
+
+- First seat: `313/448 = 69.87%`
+- Second seat: `335/448 = 74.78%`
+- Difference: second seat is `+4.91` percentage points.
+
+Interpretation: there is a modest second-seat advantage in these artifacts. It is not driving the headline result because all reported evaluations are paired/seat-swapped, but it is worth mentioning as a diagnostic. The advantage is largest against late legacy neural opponents p14-p16.
 
 ## Current Remote Commits
 
