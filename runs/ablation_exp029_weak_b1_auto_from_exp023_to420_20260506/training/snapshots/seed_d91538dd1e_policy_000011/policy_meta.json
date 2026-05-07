@@ -1,0 +1,10 @@
+{
+  "format": "seeded_train_snapshot_metadata_v1",
+  "imported_from_policy_id": "policy_000011",
+  "imported_from_run_dir": "/root/weiss_schwarz_rl/runs/exp-023-early-b1-reserved-lane-ungated-tier1b",
+  "imported_from_snapshot_path": "training/snapshots/policy_000011/weights.pt",
+  "policy_id": "seed_d91538dd1e_policy_000011",
+  "update": 220,
+  "weights_path": "training/snapshots/seed_d91538dd1e_policy_000011/weights.pt",
+  "weights_sha256": "b02ee58b328cde03caed2fc1f917554e48660a56c75b1ee9dcbaa9689839bb01"
+}

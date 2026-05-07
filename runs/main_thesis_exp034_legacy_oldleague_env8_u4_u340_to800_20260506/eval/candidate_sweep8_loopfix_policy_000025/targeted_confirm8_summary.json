@@ -1,0 +1,92 @@
+{
+  "anchor_subset": {
+    "games": 64,
+    "mean": 0.625,
+    "wins": 40
+  },
+  "created_unix": 1778111798.449738,
+  "elapsed_seconds": 210.9946849346161,
+  "focal_policy_id": "policy_000025",
+  "games_per_row": 16,
+  "legacy_subset": {
+    "games": 0,
+    "mean": null,
+    "wins": 0
+  },
+  "overall": {
+    "games": 64,
+    "mean": 0.625,
+    "wins": 40
+  },
+  "paired_seeds": 8,
+  "rows": [
+    {
+      "ci_high": 0.9981092130622137,
+      "ci_low": 0.7899499038804926,
+      "diagnostics_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000025__vs__01_b1_noleague_baseline/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "policy_000025",
+      "games": 16,
+      "losses": 1,
+      "mean": 0.9375,
+      "opponent_policy_id": "B1 NoLeague baseline",
+      "paired_seeds": 8,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000025__vs__01_b1_noleague_baseline/matchup_summary.json",
+      "truncations": 0,
+      "wins": 15
+    },
+    {
+      "ci_high": 0.5,
+      "ci_low": 0.5,
+      "diagnostics_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000025__vs__02_b3_heuristicpublicaggro/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "policy_000025",
+      "games": 16,
+      "losses": 8,
+      "mean": 0.5,
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "paired_seeds": 8,
+      "prob_gt_half": 0.0,
+      "summary_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000025__vs__02_b3_heuristicpublicaggro/matchup_summary.json",
+      "truncations": 0,
+      "wins": 8
+    },
+    {
+      "ci_high": 0.5,
+      "ci_low": 0.5,
+      "diagnostics_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000025__vs__03_b4_heuristicpubliccontrol/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "policy_000025",
+      "games": 16,
+      "losses": 8,
+      "mean": 0.5,
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "paired_seeds": 8,
+      "prob_gt_half": 0.0,
+      "summary_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000025__vs__03_b4_heuristicpubliccontrol/matchup_summary.json",
+      "truncations": 0,
+      "wins": 8
+    },
+    {
+      "ci_high": 0.7162774338375836,
+      "ci_low": 0.5016101831112899,
+      "diagnostics_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000025__vs__04_seed_2aaa98fc69_seed_ae46265326_policy_000016/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "policy_000025",
+      "games": 16,
+      "losses": 7,
+      "mean": 0.5625,
+      "opponent_policy_id": "seed_2aaa98fc69_seed_ae46265326_policy_000016",
+      "paired_seeds": 8,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000025__vs__04_seed_2aaa98fc69_seed_ae46265326_policy_000016/matchup_summary.json",
+      "truncations": 0,
+      "wins": 9
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "artifact_schema_version": "run_artifacts_v2",
+  "b1_baseline_run_dir": "/root/weiss_schwarz_rl/runs/exp-002-current-spec-b1-noleague-baseline",
+  "canonical_artifact_hashes": {},
+  "device_policy": {
+    "evaluation": "cpu",
+    "learner": "cuda:0"
+  },
+  "evaluation_pinning": {
+    "eval_device": "cpu",
+    "eval_inference_mode": true,
+    "eval_sampling_algorithm": "pinned_cdf_pcg_v1",
+    "legal_fingerprint_mismatch_policy": "hard_fail",
+    "legal_fingerprint_version": "legal_fingerprint_v1",
+    "seat_swap": true
+  },
+  "kind": "determinism_report_v1",
+  "policy_selection_mode": "unresolved",
+  "replay_verification": {
+    "path": "eval/diagnostics/replay_verification.json",
+    "status": "pending"
+  },
+  "resume_checkpoint_path": "/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/transplant_exp023_to_exp029_weak_b1_auto_20260506/best_transplant_exp029_weak_b1_auto.pt",
+  "run_id256": "b9b833c504d6aa6d4dfc2db2f5c766a273fa2caf525be59304ec791ccbbb05f4",
+  "run_id64": "6daad604c533b8b9",
+  "runtime_mode": "train_ordered",
+  "seed_files": {
+    "dev_eval": {
+      "path": "configs/seeds/dev_eval_seeds.txt",
+      "sha256": "568c17562f825562579b8a6ec54d8e83b7ad33471e9bad3de462055efd4679c3"
+    },
+    "promotion_gate": {
+      "path": "configs/seeds/local_promotion_eval_seeds.txt",
+      "sha256": "03fbbaa2c6e7e53c08e35c2dfaf141c4ad69d155eca607027fedf17f0e6cd07f"
+    },
+    "report_eval": {
+      "path": "configs/seeds/report_eval_seeds.txt",
+      "sha256": "5db0677f8ff932a95bb86cb91e6902de3ed3460ad8303858e169e0a17c728df0"
+    }
+  },
+  "seed_snapshot_run_dir": "/root/weiss_schwarz_rl/runs/exp-023-early-b1-reserved-lane-ungated-tier1b",
+  "training_controls": {
+    "fixed_opponent_backend": "simulator_native",
+    "profile_timers": true,
+    "structured_metrics_mode": "sampled",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "focal_policy_id": "train_u200_p0",
+  "opponent_policy_id": "b0_randomlegal",
+  "pair_count": 8,
+  "policy_breakdown": {
+    "b0_randomlegal": {
+      "games_as_seat0": 8,
+      "games_as_seat1": 8,
+      "total_wins": 10,
+      "wins_as_seat0": 4,
+      "wins_as_seat1": 6
+    },
+    "train_u200_p0": {
+      "games_as_seat0": 8,
+      "games_as_seat1": 8,
+      "total_wins": 6,
+      "wins_as_seat0": 2,
+      "wins_as_seat1": 4
+    }
+  },
+  "seat_results": {
+    "decisive_games": 16,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.375,
+    "seat0_wins": 6,
+    "seat1_win_rate": 0.625,
+    "seat1_wins": 10,
+    "total_games": 16,
+    "truncations": 0
+  }
+}

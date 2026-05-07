@@ -1,0 +1,16 @@
+focal_policy_id,opponent_policy_id,matchup_dir,paired_seed_count,observed_paired_seed_count,excluded_paired_seed_count,has_payoff_samples,stop_reason
+B0 RandomLegal,B0 RandomLegal,matchups/00_b0_randomlegal__vs__00_b0_randomlegal,4,4,0,True,budget
+B0 RandomLegal,B1 NoLeague baseline,matchups/00_b0_randomlegal__vs__01_b1_noleague_baseline,4,4,0,True,decisive
+B0 RandomLegal,B2 HeuristicPublic,matchups/00_b0_randomlegal__vs__02_b2_heuristicpublic,4,4,0,True,decisive
+B0 RandomLegal,policy_000012,matchups/00_b0_randomlegal__vs__03_policy_000012,4,4,0,True,decisive
+B0 RandomLegal,policy_000021,matchups/00_b0_randomlegal__vs__04_policy_000021,4,4,0,True,decisive
+B1 NoLeague baseline,B1 NoLeague baseline,matchups/01_b1_noleague_baseline__vs__01_b1_noleague_baseline,4,4,0,True,budget
+B1 NoLeague baseline,B2 HeuristicPublic,matchups/01_b1_noleague_baseline__vs__02_b2_heuristicpublic,4,4,0,True,decisive
+B1 NoLeague baseline,policy_000012,matchups/01_b1_noleague_baseline__vs__03_policy_000012,4,4,0,True,decisive
+B1 NoLeague baseline,policy_000021,matchups/01_b1_noleague_baseline__vs__04_policy_000021,4,4,0,True,decisive
+B2 HeuristicPublic,B2 HeuristicPublic,matchups/02_b2_heuristicpublic__vs__02_b2_heuristicpublic,4,4,0,True,precision
+B2 HeuristicPublic,policy_000012,matchups/02_b2_heuristicpublic__vs__03_policy_000012,4,4,0,True,decisive
+B2 HeuristicPublic,policy_000021,matchups/02_b2_heuristicpublic__vs__04_policy_000021,4,4,0,True,decisive
+policy_000012,policy_000012,matchups/03_policy_000012__vs__03_policy_000012,4,4,0,True,decisive
+policy_000012,policy_000021,matchups/03_policy_000012__vs__04_policy_000021,4,4,0,True,precision
+policy_000021,policy_000021,matchups/04_policy_000021__vs__04_policy_000021,4,4,0,True,precision

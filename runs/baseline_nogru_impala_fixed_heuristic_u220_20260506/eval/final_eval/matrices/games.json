@@ -1,0 +1,24 @@
+{
+  "policy_ids": [
+    "B0 RandomLegal",
+    "B2 HeuristicPublic",
+    "nogru_impala_best"
+  ],
+  "values": [
+    [
+      32,
+      32,
+      32
+    ],
+    [
+      32,
+      32,
+      32
+    ],
+    [
+      32,
+      32,
+      32
+    ]
+  ]
+}

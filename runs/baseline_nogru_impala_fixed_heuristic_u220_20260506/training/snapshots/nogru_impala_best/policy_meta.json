@@ -1,0 +1,8 @@
+{
+  "created_utc": "2026-05-06T19:53:56.292913+00:00",
+  "policy_id": "nogru_impala_best",
+  "source_checkpoint_path": "training/checkpoints/checkpoint_100.pt",
+  "source_metric_kind": "dev_eval_mean",
+  "source_metric_value": 0.5,
+  "update": 100
+}

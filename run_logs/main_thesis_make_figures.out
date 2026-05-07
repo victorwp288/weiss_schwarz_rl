@@ -1,0 +1,3 @@
+/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/weiss_rl/plotting/paper_figures.py:411: UserWarning: Tight layout not applied. The bottom and top margins cannot be made large enough to accommodate all Axes decorations.
+  figure.tight_layout()
+Wrote 8 paper figure files to runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/figures/paper

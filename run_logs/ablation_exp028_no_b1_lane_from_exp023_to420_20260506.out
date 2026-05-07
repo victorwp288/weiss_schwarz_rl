@@ -1,0 +1,27 @@
+================================================================================
+STARTUP CONTRACT
+================================================================================
+spec_hash:              617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+config_hash:            26d87ce94187401128cdadd17727d6743978302b3d3ac1e23dae1d14ab8c6786
+computed_run_id64:      d816456c43557e1d
+computed_run_id256:     1d7e55436c4516d85319c32ceaf39c94d5cbfbc5eb7808f4cd64f6f0bf2524a2
+run_label:              ablation_exp028_no_b1_lane_from_exp023_to420_20260506
+run_dir_name:           ablation_exp028_no_b1_lane_from_exp023_to420_20260506
+spec_mismatch_policy:   hard_fail
+================================================================================
+Verified runtime spec bundle: compat=8590000130 sha256=617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+Loaded stack config with 0 components
+Wrote manifest: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_from_exp023_to420_20260506/manifest.json
+Structured profiling enabled: profile_timers=True torch_profiler=False structured_metrics_mode=sampled teacher_aux_mode=always fixed_opponent_backend=simulator_native
+Traceback (most recent call last):
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 4725, in <module>
+    main()
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 4691, in main
+    metrics = _run_minimal_training(
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 3970, in _run_minimal_training
+    resume_state = _restore_learner_from_checkpoint(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 1867, in _restore_learner_from_checkpoint
+    raise RuntimeError(
+RuntimeError: checkpoint config hash mismatch for /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/transplant_exp023_to_exp028_no_b1_lane_20260506/best_transplant_exp028_no_b1_lane.pt: expected 26d87ce94187401128cdadd17727d6743978302b3d3ac1e23dae1d14ab8c6786, got d3bf7d3f880187b7859d8c81e1281a777cb59d525eed22363dac7d1b6afab856

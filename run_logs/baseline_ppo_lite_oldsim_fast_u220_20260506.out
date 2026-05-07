@@ -1,0 +1,30 @@
+================================================================================
+STARTUP CONTRACT
+================================================================================
+spec_hash:              617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+config_hash:            c5b27f73158d96c5643b63507f1975b120697d2aada539f0fd07ffafd6774411
+computed_run_id64:      cd794db1c1754b2d
+computed_run_id256:     2d4b75c1b14d79cd9524a068351a4adf4a925f6fa60ec53e4e3b1b6458ee3356
+run_label:              baseline_ppo_lite_oldsim_fast_u220_20260506
+run_dir_name:           baseline_ppo_lite_oldsim_fast_u220_20260506
+spec_mismatch_policy:   hard_fail
+================================================================================
+Verified runtime spec bundle: compat=8590000130 sha256=617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+Loaded stack config with 0 components
+Wrote manifest: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/baseline_ppo_lite_oldsim_fast_u220_20260506/manifest.json
+Traceback (most recent call last):
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 4725, in <module>
+    main()
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 4691, in main
+    metrics = _run_minimal_training(
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 3986, in _run_minimal_training
+    _ensure_noleague_baseline_anchor(
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 2658, in _ensure_noleague_baseline_anchor
+    weights_path, weights_sha256, imported_update = _import_noleague_baseline_anchor(
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 2398, in _import_noleague_baseline_anchor
+    _validate_imported_snapshot_contract(
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 734, in _validate_imported_snapshot_contract
+    raise RuntimeError(
+RuntimeError: Imported B1 baseline config does not match the current run for section='model'

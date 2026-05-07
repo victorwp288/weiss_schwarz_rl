@@ -1,0 +1,48 @@
+{
+  "evaluation_context": {
+    "anchor_display_name": "B0 RandomLegal",
+    "artifact_scope": "periodic_dev_eval",
+    "checkpoint_path": "training/checkpoints/checkpoint_100.pt",
+    "policy_version": 0,
+    "seed_usage_path": "eval/dev_eval/update_100/b0_randomlegal/seed_usage.json",
+    "update_count": 100
+  },
+  "excluded_paired_seeds": 0,
+  "focal_policy_id": "train_u100_p0",
+  "has_payoff_samples": true,
+  "max_paired_seeds": 8,
+  "observed_paired_seeds": 8,
+  "opponent_policy_id": "b0_randomlegal",
+  "paired_seeds": 8,
+  "scheme": "S0",
+  "should_stop": true,
+  "stop_reason": "budget",
+  "summary": {
+    "decision_limit_timeouts": 0,
+    "draws": 0,
+    "engine_errors": 0,
+    "games": 16,
+    "losses": 8,
+    "main_move_actions": 0,
+    "max_consecutive_main_moves": 0,
+    "natural_timeouts": 0,
+    "no_progress_timeouts": 0,
+    "pass_actions": 0,
+    "pass_with_nonpass_available": 0,
+    "tick_limit_timeouts": 0,
+    "timeout_unknown": 0,
+    "total_actions": 0,
+    "truncations": 0,
+    "wins": 8
+  },
+  "uncertainty": {
+    "ci_half_width": 0.1684863153408678,
+    "ci_high": 0.665657326780959,
+    "ci_low": 0.3286846960992234,
+    "mean": 0.5,
+    "paired_seed_count": 8,
+    "prob_gt_half": 0.492,
+    "prob_lt_half": 0.508,
+    "sample_count": 1000
+  }
+}

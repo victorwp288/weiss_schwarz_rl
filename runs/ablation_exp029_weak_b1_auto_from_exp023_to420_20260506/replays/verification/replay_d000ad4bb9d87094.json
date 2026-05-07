@@ -1,0 +1,23 @@
+{
+  "bundle_path": "runs/ablation_exp029_weak_b1_auto_from_exp023_to420_20260506/replays/bundles/replay_d000ad4bb9d87094.zip",
+  "compared_steps": 523,
+  "episode_key64": 5486378308540669891,
+  "episode_seed64": 71186667182790612,
+  "expected_steps": 523,
+  "fault_present": false,
+  "matched": true,
+  "replay_key64": "d000ad4bb9d87094",
+  "report_path": "runs/ablation_exp029_weak_b1_auto_from_exp023_to420_20260506/replays/verification/replay_d000ad4bb9d87094.json",
+  "rerun_contract": {
+    "curriculum_json": null,
+    "max_decisions": 2000,
+    "max_ticks": 100000,
+    "observation_visibility": "public",
+    "reward_json": "{\"board_reward\": 0.0, \"damage_reward\": 0.05, \"enable_shaping\": true, \"level_reward\": 0.0, \"no_progress_penalty\": 0.0, \"terminal_draw\": 0.0, \"terminal_loss\": -1.0, \"terminal_timeout\": -0.1, \"terminal_win\": 1.0}",
+    "version": 2
+  },
+  "rerun_supported": true,
+  "schema_version": 3,
+  "status": "success",
+  "verified_simulator_episode_key_u64": 18436608842300248679
+}

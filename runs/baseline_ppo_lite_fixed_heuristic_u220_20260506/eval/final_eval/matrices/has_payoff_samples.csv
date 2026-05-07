@@ -1,0 +1,4 @@
+focal_policy_id,B0 RandomLegal,B2 HeuristicPublic,ppo_lite_best
+B0 RandomLegal,True,True,True
+B2 HeuristicPublic,True,True,True
+ppo_lite_best,True,True,True

@@ -1,0 +1,4 @@
+focal_policy_id,B0 RandomLegal,B2 HeuristicPublic,nogru_impala_best
+B0 RandomLegal,17,0,17
+B2 HeuristicPublic,32,16,32
+nogru_impala_best,15,0,16

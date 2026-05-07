@@ -1,0 +1,23 @@
+================================================================================
+STARTUP CONTRACT
+================================================================================
+spec_hash:              617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+config_hash:            01d7509f89495e69c9bd80b1d6d9dca56e4d663a3684ff36566d3aa26746144a
+computed_run_id64:      b5327ef7a8a5a04f
+computed_run_id256:     4fa0a5a8f77e32b5cfdd7508e97db53e9a25f2f334d55d10e472c7d3314eec4d
+run_label:              baseline_nogru_impala_fixed_heuristic_u220_20260506
+run_dir_name:           baseline_nogru_impala_fixed_heuristic_u220_20260506
+spec_mismatch_policy:   hard_fail
+================================================================================
+Verified runtime spec bundle: compat=8590000130 sha256=617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+Loaded stack config with 0 components
+Wrote manifest: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/baseline_nogru_impala_fixed_heuristic_u220_20260506/manifest.json
+Periodic dev eval: update=25 opponent=b0_randomlegal aggregate=0.3125 anchors=B0 RandomLegal
+Periodic dev eval: update=50 opponent=b0_randomlegal aggregate=0.3125 anchors=B0 RandomLegal
+Periodic dev eval: update=75 opponent=b0_randomlegal aggregate=0.4375 anchors=B0 RandomLegal
+Periodic dev eval: update=100 opponent=b0_randomlegal aggregate=0.5000 anchors=B0 RandomLegal
+Periodic dev eval: update=125 opponent=b0_randomlegal aggregate=0.3750 anchors=B0 RandomLegal
+Periodic dev eval: update=150 opponent=b0_randomlegal aggregate=0.5000 anchors=B0 RandomLegal
+Periodic dev eval: update=175 opponent=b0_randomlegal aggregate=0.3750 anchors=B0 RandomLegal
+Periodic dev eval: update=200 opponent=b0_randomlegal aggregate=0.3750 anchors=B0 RandomLegal
+Completed canonical single-node training run: loss=-0.022882 policy_loss=-0.001488 value_loss=0.000119 entropy=2.145520

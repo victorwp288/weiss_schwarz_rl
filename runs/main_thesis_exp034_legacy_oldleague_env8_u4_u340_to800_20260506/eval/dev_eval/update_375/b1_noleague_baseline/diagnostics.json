@@ -1,0 +1,32 @@
+{
+  "focal_policy_id": "train_u375_p18",
+  "opponent_policy_id": "b1_noleague_baseline",
+  "pair_count": 8,
+  "policy_breakdown": {
+    "b1_noleague_baseline": {
+      "games_as_seat0": 8,
+      "games_as_seat1": 8,
+      "total_wins": 3,
+      "wins_as_seat0": 3,
+      "wins_as_seat1": 0
+    },
+    "train_u375_p18": {
+      "games_as_seat0": 8,
+      "games_as_seat1": 8,
+      "total_wins": 13,
+      "wins_as_seat0": 8,
+      "wins_as_seat1": 5
+    }
+  },
+  "seat_results": {
+    "decisive_games": 16,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.6875,
+    "seat0_wins": 11,
+    "seat1_win_rate": 0.3125,
+    "seat1_wins": 5,
+    "total_games": 16,
+    "truncations": 0
+  }
+}

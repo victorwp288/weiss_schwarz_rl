@@ -1,0 +1,10 @@
+{
+  "format": "seeded_train_snapshot_metadata_v1",
+  "imported_from_policy_id": "seed_ae46265326_policy_000015",
+  "imported_from_run_dir": "/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/exp034_legacy_oldleague_env8_u4_cont_u320_to340_20260506",
+  "imported_from_snapshot_path": "training/snapshots/seed_ae46265326_policy_000015/weights.pt",
+  "policy_id": "seed_2aaa98fc69_seed_ae46265326_policy_000015",
+  "update": 300,
+  "weights_path": "training/snapshots/seed_2aaa98fc69_seed_ae46265326_policy_000015/weights.pt",
+  "weights_sha256": "613b8e39de80ad1386afb70fcd4bf24cc051d7438e069de5183f4a167616426b"
+}

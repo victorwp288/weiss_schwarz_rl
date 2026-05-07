@@ -1,0 +1,75 @@
+{
+  "artifact_schema_version": "run_artifacts_v2",
+  "canonical_artifact_hashes": {
+    "eval/diagnostics/replay_verification.json": "5824738c736876ae012ce9983371281c519cf49e10ff1f42819d65f0b231404f",
+    "eval/diagnostics/seat_bias.json": "a7a763c5a841dd18e656f0565b4206febad6d001d03259608959b534a60f7737",
+    "eval/diagnostics/truncation_heatmap_data.csv": "d82b7706332f4791d5f8901e6b10c352f8621f3ef3d5a3f544cfa233e9bb00c0",
+    "eval/final_eval/matchups.csv": "0f18dfd025681422330b87bdd0217482a89566a07b5d94462e762dfc58f3c3a6",
+    "eval/final_eval/matrices/mean.csv": "0b597c50cac2d72c16a336c0406e9e69dc3f93b75ac111230bd89b93cadf3c1e",
+    "eval/final_eval/metadata.json": "bca44658e59a9278f775ec749a9501dcbd1ac46e431e8f9f972466ac2c5d5d17",
+    "eval/final_eval/policy_set.json": "cea2ab76905f453328b9c749bacd01030164f050b89a3a38751b6a22b7894d8d",
+    "eval/final_eval/posterior_samples.json": "8abf78d4933848958214ce9ce725b37fcc34cc53c1a40d52240ef18c9fffeacf",
+    "eval/final_eval/posterior_samples.npz": "aaff475ebe026167a37cb17b5f3a919ffb57bb288f27d5968b4cc53a391876d2",
+    "eval/final_eval/summary.json": "c8a66d10a3381df54a3eae0c58a314c966b073901d9f514a81f7a32d50a3ba2f",
+    "replays/index.json": "232bcd8a23a31edf7d13de1f47810c8b936ef27bbfe1f2dc5e20c6dc4c4a087f"
+  },
+  "device_policy": {
+    "evaluation": "cpu",
+    "learner": "cuda:0"
+  },
+  "evaluation_pinning": {
+    "eval_device": "cpu",
+    "eval_inference_mode": true,
+    "eval_sampling_algorithm": "pinned_cdf_pcg_v1",
+    "legal_fingerprint_mismatch_policy": "hard_fail",
+    "legal_fingerprint_version": "legal_fingerprint_v1",
+    "seat_swap": true
+  },
+  "final_eval": {
+    "matchup_count": 6,
+    "path": "eval/final_eval/summary.json",
+    "policy_ids": [
+      "B0 RandomLegal",
+      "B2 HeuristicPublic",
+      "ppo_lite_best"
+    ],
+    "selection": {
+      "mode": "explicit_cli",
+      "policy_count": 3
+    }
+  },
+  "kind": "determinism_report_v1",
+  "policy_selection_mode": "explicit_cli",
+  "replay_verification": {
+    "failed_episode_count": 0,
+    "path": "eval/diagnostics/replay_verification.json",
+    "sampled_episode_count": 0,
+    "status": "not_sampled",
+    "verified_episode_count": 0
+  },
+  "run_dir": "/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/baseline_ppo_lite_fixed_heuristic_u220_20260506",
+  "run_id256": "d15a6dd0c884013de4a144b0cb70743ca4af4d6794645783ac0051b77b292f98",
+  "run_id64": "3d0184c8d06d5ad1",
+  "runtime_mode": "train_ordered",
+  "seed_files": {
+    "dev_eval": {
+      "path": "configs/seeds/dev_eval_seeds.txt",
+      "sha256": "568c17562f825562579b8a6ec54d8e83b7ad33471e9bad3de462055efd4679c3"
+    },
+    "promotion_gate": {
+      "path": "configs/seeds/promotion_eval_seeds.txt",
+      "sha256": "12cb2549f6297d0418cbc203e157b3363579189412ec40b652f90417e5f78987"
+    },
+    "report_eval": {
+      "path": "configs/seeds/report_eval_seeds.txt",
+      "sha256": "5db0677f8ff932a95bb86cb91e6902de3ed3460ad8303858e169e0a17c728df0"
+    }
+  },
+  "training_controls": {
+    "fixed_opponent_backend": "python_scalar",
+    "profile_timers": false,
+    "structured_metrics_mode": "off",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false
+  }
+}

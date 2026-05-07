@@ -1,0 +1,13 @@
+================================================================================
+STARTUP CONTRACT
+================================================================================
+spec_hash:              617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+config_hash:            b8ab320174befe7ee6a50da25f6d0dc81b55755bd54cc1f0ac15a28ea51be8d3
+run_label:              (default)
+spec_mismatch_policy:   hard_fail
+================================================================================
+Verified runtime spec bundle: compat=8590000130 sha256=617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+Eval provenance git commit: 046600625a06f5ba0c26b5ea9d4cedf1eec62ca2
+Canonical final_eval summary JSON: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/baseline_ppo_lite_fixed_heuristic_u220_20260506/eval/final_eval/summary.json
+Canonical replay verification JSON: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/baseline_ppo_lite_fixed_heuristic_u220_20260506/eval/diagnostics/replay_verification.json
+Resolved policy set: ['B0 RandomLegal', 'B2 HeuristicPublic', 'ppo_lite_best']

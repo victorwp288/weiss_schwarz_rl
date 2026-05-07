@@ -1,0 +1,38 @@
+================================================================================
+STARTUP CONTRACT
+================================================================================
+spec_hash:              617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+config_hash:            bf060809c9aee32ea683a757a0c2b727daf4b9312d6fd43c6e4eb7b0a96d3303
+computed_run_id64:      8b4c94e6cfc0887a
+computed_run_id256:     7a88c0cfe6944c8b03c2c803428cb993b0d504235ccd2fbe43d42862999cde6f
+run_label:              baseline_ppo_lite_noleague_b0only_fast_u220_20260506
+run_dir_name:           baseline_ppo_lite_noleague_b0only_fast_u220_20260506
+spec_mismatch_policy:   hard_fail
+================================================================================
+Verified runtime spec bundle: compat=8590000130 sha256=617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+Loaded stack config with 0 components
+Wrote manifest: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/baseline_ppo_lite_noleague_b0only_fast_u220_20260506/manifest.json
+Traceback (most recent call last):
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 4725, in <module>
+    main()
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 4691, in main
+    metrics = _run_minimal_training(
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 4073, in _run_minimal_training
+    runtime_batch = _collect_training_batch(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/scripts/train.py", line 2148, in _collect_training_batch
+    return runtime.collect_policy_batch(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/weiss_rl/runtime.py", line 2550, in collect_policy_batch
+    self._fill_pending_unrolls(
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/weiss_rl/runtime.py", line 2717, in _fill_pending_unrolls
+    self._pending_unrolls.append(self._collect_actor_unroll(actor))
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/weiss_rl/runtime.py", line 6490, in _collect_actor_unroll
+    self._fill_policy_outputs_ids(
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/weiss_rl/runtime.py", line 3688, in _fill_policy_outputs_ids
+    self._apply_opponent_rows_ids(
+  File "/root/wsrl-exp034-legacy/weiss_schwarz_rl/python/weiss_rl/runtime.py", line 3884, in _apply_opponent_rows_ids
+    raise RuntimeError(f"missing opponent snapshot model for policy_id {policy_id!r}")
+RuntimeError: missing opponent snapshot model for policy_id 'B2 HeuristicPublic'

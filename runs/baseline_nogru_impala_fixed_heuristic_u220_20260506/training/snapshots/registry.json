@@ -1,0 +1,16 @@
+{
+  "champion_size": 4,
+  "champion_snapshots": [],
+  "pinned_snapshots": [],
+  "recent_size": 24,
+  "schema_version": 1,
+  "snapshots": [
+    {
+      "created_utc": "2026-05-06T19:53:56.292913+00:00",
+      "path": "training/snapshots/nogru_impala_best/weights.pt",
+      "policy_id": "nogru_impala_best",
+      "update": 100,
+      "weights_sha256": "0f053111e323bd651746ce2ee8475f7b06b1961bc026e799a03f4b392df49620"
+    }
+  ]
+}

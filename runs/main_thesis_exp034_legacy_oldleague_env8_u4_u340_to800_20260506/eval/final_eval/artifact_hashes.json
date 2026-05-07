@@ -1,0 +1,15 @@
+{
+  "artifacts": {
+    "eval/diagnostics/replay_verification.json": "5824738c736876ae012ce9983371281c519cf49e10ff1f42819d65f0b231404f",
+    "eval/diagnostics/truncation_heatmap_data.csv": "5d5c5f98a611e3507beab3b8ac8ec60e1cbe99d0c4ae11a41393a243b7739d50",
+    "eval/final_eval/matchups.csv": "8e3a708e9a3d9a3e1f943b352c26045bce3ab286e207324ff2899559df52b23c",
+    "eval/final_eval/matrices/mean.csv": "2b9a324d787a7b8e87ba3823533dac4f8571962cc2a21b9f85d68c57601bf0ee",
+    "eval/final_eval/metadata.json": "e178474dd6b054137678f55cf494bba2fb731cf62cd6f5a19b3229eaef69160a",
+    "eval/final_eval/policy_set.json": "19c3d06035b854e1d69e04912aa86d79d49696cc322d236fca1fba3efb8fae1e",
+    "eval/final_eval/posterior_samples.json": "5689f882ebdc31c8150b6b9cb2ab9bd727486e042b06f7445b4cc933d3eacdfc",
+    "eval/final_eval/posterior_samples.npz": "f9ff981f38f797ab3c2e5bd215813b89ffecb5a318b95709ba5258e6376e68d6",
+    "eval/final_eval/summary.json": "c7cee3336eadfa5681be9a2fd7e69598de0c475ca3f2485022534b35a207c7c7",
+    "replays/index.json": "232bcd8a23a31edf7d13de1f47810c8b936ef27bbfe1f2dc5e20c6dc4c4a087f"
+  },
+  "kind": "final_eval_artifact_hashes_v1"
+}

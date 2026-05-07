@@ -1,0 +1,53 @@
+{
+  "evaluation_context": {
+    "artifact_scope": "final_eval",
+    "focal_policy_index": 1,
+    "max_paired_seeds": 4,
+    "opponent_policy_index": 2,
+    "stage1_paired_seeds": 4,
+    "used_paired_seeds": [
+      71186667182790612,
+      74532068704462917,
+      119544824309379461,
+      163020724606140457
+    ]
+  },
+  "excluded_paired_seeds": 0,
+  "focal_policy_id": "B1 NoLeague baseline",
+  "has_payoff_samples": true,
+  "max_paired_seeds": 4,
+  "observed_paired_seeds": 4,
+  "opponent_policy_id": "B2 HeuristicPublic",
+  "paired_seeds": 4,
+  "scheme": "S0",
+  "should_stop": true,
+  "stop_reason": "decisive",
+  "summary": {
+    "decision_limit_timeouts": 0,
+    "draws": 0,
+    "engine_errors": 0,
+    "games": 8,
+    "losses": 1,
+    "main_move_actions": 1563,
+    "max_consecutive_main_moves": 223,
+    "natural_timeouts": 0,
+    "no_progress_timeouts": 0,
+    "pass_actions": 311,
+    "pass_with_nonpass_available": 122,
+    "tick_limit_timeouts": 0,
+    "timeout_unknown": 0,
+    "total_actions": 2754,
+    "truncations": 0,
+    "wins": 7
+  },
+  "uncertainty": {
+    "ci_half_width": 0.1715780617030463,
+    "ci_high": 0.9955269598175269,
+    "ci_low": 0.6523708364114343,
+    "mean": 0.875,
+    "paired_seed_count": 4,
+    "prob_gt_half": 1.0,
+    "prob_lt_half": 0.0,
+    "sample_count": 1000
+  }
+}

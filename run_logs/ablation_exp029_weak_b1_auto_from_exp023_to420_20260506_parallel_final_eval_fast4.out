@@ -1,0 +1,16 @@
+completed 1/15: B0 RandomLegal vs B2 HeuristicPublic
+completed 2/15: B0 RandomLegal vs B0 RandomLegal
+completed 3/15: B2 HeuristicPublic vs B2 HeuristicPublic
+completed 4/15: B0 RandomLegal vs policy_000021
+completed 5/15: B0 RandomLegal vs B1 NoLeague baseline
+completed 6/15: B0 RandomLegal vs policy_000012
+completed 7/15: B2 HeuristicPublic vs policy_000012
+completed 8/15: B2 HeuristicPublic vs policy_000021
+completed 9/15: B1 NoLeague baseline vs B2 HeuristicPublic
+completed 10/15: B1 NoLeague baseline vs policy_000021
+completed 11/15: B1 NoLeague baseline vs policy_000012
+completed 12/15: policy_000012 vs policy_000021
+completed 13/15: policy_000012 vs policy_000012
+completed 14/15: policy_000021 vs policy_000021
+completed 15/15: B1 NoLeague baseline vs B1 NoLeague baseline
+Parallel final_eval summary JSON: runs/ablation_exp029_weak_b1_auto_from_exp023_to420_20260506/eval/final_eval/summary.json

@@ -1,0 +1,37 @@
+{
+  "artifact_roots": {
+    "eval": "eval",
+    "figures": "figures",
+    "replays": "replays",
+    "tensorboard": "tensorboard",
+    "training": "training"
+  },
+  "artifact_schema_version": "run_artifacts_v2",
+  "canonical_eval_completed": true,
+  "determinism_report_path": "determinism_report.json",
+  "environment_path": "environment.json",
+  "figure_outputs": [],
+  "final_eval_dir": "eval/final_eval",
+  "kind": "run_summary_v1",
+  "manifest_path": "manifest.json",
+  "metagame_dir": null,
+  "paper_grade": false,
+  "paper_readiness_summary_path": "paper_readiness_summary.json",
+  "policy_ids": [
+    "B0 RandomLegal",
+    "B2 HeuristicPublic",
+    "nogru_impala_best"
+  ],
+  "policy_set_selection_mode": "explicit_cli",
+  "run_dir": "/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/baseline_nogru_impala_fixed_heuristic_u220_20260506",
+  "run_id256": "4fa0a5a8f77e32b5cfdd7508e97db53e9a25f2f334d55d10e472c7d3314eec4d",
+  "run_id64": "b5327ef7a8a5a04f",
+  "runtime_mode": "train_ordered",
+  "training_controls": {
+    "fixed_opponent_backend": "python_scalar",
+    "profile_timers": false,
+    "structured_metrics_mode": "off",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "best": {
+    "alias": "best",
+    "alias_path": "training/checkpoints/best.pt",
+    "metric_kind": "dev_eval_mean",
+    "metric_value": 0.5,
+    "policy_version": 0,
+    "source_checkpoint_path": "training/checkpoints/checkpoint_100.pt",
+    "update_count": 100
+  },
+  "format": "checkpoint_tracker_v1",
+  "latest": {
+    "alias": "latest",
+    "alias_path": "training/checkpoints/latest.pt",
+    "metric_kind": "training_loss",
+    "metric_value": -0.02288193255662918,
+    "policy_version": 0,
+    "source_checkpoint_path": "training/checkpoints/checkpoint_220.pt",
+    "update_count": 220
+  }
+}

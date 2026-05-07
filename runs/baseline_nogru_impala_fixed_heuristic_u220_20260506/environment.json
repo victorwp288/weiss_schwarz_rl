@@ -1,0 +1,54 @@
+{
+  "argv": [
+    "python/scripts/train.py",
+    "--stack-config",
+    "configs/presets/baseline_nogru_impala_pythonfixed_fast_20260506.yaml",
+    "--run-label",
+    "baseline_nogru_impala_fixed_heuristic_u220_20260506",
+    "--num-envs",
+    "8",
+    "--unroll-length",
+    "4",
+    "--max-updates",
+    "220",
+    "--runtime-mode",
+    "train_ordered",
+    "--device",
+    "cuda:auto"
+  ],
+  "artifact_schema_version": "run_artifacts_v2",
+  "cwd": "/root/wsrl-exp034-legacy/weiss_schwarz_rl",
+  "hardware": {
+    "actor_device": "cpu",
+    "actor_device_layout": "cpu",
+    "actor_device_unique_count": 1,
+    "cpu_count": 128,
+    "learner_device": "cuda:0",
+    "machine": "x86_64",
+    "platform": "Linux-5.15.0-174-generic-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "python_version": "3.11.15"
+  },
+  "kind": "environment_manifest_v1",
+  "packages": {
+    "matplotlib": "3.10.1",
+    "numpy": "2.1.3",
+    "scipy": "1.14.1",
+    "torch": "2.7.0+cu128",
+    "weiss-rl": null,
+    "weiss-sim": "0.7.0"
+  },
+  "platform": {
+    "machine": "x86_64",
+    "platform": "Linux-5.15.0-174-generic-x86_64-with-glibc2.39",
+    "release": "5.15.0-174-generic",
+    "system": "Linux"
+  },
+  "python": {
+    "executable": "/root/wsrl-exp034-legacy/weiss_schwarz_rl/.venv-exp034/bin/python",
+    "implementation": "CPython",
+    "version": "3.11.15"
+  },
+  "run_id256": "4fa0a5a8f77e32b5cfdd7508e97db53e9a25f2f334d55d10e472c7d3314eec4d",
+  "run_id64": "b5327ef7a8a5a04f"
+}

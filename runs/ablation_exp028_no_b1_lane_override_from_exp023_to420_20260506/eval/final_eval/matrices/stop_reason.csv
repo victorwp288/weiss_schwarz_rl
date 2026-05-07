@@ -1,0 +1,6 @@
+focal_policy_id,B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic,policy_000012,policy_000021
+B0 RandomLegal,budget,decisive,decisive,decisive,decisive
+B1 NoLeague baseline,decisive,budget,decisive,decisive,decisive
+B2 HeuristicPublic,decisive,decisive,precision,decisive,decisive
+policy_000012,decisive,decisive,decisive,decisive,precision
+policy_000021,decisive,decisive,decisive,precision,precision

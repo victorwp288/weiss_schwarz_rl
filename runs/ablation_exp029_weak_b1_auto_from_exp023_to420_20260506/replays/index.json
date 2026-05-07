@@ -1,0 +1,19 @@
+{
+  "kind": "replay_index_v1",
+  "samples": [
+    {
+      "bundle_path": "replays/bundles/replay_d000ad4bb9d87094.zip",
+      "episode_index": 1,
+      "error": null,
+      "focal_policy_id": "policy_000012",
+      "matched": true,
+      "opponent_policy_id": "policy_000021",
+      "pair_index": 0,
+      "raw_replay_path": null,
+      "replay_key64": "d000ad4bb9d87094",
+      "swap_index": 1,
+      "verification_report_path": "replays/verification/replay_d000ad4bb9d87094.json",
+      "verification_status": "success"
+    }
+  ]
+}

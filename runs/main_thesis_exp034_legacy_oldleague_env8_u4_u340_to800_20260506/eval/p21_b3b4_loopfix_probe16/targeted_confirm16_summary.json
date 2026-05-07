@@ -1,0 +1,58 @@
+{
+  "anchor_subset": {
+    "games": 64,
+    "mean": 0.59375,
+    "wins": 38
+  },
+  "created_unix": 1778106072.9123487,
+  "elapsed_seconds": 112.46489810943604,
+  "focal_policy_id": "policy_000021",
+  "games_per_row": 32,
+  "legacy_subset": {
+    "games": 0,
+    "mean": null,
+    "wins": 0
+  },
+  "overall": {
+    "games": 64,
+    "mean": 0.59375,
+    "wins": 38
+  },
+  "paired_seeds": 16,
+  "rows": [
+    {
+      "ci_high": 0.6960025709787957,
+      "ci_low": 0.5219308771554411,
+      "diagnostics_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__01_b3_heuristicpublicaggro/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "policy_000021",
+      "games": 32,
+      "losses": 13,
+      "mean": 0.59375,
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "paired_seeds": 16,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__01_b3_heuristicpublicaggro/matchup_summary.json",
+      "truncations": 0,
+      "wins": 19
+    },
+    {
+      "ci_high": 0.7020202158228325,
+      "ci_low": 0.5221276821814314,
+      "diagnostics_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__02_b4_heuristicpubliccontrol/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "policy_000021",
+      "games": 32,
+      "losses": 13,
+      "mean": 0.59375,
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "paired_seeds": 16,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__02_b4_heuristicpubliccontrol/matchup_summary.json",
+      "truncations": 0,
+      "wins": 19
+    }
+  ]
+}

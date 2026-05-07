@@ -1,0 +1,51 @@
+================================================================================
+STARTUP CONTRACT
+================================================================================
+spec_hash:              617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+config_hash:            26d87ce94187401128cdadd17727d6743978302b3d3ac1e23dae1d14ab8c6786
+computed_run_id64:      314e5bb6c967cd81
+computed_run_id256:     81cd67c9b65b4e3119b4f8c594eeabc2059b7f6bb81bc11e22aa3f01420f4366
+run_label:              ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506
+run_dir_name:           ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506
+spec_mismatch_policy:   hard_fail
+================================================================================
+Verified runtime spec bundle: compat=8590000130 sha256=617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+Loaded stack config with 0 components
+Wrote manifest: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/manifest.json
+Structured profiling enabled: profile_timers=True torch_profiler=False structured_metrics_mode=sampled teacher_aux_mode=always fixed_opponent_backend=simulator_native
+Resumed learner state: checkpoint=/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/transplant_exp023_to_exp028_no_b1_lane_override_20260506/best_transplant_exp028_no_b1_lane_override.pt update=220 policy_version=11
+Imported promotion anchor: anchor=B1 NoLeague baseline policy_id=b1_noleague_baseline source_run_dir=/root/weiss_schwarz_rl/runs/exp-002-current-spec-b1-noleague-baseline
+Imported seeded snapshot pool: count=11 source_run_dir=/root/weiss_schwarz_rl/runs/exp-023-early-b1-reserved-lane-ungated-tier1b
+Periodic dev eval: update=225 opponent=b0_randomlegal aggregate=0.9167 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_240.json
+Promotion gate passed: update=240 candidate=policy_000012 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Periodic dev eval: update=250 opponent=b0_randomlegal aggregate=0.9583 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_260.json
+Promotion gate passed: update=260 candidate=policy_000013 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Periodic dev eval: update=275 opponent=b0_randomlegal aggregate=0.9167 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Checkpoint guard rollback: update=275 best_update=250 current_score=0.9167 best_score=0.9583 reasons=score_drop
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_280.json
+Promotion gate passed: update=280 candidate=policy_000014 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_300.json
+Promotion gate passed: update=300 candidate=policy_000015 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Periodic dev eval: update=300 opponent=b0_randomlegal aggregate=0.9167 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Checkpoint guard rollback: update=300 best_update=250 current_score=0.9167 best_score=0.9583 reasons=score_drop
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_320.json
+Promotion gate passed: update=320 candidate=policy_000016 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Periodic dev eval: update=325 opponent=b0_randomlegal aggregate=0.9583 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_340.json
+Promotion gate passed: update=340 candidate=policy_000017 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Periodic dev eval: update=350 opponent=b0_randomlegal aggregate=0.9583 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_360.json
+Promotion gate passed: update=360 candidate=policy_000018 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Periodic dev eval: update=375 opponent=b0_randomlegal aggregate=0.9375 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Checkpoint guard rollback: update=375 best_update=250 current_score=0.9375 best_score=0.9583 reasons=score_drop
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_380.json
+Promotion gate passed: update=380 candidate=policy_000019 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_400.json
+Promotion gate passed: update=400 candidate=policy_000020 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Periodic dev eval: update=400 opponent=b0_randomlegal aggregate=0.9375 anchors=B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic
+Checkpoint guard rollback: update=400 best_update=250 current_score=0.9375 best_score=0.9583 reasons=score_drop
+Saved checkpoint metadata: /root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/ablation_exp028_no_b1_lane_override_from_exp023_to420_20260506/training/checkpoints/checkpoint_metadata_420.json
+Promotion gate failed: update=420 candidate=policy_000021 reasons=anchor_loss_guardrail_exceeded
+Completed canonical single-node training run: loss=1.794791 policy_loss=-0.001588 value_loss=0.004950 entropy=1.052972

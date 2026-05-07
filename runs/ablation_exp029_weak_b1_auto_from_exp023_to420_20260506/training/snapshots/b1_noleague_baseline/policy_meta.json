@@ -1,0 +1,10 @@
+{
+  "format": "imported_train_snapshot_metadata_v1",
+  "imported_from_policy_id": "b1_noleague_baseline",
+  "imported_from_run_dir": "/root/weiss_schwarz_rl/runs/exp-002-current-spec-b1-noleague-baseline",
+  "imported_from_snapshot_path": "training/snapshots/b1_noleague_baseline/weights.pt",
+  "policy_id": "b1_noleague_baseline",
+  "update": 1,
+  "weights_path": "training/snapshots/b1_noleague_baseline/weights.pt",
+  "weights_sha256": "4dbd6267dcc65165b0100a81ce4331ccbd525dbef894bd08c966a034864d96f0"
+}

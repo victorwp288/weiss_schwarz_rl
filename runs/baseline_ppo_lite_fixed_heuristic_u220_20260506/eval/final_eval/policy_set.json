@@ -1,0 +1,7 @@
+{
+  "policy_ids": [
+    "B0 RandomLegal",
+    "B2 HeuristicPublic",
+    "ppo_lite_best"
+  ]
+}

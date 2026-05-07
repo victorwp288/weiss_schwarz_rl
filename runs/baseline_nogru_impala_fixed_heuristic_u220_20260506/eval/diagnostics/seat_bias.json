@@ -1,0 +1,53 @@
+{
+  "global": {
+    "ci_high": 0.4791666666666667,
+    "ci_low": 0.4791666666666667,
+    "decisive_games": 192,
+    "seat0_win_rate": 0.4791666666666667
+  },
+  "kind": "seat_bias_summary_v1",
+  "matchups": [
+    {
+      "decisive_games": 32,
+      "policy_a": "B0 RandomLegal",
+      "policy_b": "B0 RandomLegal",
+      "seat0_win_rate": 0.40625,
+      "seat1_win_rate": 0.59375
+    },
+    {
+      "decisive_games": 32,
+      "policy_a": "B0 RandomLegal",
+      "policy_b": "B2 HeuristicPublic",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 32,
+      "policy_a": "B0 RandomLegal",
+      "policy_b": "nogru_impala_best",
+      "seat0_win_rate": 0.53125,
+      "seat1_win_rate": 0.46875
+    },
+    {
+      "decisive_games": 32,
+      "policy_a": "B2 HeuristicPublic",
+      "policy_b": "B2 HeuristicPublic",
+      "seat0_win_rate": 0.4375,
+      "seat1_win_rate": 0.5625
+    },
+    {
+      "decisive_games": 32,
+      "policy_a": "B2 HeuristicPublic",
+      "policy_b": "nogru_impala_best",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    },
+    {
+      "decisive_games": 32,
+      "policy_a": "nogru_impala_best",
+      "policy_b": "nogru_impala_best",
+      "seat0_win_rate": 0.5,
+      "seat1_win_rate": 0.5
+    }
+  ]
+}

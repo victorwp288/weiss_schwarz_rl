@@ -1,0 +1,38 @@
+schema_version: 2
+description: "Hard emergency continuation from p22 with near-pure B3/B4 variant pressure and tactical public teacher cycling"
+extends: structured_acceptance_exp031_b3b4_rescue_20260506.yaml
+training:
+  teacher_aux:
+    mode: always
+  structured_aux:
+    teacher_public_heuristic_profiles:
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle
+    teacher_public_heuristic_temperature: 8.0
+    teacher_public_heuristic_families:
+      - attack
+      - main_move
+  structured_warmstart:
+    teacher_public_heuristic_profiles:
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle
+    teacher_public_heuristic_families:
+      - main_play_character
+      - attack
+      - main_move
+league:
+  sampling:
+    noleague_baseline_reserved_envs_per_actor: 1
+    noleague_baseline_mix_fraction: 0.10
+    noleague_baseline_mix_end_updates: -1
+    heuristic_public_mix_fraction: 0.0
+    heuristic_public_final_mix_fraction: 0.0
+    heuristic_public_mix_end_updates: 1
+    heuristic_public_variant_mix_fraction: 0.85
+    heuristic_public_variant_mix_end_updates: -1
+    heuristic_public_variant_final_mix_fraction: 0.85
+    champion_mix_fraction: 0.0
+    hard_negative_mix_fraction: 0.0
+    pfsp_epsilon_uniform: 0.10

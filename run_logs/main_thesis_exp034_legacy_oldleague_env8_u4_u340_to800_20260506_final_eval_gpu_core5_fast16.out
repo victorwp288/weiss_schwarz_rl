@@ -1,0 +1,10 @@
+================================================================================
+STARTUP CONTRACT
+================================================================================
+spec_hash:              617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+config_hash:            9255c70eb44ddafe9e7c0b2601bf3f9e07ab711834d457a8725192e858a76cb5
+run_label:              (default)
+spec_mismatch_policy:   hard_fail
+================================================================================
+Verified runtime spec bundle: compat=8590000130 sha256=617b38051c728b667b870d357555672215d93552c816a07ffbb31f4f9945c51a
+Eval provenance git commit: 046600625a06f5ba0c26b5ea9d4cedf1eec62ca2

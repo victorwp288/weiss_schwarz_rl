@@ -1,0 +1,598 @@
+{
+  "action": {
+    "action_encoding_version": 1,
+    "action_space_size": 527,
+    "attack_type_encoding": [
+      [
+        "frontal",
+        0
+      ],
+      [
+        "side",
+        1
+      ],
+      [
+        "direct",
+        2
+      ]
+    ],
+    "constants": [
+      [
+        "MAX_HAND",
+        50
+      ],
+      [
+        "MAX_STAGE",
+        5
+      ],
+      [
+        "MAX_LEVEL",
+        4
+      ],
+      [
+        "ATTACK_SLOT_COUNT",
+        3
+      ],
+      [
+        "MAX_ABILITIES_PER_CARD",
+        4
+      ]
+    ],
+    "families": [
+      {
+        "base": 0,
+        "count": 1,
+        "description": "confirm mulligan selection",
+        "name": "mulligan_confirm",
+        "params": []
+      },
+      {
+        "base": 1,
+        "count": 50,
+        "description": "select card in hand for mulligan",
+        "name": "mulligan_select",
+        "params": [
+          "hand_index"
+        ]
+      },
+      {
+        "base": 51,
+        "count": 1,
+        "description": "pass action",
+        "name": "pass",
+        "params": []
+      },
+      {
+        "base": 52,
+        "count": 50,
+        "description": "clock card from hand",
+        "name": "clock_from_hand",
+        "params": [
+          "hand_index"
+        ]
+      },
+      {
+        "base": 102,
+        "count": 250,
+        "description": "play character to stage",
+        "name": "main_play_character",
+        "params": [
+          "hand_index",
+          "stage_slot"
+        ]
+      },
+      {
+        "base": 352,
+        "count": 50,
+        "description": "play event from hand",
+        "name": "main_play_event",
+        "params": [
+          "hand_index"
+        ]
+      },
+      {
+        "base": 402,
+        "count": 20,
+        "description": "move stage slot",
+        "name": "main_move",
+        "params": [
+          "from_slot",
+          "to_slot"
+        ]
+      },
+      {
+        "base": 422,
+        "count": 50,
+        "description": "play climax",
+        "name": "climax_play",
+        "params": [
+          "hand_index"
+        ]
+      },
+      {
+        "base": 472,
+        "count": 9,
+        "description": "declare attack",
+        "name": "attack",
+        "params": [
+          "slot",
+          "attack_type"
+        ]
+      },
+      {
+        "base": 481,
+        "count": 7,
+        "description": "choose card for level up",
+        "name": "level_up",
+        "params": [
+          "index"
+        ]
+      },
+      {
+        "base": 488,
+        "count": 5,
+        "description": "pay encore for a slot",
+        "name": "encore_pay",
+        "params": [
+          "slot"
+        ]
+      },
+      {
+        "base": 493,
+        "count": 5,
+        "description": "decline encore for a slot",
+        "name": "encore_decline",
+        "params": [
+          "slot"
+        ]
+      },
+      {
+        "base": 498,
+        "count": 10,
+        "description": "choose trigger order",
+        "name": "trigger_order",
+        "params": [
+          "index"
+        ]
+      },
+      {
+        "base": 508,
+        "count": 16,
+        "description": "select choice option on current page",
+        "name": "choice_select",
+        "params": [
+          "index"
+        ]
+      },
+      {
+        "base": 524,
+        "count": 1,
+        "description": "choice pagination previous",
+        "name": "choice_prev_page",
+        "params": []
+      },
+      {
+        "base": 525,
+        "count": 1,
+        "description": "choice pagination next",
+        "name": "choice_next_page",
+        "params": []
+      },
+      {
+        "base": 526,
+        "count": 1,
+        "description": "concede game (if enabled)",
+        "name": "concede",
+        "params": []
+      }
+    ],
+    "notes": [
+      "Action ids are stable within ACTION_ENCODING_VERSION.",
+      "Use legality masks or legal_action_ids for valid choices."
+    ],
+    "pass_action_id": 51
+  },
+  "observation": {
+    "dtype": "i32",
+    "header_fields": [
+      {
+        "description": "active player id",
+        "index": 0,
+        "name": "active_player",
+        "visibility": "public"
+      },
+      {
+        "description": "phase enum encoding",
+        "index": 1,
+        "name": "phase",
+        "visibility": "public"
+      },
+      {
+        "description": "decision kind encoding (or -1 if none)",
+        "index": 2,
+        "name": "decision_kind",
+        "visibility": "public"
+      },
+      {
+        "description": "player who must act (or -1)",
+        "index": 3,
+        "name": "decision_player",
+        "visibility": "public"
+      },
+      {
+        "description": "terminal status encoding",
+        "index": 4,
+        "name": "terminal",
+        "visibility": "public"
+      },
+      {
+        "description": "last action encoding",
+        "index": 5,
+        "name": "last_action_kind",
+        "visibility": "public"
+      },
+      {
+        "description": "last action arg0",
+        "index": 6,
+        "name": "last_action_arg0",
+        "visibility": "public"
+      },
+      {
+        "description": "last action arg1",
+        "index": 7,
+        "name": "last_action_arg1",
+        "visibility": "public"
+      },
+      {
+        "description": "attacker slot if in attack",
+        "index": 8,
+        "name": "attack_slot",
+        "visibility": "public"
+      },
+      {
+        "description": "defender slot if in attack",
+        "index": 9,
+        "name": "defender_slot",
+        "visibility": "public"
+      },
+      {
+        "description": "attack type encoding",
+        "index": 10,
+        "name": "attack_type",
+        "visibility": "public"
+      },
+      {
+        "description": "current attack damage",
+        "index": 11,
+        "name": "attack_damage",
+        "visibility": "public"
+      },
+      {
+        "description": "current counter power",
+        "index": 12,
+        "name": "attack_counter_power",
+        "visibility": "public"
+      },
+      {
+        "description": "focused slot for some decisions",
+        "index": 13,
+        "name": "focus_slot",
+        "visibility": "public"
+      },
+      {
+        "description": "choice page start index",
+        "index": 14,
+        "name": "choice_page_start",
+        "visibility": "public"
+      },
+      {
+        "description": "choice total candidates",
+        "index": 15,
+        "name": "choice_total",
+        "visibility": "public"
+      }
+    ],
+    "notes": [
+      "Player blocks are ordered perspective, opponent.",
+      "Hidden zones are masked by sentinel_hidden."
+    ],
+    "obs_encoding_version": 2,
+    "obs_len": 378,
+    "player_blocks": [
+      {
+        "base": 16,
+        "len": 171,
+        "player_index": 0,
+        "slices": [
+          {
+            "description": "level count",
+            "len": 1,
+            "name": "level_count",
+            "start": 0,
+            "visibility": "public"
+          },
+          {
+            "description": "clock count",
+            "len": 1,
+            "name": "clock_count",
+            "start": 1,
+            "visibility": "public"
+          },
+          {
+            "description": "deck count",
+            "len": 1,
+            "name": "deck_count",
+            "start": 2,
+            "visibility": "public"
+          },
+          {
+            "description": "hand count (private by default; visible in full mode or when reveal_opponent_hand_stock_counts is enabled)",
+            "len": 1,
+            "name": "hand_count",
+            "start": 3,
+            "visibility": "private"
+          },
+          {
+            "description": "stock count (private by default; visible in full mode or when reveal_opponent_hand_stock_counts is enabled)",
+            "len": 1,
+            "name": "stock_count",
+            "start": 4,
+            "visibility": "private"
+          },
+          {
+            "description": "waiting room count",
+            "len": 1,
+            "name": "waiting_room_count",
+            "start": 5,
+            "visibility": "public"
+          },
+          {
+            "description": "memory count (private unless full visibility)",
+            "len": 1,
+            "name": "memory_count",
+            "start": 6,
+            "visibility": "private"
+          },
+          {
+            "description": "climax count",
+            "len": 1,
+            "name": "climax_count",
+            "start": 7,
+            "visibility": "public"
+          },
+          {
+            "description": "resolution count",
+            "len": 1,
+            "name": "resolution_count",
+            "start": 8,
+            "visibility": "public"
+          },
+          {
+            "description": "stage slots (card id, status, has_attacked, power, base soul, effective soul, side-attack-allowed)",
+            "len": 35,
+            "name": "stage",
+            "start": 9,
+            "visibility": "public"
+          },
+          {
+            "description": "top climax card id",
+            "len": 1,
+            "name": "climax_top",
+            "start": 44,
+            "visibility": "public"
+          },
+          {
+            "description": "top level cards (chronological)",
+            "len": 4,
+            "name": "level_top",
+            "start": 45,
+            "visibility": "public"
+          },
+          {
+            "description": "top clock cards",
+            "len": 7,
+            "name": "clock_top",
+            "start": 49,
+            "visibility": "public"
+          },
+          {
+            "description": "top waiting room cards",
+            "len": 5,
+            "name": "waiting_room_top",
+            "start": 56,
+            "visibility": "public"
+          },
+          {
+            "description": "top resolution cards",
+            "len": 5,
+            "name": "resolution_top",
+            "start": 61,
+            "visibility": "public"
+          },
+          {
+            "description": "top stock cards",
+            "len": 5,
+            "name": "stock_top",
+            "start": 66,
+            "visibility": "private"
+          },
+          {
+            "description": "hand cards",
+            "len": 50,
+            "name": "hand",
+            "start": 71,
+            "visibility": "private"
+          },
+          {
+            "description": "deck cards",
+            "len": 50,
+            "name": "deck",
+            "start": 121,
+            "visibility": "private"
+          }
+        ]
+      },
+      {
+        "base": 187,
+        "len": 171,
+        "player_index": 1,
+        "slices": [
+          {
+            "description": "level count",
+            "len": 1,
+            "name": "level_count",
+            "start": 0,
+            "visibility": "public"
+          },
+          {
+            "description": "clock count",
+            "len": 1,
+            "name": "clock_count",
+            "start": 1,
+            "visibility": "public"
+          },
+          {
+            "description": "deck count",
+            "len": 1,
+            "name": "deck_count",
+            "start": 2,
+            "visibility": "public"
+          },
+          {
+            "description": "hand count (private by default; visible in full mode or when reveal_opponent_hand_stock_counts is enabled)",
+            "len": 1,
+            "name": "hand_count",
+            "start": 3,
+            "visibility": "private"
+          },
+          {
+            "description": "stock count (private by default; visible in full mode or when reveal_opponent_hand_stock_counts is enabled)",
+            "len": 1,
+            "name": "stock_count",
+            "start": 4,
+            "visibility": "private"
+          },
+          {
+            "description": "waiting room count",
+            "len": 1,
+            "name": "waiting_room_count",
+            "start": 5,
+            "visibility": "public"
+          },
+          {
+            "description": "memory count (private unless full visibility)",
+            "len": 1,
+            "name": "memory_count",
+            "start": 6,
+            "visibility": "private"
+          },
+          {
+            "description": "climax count",
+            "len": 1,
+            "name": "climax_count",
+            "start": 7,
+            "visibility": "public"
+          },
+          {
+            "description": "resolution count",
+            "len": 1,
+            "name": "resolution_count",
+            "start": 8,
+            "visibility": "public"
+          },
+          {
+            "description": "stage slots (card id, status, has_attacked, power, base soul, effective soul, side-attack-allowed)",
+            "len": 35,
+            "name": "stage",
+            "start": 9,
+            "visibility": "public"
+          },
+          {
+            "description": "top climax card id",
+            "len": 1,
+            "name": "climax_top",
+            "start": 44,
+            "visibility": "public"
+          },
+          {
+            "description": "top level cards (chronological)",
+            "len": 4,
+            "name": "level_top",
+            "start": 45,
+            "visibility": "public"
+          },
+          {
+            "description": "top clock cards",
+            "len": 7,
+            "name": "clock_top",
+            "start": 49,
+            "visibility": "public"
+          },
+          {
+            "description": "top waiting room cards",
+            "len": 5,
+            "name": "waiting_room_top",
+            "start": 56,
+            "visibility": "public"
+          },
+          {
+            "description": "top resolution cards",
+            "len": 5,
+            "name": "resolution_top",
+            "start": 61,
+            "visibility": "public"
+          },
+          {
+            "description": "top stock cards",
+            "len": 5,
+            "name": "stock_top",
+            "start": 66,
+            "visibility": "private"
+          },
+          {
+            "description": "hand cards",
+            "len": 50,
+            "name": "hand",
+            "start": 71,
+            "visibility": "private"
+          },
+          {
+            "description": "deck cards",
+            "len": 50,
+            "name": "deck",
+            "start": 121,
+            "visibility": "private"
+          }
+        ]
+      }
+    ],
+    "self_first": true,
+    "sentinel_empty_card": 0,
+    "sentinel_hidden": -1,
+    "tail_slices": [
+      {
+        "description": "reason bits",
+        "len": 8,
+        "name": "reason",
+        "start": 358,
+        "visibility": "public"
+      },
+      {
+        "description": "recent reveal history",
+        "len": 8,
+        "name": "reveal",
+        "start": 366,
+        "visibility": "public"
+      },
+      {
+        "description": "context bits",
+        "len": 4,
+        "name": "context",
+        "start": 374,
+        "visibility": "public"
+      }
+    ]
+  },
+  "policy_version": 2,
+  "spec_hash": 8590000130
+}

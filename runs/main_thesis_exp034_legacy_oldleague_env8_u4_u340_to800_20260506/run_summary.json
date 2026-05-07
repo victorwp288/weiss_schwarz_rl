@@ -1,0 +1,35 @@
+{
+  "artifact_roots": {
+    "eval": "eval",
+    "figures": "figures",
+    "replays": "replays",
+    "tensorboard": "tensorboard",
+    "training": "training"
+  },
+  "artifact_schema_version": "run_artifacts_v2",
+  "b1_baseline_run_dir": "/root/weiss_schwarz_rl/runs/exp-002-current-spec-b1-noleague-baseline",
+  "determinism_report_path": "determinism_report.json",
+  "environment_path": "environment.json",
+  "kind": "run_summary_v1",
+  "manifest_path": "manifest.json",
+  "paper_grade": false,
+  "paper_readiness_summary_path": "paper_readiness_summary.json",
+  "policy_set_selection_mode": "unresolved",
+  "resume": {
+    "enabled": true,
+    "resume_checkpoint_path": "/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/training/checkpoints/checkpoint_360.pt",
+    "resume_run_dir": "/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506"
+  },
+  "run_dir": "/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506",
+  "run_id256": "ea28cae810372a8d329d96aa7fd913074c7b745dcc97458b3be60c202417b610",
+  "run_id64": "8d2a3710e8ca28ea",
+  "runtime_mode": "train_ordered",
+  "seed_snapshot_run_dir": "/root/wsrl-exp034-legacy/weiss_schwarz_rl/runs/exp034_legacy_oldleague_env8_u4_cont_u320_to340_20260506",
+  "training_controls": {
+    "fixed_opponent_backend": "simulator_native",
+    "profile_timers": true,
+    "structured_metrics_mode": "sampled",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false
+  }
+}

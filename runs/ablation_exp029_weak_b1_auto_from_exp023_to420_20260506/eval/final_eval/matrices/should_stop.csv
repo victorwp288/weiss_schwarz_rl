@@ -1,0 +1,6 @@
+focal_policy_id,B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic,policy_000012,policy_000021
+B0 RandomLegal,True,True,True,True,True
+B1 NoLeague baseline,True,True,True,True,True
+B2 HeuristicPublic,True,True,True,True,True
+policy_000012,True,True,True,True,True
+policy_000021,True,True,True,True,True

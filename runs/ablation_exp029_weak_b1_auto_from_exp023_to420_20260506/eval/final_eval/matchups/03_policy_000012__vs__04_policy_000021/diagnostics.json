@@ -1,0 +1,32 @@
+{
+  "focal_policy_id": "policy_000012",
+  "opponent_policy_id": "policy_000021",
+  "pair_count": 4,
+  "policy_breakdown": {
+    "policy_000012": {
+      "games_as_seat0": 4,
+      "games_as_seat1": 4,
+      "total_wins": 3,
+      "wins_as_seat0": 0,
+      "wins_as_seat1": 3
+    },
+    "policy_000021": {
+      "games_as_seat0": 4,
+      "games_as_seat1": 4,
+      "total_wins": 5,
+      "wins_as_seat0": 1,
+      "wins_as_seat1": 4
+    }
+  },
+  "seat_results": {
+    "decisive_games": 8,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.125,
+    "seat0_wins": 1,
+    "seat1_win_rate": 0.875,
+    "seat1_wins": 7,
+    "total_games": 8,
+    "truncations": 0
+  }
+}
