@@ -1,21 +1,21 @@
 \begin{table}[t]
 \centering
-\caption{Targeted evaluation of the selected main league GRU model, policy\_000021. B0, B2, B3, and B4 are confirm64 rows; B1 and legacy league opponents are confirm32 rows.}
+\caption{Targeted evaluation of the selected main League GRU model, policy\_000021. All rows use 64 paired seeds (128 games) with seat-swapped evaluation.}
 \label{tab:main-p21-targeted}
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Opponent & Wins & Games & Win rate \\
+Opponent & Wins & Games & Win rate & Issues \\
 \midrule
-B0 RandomLegal & 128 & 128 & 100.00\% \\
-B1 NoLeague baseline & 50 & 64 & 78.12\% \\
-B2 HeuristicPublic & 128 & 128 & 100.00\% \\
-B3 HeuristicPublicAggro & 82 & 128 & 64.06\% \\
-B4 HeuristicPublicControl & 83 & 128 & 64.84\% \\
-Legacy p11 & 40 & 64 & 62.50\% \\
-Legacy p12 & 34 & 64 & 53.12\% \\
-Legacy p14 & 36 & 64 & 56.25\% \\
-Legacy p15 & 34 & 64 & 53.12\% \\
-Legacy p16 & 33 & 64 & 51.56\% \\
+B0 RandomLegal & 128 & 128 & 100.00\% & 0 \\
+B1 NoLeague baseline & 100 & 128 & 78.12\% & 0 \\
+B2 HeuristicPublic & 128 & 128 & 100.00\% & 0 \\
+B3 HeuristicPublicAggro & 82 & 128 & 64.06\% & 0 \\
+B4 HeuristicPublicControl & 83 & 128 & 64.84\% & 0 \\
+Legacy p11 & 76 & 128 & 59.38\% & 0 \\
+Legacy p12 & 69 & 128 & 53.91\% & 0 \\
+Legacy p14 & 69 & 128 & 53.91\% & 0 \\
+Legacy p15 & 65 & 128 & 50.78\% & 0 \\
+Legacy p16 & 65 & 128 & 50.78\% & 0 \\
 \bottomrule
 \end{tabular}
 \end{table}

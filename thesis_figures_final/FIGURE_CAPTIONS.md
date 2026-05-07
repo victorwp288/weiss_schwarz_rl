@@ -1,7 +1,7 @@
 # Thesis Figure Captions
 
 ## fig_main_targeted_robustness
-Targeted evaluation of the selected main league GRU model (`policy_000021`) against fixed anchors and legacy league opponents. B0/B2/B3/B4 use completed confirm64 rows; B1 and legacy league rows use completed confirm32 rows. The B1 plus legacy block scores 227/384 (59.1%), and B3/B4 score 165/256 (64.5%).
+Targeted evaluation of the selected main League GRU model (`policy_000021`) against fixed anchors, corrected B3/B4 public heuristics, and legacy league opponents. Evidence level: confirm64 rows. Overall targeted table: 865/1280 (67.6%). B1 no-league: 100/128 (78.1%). B3/B4 combined: 165/256 (64.5%). Legacy neural subset: 344/640 (53.8%).
 
 ## fig_anchor_retention
 Periodic development evaluation on fixed anchors for the main model and B1-pressure ablations. Solid lines show aggregate anchor score; dashed lines show B1 no-league retention. Use this to argue that the selected model retains anchor strength while entering league training.
@@ -25,7 +25,7 @@ Validation figure for the corrected B3/B4 evaluation rows. It shows that all B3/
 Seat-swapped B3/B4 robustness diagnostic. `policy_000021` remains above 50% both when moving first and when moving second, which supports using the paired-seat evaluation rather than a single-seat result.
 
 ## fig_p21_seat_advantage
-Headline-table seat sensitivity diagnostic for `policy_000021`. Positive values mean the policy won more often from the second seat than the first seat for that opponent. Across the headline table, p21 scored 313/448 from first seat and 335/448 from second seat, indicating a modest second-seat advantage in these artifacts.
+Headline-table seat sensitivity diagnostic for `policy_000021`. Positive values mean the policy won more often from the second seat than the first seat for that opponent. The evaluations are paired and seat-swapped, so the seat split is a diagnostic rather than a confound.
 
-## fig_p21_seat_advantage
-Headline-table seat sensitivity diagnostic for `policy_000021`. Positive values mean the policy won more often from the second seat than the first seat for that opponent. The aggregate row is first seat 313/448 and second seat 335/448, so there is a modest second-seat advantage in these artifacts.
+## fig_close_legacy_stress
+Stress check for the two closest legacy neural rows. Both p15 and p16 remain slightly above parity at confirm128 (`129/256` each), but their bootstrap intervals overlap 50%, so they should be described as narrow positive margins rather than decisive wins.

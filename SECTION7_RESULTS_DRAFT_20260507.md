@@ -14,7 +14,11 @@ The main model substantially solves the fixed public anchors and retains positiv
 
 Recommended wording:
 
-> The selected League GRU policy maintains perfect performance against the random and public heuristic anchors in higher-seed confirmation (`128/128` against both B0 RandomLegal and B2 HeuristicPublic). It also beats the no-league B1 baseline in confirm32 (`50/64`, 78.1%). Against older promoted league snapshots, performance is more modest but remains above parity in each confirm32 row, with individual win rates between 51.6% and 62.5%.
+> The selected League GRU policy maintains perfect performance against the random and public heuristic anchors in higher-seed confirmation (`128/128` against both B0 RandomLegal and B2 HeuristicPublic). It also beats the no-league B1 baseline in confirm64 (`100/128`, 78.1%). Against older promoted league snapshots, performance is more modest but remains above parity in each confirm64 row, with individual win rates between 50.8% and 59.4%.
+
+For the two closest promoted snapshots, add the following caveat if space allows:
+
+> Because p15 and p16 were close to parity in the uniform confirm64 table, they were rerun with 128 paired seeds. Both remained slightly above parity (`129/256`, 50.4%), but the confidence intervals overlap 50%, so these rows should be interpreted as narrow robustness evidence rather than decisive dominance.
 
 ## B3/B4 Correction
 
@@ -50,12 +54,13 @@ Use these figures from `thesis_figures_final`:
 - `fig_main_targeted_robustness.pdf`: primary quantitative result.
 - `fig_b3b4_fixed_validation.pdf`: documents B3/B4 completion and win rates after the heuristic-loop fix.
 - `fig_b3b4_seat_balance.pdf`: shows B3/B4 wins are not from only one seat.
+- `fig_close_legacy_stress.pdf`: documents the p15/p16 confirm128 stress check.
 - `fig_anchor_retention.pdf`: supports B1-pressure/ablation discussion.
 - `fig_baseline_fixed_grid.pdf`: compact fixed-opponent baseline comparison.
 
 ## Claims To Avoid
 
-- Do not claim all final rows are confirm64 unless the B1/legacy confirm32/confirm64 run completes and figures are regenerated.
+- Do not overstate the close legacy rows. p15 and p16 are above parity, but only by `65/128`.
 - Do not claim No-GRU/PPO were evaluated against the same full opponent set.
 - Do not imply the B3/B4 fix improved the learned model. It repaired invalid opponent behavior in evaluation.
 - Do not claim current-simulator generality; this main result is legacy-simulator comparable.
@@ -69,12 +74,12 @@ Later snapshots up to `policy_000033` were checked after the p21 package was ass
 | Opponent | Wins | Games | Win rate | Status |
 |---|---:|---:|---:|---|
 | B0 RandomLegal | 128 | 128 | 100.00% | confirm64 |
-| B1 NoLeague baseline | 50 | 64 | 78.12% | confirm32 |
+| B1 NoLeague baseline | 100 | 128 | 78.12% | confirm64 |
 | B2 HeuristicPublic | 128 | 128 | 100.00% | confirm64 |
 | B3 HeuristicPublicAggro | 82 | 128 | 64.06% | fixed confirm64 |
 | B4 HeuristicPublicControl | 83 | 128 | 64.84% | fixed confirm64 |
-| Legacy p11 | 40 | 64 | 62.50% | confirm32 |
-| Legacy p12 | 34 | 64 | 53.12% | confirm32 |
-| Legacy p14 | 36 | 64 | 56.25% | confirm32 |
-| Legacy p15 | 34 | 64 | 53.12% | confirm32 |
-| Legacy p16 | 33 | 64 | 51.56% | confirm32 |
+| Legacy p11 | 76 | 128 | 59.38% | confirm64 |
+| Legacy p12 | 69 | 128 | 53.91% | confirm64 |
+| Legacy p14 | 69 | 128 | 53.91% | confirm64 |
+| Legacy p15 | 65 | 128 | 50.78% | confirm64 |
+| Legacy p16 | 65 | 128 | 50.78% | confirm64 |

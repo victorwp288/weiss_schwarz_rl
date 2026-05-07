@@ -2,7 +2,7 @@
 
 ## Verdict
 
-The main result package is thesis-usable if reported with the comparability caveats below. The main model result is now substantially stronger than the earlier 32-game table: every headline row is at least confirm32, and B0/B2/B3/B4 are confirm64.
+The main result package is thesis-usable if reported with the comparability caveats below. The main model result is now substantially stronger than the earlier 32-game table: every headline row is confirm64, using 64 paired seeds / 128 seat-swapped games per opponent.
 
 The safest thesis framing is:
 
@@ -10,6 +10,7 @@ The safest thesis framing is:
 - Primary evidence: targeted confirmation table, not the tiny fast final matrix.
 - Baselines: useful but not all equally comparable. No-GRU and PPO-lite are fixed-opponent baselines, not full league-robustness ablations.
 - B3/B4: valid only after the heuristic move-loop fix; old B3/B4 zero rows are invalid truncation artifacts and must not be reported as losses.
+- Close legacy rows: p15 and p16 were stress-checked at confirm128 and remained narrowly positive (`129/256` each), but their confidence intervals overlap parity.
 
 After a later-checkpoint sweep, `policy_000021` remains the recommended thesis model. Later `policy_000033` looked promising in a small 8-paired-seed stress sweep, but did not hold up in confirm32: it underperformed p21 on B1, B3/B4, p11, p14, and p15, while only improving p12 and p16.
 
@@ -18,24 +19,24 @@ After a later-checkpoint sweep, `policy_000021` remains the recommended thesis m
 | Opponent | Wins | Games | Win rate | Evidence level | Truncations | Engine errors |
 |---|---:|---:|---:|---|---:|---:|
 | B0 RandomLegal | 128 | 128 | 100.00% | confirm64 | 0 | 0 |
-| B1 NoLeague baseline | 50 | 64 | 78.12% | confirm32 | 0 | 0 |
+| B1 NoLeague baseline | 100 | 128 | 78.12% | confirm64 | 0 | 0 |
 | B2 HeuristicPublic | 128 | 128 | 100.00% | confirm64 | 0 | 0 |
 | B3 HeuristicPublicAggro | 82 | 128 | 64.06% | confirm64 after heuristic-loop fix | 0 | 0 |
 | B4 HeuristicPublicControl | 83 | 128 | 64.84% | confirm64 after heuristic-loop fix | 0 | 0 |
-| Legacy p11 | 40 | 64 | 62.50% | confirm32 | 0 | 0 |
-| Legacy p12 | 34 | 64 | 53.12% | confirm32 | 0 | 0 |
-| Legacy p14 | 36 | 64 | 56.25% | confirm32 | 0 | 0 |
-| Legacy p15 | 34 | 64 | 53.12% | confirm32 | 0 | 0 |
-| Legacy p16 | 33 | 64 | 51.56% | confirm32 | 0 | 0 |
+| Legacy p11 | 76 | 128 | 59.38% | confirm64 | 0 | 0 |
+| Legacy p12 | 69 | 128 | 53.91% | confirm64 | 0 | 0 |
+| Legacy p14 | 69 | 128 | 53.91% | confirm64 | 0 | 0 |
+| Legacy p15 | 65 | 128 | 50.78% | confirm64 | 0 | 0 |
+| Legacy p16 | 65 | 128 | 50.78% | confirm64 | 0 | 0 |
 
-Combined over the displayed table: `648/896 = 72.32%`. This aggregate is useful as a broad summary, but the thesis should emphasize the per-opponent rows because the table mixes confirm32 and confirm64 evidence.
+Combined over the displayed table: `865/1280 = 67.58%`. This aggregate is useful as a broad summary, but the thesis should emphasize the per-opponent rows because the opponent set mixes fixed anchors, heuristic variants, and legacy neural snapshots.
 
 Subsets:
 
 - Fixed public anchors B0/B2: `256/256 = 100.00%`.
 - B3/B4 after fix: `165/256 = 64.45%`.
-- B1 plus legacy neural opponents: `227/384 = 59.11%`.
-- Legacy-only neural subset: `177/320 = 55.31%`.
+- B1 plus legacy neural opponents: `444/768 = 57.81%`.
+- Legacy-only neural subset: `344/640 = 53.75%`.
 
 ## Artifact Sources
 
@@ -48,7 +49,8 @@ Local copied artifacts:
 - `vast_artifacts/main/confirm64_rows/p21_vs_b0_summary.json`
 - `vast_artifacts/main/confirm64_rows/p21_vs_b2_summary.json`
 - `vast_artifacts/main/p21_b3b4_loopfix_confirm64_summary.json`
-- `vast_artifacts/main/p21_b1_legacy_confirm32_summary.json`
+- `vast_artifacts/main/p21_b1_legacy_confirm64_summary.json`
+- Close-row stress check: `vast_artifacts/main/p21_p15_p16_confirm128_summary.json`
 - Candidate check: `vast_artifacts/main/p33_b1_b3b4_legacy_confirm32_summary.json`
 
 Main figures:
@@ -57,6 +59,7 @@ Main figures:
 - `thesis_figures_final/fig_b3b4_fixed_validation.pdf`
 - `thesis_figures_final/fig_b3b4_seat_balance.pdf`
 - `thesis_figures_final/fig_p21_seat_advantage.pdf`
+- `thesis_figures_final/fig_close_legacy_stress.pdf`
 - `thesis_figures_final/fig_anchor_retention.pdf`
 - `thesis_figures_final/fig_baseline_fixed_grid.pdf`
 
@@ -138,9 +141,9 @@ The headline evaluations are seat-swapped, so first/second-seat effects can be m
 
 For `policy_000021` across the headline table:
 
-- First seat: `313/448 = 69.87%`
-- Second seat: `335/448 = 74.78%`
-- Difference: second seat is `+4.91` percentage points.
+- First seat: `419/640 = 65.47%`
+- Second seat: `446/640 = 69.69%`
+- Difference: second seat is `+4.22` percentage points.
 
 Interpretation: there is a modest second-seat advantage in these artifacts. It is not driving the headline result because all reported evaluations are paired/seat-swapped, but it is worth mentioning as a diagnostic. The advantage is largest against late legacy neural opponents p14-p16.
 
@@ -163,16 +166,20 @@ Recommended claim:
 
 Recommended quantitative wording:
 
-> In targeted confirmation, the model achieved 100% against B0 and B2 over 128 games each, 78.1% against B1 over 64 games, 64.1% and 64.8% against B3 and B4 over 128 games each, and 51.6%-62.5% against legacy promoted policies over 64 games each.
+> In targeted confirmation, the model achieved 100% against B0 and B2, 78.1% against B1, 64.1% and 64.8% against B3 and B4, and 50.8%-59.4% against legacy promoted policies, with every row evaluated over 128 games and no truncations or engine errors.
+
+Optional close-row caveat:
+
+> The two closest legacy rows, p15 and p16, were additionally checked at 256 games each and remained slightly above parity (`129/256 = 50.4%`), but the margin is narrow and should be interpreted cautiously.
 
 ## What Not To Claim
 
 - Do not claim this is a clean current-simulator result; it is a legacy exp034-runtime result for comparability.
 - Do not report the old B3/B4 zeros as losses.
-- Do not claim every row is confirm64; B1 and legacy rows are confirm32.
+- Do not overclaim the close legacy rows; p15 and p16 are positive but narrow at `65/128`.
 - Do not claim No-GRU/PPO-lite have the same opponent coverage as the main model.
 - Do not use the tiny fast final matrix as headline quantitative evidence.
 
 ## Remaining Optional Improvements
 
-If more time is available, the only major quantitative upgrade would be a full overnight confirm64 for B1 and legacy neural opponents. It is not necessary for a defensible result package because confirm32 is already much stronger than the original 32-game table, but confirm64 would make the table more uniform.
+If more time is available, the only major quantitative upgrade would be a wider confirm128 or confirm256 over all legacy neural rows. That is optional; the current confirm64 table plus p15/p16 confirm128 stress check is already uniform enough for a defensible thesis result.
