@@ -60,6 +60,10 @@ Use these figures from `thesis_figures_final`:
 - Do not imply the B3/B4 fix improved the learned model. It repaired invalid opponent behavior in evaluation.
 - Do not claim current-simulator generality; this main result is legacy-simulator comparable.
 
+## Candidate Selection Note
+
+Later snapshots up to `policy_000033` were checked after the p21 package was assembled. `policy_000033` looked promising in a very small sweep, but confirm32 showed it was not a better thesis model overall: it scored `293/512 = 57.23%` on B1, B3/B4, and legacy neural opponents, with weaker B1 and B3/B4 performance than p21. It improved p12 and p16 but regressed p11, p14, and p15. Therefore p21 remains the recommended main model because it gives the stronger broad robustness profile.
+
 ## Current Best Numerical Summary
 
 | Opponent | Wins | Games | Win rate | Status |

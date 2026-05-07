@@ -11,6 +11,8 @@ The safest thesis framing is:
 - Baselines: useful but not all equally comparable. No-GRU and PPO-lite are fixed-opponent baselines, not full league-robustness ablations.
 - B3/B4: valid only after the heuristic move-loop fix; old B3/B4 zero rows are invalid truncation artifacts and must not be reported as losses.
 
+After a later-checkpoint sweep, `policy_000021` remains the recommended thesis model. Later `policy_000033` looked promising in a small 8-paired-seed stress sweep, but did not hold up in confirm32: it underperformed p21 on B1, B3/B4, p11, p14, and p15, while only improving p12 and p16.
+
 ## Main Headline Table
 
 | Opponent | Wins | Games | Win rate | Evidence level | Truncations | Engine errors |
@@ -47,6 +49,7 @@ Local copied artifacts:
 - `vast_artifacts/main/confirm64_rows/p21_vs_b2_summary.json`
 - `vast_artifacts/main/p21_b3b4_loopfix_confirm64_summary.json`
 - `vast_artifacts/main/p21_b1_legacy_confirm32_summary.json`
+- Candidate check: `vast_artifacts/main/p33_b1_b3b4_legacy_confirm32_summary.json`
 
 Main figures:
 
@@ -87,6 +90,27 @@ Thesis wording should say “fixed-opponent baselines,” not “full league rob
 ### Fast final matrices
 
 The final matrix sanity artifacts are low-game sanity checks, not headline evidence. Example: rows are often 8 games. Keep `fig_fast_matrix_sanity` as an artifact/sanity figure only, or omit it from the main results section.
+
+## Candidate Selection Check
+
+A small sweep over later snapshots (`policy_000022`, `policy_000025`, `policy_000029`, `policy_000033`) suggested that `policy_000033` might be competitive. It was then evaluated more carefully on B1, B3/B4, and the five legacy neural opponents.
+
+`policy_000033` confirm32 results:
+
+| Opponent | Wins | Games | Win rate |
+|---|---:|---:|---:|
+| B1 NoLeague baseline | 48 | 64 | 75.00% |
+| B3 HeuristicPublicAggro | 36 | 64 | 56.25% |
+| B4 HeuristicPublicControl | 36 | 64 | 56.25% |
+| Legacy p11 | 37 | 64 | 57.81% |
+| Legacy p12 | 36 | 64 | 56.25% |
+| Legacy p14 | 32 | 64 | 50.00% |
+| Legacy p15 | 32 | 64 | 50.00% |
+| Legacy p16 | 36 | 64 | 56.25% |
+
+Overall p33 on that candidate set: `293/512 = 57.23%`.
+
+Decision: keep `policy_000021`. p33 improves p12 and p16, but it weakens B1, B3/B4, p11, p14, and p15. Since the thesis needs broad robustness rather than one or two better legacy rows, p21 is still the better primary model.
 
 ## B3/B4 Validity
 
@@ -139,4 +163,3 @@ Recommended quantitative wording:
 ## Remaining Optional Improvements
 
 If more time is available, the only major quantitative upgrade would be a full overnight confirm64 for B1 and legacy neural opponents. It is not necessary for a defensible result package because confirm32 is already much stronger than the original 32-game table, but confirm64 would make the table more uniform.
-
