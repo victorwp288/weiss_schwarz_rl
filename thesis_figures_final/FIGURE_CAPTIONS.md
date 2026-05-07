@@ -29,3 +29,15 @@ Headline-table seat sensitivity diagnostic for `policy_000021`. Positive values 
 
 ## fig_close_legacy_stress
 Stress check for the two closest legacy neural rows. Both p15 and p16 remain slightly above parity at confirm128 (`129/256` each), but their bootstrap intervals overlap 50%, so they should be described as narrow positive margins rather than decisive wins.
+
+## fig_result_decomposition
+Aggregate view of the confirm64 table by opponent group. This is useful for a high-level results paragraph: fixed anchors `256/256`, B1 `100/128`, B3/B4 `165/256`, and legacy neural snapshots `344/640`.
+
+## fig_legacy_margin_ladder
+Per-legacy-opponent margin above 50% parity with confidence intervals. This is the clearest caveat figure: every legacy row is positive, but p15/p16 are close.
+
+## fig_candidate_p21_vs_p33
+Candidate selection diagnostic comparing selected p21 against later p33 on common targeted opponents. p21 uses confirm64 and p33 uses confirm32, so it should support model selection discussion rather than serve as a formal equal-seed comparison.
+
+## fig_anchor_ablation_endpoints
+Endpoint fixed-anchor retention for the main model and B1-pressure ablations. Useful for the ablation discussion because it summarizes how B1 pressure affected anchor retention.

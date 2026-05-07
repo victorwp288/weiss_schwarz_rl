@@ -382,6 +382,175 @@ def figure_close_legacy_stress():
     savefig("fig_close_legacy_stress")
 
 
+def figure_result_decomposition():
+    rows, _ = targeted_rows()
+    groups = [
+        ("fixed anchors\nB0/B2", [r for r in rows if r["opponent_policy_id"] in ("B0 RandomLegal", "B2 HeuristicPublic")], TEAL),
+        ("B1 no-league", [r for r in rows if r["opponent_policy_id"] == "B1 NoLeague baseline"], AMBER),
+        ("B3/B4\nheuristics", [r for r in rows if r["opponent_policy_id"].startswith("B3") or r["opponent_policy_id"].startswith("B4")], PURPLE),
+        ("legacy neural\np11-p16", [r for r in rows if "policy_0000" in r["opponent_policy_id"]], BLUE),
+    ]
+    labels, means, counts, colors = [], [], [], []
+    for label, group_rows, color in groups:
+        wins = sum(int(r["wins"]) for r in group_rows)
+        games = sum(int(r["games"]) for r in group_rows)
+        labels.append(label)
+        means.append(100 * wins / games)
+        counts.append((wins, games))
+        colors.append(color)
+
+    fig, ax = plt.subplots(figsize=(7.4, 4.8))
+    x = np.arange(len(labels))
+    bars = ax.bar(x, means, color=colors, width=0.62)
+    ax.axhline(50, color="#1F2328", linestyle="--", linewidth=1.1)
+    for bar, (wins, games), mean in zip(bars, counts, means):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            min(mean + 2.2, 104),
+            f"{wins}/{games}\n{mean:.1f}%",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+    ax.set_xticks(x, labels)
+    ax.set_ylim(0, 112)
+    ax.set_ylabel("Aggregate win rate (%)")
+    ax.set_title("Main result by opponent group", fontsize=13.5, pad=12)
+    ax.grid(axis="y", color=LIGHT_GRID, linewidth=0.8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.subplots_adjust(bottom=0.20, top=0.86, left=0.12, right=0.98)
+    savefig("fig_result_decomposition")
+
+
+def figure_legacy_margin_ladder():
+    rows, _ = targeted_rows()
+    legacy = [r for r in rows if "policy_0000" in r["opponent_policy_id"]]
+    legacy.sort(key=lambda r: short_policy(r["opponent_policy_id"]))
+    labels = [short_policy(r["opponent_policy_id"]) for r in legacy]
+    margin = np.array([100 * (float(r["mean"]) - 0.5) for r in legacy])
+    low = np.array([100 * (float(r["ci_low"]) - 0.5) for r in legacy])
+    high = np.array([100 * (float(r["ci_high"]) - 0.5) for r in legacy])
+    y = np.arange(len(legacy))
+
+    fig, ax = plt.subplots(figsize=(7.4, 4.4))
+    colors = [BLUE if m >= 4 else AMBER for m in margin]
+    ax.barh(y, margin, color=colors, height=0.62)
+    ax.errorbar(
+        margin,
+        y,
+        xerr=np.vstack([margin - low, high - margin]),
+        fmt="none",
+        ecolor="#1F2328",
+        capsize=4,
+        linewidth=1.2,
+    )
+    ax.axvline(0, color="#1F2328", linestyle="--", linewidth=1.1)
+    for yi, m, row in zip(y, margin, legacy):
+        ax.text(
+            m + (0.45 if m >= 0 else -0.45),
+            yi,
+            f"{int(row['wins'])}/{int(row['games'])}",
+            va="center",
+            ha="left" if m >= 0 else "right",
+            fontsize=9,
+        )
+    ax.set_yticks(y, labels)
+    ax.invert_yaxis()
+    ax.set_xlabel("Margin over 50% parity (percentage points)")
+    ax.set_title("Legacy league robustness margins", fontsize=13.5, pad=12)
+    max_abs = max(10, float(np.nanmax(np.abs(np.r_[low, high]))) + 2)
+    ax.set_xlim(-max_abs, max_abs)
+    ax.grid(axis="x", color=LIGHT_GRID, linewidth=0.8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.subplots_adjust(bottom=0.18, top=0.86, left=0.18, right=0.96)
+    savefig("fig_legacy_margin_ladder")
+
+
+def figure_candidate_selection_p21_p33():
+    rows21, _ = targeted_rows()
+    rows33 = load_json(ARTIFACTS / "main" / "p33_b1_b3b4_legacy_confirm32_summary.json")["rows"]
+    by21 = {r["opponent_policy_id"]: r for r in rows21}
+    by33 = {r["opponent_policy_id"]: r for r in rows33}
+    keys = [key for key in by33 if key in by21]
+    order = {
+        "B1 NoLeague baseline": 0,
+        "B3 HeuristicPublicAggro": 1,
+        "B4 HeuristicPublicControl": 2,
+    }
+    keys.sort(key=lambda key: order.get(key, 10 + short_policy(key).__hash__() % 1000))
+    # Stabilize legacy ordering after the anchors.
+    keys = [k for k in ("B1 NoLeague baseline", "B3 HeuristicPublicAggro", "B4 HeuristicPublicControl") if k in by33] + [
+        k for suffix in ("policy_000011", "policy_000012", "policy_000014", "policy_000015", "policy_000016")
+        for k in keys
+        if suffix in k
+    ]
+    labels = [short_policy(k) for k in keys]
+    p21 = np.array([100 * by21[k]["mean"] for k in keys])
+    p33 = np.array([100 * by33[k]["mean"] for k in keys])
+    diff = p21 - p33
+    x = np.arange(len(keys))
+    width = 0.36
+
+    fig, ax = plt.subplots(figsize=(9.2, 4.9))
+    ax.bar(x - width / 2, p21, width=width, color=BLUE, label="p21 selected (confirm64)")
+    ax.bar(x + width / 2, p33, width=width, color=GRAY, label="p33 candidate (confirm32)")
+    ax.axhline(50, color="#1F2328", linestyle="--", linewidth=1.0)
+    for xi, d in zip(x, diff):
+        ax.text(
+            xi,
+            max(p21[xi], p33[xi]) + 2.2,
+            f"{d:+.1f} pp",
+            ha="center",
+            va="bottom",
+            fontsize=8.8,
+            color=TEAL if d >= 0 else RED,
+        )
+    ax.set_xticks(x, labels, rotation=20, ha="right")
+    ax.set_ylim(0, 92)
+    ax.set_ylabel("Win rate (%)")
+    ax.set_title("Candidate selection check: p21 versus later p33", fontsize=13.5, pad=12)
+    ax.legend(frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.20), ncols=2, fontsize=9)
+    ax.grid(axis="y", color=LIGHT_GRID, linewidth=0.8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.subplots_adjust(bottom=0.30, top=0.86, left=0.10, right=0.98)
+    savefig("fig_candidate_p21_vs_p33")
+
+
+def figure_anchor_ablation_endpoints():
+    specs = [
+        ("main p21", "main", BLUE),
+        ("no B1 lane", "exp028", RED),
+        ("weak B1 mix", "exp029", AMBER),
+    ]
+    anchors = ["B0 RandomLegal", "B1 NoLeague baseline", "B2 HeuristicPublic"]
+    labels = ["B0 random", "B1 no-league", "B2 heuristic"]
+    x = np.arange(len(anchors))
+    width = 0.24
+    fig, ax = plt.subplots(figsize=(8.0, 4.7))
+    for idx, (label, run, color) in enumerate(specs):
+        data = load_json(ARTIFACTS / run / "dev_eval_summaries.json")
+        latest = max(data.values(), key=lambda item: int(item["update_count"]))
+        vals = [100 * latest["anchor_scores"][anchor] for anchor in anchors]
+        offset = (idx - 1) * width
+        bars = ax.bar(x + offset, vals, width=width, color=color, label=f"{label} u{latest['update_count']}")
+        for bar, val in zip(bars, vals):
+            ax.text(bar.get_x() + bar.get_width() / 2, val + 1.5, f"{val:.0f}", ha="center", va="bottom", fontsize=8.5)
+    ax.axhline(80, color="#1F2328", linestyle=":", linewidth=1.0)
+    ax.set_xticks(x, labels)
+    ax.set_ylim(0, 112)
+    ax.set_ylabel("Dev-eval win rate (%)")
+    ax.set_title("Ablation endpoint anchor retention", fontsize=13.5, pad=12)
+    ax.legend(frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=3, fontsize=8.5)
+    ax.grid(axis="y", color=LIGHT_GRID, linewidth=0.8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.subplots_adjust(bottom=0.27, top=0.86, left=0.10, right=0.98)
+    savefig("fig_anchor_ablation_endpoints")
+
+
 def dev_points(run: str):
     data = load_json(ARTIFACTS / run / "dev_eval_summaries.json")
     points = []
@@ -651,6 +820,20 @@ def write_section7_snippets():
 
 \begin{figure}[t]
 \centering
+\includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_result_decomposition.pdf}
+\caption{Decomposition of the targeted confirm64 table by opponent group. The fixed anchors are solved, B1 and B3/B4 remain clearly above parity, and the legacy neural block is positive but more modest.}
+\label{fig:result-decomposition}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_legacy_margin_ladder.pdf}
+\caption{Per-opponent margins above parity for the legacy neural snapshots. This figure makes clear that late legacy rows remain positive but close.}
+\label{fig:legacy-margin-ladder}
+\end{figure}
+
+\begin{figure}[t]
+\centering
 \includegraphics[width=0.72\linewidth]{thesis_figures_final/fig_close_legacy_stress.pdf}
 \caption{Stress check for the two closest legacy neural rows. The rows remain slightly above parity at confirm128, but the margins are narrow and should be reported conservatively.}
 \label{fig:close-legacy-stress}
@@ -658,9 +841,23 @@ def write_section7_snippets():
 
 \begin{figure}[t]
 \centering
+\includegraphics[width=\linewidth]{thesis_figures_final/fig_candidate_p21_vs_p33.pdf}
+\caption{Candidate selection check comparing the selected p21 snapshot against the later p33 snapshot on their common targeted opponents. p33 uses confirm32 while p21 uses confirm64, so this is a selection diagnostic rather than the headline comparison.}
+\label{fig:candidate-p21-p33}
+\end{figure}
+
+\begin{figure}[t]
+\centering
 \includegraphics[width=0.88\linewidth]{thesis_figures_final/fig_anchor_retention.pdf}
 \caption{Periodic development evaluation for the main model and B1-pressure ablations. Solid lines show aggregate anchor performance; dashed lines show B1 no-league retention.}
 \label{fig:anchor-retention}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_anchor_ablation_endpoints.pdf}
+\caption{Endpoint anchor retention for the main model and B1-pressure ablations. This summarizes why B1 pressure is discussed as an ablation rather than treating every training variant as equally robust.}
+\label{fig:anchor-ablation-endpoints}
 \end{figure}
 
 \begin{figure}[t]
@@ -716,6 +913,18 @@ Headline-table seat sensitivity diagnostic for `policy_000021`. Positive values 
 
 ## fig_close_legacy_stress
 Stress check for the two closest legacy neural rows. Both p15 and p16 remain slightly above parity at confirm128 (`129/256` each), but their bootstrap intervals overlap 50%, so they should be described as narrow positive margins rather than decisive wins.
+
+## fig_result_decomposition
+Aggregate view of the confirm64 table by opponent group. This is useful for a high-level results paragraph: fixed anchors `256/256`, B1 `100/128`, B3/B4 `165/256`, and legacy neural snapshots `344/640`.
+
+## fig_legacy_margin_ladder
+Per-legacy-opponent margin above 50% parity with confidence intervals. This is the clearest caveat figure: every legacy row is positive, but p15/p16 are close.
+
+## fig_candidate_p21_vs_p33
+Candidate selection diagnostic comparing selected p21 against later p33 on common targeted opponents. p21 uses confirm64 and p33 uses confirm32, so it should support model selection discussion rather than serve as a formal equal-seed comparison.
+
+## fig_anchor_ablation_endpoints
+Endpoint fixed-anchor retention for the main model and B1-pressure ablations. Useful for the ablation discussion because it summarizes how B1 pressure affected anchor retention.
 """
     (OUT / "FIGURE_CAPTIONS.md").write_text(text)
 
@@ -726,6 +935,10 @@ def main():
     figure_b3b4_seat_balance()
     figure_p21_seat_advantage()
     figure_close_legacy_stress()
+    figure_result_decomposition()
+    figure_legacy_margin_ladder()
+    figure_candidate_selection_p21_p33()
+    figure_anchor_ablation_endpoints()
     figure_anchor_retention()
     figure_core_matrix()
     figure_baselines()
