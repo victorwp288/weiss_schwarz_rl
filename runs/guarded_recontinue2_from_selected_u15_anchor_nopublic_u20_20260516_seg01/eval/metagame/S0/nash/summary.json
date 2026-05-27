@@ -1,0 +1,31 @@
+{
+  "case_id": "S0",
+  "scheme": "S0",
+  "top_policies_by_mean_mixture": [
+    {
+      "mean_mixture": 0.9999999996961085,
+      "policy_id": "selected_candidate",
+      "prob_mass_gt_0_05": 1.0
+    },
+    {
+      "mean_mixture": 3.0388981529456085e-10,
+      "policy_id": "B2 HeuristicPublic",
+      "prob_mass_gt_0_05": 0.0
+    },
+    {
+      "mean_mixture": 0.0,
+      "policy_id": "B0 RandomLegal",
+      "prob_mass_gt_0_05": 0.0
+    },
+    {
+      "mean_mixture": 0.0,
+      "policy_id": "B3 HeuristicPublicAggro",
+      "prob_mass_gt_0_05": 0.0
+    },
+    {
+      "mean_mixture": 0.0,
+      "policy_id": "B4 HeuristicPublicControl",
+      "prob_mass_gt_0_05": 0.0
+    }
+  ]
+}

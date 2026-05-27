@@ -1,0 +1,16 @@
+{
+  "artifacts": {
+    "eval/diagnostics/replay_verification.json": "cf6a861845e8e2ca1c2f4ac45541ce7abaffe3c09c0069862704ddaf88cbc9b9",
+    "eval/diagnostics/seat_bias.json": "3c079fe9cd965ed54d741b54caf76dec4fd4464686628d9e287e010b03c6241a",
+    "eval/diagnostics/truncation_heatmap_data.csv": "4c5a44169239e716fd57fca0ae1ec2a5e067b1e277fae3159c468088eeb4e106",
+    "eval/final_eval/matchups.csv": "4ea2f4a2f05cd5231bab36b02ecdc93332b331d953dd1bdf5f1e619f60beac63",
+    "eval/final_eval/matrices/mean.csv": "b533338c4449453b136c83f20c906089d88748e76d1b2293c0a3eabea14c55ea",
+    "eval/final_eval/metadata.json": "916468499573f7ff68bf536f69e14b0bcd88fc6d424e100f372ac460dbee7617",
+    "eval/final_eval/policy_set.json": "23a936754550a9b987cc1a207a9bf56f9f76a12e2982478f04d1555c91833a2b",
+    "eval/final_eval/posterior_samples.json": "2bfe70bd688b69adf5f9b06ac7941cf55706d393b795767114f79390b7398158",
+    "eval/final_eval/posterior_samples.npz": "d94f025626dbdf8ed17642af63196b3b999901ca4520b1f54ac632bddc1890cb",
+    "eval/final_eval/summary.json": "107e4b717a18ce11d5283fe88b4007b003c0aa19ea98fb1c16eb64ccfc91922e",
+    "replays/index.json": "55f0bd4af7ead73a878d9deb462fcc213e50098f579e893e33206419e696e486"
+  },
+  "kind": "final_eval_artifact_hashes_v1"
+}

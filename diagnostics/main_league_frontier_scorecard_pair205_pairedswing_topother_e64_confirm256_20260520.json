@@ -1,0 +1,931 @@
+{
+  "counts": {
+    "publishable_gate_candidate": 0,
+    "run_confirm128": 1,
+    "run_confirm256": 1,
+    "run_full_confirm64": 1,
+    "stop": 1,
+    "total": 4
+  },
+  "entries": [
+    {
+      "baseline_label": "selected_a015_confirm128_first64",
+      "baseline_summary_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_from_selected_retention_b4guard_u5x3_20260518_seg01/eval/selected_a015_confirm128_same_seed_surface/targeted_confirm128_summary.json",
+      "candidate_label": "pair205_pairedswing_topother_e64_sentinel64",
+      "candidate_summary_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_a075_pair205_pairedswing_topother_e64_20260520/eval/sentinel64_pair205_pairedswing_topother_e64_20260520/targeted_confirm64_summary.json",
+      "compare_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/diagnostics/paired_outcome_compare_pair205_pairedswing_topother_e64_vs_selected_sentinel64_20260520.json",
+      "escalation": {
+        "decision": "run_full_confirm64",
+        "reason": "sentinel_gate_passed"
+      },
+      "full_gate": {
+        "all_delta_wins": 1,
+        "failures": [],
+        "fixed_delta_wins": 1,
+        "learned_delta_wins": 0,
+        "passed": true
+      },
+      "group_deltas": {
+        "all_changed_outcome": 1,
+        "all_delta_wins": 1,
+        "fixed_changed_outcome": 1,
+        "fixed_delta_wins": 1,
+        "learned_changed_outcome": 0,
+        "learned_delta_wins": 0
+      },
+      "learned_opponents": [
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+        "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005"
+      ],
+      "paired_seeds": 64,
+      "panel_kind": "sentinel",
+      "row_regressions": {
+        "fixed": [],
+        "learned": [],
+        "sentinel": []
+      },
+      "rows": [
+        {
+          "baseline_mean": 0.78125,
+          "baseline_wins": 100,
+          "candidate_mean": 0.7890625,
+          "candidate_wins": 101,
+          "changed_outcome": 1,
+          "delta_wins": 1,
+          "group": "fixed",
+          "is_sentinel": true,
+          "opponent_policy_id": "B2 HeuristicPublic",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.71875,
+          "baseline_wins": 92,
+          "candidate_mean": 0.71875,
+          "candidate_wins": 92,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": true,
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.671875,
+          "baseline_wins": 86,
+          "candidate_mean": 0.671875,
+          "candidate_wins": 86,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.546875,
+          "baseline_wins": 70,
+          "candidate_mean": 0.546875,
+          "candidate_wins": 70,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.546875,
+          "baseline_wins": 70,
+          "candidate_mean": 0.546875,
+          "candidate_wins": 70,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.546875,
+          "baseline_wins": 70,
+          "candidate_mean": 0.546875,
+          "candidate_wins": 70,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.59375,
+          "baseline_wins": 76,
+          "candidate_mean": 0.59375,
+          "candidate_wins": 76,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005",
+          "shared_games": 128,
+          "status": "ok"
+        }
+      ],
+      "sentinel_gate": {
+        "all_delta_wins": 1,
+        "expected_count": 7,
+        "failures": [],
+        "fixed_delta_wins": 1,
+        "learned_delta_wins": 0,
+        "passed": true,
+        "present_count": 7
+      }
+    },
+    {
+      "baseline_label": "selected_a015_confirm128_first64",
+      "baseline_summary_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_from_selected_retention_b4guard_u5x3_20260518_seg01/eval/selected_a015_confirm128_same_seed_surface/targeted_confirm128_summary.json",
+      "candidate_label": "pair205_pairedswing_topother_e64_full13_confirm64",
+      "candidate_summary_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_a075_pair205_pairedswing_topother_e64_20260520/eval/full13_confirm64_pair205_pairedswing_topother_e64_20260520/targeted_confirm64_summary.json",
+      "compare_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/diagnostics/paired_outcome_compare_pair205_pairedswing_topother_e64_vs_selected_full13_confirm64_20260520.json",
+      "escalation": {
+        "decision": "run_confirm128",
+        "reason": "full_confirm64_gate_passed"
+      },
+      "full_gate": {
+        "all_delta_wins": 2,
+        "failures": [],
+        "fixed_delta_wins": 2,
+        "learned_delta_wins": 0,
+        "passed": true
+      },
+      "group_deltas": {
+        "all_changed_outcome": 2,
+        "all_delta_wins": 2,
+        "fixed_changed_outcome": 2,
+        "fixed_delta_wins": 2,
+        "learned_changed_outcome": 0,
+        "learned_delta_wins": 0
+      },
+      "learned_opponents": [
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+        "seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+        "seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+        "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005"
+      ],
+      "paired_seeds": 64,
+      "panel_kind": "full",
+      "row_regressions": {
+        "fixed": [],
+        "learned": [],
+        "sentinel": []
+      },
+      "rows": [
+        {
+          "baseline_mean": 1.0,
+          "baseline_wins": 128,
+          "candidate_mean": 1.0,
+          "candidate_wins": 128,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": false,
+          "opponent_policy_id": "B0 RandomLegal",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.640625,
+          "baseline_wins": 82,
+          "candidate_mean": 0.640625,
+          "candidate_wins": 82,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": false,
+          "opponent_policy_id": "B1 NoLeague baseline",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.78125,
+          "baseline_wins": 100,
+          "candidate_mean": 0.7890625,
+          "candidate_wins": 101,
+          "changed_outcome": 1,
+          "delta_wins": 1,
+          "group": "fixed",
+          "is_sentinel": true,
+          "opponent_policy_id": "B2 HeuristicPublic",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.703125,
+          "baseline_wins": 90,
+          "candidate_mean": 0.7109375,
+          "candidate_wins": 91,
+          "changed_outcome": 1,
+          "delta_wins": 1,
+          "group": "fixed",
+          "is_sentinel": false,
+          "opponent_policy_id": "B3 HeuristicPublicAggro",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.71875,
+          "baseline_wins": 92,
+          "candidate_mean": 0.71875,
+          "candidate_wins": 92,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": true,
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.671875,
+          "baseline_wins": 86,
+          "candidate_mean": 0.671875,
+          "candidate_wins": 86,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.6328125,
+          "baseline_wins": 81,
+          "candidate_mean": 0.6328125,
+          "candidate_wins": 81,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": false,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.59375,
+          "baseline_wins": 76,
+          "candidate_mean": 0.59375,
+          "candidate_wins": 76,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": false,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.59375,
+          "baseline_wins": 76,
+          "candidate_mean": 0.59375,
+          "candidate_wins": 76,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": false,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.546875,
+          "baseline_wins": 70,
+          "candidate_mean": 0.546875,
+          "candidate_wins": 70,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.546875,
+          "baseline_wins": 70,
+          "candidate_mean": 0.546875,
+          "candidate_wins": 70,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.546875,
+          "baseline_wins": 70,
+          "candidate_mean": 0.546875,
+          "candidate_wins": 70,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+          "shared_games": 128,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.59375,
+          "baseline_wins": 76,
+          "candidate_mean": 0.59375,
+          "candidate_wins": 76,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005",
+          "shared_games": 128,
+          "status": "ok"
+        }
+      ],
+      "sentinel_gate": {
+        "all_delta_wins": 1,
+        "expected_count": 7,
+        "failures": [],
+        "fixed_delta_wins": 1,
+        "learned_delta_wins": 0,
+        "passed": true,
+        "present_count": 7
+      }
+    },
+    {
+      "baseline_label": "selected_a015_confirm128",
+      "baseline_summary_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_from_selected_retention_b4guard_u5x3_20260518_seg01/eval/selected_a015_confirm128_same_seed_surface/targeted_confirm128_summary.json",
+      "candidate_label": "pair205_pairedswing_topother_e64_confirm128",
+      "candidate_summary_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_a075_pair205_pairedswing_topother_e64_20260520/eval/full13_confirm128_pair205_pairedswing_topother_e64_20260520/targeted_confirm128_summary.json",
+      "compare_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/diagnostics/paired_outcome_compare_pair205_pairedswing_topother_e64_vs_selected_confirm128_20260520.json",
+      "escalation": {
+        "decision": "run_confirm256",
+        "reason": "confirm128_gate_passed"
+      },
+      "full_gate": {
+        "all_delta_wins": 3,
+        "failures": [],
+        "fixed_delta_wins": 2,
+        "learned_delta_wins": 1,
+        "passed": true
+      },
+      "group_deltas": {
+        "all_changed_outcome": 7,
+        "all_delta_wins": 3,
+        "fixed_changed_outcome": 6,
+        "fixed_delta_wins": 2,
+        "learned_changed_outcome": 1,
+        "learned_delta_wins": 1
+      },
+      "learned_opponents": [
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+        "seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+        "seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+        "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005"
+      ],
+      "paired_seeds": 128,
+      "panel_kind": "full",
+      "row_regressions": {
+        "fixed": [],
+        "learned": [],
+        "sentinel": []
+      },
+      "rows": [
+        {
+          "baseline_mean": 1.0,
+          "baseline_wins": 256,
+          "candidate_mean": 1.0,
+          "candidate_wins": 256,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": false,
+          "opponent_policy_id": "B0 RandomLegal",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.625,
+          "baseline_wins": 160,
+          "candidate_mean": 0.625,
+          "candidate_wins": 160,
+          "changed_outcome": 2,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": false,
+          "opponent_policy_id": "B1 NoLeague baseline",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.79296875,
+          "baseline_wins": 203,
+          "candidate_mean": 0.79296875,
+          "candidate_wins": 203,
+          "changed_outcome": 2,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": true,
+          "opponent_policy_id": "B2 HeuristicPublic",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.73828125,
+          "baseline_wins": 189,
+          "candidate_mean": 0.74609375,
+          "candidate_wins": 191,
+          "changed_outcome": 2,
+          "delta_wins": 2,
+          "group": "fixed",
+          "is_sentinel": false,
+          "opponent_policy_id": "B3 HeuristicPublicAggro",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.71875,
+          "baseline_wins": 184,
+          "candidate_mean": 0.71875,
+          "candidate_wins": 184,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": true,
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.66015625,
+          "baseline_wins": 169,
+          "candidate_mean": 0.66015625,
+          "candidate_wins": 169,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.578125,
+          "baseline_wins": 148,
+          "candidate_mean": 0.578125,
+          "candidate_wins": 148,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": false,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.58203125,
+          "baseline_wins": 149,
+          "candidate_mean": 0.58203125,
+          "candidate_wins": 149,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": false,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.58203125,
+          "baseline_wins": 149,
+          "candidate_mean": 0.58203125,
+          "candidate_wins": 149,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": false,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.546875,
+          "baseline_wins": 140,
+          "candidate_mean": 0.546875,
+          "candidate_wins": 140,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.546875,
+          "baseline_wins": 140,
+          "candidate_mean": 0.546875,
+          "candidate_wins": 140,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.5625,
+          "baseline_wins": 144,
+          "candidate_mean": 0.5625,
+          "candidate_wins": 144,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+          "shared_games": 256,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.55859375,
+          "baseline_wins": 143,
+          "candidate_mean": 0.5625,
+          "candidate_wins": 144,
+          "changed_outcome": 1,
+          "delta_wins": 1,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005",
+          "shared_games": 256,
+          "status": "ok"
+        }
+      ],
+      "sentinel_gate": {
+        "all_delta_wins": 1,
+        "expected_count": 7,
+        "failures": [],
+        "fixed_delta_wins": 0,
+        "learned_delta_wins": 1,
+        "passed": true,
+        "present_count": 7
+      }
+    },
+    {
+      "baseline_label": "selected_a015_confirm256",
+      "baseline_summary_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/diagnostics/selected_a015_confirm256_b0_b4_plus_learned_summary_20260520.json",
+      "candidate_label": "pair205_pairedswing_topother_e64_confirm256",
+      "candidate_summary_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_a075_pair205_pairedswing_topother_e64_20260520/eval/full13_confirm256_pair205_pairedswing_topother_e64_20260520/targeted_confirm256_summary.json",
+      "compare_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/diagnostics/paired_outcome_compare_pair205_pairedswing_topother_e64_vs_selected_confirm256_20260520.json",
+      "escalation": {
+        "decision": "stop",
+        "reason": "full_gate_failed"
+      },
+      "full_gate": {
+        "all_delta_wins": 4,
+        "failures": [
+          {
+            "delta_wins": -2,
+            "opponent": "B2 HeuristicPublic",
+            "reason": "full_fixed_row_drop",
+            "threshold": 0
+          },
+          {
+            "delta_wins": -2,
+            "opponent": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+            "reason": "full_learned_row_drop",
+            "threshold": 0
+          }
+        ],
+        "fixed_delta_wins": 1,
+        "learned_delta_wins": 3,
+        "passed": false
+      },
+      "group_deltas": {
+        "all_changed_outcome": 22,
+        "all_delta_wins": 4,
+        "fixed_changed_outcome": 13,
+        "fixed_delta_wins": 1,
+        "learned_changed_outcome": 9,
+        "learned_delta_wins": 3
+      },
+      "learned_opponents": [
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+        "seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+        "seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+        "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+        "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005"
+      ],
+      "paired_seeds": 256,
+      "panel_kind": "full",
+      "row_regressions": {
+        "fixed": [
+          {
+            "baseline_mean": 0.779296875,
+            "baseline_wins": 399,
+            "candidate_mean": 0.775390625,
+            "candidate_wins": 397,
+            "changed_outcome": 4,
+            "delta_wins": -2,
+            "group": "fixed",
+            "is_sentinel": true,
+            "opponent_policy_id": "B2 HeuristicPublic",
+            "shared_games": 512,
+            "status": "ok"
+          }
+        ],
+        "learned": [
+          {
+            "baseline_mean": 0.568359375,
+            "baseline_wins": 291,
+            "candidate_mean": 0.564453125,
+            "candidate_wins": 289,
+            "changed_outcome": 2,
+            "delta_wins": -2,
+            "group": "learned",
+            "is_sentinel": true,
+            "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+            "shared_games": 512,
+            "status": "ok"
+          }
+        ],
+        "sentinel": [
+          {
+            "baseline_mean": 0.779296875,
+            "baseline_wins": 399,
+            "candidate_mean": 0.775390625,
+            "candidate_wins": 397,
+            "changed_outcome": 4,
+            "delta_wins": -2,
+            "group": "fixed",
+            "is_sentinel": true,
+            "opponent_policy_id": "B2 HeuristicPublic",
+            "shared_games": 512,
+            "status": "ok"
+          },
+          {
+            "baseline_mean": 0.568359375,
+            "baseline_wins": 291,
+            "candidate_mean": 0.564453125,
+            "candidate_wins": 289,
+            "changed_outcome": 2,
+            "delta_wins": -2,
+            "group": "learned",
+            "is_sentinel": true,
+            "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+            "shared_games": 512,
+            "status": "ok"
+          }
+        ]
+      },
+      "rows": [
+        {
+          "baseline_mean": 1.0,
+          "baseline_wins": 512,
+          "candidate_mean": 1.0,
+          "candidate_wins": 512,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": false,
+          "opponent_policy_id": "B0 RandomLegal",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.62890625,
+          "baseline_wins": 322,
+          "candidate_mean": 0.62890625,
+          "candidate_wins": 322,
+          "changed_outcome": 4,
+          "delta_wins": 0,
+          "group": "fixed",
+          "is_sentinel": false,
+          "opponent_policy_id": "B1 NoLeague baseline",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.779296875,
+          "baseline_wins": 399,
+          "candidate_mean": 0.775390625,
+          "candidate_wins": 397,
+          "changed_outcome": 4,
+          "delta_wins": -2,
+          "group": "fixed",
+          "is_sentinel": true,
+          "opponent_policy_id": "B2 HeuristicPublic",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.712890625,
+          "baseline_wins": 365,
+          "candidate_mean": 0.716796875,
+          "candidate_wins": 367,
+          "changed_outcome": 4,
+          "delta_wins": 2,
+          "group": "fixed",
+          "is_sentinel": false,
+          "opponent_policy_id": "B3 HeuristicPublicAggro",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.74609375,
+          "baseline_wins": 382,
+          "candidate_mean": 0.748046875,
+          "candidate_wins": 383,
+          "changed_outcome": 1,
+          "delta_wins": 1,
+          "group": "fixed",
+          "is_sentinel": true,
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.640625,
+          "baseline_wins": 328,
+          "candidate_mean": 0.640625,
+          "candidate_wins": 328,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.583984375,
+          "baseline_wins": 299,
+          "candidate_mean": 0.583984375,
+          "candidate_wins": 299,
+          "changed_outcome": 0,
+          "delta_wins": 0,
+          "group": "learned",
+          "is_sentinel": false,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.564453125,
+          "baseline_wins": 289,
+          "candidate_mean": 0.56640625,
+          "candidate_wins": 290,
+          "changed_outcome": 1,
+          "delta_wins": 1,
+          "group": "learned",
+          "is_sentinel": false,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.564453125,
+          "baseline_wins": 289,
+          "candidate_mean": 0.56640625,
+          "candidate_wins": 290,
+          "changed_outcome": 1,
+          "delta_wins": 1,
+          "group": "learned",
+          "is_sentinel": false,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.53515625,
+          "baseline_wins": 274,
+          "candidate_mean": 0.537109375,
+          "candidate_wins": 275,
+          "changed_outcome": 1,
+          "delta_wins": 1,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.53515625,
+          "baseline_wins": 274,
+          "candidate_mean": 0.537109375,
+          "candidate_wins": 275,
+          "changed_outcome": 1,
+          "delta_wins": 1,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.568359375,
+          "baseline_wins": 291,
+          "candidate_mean": 0.564453125,
+          "candidate_wins": 289,
+          "changed_outcome": 2,
+          "delta_wins": -2,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+          "shared_games": 512,
+          "status": "ok"
+        },
+        {
+          "baseline_mean": 0.533203125,
+          "baseline_wins": 273,
+          "candidate_mean": 0.53515625,
+          "candidate_wins": 274,
+          "changed_outcome": 3,
+          "delta_wins": 1,
+          "group": "learned",
+          "is_sentinel": true,
+          "opponent_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005",
+          "shared_games": 512,
+          "status": "ok"
+        }
+      ],
+      "sentinel_gate": {
+        "all_delta_wins": 0,
+        "expected_count": 7,
+        "failures": [
+          {
+            "delta_wins": -2,
+            "opponent": "B2 HeuristicPublic",
+            "reason": "sentinel_fixed_row_drop",
+            "threshold": 0
+          },
+          {
+            "delta_wins": -2,
+            "opponent": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+            "reason": "sentinel_learned_row_drop",
+            "threshold": -1
+          }
+        ],
+        "fixed_delta_wins": -1,
+        "learned_delta_wins": 1,
+        "passed": false,
+        "present_count": 7
+      }
+    }
+  ],
+  "fixed_opponents": [
+    "B0 RandomLegal",
+    "B1 NoLeague baseline",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "kind": "main_league_frontier_scorecard_v1",
+  "sentinel_opponents": [
+    "B2 HeuristicPublic",
+    "B4 HeuristicPublicControl",
+    "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+    "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+    "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+    "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+    "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005"
+  ],
+  "thresholds": {
+    "max_confirm128_learned_row_drop_wins": -1,
+    "max_confirm256_learned_row_drop_wins": 0,
+    "max_full_fixed_row_drop_wins": 0,
+    "max_sentinel_fixed_row_drop_wins": 0,
+    "max_sentinel_learned_row_drop_wins": -1,
+    "min_full_fixed_delta_wins": 0,
+    "min_full_learned_delta_wins": 0,
+    "min_sentinel_learned_delta_wins": 0
+  }
+}

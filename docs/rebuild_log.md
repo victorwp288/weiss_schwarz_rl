@@ -17252,3 +17252,88 @@ uv run --extra dev --extra sim python -m mypy python/weiss_rl/core/simulator_con
 ### Next Action
 
 - Commit and push the v1.2.0 dependency update.
+
+## 2026-05-27 - Curated Private Backup Artifact Set
+
+### What Changed
+
+- Audited the current `final/progress` history, local ignored artifacts, May 21
+  model-lock docs, and the sibling `Kandidatspeciale` figure folder.
+- Confirmed that `final/progress` history already contains the May 7 artifact
+  preservation commit `b40bce61e`.
+- Added `docs/private_backup_manifest_20260527.md` to document the private
+  backup payload.
+- Copied the shared main-search result PNGs from the sibling thesis folder into
+  `thesis_figures_final/main_search_20260521/`.
+- Prepared the private backup branch to force-add the locked May 17-21 model
+  artifacts rather than all 124.6 GB of local `runs/`.
+
+### Commands Run
+
+```powershell
+git status --short --branch
+git branch --all --verbose --verbose
+git log --oneline --decorate --graph --all -n 60
+git show --stat --oneline --find-renames b40bce61e
+git ls-files runs/main_champion_hardneg_interp_u10_repair_a015_20260517 runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01
+Get-ChildItem -LiteralPath runs\<locked-run> -Recurse -File | Measure-Object -Property Length -Sum
+Get-ChildItem -LiteralPath runs\<locked-run> -Recurse -File | Where-Object { $_.Length -gt 90000000 }
+Get-FileHash -Algorithm SHA256 -LiteralPath runs\<locked-run>\training\snapshots\<policy>\weights.pt
+Copy-Item -Path '..\Kandidatspeciale\Figures\new results\*' -Destination thesis_figures_final\main_search_20260521 -Force
+```
+
+### Results
+
+- Current branch: `final/progress`, tracking `origin/final/progress`.
+- Remote branches include `main`, `final/progress`, and several historical side
+  branches with earlier experiment history.
+- The locked May 21 run directories exist locally but were not tracked at the
+  current branch tip before this backup pass.
+- Curated run payload sizes:
+  - selected main run: 199 MB
+  - locked B1 seed run: 212 MB
+  - first interpolation source run: 118 MB
+  - second interpolation source run: 102 MB
+- No checked file in the curated run set exceeded 90 MB.
+- Locked selected main weight hash:
+  `1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26`.
+- Locked B1 seed weight hash:
+  `66767c1e70c70d1706c058bfd38a7b20cb902c9740d96b6fb1ba664a2b65a685`.
+
+### Tests Added
+
+- No code tests were added; this was an artifact backup and inventory pass.
+
+### Failures Found
+
+- The full local `runs/` tree is about 124.6 GB, so force-adding everything is
+  not a safe GitHub branch strategy.
+- The locked May 17-21 artifacts were local-only before this pass, despite being
+  referenced by the May 21 lock docs.
+
+### Fixes Applied
+
+- Chose a curated private-backup set tied to the lock docs and current thesis
+  claims.
+- Added a manifest that records what is included, why it is included, and what
+  remains local-only.
+
+### Behavior Changes
+
+- No runtime behavior changes.
+
+### Performance Numbers
+
+- Not applicable; no training, evaluation, or throughput benchmarks were run.
+
+### Remaining Risks
+
+- The backup branch will remain large because it intentionally contains model
+  and run artifacts.
+- Remote branch deletion and public-facing `main` cleanup are still pending and
+  should be done only after the private backup push is verified.
+
+### Next Action
+
+- Force-add the curated artifacts, commit them on `final/progress`, push the
+  private backup, then create a separate polished `main` tree.

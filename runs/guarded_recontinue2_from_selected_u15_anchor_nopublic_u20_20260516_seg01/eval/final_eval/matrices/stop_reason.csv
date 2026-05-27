@@ -1,0 +1,6 @@
+focal_policy_id,selected_candidate,B0 RandomLegal,B2 HeuristicPublic,B3 HeuristicPublicAggro,B4 HeuristicPublicControl
+selected_candidate,precision,decisive,decisive,decisive,decisive
+B0 RandomLegal,decisive,budget,decisive,decisive,decisive
+B2 HeuristicPublic,decisive,decisive,precision,decisive,budget
+B3 HeuristicPublicAggro,decisive,decisive,decisive,precision,budget
+B4 HeuristicPublicControl,decisive,decisive,budget,budget,precision

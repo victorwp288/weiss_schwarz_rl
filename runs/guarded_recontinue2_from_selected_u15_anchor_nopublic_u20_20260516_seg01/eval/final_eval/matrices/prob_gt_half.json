@@ -1,0 +1,46 @@
+{
+  "policy_ids": [
+    "selected_candidate",
+    "B0 RandomLegal",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "values": [
+    [
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    [
+      0.0,
+      0.19975,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.40025
+    ],
+    [
+      0.0,
+      1.0,
+      1.0,
+      0.0,
+      0.25575
+    ],
+    [
+      0.0,
+      1.0,
+      0.59975,
+      0.74425,
+      0.0
+    ]
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "artifact_roots": {
+    "eval": "eval",
+    "figures": "figures",
+    "replays": "replays",
+    "tensorboard": "tensorboard",
+    "training": "training"
+  },
+  "artifact_schema_version": "run_artifacts_v2",
+  "b1_baseline_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01",
+  "determinism_report_path": "determinism_report.json",
+  "environment_path": "environment.json",
+  "init_from_checkpoint_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_b1only_p2_trust_region_u5_v3_20260517_seg01/training/checkpoints/checkpoint_5.pt",
+  "kind": "run_summary_v1",
+  "manifest_path": "manifest.json",
+  "paper_grade": false,
+  "paper_readiness_summary_path": "paper_readiness_summary.json",
+  "policy_set_selection_mode": "unresolved",
+  "run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_long_v1_u10_20260517_seg01",
+  "run_id256": "29bb7254204c6bbf58086a3709bba6889f5fe2a9930277b582d4b16648e83fe1",
+  "run_id64": "bf6b4c205472bb29",
+  "runtime_mode": "train_async_fast",
+  "seed_derivation": {
+    "actor_seed_formula": "hash64(base_seed64, actor_id)",
+    "cli_seed_override": false,
+    "config_base_seed64": 20260212,
+    "effective_base_seed64": 20260212,
+    "episode_seed_formula": "hash64(actor_seed64, env_id, episode_index)"
+  },
+  "seed_snapshot_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_b1only_bestresponse_from_u50_to_u100_20260517",
+  "training_controls": {
+    "actor_heuristic_final_fraction": 0.0,
+    "actor_heuristic_fraction": 0.0,
+    "actor_policy_backend": "model",
+    "actor_sampling_temperature": 0.95,
+    "fixed_opponent_backend": "simulator_native",
+    "profile_timers": true,
+    "structured_metrics_mode": "sampled",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false,
+    "train_on_heuristic_actor_rows": false
+  }
+}

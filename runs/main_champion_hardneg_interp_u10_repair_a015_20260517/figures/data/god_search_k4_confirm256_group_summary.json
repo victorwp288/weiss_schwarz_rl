@@ -1,0 +1,29 @@
+{
+  "all": {
+    "baseline_rate": 0.6455829326923077,
+    "baseline_wins": 4297,
+    "candidate_rate": 0.884765625,
+    "candidate_wins": 5889,
+    "delta_rate": 0.23918269230769232,
+    "delta_wins": 1592,
+    "games": 6656
+  },
+  "fixed": {
+    "baseline_rate": 0.7734375,
+    "baseline_wins": 1980,
+    "candidate_rate": 0.9453125,
+    "candidate_wins": 2420,
+    "delta_rate": 0.171875,
+    "delta_wins": 440,
+    "games": 2560
+  },
+  "learned": {
+    "baseline_rate": 0.565673828125,
+    "baseline_wins": 2317,
+    "candidate_rate": 0.846923828125,
+    "candidate_wins": 3469,
+    "delta_rate": 0.28125,
+    "delta_wins": 1152,
+    "games": 4096
+  }
+}

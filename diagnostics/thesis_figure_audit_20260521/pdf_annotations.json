@@ -1,0 +1,563 @@
+[
+  {
+    "page": 7,
+    "type": "Text",
+    "content": "There should be some references already in the introduction.",
+    "rect": [
+      23.4,
+      33.9,
+      39.4,
+      49.9
+    ]
+  },
+  {
+    "page": 10,
+    "type": "Highlight",
+    "content": "This subheading seems redundant...",
+    "rect": [
+      65.8,
+      160.9,
+      249.2,
+      181.1
+    ]
+  },
+  {
+    "page": 11,
+    "type": "Highlight",
+    "content": "Does this still refer to the [Vieira et al., 2023] reference?",
+    "rect": [
+      66.2,
+      419.0,
+      528.8,
+      455.0
+    ]
+  },
+  {
+    "page": 12,
+    "type": "Text",
+    "content": "If you want to maintain the angle of the pipeline being a major part of your contribution, this should also be reflected in the related work section.",
+    "rect": [
+      542.6,
+      423.8,
+      558.6,
+      439.8
+    ]
+  },
+  {
+    "page": 16,
+    "type": "Text",
+    "content": "I suggest avoiding the personal pronoun (\"you\") and formulate it more neutrally (\"the player\").",
+    "rect": [
+      553.1,
+      80.5,
+      569.1,
+      96.5
+    ]
+  },
+  {
+    "page": 16,
+    "type": "Highlight",
+    "content": "Proof-read the thesis for typos and grammar before submitting!",
+    "rect": [
+      211.2,
+      176.0,
+      262.8,
+      194.0
+    ]
+  },
+  {
+    "page": 17,
+    "type": "Text",
+    "content": "Interesting! Can you test/verify if the trained agent learned these skills?",
+    "rect": [
+      555.7,
+      631.9,
+      571.7,
+      647.9
+    ]
+  },
+  {
+    "page": 20,
+    "type": "Text",
+    "content": "Perhaps the subfigures can be aligned in a grid?",
+    "rect": [
+      541.3,
+      564.8,
+      557.3,
+      580.8
+    ]
+  },
+  {
+    "page": 21,
+    "type": "Text",
+    "content": "How does this relate to the Markov assumption?",
+    "rect": [
+      30.9,
+      718.4,
+      46.9,
+      734.4
+    ]
+  },
+  {
+    "page": 21,
+    "type": "Text",
+    "content": "Later you introduce GRUs, which allows your policy to have a \"memory\". Is this formalization still applicable? Is a policy still a distribution over actions conditioned on the state?",
+    "rect": [
+      41.5,
+      210.3,
+      57.5,
+      226.3
+    ]
+  },
+  {
+    "page": 23,
+    "type": "Highlight",
+    "content": "The Lanctot reference is older than the Brown and Sandholm one.",
+    "rect": [
+      66.2,
+      592.0,
+      528.8,
+      628.0
+    ]
+  },
+  {
+    "page": 24,
+    "type": "Text",
+    "content": "Will you make more precise how this works in a later section (e.g., the methodology)?",
+    "rect": [
+      557.4,
+      392.5,
+      573.4,
+      408.5
+    ]
+  },
+  {
+    "page": 25,
+    "type": "Text",
+    "content": "What is the operator here?",
+    "rect": [
+      406.7,
+      320.1,
+      422.7,
+      336.1
+    ]
+  },
+  {
+    "page": 26,
+    "type": "Highlight",
+    "content": "What does it say?",
+    "rect": [
+      66.2,
+      645.0,
+      528.8,
+      681.0
+    ]
+  },
+  {
+    "page": 28,
+    "type": "Text",
+    "content": "This answers my earlier question, but the order of subsections is a bit unintuitive. It might make more sense to discuss GRUs *after* this part, in a way to suggest a possible solution (belief states work conceptually, but it is often impractical to represent them explicitly due to size).",
+    "rect": [
+      557.2,
+      234.5,
+      573.2,
+      250.5
+    ]
+  },
+  {
+    "page": 29,
+    "type": "Highlight",
+    "content": "Phrasing",
+    "rect": [
+      66.2,
+      550.0,
+      528.8,
+      586.0
+    ]
+  },
+  {
+    "page": 29,
+    "type": "Text",
+    "content": "At the moment, this chapter mainly consists of prose, and would greatly benefit from any kind of more structured presentation. For example, architectures can be illustrated by diagrams, algorithms be presented in pseudocode, etc. (It is okay to use figures etc. from books and papers, as long as you name the source.)",
+    "rect": [
+      308.0,
+      50.2,
+      324.0,
+      66.2
+    ]
+  },
+  {
+    "page": 31,
+    "type": "Highlight",
+    "content": "It might be worthwhile to introduce the concept of masking and masked softmax conceptually, perhaps in the previous chapter.",
+    "rect": [
+      66.2,
+      676.0,
+      528.8,
+      729.0
+    ]
+  },
+  {
+    "page": 31,
+    "type": "Highlight",
+    "content": "Same here. I believe this is the first time you mention this concept.",
+    "rect": [
+      88.2,
+      729.0,
+      282.8,
+      747.0
+    ]
+  },
+  {
+    "page": 32,
+    "type": "Highlight",
+    "content": "Again, this concept has not been introduced before.",
+    "rect": [
+      270.2,
+      555.0,
+      391.8,
+      573.0
+    ]
+  },
+  {
+    "page": 33,
+    "type": "Highlight",
+    "content": "reason *about* actions?",
+    "rect": [
+      409.5,
+      330.1,
+      488.5,
+      346.9
+    ]
+  },
+  {
+    "page": 33,
+    "type": "Highlight",
+    "content": "This is highly relevant, and should be described in detail. What heuristics/guidance/shaping did you use, specifically?",
+    "rect": [
+      66.2,
+      442.0,
+      529.8,
+      478.0
+    ]
+  },
+  {
+    "page": 33,
+    "type": "Highlight",
+    "content": "learner?",
+    "rect": [
+      422.2,
+      704.0,
+      467.8,
+      722.0
+    ]
+  },
+  {
+    "page": 34,
+    "type": "Text",
+    "content": "Again, this might be hard for the reader to follow at this point because you have not introduced the notions of behaviour and target policy, or explained what is being updated during training. In particular, it would be very informative to show pseudocode for the learning algorithm you use.",
+    "rect": [
+      555.5,
+      595.3,
+      571.5,
+      611.3
+    ]
+  },
+  {
+    "page": 36,
+    "type": "Text",
+    "content": "The order of subsections is a bit counterintuitive. This subsection is closely related to Section 4.3, and it would make a lot of sense to have them in sequence.",
+    "rect": [
+      548.6,
+      120.3,
+      564.6,
+      136.3
+    ]
+  },
+  {
+    "page": 36,
+    "type": "Text",
+    "content": "This section overlaps substantially with the corresponding section in the previous chapter. Here it would be more important to say *how* you used GRUs in your own experiment.",
+    "rect": [
+      556.7,
+      277.0,
+      572.7,
+      293.0
+    ]
+  },
+  {
+    "page": 37,
+    "type": "Text",
+    "content": "This description is very high-level. How would league training work exactly? What version plays against what other version, and how does the model advance from there? Again, pseudocode can help to make this explicit.",
+    "rect": [
+      27.1,
+      358.2,
+      43.1,
+      374.2
+    ]
+  },
+  {
+    "page": 39,
+    "type": "Text",
+    "content": "Sections 4.7-4.10 overlap considerably. Many pieces of information are repeated multiple times, such as the fact that a single win-rate metric not being sufficient. I strongly recommend to (a) streamline these sections and (b) be more concrete and specific about the structure of the training process. (How many and what policies are there in the beginning? Who plays against whom, and how often? What happens when one wins and the other loses? When are the \"snapshots\" being taken?...)\r\rAlso, did you come up with this \"league-style\" curriculum yourself, or did you take this from existing literature? In the latter case, of course give a reference, but in either case be specific about it!",
+    "rect": [
+      49.6,
+      643.4,
+      65.6,
+      659.4
+    ]
+  },
+  {
+    "page": 39,
+    "type": "Text",
+    "content": "This part is highly important, and you should be very specific here. See the comments in the marked sections.",
+    "rect": [
+      50.5,
+      710.1,
+      66.5,
+      726.1
+    ]
+  },
+  {
+    "page": 39,
+    "type": "Highlight",
+    "content": "Jens Classen",
+    "rect": [
+      0.0,
+      841.9,
+      0.0,
+      841.9
+    ]
+  },
+  {
+    "page": 39,
+    "type": "Highlight",
+    "content": "How exactly does it work? Does it choose uniformly at random among the legal actions?",
+    "rect": [
+      66.2,
+      704.0,
+      528.8,
+      740.0
+    ]
+  },
+  {
+    "page": 40,
+    "type": "Highlight",
+    "content": "But how?",
+    "rect": [
+      66.2,
+      122.0,
+      528.8,
+      158.0
+    ]
+  },
+  {
+    "page": 40,
+    "type": "Highlight",
+    "content": "How exactly? What is the script? What are the heuristics?",
+    "rect": [
+      66.2,
+      158.0,
+      528.8,
+      194.0
+    ]
+  },
+  {
+    "page": 41,
+    "type": "Text",
+    "content": "Is this separation not fairly standard? Compare this e.g. against how the RL Gym defines the interface to an environment.",
+    "rect": [
+      42.4,
+      222.0,
+      58.4,
+      238.0
+    ]
+  },
+  {
+    "page": 41,
+    "type": "Text",
+    "content": "Again, I think this is fairly standard. For example, the Black Jack environment in the RL Gym does the same thing: Once a player \"sticks\", the environment keeps dealing cards to the dealer until the dealer's sum is 17 or higher.",
+    "rect": [
+      42.4,
+      630.7,
+      58.4,
+      646.7
+    ]
+  },
+  {
+    "page": 42,
+    "type": "Text",
+    "content": "This is very important and more than just an implementation detail! You want to give a more detailed description of the structure and meaning of these vectors at the conceptual level. This should be part of the preceding chapter.",
+    "rect": [
+      519.8,
+      267.1,
+      535.8,
+      283.1
+    ]
+  },
+  {
+    "page": 44,
+    "type": "Text",
+    "content": "Here you should give more context. Encoding the cards was a major part of your experiment, and a considerable effort. A reader not familiar with these types of trading-card games might not be aware of the fact that every card is different, and might contain text that modifies rules and aspects of the game.",
+    "rect": [
+      546.8,
+      268.9,
+      562.8,
+      284.9
+    ]
+  },
+  {
+    "page": 44,
+    "type": "Text",
+    "content": "That's okay for limiting the scope. But is it possible to quantify this? How many cards did you encode? I also vaguely remember that you mentioned some percentages to me in terms of how many effects etc. you incorporate.",
+    "rect": [
+      553.1,
+      606.4,
+      569.1,
+      622.4
+    ]
+  },
+  {
+    "page": 46,
+    "type": "Text",
+    "content": "As mentioned before, you should give more context here, perhaps using pseudocode.",
+    "rect": [
+      551.3,
+      185.9,
+      567.3,
+      201.9
+    ]
+  },
+  {
+    "page": 46,
+    "type": "Text",
+    "content": "Is Table 4 the \"matrix-like result\"?",
+    "rect": [
+      553.1,
+      517.0,
+      569.1,
+      533.0
+    ]
+  },
+  {
+    "page": 52,
+    "type": "Text",
+    "content": "You spend a significant amount of time on interpreting the numbers and providing some context. Are there perhaps statistics from real-world Weiß-Schwarz games (between human players) that could be used as point of reference?\r\rFor example, I remember reading that in matches between professional Chess players, 75% end in a draw, and the remaining 25% determine who is the \"better\" player. So a \"win rate\" of e.g. 9/16 would actually be significantly good, which is not obvious without the above information. (This is kind of the opposite direction of what you say about stochastic card games here, which makes sense due to the difference between deterministic and stochastic games.)",
+    "rect": [
+      548.6,
+      614.5,
+      564.6,
+      630.5
+    ]
+  },
+  {
+    "page": 54,
+    "type": "Highlight",
+    "content": "What's that?",
+    "rect": [
+      239.2,
+      199.0,
+      284.8,
+      217.0
+    ]
+  },
+  {
+    "page": 55,
+    "type": "Highlight",
+    "content": "Phrasing...\r\rAlso, as discussed in our last meeting, the results seem perfectly valid and plausible. Heuristics exist for a reason, and there are solutions to games, planning problems etc. that solely rely on heuristics, and show a strong performance. So, IMO there is no need to undersell the results here.",
+    "rect": [
+      187.2,
+      366.0,
+      284.8,
+      384.0
+    ]
+  },
+  {
+    "page": 57,
+    "type": "Text",
+    "content": "Up until here, the discussion talks a lot about the specifics, and feels to a large degree like a continuation of the previous chapter.\r\rAfter having done your experiment, can you say anything about what would be needed to improve the resulting policy further? Is there a theoretical limit, or some empirical knowledge from human play (for example, even the best players may lose from time to time against a \"weaker\" player due to randomization etc.)?",
+    "rect": [
+      31.6,
+      367.3,
+      47.6,
+      383.3
+    ]
+  },
+  {
+    "page": 59,
+    "type": "Highlight",
+    "content": "statistically?",
+    "rect": [
+      201.2,
+      650.0,
+      256.8,
+      668.0
+    ]
+  },
+  {
+    "page": 60,
+    "type": "Highlight",
+    "content": "Can't you just pick one phrase here?",
+    "rect": [
+      66.2,
+      325.0,
+      226.8,
+      343.0
+    ]
+  },
+  {
+    "page": 61,
+    "type": "Text",
+    "content": "This is relevant information you should mention much earlier in your text!\r\rIt might also be worthwhile talking briefly about *how* you processed the cards (I vaguely remember you mentioning a semi-automated process). In a data science project, data preparation and cleaning is vital aspect of the overall endeavour, and this is IMO similar.",
+    "rect": [
+      28.0,
+      536.0,
+      44.0,
+      552.0
+    ]
+  },
+  {
+    "page": 61,
+    "type": "Text",
+    "content": "Again, decks are an important aspect of your project, but I haven't seen any description of what decks were used for what agent. Were they all the same, or did you have a selection that you assigned randomly to the agents before a match? Depending on how much space it takes up, you could e.g. provide the complete list of cards for each deck you used in the appendix.",
+    "rect": [
+      41.5,
+      693.0,
+      57.5,
+      709.0
+    ]
+  },
+  {
+    "page": 62,
+    "type": "Highlight",
+    "content": "Again, this information is highly relevant to your experimental setup.",
+    "rect": [
+      66.2,
+      402.0,
+      528.8,
+      438.0
+    ]
+  },
+  {
+    "page": 63,
+    "type": "Text",
+    "content": "What *was* the reward function you used? And what were the parameters? The algorithms? (All this would go in the methodology or experimental setup section.)",
+    "rect": [
+      41.5,
+      542.3,
+      57.5,
+      558.3
+    ]
+  },
+  {
+    "page": 64,
+    "type": "Text",
+    "content": "In Chapter 2 you mention a few papers on RL applied to Magic The Gathering. For comparison, who good are these systems?",
+    "rect": [
+      546.8,
+      179.6,
+      562.8,
+      195.6
+    ]
+  }
+]

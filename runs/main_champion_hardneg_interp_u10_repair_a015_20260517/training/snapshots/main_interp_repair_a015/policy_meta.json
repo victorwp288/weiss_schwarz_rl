@@ -1,0 +1,7 @@
+{
+  "format": "interpolated_snapshot_meta_v1",
+  "policy_id": "main_interp_repair_a015",
+  "source_checkpoint_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/checkpoints/checkpoint_interpolated.pt",
+  "update": 5,
+  "weights_sha256": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26"
+}

@@ -1,0 +1,118 @@
+{
+  "champion_size": 8,
+  "champion_snapshots": [
+    "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+    "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+    "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+    "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+    "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005",
+    "seed_ee33b9cf09_policy_000001",
+    "seed_ee33b9cf09_policy_000002",
+    "policy_000001"
+  ],
+  "pinned_snapshots": [
+    "b1_noleague_baseline"
+  ],
+  "recent_size": 24,
+  "schema_version": 1,
+  "snapshots": [
+    {
+      "created_utc": "2026-05-17T22:52:03.447955+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_policy_000001/weights.pt",
+      "policy_id": "seed_ee33b9cf09_policy_000001",
+      "update": 0,
+      "weights_sha256": "7728e15dd07cdbe5fa32ae3e25bbe75156d83df307645a62aedc562d79564eab"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.484756+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_policy_000002/weights.pt",
+      "policy_id": "seed_ee33b9cf09_policy_000002",
+      "update": 0,
+      "weights_sha256": "9182b2c87410516a784e60643482f6ace68c296838c69b31aad28a200d576288"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.091107+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_policy_000001/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_policy_000001",
+      "update": 0,
+      "weights_sha256": "4dce2ced8bfb6ced221038ac78f58dd06d2d8e6bf36a713fbf94977dfe0d9018"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.127448+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_policy_000002/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_policy_000002",
+      "update": 0,
+      "weights_sha256": "be35dec03606aeb2dfe0ba20b5a58daaa0a0d84266a7962cf3404edcc8521d8f"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.163227+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+      "update": 0,
+      "weights_sha256": "e16751fec03897d328612f5e419cc34ed7f3b54e4fa7a2a05484380ad041f7c2"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.198769+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+      "update": 0,
+      "weights_sha256": "6028da99f798b0fa5a75a2d89e35bff462ca3e63392cacace28af8a11f8228be"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.234046+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+      "update": 0,
+      "weights_sha256": "b5e498ebbcd50738292e66d06136c2c7cc50cddfd19bc4790a2d03b50ca14a0a"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.269832+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+      "update": 0,
+      "weights_sha256": "a17f3a0beb91ad4b0f9c372efa09ee4649d7a106e420f3f1f65584e018784b45"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.304873+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+      "update": 0,
+      "weights_sha256": "d7f73f6476ab3ca633402a88269c259cbd153921a5858b5f59fa80eb8c51bdd8"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.340116+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+      "update": 0,
+      "weights_sha256": "8e630c9921e7ad8c6c0c614fc9202c63a781e9c417316bf9619d7e33fb1b7519"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.376580+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+      "update": 0,
+      "weights_sha256": "28e7cbdac9a93e2e4ac1c0eb2086af28d68f2d93e5ed5d6aecb99c054daf9adc"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.412280+00:00",
+      "path": "training/snapshots/seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005/weights.pt",
+      "policy_id": "seed_ee33b9cf09_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005",
+      "update": 0,
+      "weights_sha256": "d52692d43e6e2654380c4de06024c7cda6dadc1d0d69468a1f5ed86d73da22de"
+    },
+    {
+      "created_utc": "2026-05-17T22:53:50.440175+00:00",
+      "path": "training/snapshots/policy_000001/weights.pt",
+      "policy_id": "policy_000001",
+      "update": 5,
+      "weights_sha256": "f12b4d5cade93e000c7d9e7d993bde09180edc7559ff1998460380c9a2f57fca"
+    },
+    {
+      "created_utc": "2026-05-17T22:52:03.046216+00:00",
+      "path": "training/snapshots/b1_noleague_baseline/weights.pt",
+      "policy_id": "b1_noleague_baseline",
+      "update": 15,
+      "weights_sha256": "014c9a63a5ec3819053a87a156b2ac57aa5859829cb7e343e861dcac408a04f0"
+    }
+  ]
+}

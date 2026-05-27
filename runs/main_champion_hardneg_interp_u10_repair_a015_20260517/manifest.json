@@ -1,0 +1,1501 @@
+{
+  "config_canonical": {
+    "config": {
+      "curriculum": {
+        "checkpoint_guard": {
+          "cooldown_updates": 20,
+          "enabled": true,
+          "min_best_score": 0.55,
+          "promote_max_ci_half_width": 0.24,
+          "promote_min_prob_gt_half": 0.6,
+          "rollback_max_prob_lt_half": 0.7,
+          "rollback_score_margin": 0.01,
+          "rollback_truncation_rate_threshold": 0.25,
+          "stop_after_rollback": true
+        },
+        "simulator": {},
+        "stall_monitor": {
+          "consecutive_evals": 2,
+          "enabled": false,
+          "truncation_rate_threshold": 0.25
+        }
+      },
+      "environment": {
+        "deck_pool": [
+          "preset:main_deck_5hy_yotsuba_v1"
+        ],
+        "deck_set_size": {
+          "bring_up": 2,
+          "paper": 8
+        },
+        "max_decisions": 2000,
+        "max_decisions_per_episode": 2000,
+        "max_learner_steps_per_episode": 2000,
+        "max_raw_decisions_per_episode": 4000,
+        "max_ticks": 100000,
+        "observation_visibility": "public",
+        "opponent_deck_pool": [
+          "preset:main_deck_5hy_yotsuba_v1"
+        ],
+        "truncate_on_max_steps": true,
+        "visibility": "public"
+      },
+      "evaluation": {
+        "decision_kind_tagging": {
+          "enable_python_derived_debug_tag": false,
+          "required_for_training": false
+        },
+        "eval_assert_sorted_legal_ids": true,
+        "eval_device": "cpu",
+        "eval_inference_mode": true,
+        "eval_sampling_algorithm": "model_argmax_pinned_v1",
+        "final_matrix_stage1_paired_seeds": 64,
+        "final_matrix_stage2_adaptive_max_paired_seeds": 256,
+        "final_policy_set_selection": {
+          "fixed_anchor_set_v1": {
+            "optional_if_available": [
+              "B2 HeuristicPublic",
+              "B3 HeuristicPublicAggro",
+              "B4 HeuristicPublicControl"
+            ],
+            "required": [
+              "B0 RandomLegal"
+            ]
+          },
+          "folding": "S0",
+          "include_final_champion_snapshot": true,
+          "include_heuristic_public_anchors_b2_b3_b4": false,
+          "include_heuristic_public_b2_if_exists": true,
+          "include_no_league_baseline_b1": true,
+          "include_random_legal_baseline_b0": true,
+          "include_spaced_snapshots_near_percent_updates": [
+            25,
+            50,
+            75
+          ],
+          "remaining_slots_strategy": "top_dev_performers_vs_anchor_set_v1",
+          "seat_swap": true,
+          "seed_file": "configs/seeds/dev_eval_seeds.txt",
+          "tie_break": "lowest_policy_id",
+          "version": "deterministic_v1"
+        },
+        "final_policy_set_size": 10,
+        "legal_fingerprint_checks": {
+          "enabled": true,
+          "mismatch_policy": "hard_fail",
+          "require_strictly_increasing_legal_ids": true,
+          "version": "legal_fingerprint_v1"
+        },
+        "model_sampling_temperature": 1.0,
+        "periodic_dev_eval_interval_updates": 25,
+        "periodic_dev_eval_paired_seeds": 16,
+        "regression_capture_count": 50,
+        "replay_capture_rate_eval": 0.001,
+        "seat_swap": true,
+        "seed_files": {
+          "dev_eval": "configs/seeds/dev_eval_seeds.txt",
+          "promotion_gate": "configs/seeds/local_promotion_eval_seeds.txt",
+          "report_eval": "configs/seeds/report_eval_seeds.txt"
+        },
+        "stop_rules": {
+          "stop_confidence": 0.95,
+          "stop_delta_ci_half_width": 0.03
+        }
+      },
+      "experiment": {
+        "role": "guided_league_bootstrap"
+      },
+      "league": {
+        "enabled": true,
+        "pool": {
+          "champion_max_age_updates": 0,
+          "champion_size": 8,
+          "recent_size": 24,
+          "seed_snapshot_champion_import": "all",
+          "seed_snapshot_import_filter": "all"
+        },
+        "promotion": {
+          "anchor_set_v1": {
+            "optional_if_available": [
+              "Previous champion snapshot",
+              "Previous recent snapshot"
+            ],
+            "required": [
+              "B0 RandomLegal",
+              "B1 NoLeague baseline",
+              "B2 HeuristicPublic",
+              "B3 HeuristicPublicAggro",
+              "B4 HeuristicPublicControl"
+            ]
+          },
+          "enabled": true,
+          "gate": {
+            "folding": "S0",
+            "guardrails": {
+              "max_prob_anchor_loss_below_0_45": 0.05,
+              "max_truncation_rate": 0.05
+            },
+            "record_file": "promotion_gate.json",
+            "seat_swap": true,
+            "uncertainty_method": "bayesian_bootstrap_seedlevel_v1",
+            "weighting": "uniform_across_anchors"
+          },
+          "paired_seeds": 8,
+          "seed_file": "configs/seeds/local_promotion_eval_seeds.txt",
+          "threshold": "P(p_anchor > 0.55) > 0.95 using AnchorSet_v1"
+        },
+        "sampling": {
+          "champion_mix_fraction": 0.2,
+          "hard_negative_max_win_rate": 0.5,
+          "hard_negative_min_samples": 8,
+          "hard_negative_mix_fraction": 0.12,
+          "heuristic_public_final_mix_fraction": 0.08,
+          "heuristic_public_mix_end_updates": -1,
+          "heuristic_public_mix_fraction": 0.08,
+          "heuristic_public_reserved_envs_per_actor": 0,
+          "heuristic_public_start_updates": 0,
+          "heuristic_public_variant_final_mix_fraction": 0.2,
+          "heuristic_public_variant_mix_end_updates": -1,
+          "heuristic_public_variant_mix_fraction": 0.2,
+          "mirror_final_mix_fraction": 0.05,
+          "mirror_mix_end_updates": -1,
+          "mirror_mix_fraction": 0.05,
+          "noleague_baseline_mix_end_updates": -1,
+          "noleague_baseline_mix_fraction": 0.2,
+          "noleague_baseline_reserved_envs_per_actor": 2,
+          "opponent_sampling": "PFSP",
+          "pfsp_epsilon_uniform": 0.3,
+          "pfsp_power": 1.5,
+          "pfsp_stats_source": "online_outcomes",
+          "pfsp_window_episodes": 25000,
+          "warmup_snapshot_mix_fraction": 0.1
+        },
+        "warmup": {
+          "first_updates": 2,
+          "initial_window_episodes": 512,
+          "ramp_target_updates": 20,
+          "ramp_target_window_episodes": 4096
+        }
+      },
+      "model": {
+        "candidate_scoring_chunk_size": 65536,
+        "cuda_learner_candidate_scoring_chunk_size": 1048576,
+        "dropout": {
+          "ablation": 0.1,
+          "family_a": 0.0
+        },
+        "encoder_kind": "structured_v2",
+        "encoder_mlp_layers": 2,
+        "encoder_mlp_width": 64,
+        "gru_hidden_size": 64,
+        "layer_norm": true,
+        "public_heuristic_actor_logit_bias_scale": 0.0,
+        "public_heuristic_logit_bias_end_updates": -1,
+        "public_heuristic_logit_bias_families": [],
+        "public_heuristic_logit_bias_final_scale": 0.0,
+        "public_heuristic_logit_bias_scale": 0.0,
+        "public_heuristic_logit_bias_start_updates": 0,
+        "recurrent_core": "gru",
+        "structured_policy_contract": "factorized_v1",
+        "typed_feature_width": 16
+      },
+      "reproducibility": {
+        "determinism_requirements": [
+          "simulator_build_and_spec_bundle_match",
+          "environment_config_match",
+          "episode_seeds_match",
+          "action_sequence_match",
+          "evaluation_sampler_rng_and_algorithm_match"
+        ],
+        "ids": {
+          "config_hash": "sha256",
+          "run_id_hash": "sha256",
+          "spec_hash": "sha256",
+          "store_full_256_bit_ids": true,
+          "store_short_64_bit_ids_for_filenames": true
+        },
+        "legal_fingerprint": {
+          "canonical_bytes": [
+            "b'legal_fp_v1'",
+            "spec_hash256",
+            "u32_le_decision_id",
+            "u32_le_legal_ids_len",
+            "u32_le_each_legal_id"
+          ],
+          "compute_in_rl_layer": true,
+          "replay_eval_mismatch_policy": "hard_fail",
+          "version": "legal_fingerprint_v1"
+        },
+        "seed_derivation": {
+          "actor_seed_formula": "hash64(base_seed64, actor_id)",
+          "base_seed64": 20260212,
+          "episode_seed_formula": "hash64(actor_seed64, env_id, episode_index)"
+        },
+        "seed_files": {
+          "dev_eval": "configs/seeds/dev_eval_seeds.txt",
+          "promotion_gate": "configs/seeds/local_promotion_eval_seeds.txt",
+          "report_eval": "configs/seeds/report_eval_seeds.txt"
+        },
+        "spec_bundle": {
+          "fail_on_spec_mismatch": true,
+          "persist_in_manifest": true,
+          "require_export_spec_bundle": true
+        }
+      },
+      "rewards": {
+        "discount": {
+          "gamma": 0.99
+        },
+        "objective": "terminal_pm1",
+        "shaping": {
+          "board_reward": 0.02,
+          "damage_reward": 0.05,
+          "enable_damage_shaping": true,
+          "level_reward": 0.05,
+          "mulligan_select_with_confirm_penalty": 0.0,
+          "no_progress_penalty": 0.005,
+          "pass_with_nonpass_penalty": 0.02,
+          "terminal_outcome_backfill_reward": 0.0,
+          "terminal_outcome_trace_backfill_reward": 0.0
+        },
+        "truncation": {
+          "bootstrap_rule": "if truncated and not terminated, bootstrap from V(next_state); if terminated, no bootstrap",
+          "bootstrap_value": false,
+          "reward": -0.1
+        }
+      },
+      "system": {
+        "actor_device": "cpu",
+        "actor_process_count": 32,
+        "actor_queue_capacity_unrolls": 256,
+        "actor_torch_threads": 1,
+        "collection_backend": "process",
+        "envs_per_actor": 8,
+        "learner_device": "cuda",
+        "learner_prefetch_batches": 4,
+        "learner_torch_threads": 16,
+        "mp_start_method": "spawn",
+        "profile": {
+          "ci_invariant_testing": "debug",
+          "local_iteration": "fast",
+          "training": "fast"
+        },
+        "total_envs": 96
+      },
+      "training": {
+        "action_surface": {
+          "force_attack_over_pass_when_attack_legal": true,
+          "force_pass_over_main_move_only": true,
+          "main_move_only_max_consecutive": 0,
+          "mulligan_force_confirm_after_select": true
+        },
+        "actor_heuristic_end_updates": -1,
+        "actor_heuristic_final_fraction": 0.0,
+        "actor_heuristic_fraction": 0.0,
+        "actor_heuristic_start_updates": 0,
+        "actor_policy_backend": "model",
+        "algorithm": "impala_vtrace_structured_v1",
+        "checkpointing": {
+          "actor_reload_interval_updates": 1,
+          "checkpoint_interval_updates": 20,
+          "snapshot_interval_updates": 20
+        },
+        "diverse_model_actor_count": 999,
+        "diverse_opponent_actor_count": 999,
+        "diverse_opponent_batch_fraction": 1.0,
+        "diverse_opponent_batch_wait_ms": 0,
+        "exploration": {
+          "actor_sampling_temperature": 0.95,
+          "entropy_anneal_steps_updates": 300000,
+          "entropy_anneal_to": 0.003,
+          "entropy_coef": 0.003,
+          "entropy_scope": "family"
+        },
+        "fixed_model_opponent_action_selection": "argmax",
+        "fixed_opponent_backend": "simulator_native",
+        "heuristic_actor_hidden_state_tracking": true,
+        "optimizer": {
+          "grad_norm_clip": 40.0,
+          "learning_rate": 4e-05,
+          "name": "Adam",
+          "value_loss_coef": 0.5
+        },
+        "ppo": {
+          "clip_epsilon": 0.2,
+          "epochs": 4,
+          "gae_lambda": 0.95,
+          "normalize_advantages": true,
+          "target_kl": 0.03,
+          "value_clip_epsilon": 0.2
+        },
+        "precision": {
+          "compile_actor_inference": false,
+          "compile_learner": false,
+          "masking_math_float32": true,
+          "mixed_precision": true
+        },
+        "profile_timers": true,
+        "rollout": {
+          "batch_unrolls_per_update": 64,
+          "unroll_length": 64
+        },
+        "structured_aux": {
+          "enabled": true,
+          "policy_anchor_coef": 0.2,
+          "policy_anchor_temperature": 0.75,
+          "policy_anchor_top_action_coef": 0.02,
+          "teacher_action_coef": 0.08,
+          "teacher_action_margin": 0.75,
+          "teacher_action_margin_coef": 0.1,
+          "teacher_attack_type_coef": 0.03,
+          "teacher_exact_action_families": [],
+          "teacher_family_coef": 0.03,
+          "teacher_hand_coef": 0.0,
+          "teacher_move_source_coef": 0.03,
+          "teacher_public_heuristic_coef": 0.0,
+          "teacher_public_heuristic_end_updates": 0,
+          "teacher_public_heuristic_families": [],
+          "teacher_public_heuristic_final_coef": 0.0,
+          "teacher_public_heuristic_profile_mode": "mixture",
+          "teacher_public_heuristic_profiles": [
+            "base"
+          ],
+          "teacher_public_heuristic_profiles_end_updates": 0,
+          "teacher_public_heuristic_start_updates": 0,
+          "teacher_public_heuristic_temperature": 0.75,
+          "teacher_public_nonpass_over_pass_coef": 0.0,
+          "teacher_public_nonpass_over_pass_margin": 0.5,
+          "teacher_same_family_action_coef": 0.3,
+          "teacher_same_family_action_margin": 0.5,
+          "teacher_same_family_action_margin_coef": 0.08,
+          "teacher_slot_coef": 0.08,
+          "teacher_supervised_end_updates": 0,
+          "teacher_supervised_final_scale": 0.0,
+          "teacher_supervised_start_updates": 0,
+          "trajectory_bc_aux_updates": 1,
+          "trajectory_bc_batch_episodes": 8,
+          "trajectory_bc_dataset_path": "runs/trajectory_bc_direct_b2_b3_b4_win_64_20260516/trajectory_bc_direct_b2_b3_b4_win_64.npz",
+          "trajectory_bc_every_updates": 1,
+          "trajectory_bc_seed": 20260517,
+          "trajectory_bc_teacher_action_coef": 0.18,
+          "trajectory_bc_teacher_attack_type_coef": 0.02,
+          "trajectory_bc_teacher_family_coef": 0.05,
+          "trajectory_bc_teacher_move_source_coef": 0.02,
+          "trajectory_bc_teacher_same_family_action_coef": 0.55,
+          "trajectory_bc_teacher_same_family_action_margin": 0.5,
+          "trajectory_bc_teacher_same_family_action_margin_coef": 0.08,
+          "trajectory_bc_teacher_slot_coef": 0.05,
+          "trajectory_retention_coef": 0.0,
+          "trajectory_retention_policy_ids": [],
+          "trajectory_retention_sources": [
+            "champions"
+          ]
+        },
+        "structured_metrics": {
+          "mode": "sampled"
+        },
+        "structured_warmstart": {
+          "enabled": false,
+          "teacher_action_coef": 0.0,
+          "teacher_attack_type_coef": 0.0,
+          "teacher_family_coef": 0.0,
+          "teacher_hand_coef": 0.0,
+          "teacher_move_source_coef": 0.0,
+          "teacher_public_heuristic_coef": 0.0,
+          "teacher_public_heuristic_families": [],
+          "teacher_public_heuristic_profile_mode": "cycle",
+          "teacher_public_heuristic_profiles": [
+            "base",
+            "aggressive",
+            "control"
+          ],
+          "teacher_public_heuristic_profiles_end_updates": -1,
+          "teacher_public_heuristic_temperature": 32.0,
+          "teacher_same_family_action_coef": 0.0,
+          "teacher_slot_coef": 0.0,
+          "updates": 0
+        },
+        "teacher_aux": {
+          "mode": "always"
+        },
+        "torch_profiler": false,
+        "train_on_heuristic_actor_rows": false,
+        "vtrace": {
+          "c_bar": 1.0,
+          "rho_bar": 1.0
+        }
+      }
+    },
+    "schema_version": 2,
+    "seed_sets": {
+      "dev_eval": "configs/seeds/dev_eval_seeds.txt",
+      "promotion_gate": "configs/seeds/local_promotion_eval_seeds.txt",
+      "report_eval": "configs/seeds/report_eval_seeds.txt"
+    }
+  },
+  "config_hash256": "21e524c785e6ab7115c9a2c05d07a47a78499cdc83bf0060ad939e0666e21205",
+  "created_at_utc": "2026-05-17T22:52:02.537850+00:00",
+  "evaluation_pinning": {
+    "eval_device": "cpu",
+    "eval_inference_mode": true,
+    "eval_sampling_algorithm": "model_argmax_pinned_v1",
+    "legal_fingerprint_mismatch_policy": "hard_fail",
+    "legal_fingerprint_version": "legal_fingerprint_v1",
+    "model_sampling_temperature": 1.0,
+    "seat_swap": true
+  },
+  "format": "checkpoint_interpolation_manifest_v1",
+  "git_commit": "b40bce61e409b858a4b47b4beaee1a25f1bc5e78",
+  "git_dirty": true,
+  "hardware": {
+    "actor_device": "cpu",
+    "actor_device_layout": "cpu,cpu,cpu,cpu,cpu,cpu",
+    "actor_device_unique_count": 1,
+    "cpu_count": 20,
+    "learner_device": "cuda",
+    "machine": "AMD64",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python_version": "3.11.14"
+  },
+  "interpolation": {
+    "first_checkpoint": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_long_v1_u10_20260517_seg01/training/checkpoints/checkpoint_10.pt",
+    "first_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_long_v1_u10_20260517_seg01",
+    "second_checkpoint": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_rehearsal_from_u20_u5_20260517_seg01/training/checkpoints/checkpoint_5.pt",
+    "second_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_rehearsal_from_u20_u5_20260517_seg01",
+    "second_weight": 0.15
+  },
+  "policy_set_selection": [
+    "main_league_selected",
+    "B0 RandomLegal",
+    "B1 NoLeague baseline",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "policy_set_selection_details": {
+    "mode": "explicit_cli",
+    "policy_count": 6,
+    "resolved_by": "canonical_eval_pipeline_v1",
+    "status": "resolved"
+  },
+  "run_id256": "3d4656e0cbc4c388d7e82ee02fd4ab23331c130ea7f4bf0d95de2d6403ebe91d",
+  "run_id64": "60ec16af5599afba",
+  "seed_derivation": {
+    "actor_seed_formula": "hash64(base_seed64, actor_id)",
+    "cli_seed_override": false,
+    "config_base_seed64": 20260212,
+    "effective_base_seed64": 20260212,
+    "episode_seed_formula": "hash64(actor_seed64, env_id, episode_index)"
+  },
+  "seed_files": {
+    "dev_eval": {
+      "path": "configs/seeds/dev_eval_seeds.txt",
+      "sha256": "568c17562f825562579b8a6ec54d8e83b7ad33471e9bad3de462055efd4679c3"
+    },
+    "promotion_gate": {
+      "path": "configs/seeds/local_promotion_eval_seeds.txt",
+      "sha256": "03fbbaa2c6e7e53c08e35c2dfaf141c4ad69d155eca607027fedf17f0e6cd07f"
+    },
+    "report_eval": {
+      "path": "configs/seeds/report_eval_seeds.txt",
+      "sha256": "5db0677f8ff932a95bb86cb91e6902de3ed3460ad8303858e169e0a17c728df0"
+    }
+  },
+  "simulator": {
+    "build_info": {
+      "debug_assertions": false,
+      "opt_level": "3",
+      "profile": "release",
+      "target": "x86_64-pc-windows-msvc",
+      "validate_state_default": false
+    },
+    "compatibility_hash": "8590000130",
+    "db_info": {
+      "catalog_db_sha256": "f0871cbf7a641af2b2185499adc255758e5c5aed4d4f7cd822a9de70eb50fb8a",
+      "db_sha256": "f0871cbf7a641af2b2185499adc255758e5c5aed4d4f7cd822a9de70eb50fb8a",
+      "matches_catalog": true
+    },
+    "module_file": "C:\\Users\\Bruger\\Desktop\\this one\\weiss_schwarz_rl\\.venv\\Lib\\site-packages\\weiss_sim\\__init__.py",
+    "probe_python": "C:\\Users\\Bruger\\Desktop\\this one\\weiss_schwarz_rl\\.venv\\Scripts\\python.exe",
+    "probe_pythonpath": null,
+    "probe_source": "active_interpreter",
+    "probe_target": "python=C:\\Users\\Bruger\\Desktop\\this one\\weiss_schwarz_rl\\.venv\\Scripts\\python.exe",
+    "thesis_deck_presets": {
+      "available": [
+        "aggro_deck_5hy_nino_v1",
+        "control_deck_jj_s66_v1",
+        "main_deck_5hy_yotsuba_v1",
+        "starter_deck_ws02_v1"
+      ],
+      "error": "",
+      "profiles": {
+        "aggro_deck_5hy_nino_v1": "approx",
+        "control_deck_jj_s66_v1": "approx",
+        "main_deck_5hy_yotsuba_v1": "approx"
+      }
+    },
+    "version": "1.1.0"
+  },
+  "spec_bundle": {
+    "action": {
+      "action_encoding_version": 1,
+      "action_space_size": 527,
+      "attack_type_encoding": [
+        [
+          "frontal",
+          0
+        ],
+        [
+          "side",
+          1
+        ],
+        [
+          "direct",
+          2
+        ]
+      ],
+      "constants": [
+        [
+          "MAX_HAND",
+          50
+        ],
+        [
+          "MAX_STAGE",
+          5
+        ],
+        [
+          "MAX_LEVEL",
+          4
+        ],
+        [
+          "ATTACK_SLOT_COUNT",
+          3
+        ],
+        [
+          "MAX_ABILITIES_PER_CARD",
+          4
+        ]
+      ],
+      "factorization": {
+        "action_encoding_version": 1,
+        "action_space_size": 527,
+        "factorization_version": 1,
+        "families": [
+          {
+            "base": 0,
+            "count": 1,
+            "description": "confirm mulligan selection",
+            "name": "mulligan_confirm",
+            "params": []
+          },
+          {
+            "base": 1,
+            "count": 50,
+            "description": "select card in hand for mulligan",
+            "name": "mulligan_select",
+            "params": [
+              "hand_index"
+            ]
+          },
+          {
+            "base": 51,
+            "count": 1,
+            "description": "pass action",
+            "name": "pass",
+            "params": []
+          },
+          {
+            "base": 52,
+            "count": 50,
+            "description": "clock card from hand",
+            "name": "clock_from_hand",
+            "params": [
+              "hand_index"
+            ]
+          },
+          {
+            "base": 102,
+            "count": 250,
+            "description": "play character to stage",
+            "name": "main_play_character",
+            "params": [
+              "hand_index",
+              "stage_slot"
+            ]
+          },
+          {
+            "base": 352,
+            "count": 50,
+            "description": "play event from hand",
+            "name": "main_play_event",
+            "params": [
+              "hand_index"
+            ]
+          },
+          {
+            "base": 402,
+            "count": 20,
+            "description": "move stage slot",
+            "name": "main_move",
+            "params": [
+              "from_slot",
+              "to_slot"
+            ]
+          },
+          {
+            "base": 422,
+            "count": 50,
+            "description": "play climax",
+            "name": "climax_play",
+            "params": [
+              "hand_index"
+            ]
+          },
+          {
+            "base": 472,
+            "count": 9,
+            "description": "declare attack",
+            "name": "attack",
+            "params": [
+              "slot",
+              "attack_type"
+            ]
+          },
+          {
+            "base": 481,
+            "count": 7,
+            "description": "choose card for level up",
+            "name": "level_up",
+            "params": [
+              "index"
+            ]
+          },
+          {
+            "base": 488,
+            "count": 5,
+            "description": "pay encore for a slot",
+            "name": "encore_pay",
+            "params": [
+              "slot"
+            ]
+          },
+          {
+            "base": 493,
+            "count": 5,
+            "description": "decline encore for a slot",
+            "name": "encore_decline",
+            "params": [
+              "slot"
+            ]
+          },
+          {
+            "base": 498,
+            "count": 10,
+            "description": "choose trigger order",
+            "name": "trigger_order",
+            "params": [
+              "index"
+            ]
+          },
+          {
+            "base": 508,
+            "count": 16,
+            "description": "select choice option on current page",
+            "name": "choice_select",
+            "params": [
+              "index"
+            ]
+          },
+          {
+            "base": 524,
+            "count": 1,
+            "description": "choice pagination previous",
+            "name": "choice_prev_page",
+            "params": []
+          },
+          {
+            "base": 525,
+            "count": 1,
+            "description": "choice pagination next",
+            "name": "choice_next_page",
+            "params": []
+          },
+          {
+            "base": 526,
+            "count": 1,
+            "description": "concede game (if enabled)",
+            "name": "concede",
+            "params": []
+          }
+        ],
+        "meta_fields": [
+          "family_id",
+          "arg0",
+          "arg1",
+          "arg2"
+        ],
+        "meta_version": "action_meta_v1",
+        "notes": [
+          "Packed legal metadata remains the audit/compatibility contract.",
+          "Factorized fields mirror the family params for structured heads."
+        ]
+      },
+      "families": [
+        {
+          "base": 0,
+          "count": 1,
+          "description": "confirm mulligan selection",
+          "name": "mulligan_confirm",
+          "params": []
+        },
+        {
+          "base": 1,
+          "count": 50,
+          "description": "select card in hand for mulligan",
+          "name": "mulligan_select",
+          "params": [
+            "hand_index"
+          ]
+        },
+        {
+          "base": 51,
+          "count": 1,
+          "description": "pass action",
+          "name": "pass",
+          "params": []
+        },
+        {
+          "base": 52,
+          "count": 50,
+          "description": "clock card from hand",
+          "name": "clock_from_hand",
+          "params": [
+            "hand_index"
+          ]
+        },
+        {
+          "base": 102,
+          "count": 250,
+          "description": "play character to stage",
+          "name": "main_play_character",
+          "params": [
+            "hand_index",
+            "stage_slot"
+          ]
+        },
+        {
+          "base": 352,
+          "count": 50,
+          "description": "play event from hand",
+          "name": "main_play_event",
+          "params": [
+            "hand_index"
+          ]
+        },
+        {
+          "base": 402,
+          "count": 20,
+          "description": "move stage slot",
+          "name": "main_move",
+          "params": [
+            "from_slot",
+            "to_slot"
+          ]
+        },
+        {
+          "base": 422,
+          "count": 50,
+          "description": "play climax",
+          "name": "climax_play",
+          "params": [
+            "hand_index"
+          ]
+        },
+        {
+          "base": 472,
+          "count": 9,
+          "description": "declare attack",
+          "name": "attack",
+          "params": [
+            "slot",
+            "attack_type"
+          ]
+        },
+        {
+          "base": 481,
+          "count": 7,
+          "description": "choose card for level up",
+          "name": "level_up",
+          "params": [
+            "index"
+          ]
+        },
+        {
+          "base": 488,
+          "count": 5,
+          "description": "pay encore for a slot",
+          "name": "encore_pay",
+          "params": [
+            "slot"
+          ]
+        },
+        {
+          "base": 493,
+          "count": 5,
+          "description": "decline encore for a slot",
+          "name": "encore_decline",
+          "params": [
+            "slot"
+          ]
+        },
+        {
+          "base": 498,
+          "count": 10,
+          "description": "choose trigger order",
+          "name": "trigger_order",
+          "params": [
+            "index"
+          ]
+        },
+        {
+          "base": 508,
+          "count": 16,
+          "description": "select choice option on current page",
+          "name": "choice_select",
+          "params": [
+            "index"
+          ]
+        },
+        {
+          "base": 524,
+          "count": 1,
+          "description": "choice pagination previous",
+          "name": "choice_prev_page",
+          "params": []
+        },
+        {
+          "base": 525,
+          "count": 1,
+          "description": "choice pagination next",
+          "name": "choice_next_page",
+          "params": []
+        },
+        {
+          "base": 526,
+          "count": 1,
+          "description": "concede game (if enabled)",
+          "name": "concede",
+          "params": []
+        }
+      ],
+      "notes": [
+        "Action ids are stable within ACTION_ENCODING_VERSION.",
+        "Use legality masks or legal_action_ids for valid choices."
+      ],
+      "pass_action_id": 51
+    },
+    "action_factorization_v1": {
+      "action_encoding_version": 1,
+      "action_space_size": 527,
+      "factorization_version": 1,
+      "families": [
+        {
+          "base": 0,
+          "count": 1,
+          "description": "confirm mulligan selection",
+          "name": "mulligan_confirm",
+          "params": []
+        },
+        {
+          "base": 1,
+          "count": 50,
+          "description": "select card in hand for mulligan",
+          "name": "mulligan_select",
+          "params": [
+            "hand_index"
+          ]
+        },
+        {
+          "base": 51,
+          "count": 1,
+          "description": "pass action",
+          "name": "pass",
+          "params": []
+        },
+        {
+          "base": 52,
+          "count": 50,
+          "description": "clock card from hand",
+          "name": "clock_from_hand",
+          "params": [
+            "hand_index"
+          ]
+        },
+        {
+          "base": 102,
+          "count": 250,
+          "description": "play character to stage",
+          "name": "main_play_character",
+          "params": [
+            "hand_index",
+            "stage_slot"
+          ]
+        },
+        {
+          "base": 352,
+          "count": 50,
+          "description": "play event from hand",
+          "name": "main_play_event",
+          "params": [
+            "hand_index"
+          ]
+        },
+        {
+          "base": 402,
+          "count": 20,
+          "description": "move stage slot",
+          "name": "main_move",
+          "params": [
+            "from_slot",
+            "to_slot"
+          ]
+        },
+        {
+          "base": 422,
+          "count": 50,
+          "description": "play climax",
+          "name": "climax_play",
+          "params": [
+            "hand_index"
+          ]
+        },
+        {
+          "base": 472,
+          "count": 9,
+          "description": "declare attack",
+          "name": "attack",
+          "params": [
+            "slot",
+            "attack_type"
+          ]
+        },
+        {
+          "base": 481,
+          "count": 7,
+          "description": "choose card for level up",
+          "name": "level_up",
+          "params": [
+            "index"
+          ]
+        },
+        {
+          "base": 488,
+          "count": 5,
+          "description": "pay encore for a slot",
+          "name": "encore_pay",
+          "params": [
+            "slot"
+          ]
+        },
+        {
+          "base": 493,
+          "count": 5,
+          "description": "decline encore for a slot",
+          "name": "encore_decline",
+          "params": [
+            "slot"
+          ]
+        },
+        {
+          "base": 498,
+          "count": 10,
+          "description": "choose trigger order",
+          "name": "trigger_order",
+          "params": [
+            "index"
+          ]
+        },
+        {
+          "base": 508,
+          "count": 16,
+          "description": "select choice option on current page",
+          "name": "choice_select",
+          "params": [
+            "index"
+          ]
+        },
+        {
+          "base": 524,
+          "count": 1,
+          "description": "choice pagination previous",
+          "name": "choice_prev_page",
+          "params": []
+        },
+        {
+          "base": 525,
+          "count": 1,
+          "description": "choice pagination next",
+          "name": "choice_next_page",
+          "params": []
+        },
+        {
+          "base": 526,
+          "count": 1,
+          "description": "concede game (if enabled)",
+          "name": "concede",
+          "params": []
+        }
+      ],
+      "meta_fields": [
+        "family_id",
+        "arg0",
+        "arg1",
+        "arg2"
+      ],
+      "meta_version": "action_meta_v1",
+      "notes": [
+        "Packed legal metadata remains the audit/compatibility contract.",
+        "Factorized fields mirror the family params for structured heads."
+      ]
+    },
+    "action_meta_v1": {
+      "fields": [
+        "family_id",
+        "arg0",
+        "arg1",
+        "arg2"
+      ],
+      "unused": 65535,
+      "version": "action_meta_v1",
+      "width": 4
+    },
+    "legal_action_context_v1": {
+      "fields": [
+        "action_family_code",
+        "action_arg0",
+        "action_arg1",
+        "action_arg2",
+        "decision_kind",
+        "actor_seat",
+        "source_zone_code",
+        "source_index",
+        "source_card_id",
+        "source_card_type_code",
+        "source_card_color_code",
+        "source_card_level",
+        "source_card_cost",
+        "source_card_power",
+        "source_card_soul"
+      ],
+      "unused": -1,
+      "version": "legal_action_context_v1",
+      "width": 15
+    },
+    "observation": {
+      "dtype": "i32",
+      "header_fields": [
+        {
+          "description": "active player id",
+          "index": 0,
+          "name": "active_player",
+          "visibility": "public"
+        },
+        {
+          "description": "phase enum encoding",
+          "index": 1,
+          "name": "phase",
+          "visibility": "public"
+        },
+        {
+          "description": "decision kind encoding (or -1 if none)",
+          "index": 2,
+          "name": "decision_kind",
+          "visibility": "public"
+        },
+        {
+          "description": "player who must act (or -1)",
+          "index": 3,
+          "name": "decision_player",
+          "visibility": "public"
+        },
+        {
+          "description": "terminal status encoding",
+          "index": 4,
+          "name": "terminal",
+          "visibility": "public"
+        },
+        {
+          "description": "last action encoding",
+          "index": 5,
+          "name": "last_action_kind",
+          "visibility": "public"
+        },
+        {
+          "description": "last action arg0",
+          "index": 6,
+          "name": "last_action_arg0",
+          "visibility": "public"
+        },
+        {
+          "description": "last action arg1",
+          "index": 7,
+          "name": "last_action_arg1",
+          "visibility": "public"
+        },
+        {
+          "description": "attacker slot if in attack",
+          "index": 8,
+          "name": "attack_slot",
+          "visibility": "public"
+        },
+        {
+          "description": "defender slot if in attack",
+          "index": 9,
+          "name": "defender_slot",
+          "visibility": "public"
+        },
+        {
+          "description": "attack type encoding",
+          "index": 10,
+          "name": "attack_type",
+          "visibility": "public"
+        },
+        {
+          "description": "current attack damage",
+          "index": 11,
+          "name": "attack_damage",
+          "visibility": "public"
+        },
+        {
+          "description": "current counter power",
+          "index": 12,
+          "name": "attack_counter_power",
+          "visibility": "public"
+        },
+        {
+          "description": "focused slot for some decisions",
+          "index": 13,
+          "name": "focus_slot",
+          "visibility": "public"
+        },
+        {
+          "description": "choice page start index",
+          "index": 14,
+          "name": "choice_page_start",
+          "visibility": "public"
+        },
+        {
+          "description": "choice total candidates",
+          "index": 15,
+          "name": "choice_total",
+          "visibility": "public"
+        }
+      ],
+      "notes": [
+        "Player blocks are ordered perspective, opponent.",
+        "Hidden zones are masked by sentinel_hidden."
+      ],
+      "obs_encoding_version": 2,
+      "obs_len": 378,
+      "player_blocks": [
+        {
+          "base": 16,
+          "len": 171,
+          "player_index": 0,
+          "slices": [
+            {
+              "description": "level count",
+              "len": 1,
+              "name": "level_count",
+              "start": 0,
+              "visibility": "public"
+            },
+            {
+              "description": "clock count",
+              "len": 1,
+              "name": "clock_count",
+              "start": 1,
+              "visibility": "public"
+            },
+            {
+              "description": "deck count",
+              "len": 1,
+              "name": "deck_count",
+              "start": 2,
+              "visibility": "public"
+            },
+            {
+              "description": "hand count (private by default; visible in full mode or when reveal_opponent_hand_stock_counts is enabled)",
+              "len": 1,
+              "name": "hand_count",
+              "start": 3,
+              "visibility": "private"
+            },
+            {
+              "description": "stock count (private by default; visible in full mode or when reveal_opponent_hand_stock_counts is enabled)",
+              "len": 1,
+              "name": "stock_count",
+              "start": 4,
+              "visibility": "private"
+            },
+            {
+              "description": "waiting room count",
+              "len": 1,
+              "name": "waiting_room_count",
+              "start": 5,
+              "visibility": "public"
+            },
+            {
+              "description": "memory count (private unless full visibility)",
+              "len": 1,
+              "name": "memory_count",
+              "start": 6,
+              "visibility": "private"
+            },
+            {
+              "description": "climax count",
+              "len": 1,
+              "name": "climax_count",
+              "start": 7,
+              "visibility": "public"
+            },
+            {
+              "description": "resolution count",
+              "len": 1,
+              "name": "resolution_count",
+              "start": 8,
+              "visibility": "public"
+            },
+            {
+              "description": "stage slots (card id, status, has_attacked, power, base soul, effective soul, side-attack-allowed)",
+              "len": 35,
+              "name": "stage",
+              "start": 9,
+              "visibility": "public"
+            },
+            {
+              "description": "top climax card id",
+              "len": 1,
+              "name": "climax_top",
+              "start": 44,
+              "visibility": "public"
+            },
+            {
+              "description": "top level cards (chronological)",
+              "len": 4,
+              "name": "level_top",
+              "start": 45,
+              "visibility": "public"
+            },
+            {
+              "description": "top clock cards",
+              "len": 7,
+              "name": "clock_top",
+              "start": 49,
+              "visibility": "public"
+            },
+            {
+              "description": "top waiting room cards",
+              "len": 5,
+              "name": "waiting_room_top",
+              "start": 56,
+              "visibility": "public"
+            },
+            {
+              "description": "top resolution cards",
+              "len": 5,
+              "name": "resolution_top",
+              "start": 61,
+              "visibility": "public"
+            },
+            {
+              "description": "top stock cards",
+              "len": 5,
+              "name": "stock_top",
+              "start": 66,
+              "visibility": "private"
+            },
+            {
+              "description": "hand cards",
+              "len": 50,
+              "name": "hand",
+              "start": 71,
+              "visibility": "private"
+            },
+            {
+              "description": "deck cards",
+              "len": 50,
+              "name": "deck",
+              "start": 121,
+              "visibility": "private"
+            }
+          ]
+        },
+        {
+          "base": 187,
+          "len": 171,
+          "player_index": 1,
+          "slices": [
+            {
+              "description": "level count",
+              "len": 1,
+              "name": "level_count",
+              "start": 0,
+              "visibility": "public"
+            },
+            {
+              "description": "clock count",
+              "len": 1,
+              "name": "clock_count",
+              "start": 1,
+              "visibility": "public"
+            },
+            {
+              "description": "deck count",
+              "len": 1,
+              "name": "deck_count",
+              "start": 2,
+              "visibility": "public"
+            },
+            {
+              "description": "hand count (private by default; visible in full mode or when reveal_opponent_hand_stock_counts is enabled)",
+              "len": 1,
+              "name": "hand_count",
+              "start": 3,
+              "visibility": "private"
+            },
+            {
+              "description": "stock count (private by default; visible in full mode or when reveal_opponent_hand_stock_counts is enabled)",
+              "len": 1,
+              "name": "stock_count",
+              "start": 4,
+              "visibility": "private"
+            },
+            {
+              "description": "waiting room count",
+              "len": 1,
+              "name": "waiting_room_count",
+              "start": 5,
+              "visibility": "public"
+            },
+            {
+              "description": "memory count (private unless full visibility)",
+              "len": 1,
+              "name": "memory_count",
+              "start": 6,
+              "visibility": "private"
+            },
+            {
+              "description": "climax count",
+              "len": 1,
+              "name": "climax_count",
+              "start": 7,
+              "visibility": "public"
+            },
+            {
+              "description": "resolution count",
+              "len": 1,
+              "name": "resolution_count",
+              "start": 8,
+              "visibility": "public"
+            },
+            {
+              "description": "stage slots (card id, status, has_attacked, power, base soul, effective soul, side-attack-allowed)",
+              "len": 35,
+              "name": "stage",
+              "start": 9,
+              "visibility": "public"
+            },
+            {
+              "description": "top climax card id",
+              "len": 1,
+              "name": "climax_top",
+              "start": 44,
+              "visibility": "public"
+            },
+            {
+              "description": "top level cards (chronological)",
+              "len": 4,
+              "name": "level_top",
+              "start": 45,
+              "visibility": "public"
+            },
+            {
+              "description": "top clock cards",
+              "len": 7,
+              "name": "clock_top",
+              "start": 49,
+              "visibility": "public"
+            },
+            {
+              "description": "top waiting room cards",
+              "len": 5,
+              "name": "waiting_room_top",
+              "start": 56,
+              "visibility": "public"
+            },
+            {
+              "description": "top resolution cards",
+              "len": 5,
+              "name": "resolution_top",
+              "start": 61,
+              "visibility": "public"
+            },
+            {
+              "description": "top stock cards",
+              "len": 5,
+              "name": "stock_top",
+              "start": 66,
+              "visibility": "private"
+            },
+            {
+              "description": "hand cards",
+              "len": 50,
+              "name": "hand",
+              "start": 71,
+              "visibility": "private"
+            },
+            {
+              "description": "deck cards",
+              "len": 50,
+              "name": "deck",
+              "start": 121,
+              "visibility": "private"
+            }
+          ]
+        }
+      ],
+      "self_first": true,
+      "sentinel_empty_card": 0,
+      "sentinel_hidden": -1,
+      "tail_slices": [
+        {
+          "description": "reason bits",
+          "len": 8,
+          "name": "reason",
+          "start": 358,
+          "visibility": "public"
+        },
+        {
+          "description": "recent reveal history",
+          "len": 8,
+          "name": "reveal",
+          "start": 366,
+          "visibility": "public"
+        },
+        {
+          "description": "context bits",
+          "len": 4,
+          "name": "context",
+          "start": 374,
+          "visibility": "public"
+        }
+      ]
+    },
+    "policy_version": 2,
+    "spec_hash": 8590000130
+  },
+  "spec_hash256": "a62917cf4825a9dfa3b3ca23c43bb29f6a4abaed0098140192ab326e12ae2319",
+  "start_nonce": 1779058322476440600
+}

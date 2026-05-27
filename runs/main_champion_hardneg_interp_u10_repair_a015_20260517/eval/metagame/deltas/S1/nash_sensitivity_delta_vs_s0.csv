@@ -1,0 +1,7 @@
+policy_id,baseline_case_id,case_id,s0_mean_mixture,case_mean_mixture,delta_mean_mixture,abs_delta_mean_mixture
+B0 RandomLegal,S0,S1,6e-13,6e-13,0.0,0.0
+B1 NoLeague baseline,S0,S1,3.834074075206471e-10,3.834074075206471e-10,0.0,0.0
+B2 HeuristicPublic,S0,S1,0.0,0.0,0.0,0.0
+B3 HeuristicPublicAggro,S0,S1,0.0,0.0,0.0,0.0
+B4 HeuristicPublicControl,S0,S1,0.0,0.0,0.0,0.0
+main_league_selected,S0,S1,0.9999999996159933,0.9999999996159933,0.0,0.0

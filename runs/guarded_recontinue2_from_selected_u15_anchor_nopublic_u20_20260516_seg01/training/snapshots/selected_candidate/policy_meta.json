@@ -1,0 +1,29 @@
+{
+  "alias_for_policy_id": "policy_000003",
+  "format": "selected_candidate_alias_metadata_v1",
+  "policy_id": "selected_candidate",
+  "selection_summary": {
+    "min_required_anchor_score": 0.5,
+    "required_anchors": [
+      "B2 HeuristicPublic",
+      "B3 HeuristicPublicAggro",
+      "B4 HeuristicPublicControl"
+    ],
+    "selected": {
+      "aggregate_score": 0.6458333333333334,
+      "required_anchor_mean": 0.6458333333333334,
+      "required_anchor_min": 0.626953125,
+      "run_name": "guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01",
+      "selection_confirmation_summary_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/eval/targeted_confirm256_policy_000003/targeted_confirm256_summary.json",
+      "selection_score": 0.6401692708333333,
+      "selection_score_source": "targeted_confirm",
+      "snapshot_policy_id": "policy_000003",
+      "train_policy_id": "targeted_confirm_policy_000003",
+      "update_count": 15
+    }
+  },
+  "source_weights_path": "training/snapshots/policy_000003/weights.pt",
+  "update": 15,
+  "weights_path": "training/snapshots/selected_candidate/weights.pt",
+  "weights_sha256": "66767c1e70c70d1706c058bfd38a7b20cb902c9740d96b6fb1ba664a2b65a685"
+}

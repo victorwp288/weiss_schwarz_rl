@@ -1,0 +1,220 @@
+{
+  "baseline_case_id": "S0",
+  "case_id": "S1",
+  "top_alpharank_mass_deltas": [
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_stationary_mass": 0.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "B0 RandomLegal",
+      "s0_mean_stationary_mass": 0.0
+    },
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_stationary_mass": 0.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "B2 HeuristicPublic",
+      "s0_mean_stationary_mass": 0.0
+    },
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_stationary_mass": 0.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "B3 HeuristicPublicAggro",
+      "s0_mean_stationary_mass": 0.0
+    },
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_stationary_mass": 0.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "B4 HeuristicPublicControl",
+      "s0_mean_stationary_mass": 0.0
+    },
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_stationary_mass": 1.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "selected_candidate",
+      "s0_mean_stationary_mass": 1.0
+    }
+  ],
+  "top_matchup_pij_shifts": [
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 0.01953125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B0 RandomLegal",
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.01953125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 0.017578125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B0 RandomLegal",
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.017578125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 0.017578125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B0 RandomLegal",
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.017578125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 0.3046875,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B2 HeuristicPublic",
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.3046875
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 0.494140625,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B2 HeuristicPublic",
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.494140625
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 0.486328125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B3 HeuristicPublicAggro",
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.486328125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 1.0,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "selected_candidate",
+      "opponent_policy_id": "B0 RandomLegal",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 1.0
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 0.666015625,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "selected_candidate",
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.666015625
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 0.64453125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "selected_candidate",
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.64453125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S1",
+      "case_p_ij_mean": 0.626953125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "selected_candidate",
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.626953125
+    }
+  ],
+  "top_nash_mixture_deltas": [
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_mixture": 0.0,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "B0 RandomLegal",
+      "s0_mean_mixture": 0.0
+    },
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_mixture": 3.0388981529456085e-10,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "B2 HeuristicPublic",
+      "s0_mean_mixture": 3.0388981529456085e-10
+    },
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_mixture": 0.0,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "B3 HeuristicPublicAggro",
+      "s0_mean_mixture": 0.0
+    },
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_mixture": 0.0,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "B4 HeuristicPublicControl",
+      "s0_mean_mixture": 0.0
+    },
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S1",
+      "case_mean_mixture": 0.9999999996961085,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "selected_candidate",
+      "s0_mean_mixture": 0.9999999996961085
+    }
+  ]
+}

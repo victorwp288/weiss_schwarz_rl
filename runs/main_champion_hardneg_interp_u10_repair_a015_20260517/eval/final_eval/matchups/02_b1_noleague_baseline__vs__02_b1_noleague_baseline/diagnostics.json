@@ -1,0 +1,25 @@
+{
+  "focal_policy_id": "B1 NoLeague baseline",
+  "opponent_policy_id": "B1 NoLeague baseline",
+  "pair_count": 64,
+  "policy_breakdown": {
+    "B1 NoLeague baseline": {
+      "games_as_seat0": 128,
+      "games_as_seat1": 128,
+      "total_wins": 128,
+      "wins_as_seat0": 60,
+      "wins_as_seat1": 68
+    }
+  },
+  "seat_results": {
+    "decisive_games": 128,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.46875,
+    "seat0_wins": 60,
+    "seat1_win_rate": 0.53125,
+    "seat1_wins": 68,
+    "total_games": 128,
+    "truncations": 0
+  }
+}

@@ -1,0 +1,845 @@
+{
+  "alarms": [],
+  "checks": {
+    "baseline_win_rate_vs_b0": {
+      "baseline_policy_id": "B0 RandomLegal",
+      "ci_high": 1.0,
+      "ci_low": 1.0,
+      "focal_policy_id": "main_league_selected",
+      "focal_policy_source": "sole_eligible_non_baseline",
+      "has_payoff_samples": true,
+      "mean": 1.0,
+      "paired_seed_count": 64,
+      "passed": true,
+      "posterior_probability_threshold": 0.95,
+      "prob_gt_threshold": 1.0,
+      "sample_count": 2000,
+      "stop_reason": "decisive",
+      "win_rate_threshold": 0.55
+    },
+    "seat_bias_alarm": {
+      "alarm": false,
+      "observed": {
+        "decisive_games": 3460,
+        "draws": 0,
+        "engine_errors": 0,
+        "seat0_wins": 1709,
+        "seat1_wins": 1751,
+        "total_games": 3460,
+        "truncations": 0
+      },
+      "passed": true,
+      "per_matchup": [
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/00_main_league_selected__vs__00_main_league_selected/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "main_league_selected",
+          "opponent_policy_id": "main_league_selected",
+          "seat0_win_rate": 0.453125,
+          "seat0_wins": 58,
+          "seat1_win_rate": 0.546875,
+          "seat1_wins": 70,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/00_main_league_selected__vs__01_b0_randomlegal/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "main_league_selected",
+          "opponent_policy_id": "B0 RandomLegal",
+          "seat0_win_rate": 0.5,
+          "seat0_wins": 64,
+          "seat1_win_rate": 0.5,
+          "seat1_wins": 64,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/00_main_league_selected__vs__02_b1_noleague_baseline/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "main_league_selected",
+          "opponent_policy_id": "B1 NoLeague baseline",
+          "seat0_win_rate": 0.5,
+          "seat0_wins": 64,
+          "seat1_win_rate": 0.5,
+          "seat1_wins": 64,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/00_main_league_selected__vs__03_b2_heuristicpublic/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "main_league_selected",
+          "opponent_policy_id": "B2 HeuristicPublic",
+          "seat0_win_rate": 0.53125,
+          "seat0_wins": 68,
+          "seat1_win_rate": 0.46875,
+          "seat1_wins": 60,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/00_main_league_selected__vs__04_b3_heuristicpublicaggro/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "main_league_selected",
+          "opponent_policy_id": "B3 HeuristicPublicAggro",
+          "seat0_win_rate": 0.4375,
+          "seat0_wins": 56,
+          "seat1_win_rate": 0.5625,
+          "seat1_wins": 72,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/00_main_league_selected__vs__05_b4_heuristicpubliccontrol/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "main_league_selected",
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "seat0_win_rate": 0.4375,
+          "seat0_wins": 56,
+          "seat1_win_rate": 0.5625,
+          "seat1_wins": 72,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 512,
+          "diagnostics_path": "matchups/01_b0_randomlegal__vs__01_b0_randomlegal/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B0 RandomLegal",
+          "opponent_policy_id": "B0 RandomLegal",
+          "seat0_win_rate": 0.4921875,
+          "seat0_wins": 252,
+          "seat1_win_rate": 0.5078125,
+          "seat1_wins": 260,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/01_b0_randomlegal__vs__02_b1_noleague_baseline/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B0 RandomLegal",
+          "opponent_policy_id": "B1 NoLeague baseline",
+          "seat0_win_rate": 0.5078125,
+          "seat0_wins": 65,
+          "seat1_win_rate": 0.4921875,
+          "seat1_wins": 63,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/01_b0_randomlegal__vs__03_b2_heuristicpublic/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B0 RandomLegal",
+          "opponent_policy_id": "B2 HeuristicPublic",
+          "seat0_win_rate": 0.5078125,
+          "seat0_wins": 65,
+          "seat1_win_rate": 0.4921875,
+          "seat1_wins": 63,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/01_b0_randomlegal__vs__04_b3_heuristicpublicaggro/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B0 RandomLegal",
+          "opponent_policy_id": "B3 HeuristicPublicAggro",
+          "seat0_win_rate": 0.5,
+          "seat0_wins": 64,
+          "seat1_win_rate": 0.5,
+          "seat1_wins": 64,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/01_b0_randomlegal__vs__05_b4_heuristicpubliccontrol/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B0 RandomLegal",
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "seat0_win_rate": 0.4921875,
+          "seat0_wins": 63,
+          "seat1_win_rate": 0.5078125,
+          "seat1_wins": 65,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/02_b1_noleague_baseline__vs__02_b1_noleague_baseline/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B1 NoLeague baseline",
+          "opponent_policy_id": "B1 NoLeague baseline",
+          "seat0_win_rate": 0.46875,
+          "seat0_wins": 60,
+          "seat1_win_rate": 0.53125,
+          "seat1_wins": 68,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/02_b1_noleague_baseline__vs__03_b2_heuristicpublic/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B1 NoLeague baseline",
+          "opponent_policy_id": "B2 HeuristicPublic",
+          "seat0_win_rate": 0.4609375,
+          "seat0_wins": 59,
+          "seat1_win_rate": 0.5390625,
+          "seat1_wins": 69,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/02_b1_noleague_baseline__vs__04_b3_heuristicpublicaggro/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B1 NoLeague baseline",
+          "opponent_policy_id": "B3 HeuristicPublicAggro",
+          "seat0_win_rate": 0.4296875,
+          "seat0_wins": 55,
+          "seat1_win_rate": 0.5703125,
+          "seat1_wins": 73,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/02_b1_noleague_baseline__vs__05_b4_heuristicpubliccontrol/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B1 NoLeague baseline",
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "seat0_win_rate": 0.5625,
+          "seat0_wins": 72,
+          "seat1_win_rate": 0.4375,
+          "seat1_wins": 56,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/03_b2_heuristicpublic__vs__03_b2_heuristicpublic/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B2 HeuristicPublic",
+          "opponent_policy_id": "B2 HeuristicPublic",
+          "seat0_win_rate": 0.515625,
+          "seat0_wins": 66,
+          "seat1_win_rate": 0.484375,
+          "seat1_wins": 62,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/03_b2_heuristicpublic__vs__04_b3_heuristicpublicaggro/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B2 HeuristicPublic",
+          "opponent_policy_id": "B3 HeuristicPublicAggro",
+          "seat0_win_rate": 0.4765625,
+          "seat0_wins": 61,
+          "seat1_win_rate": 0.5234375,
+          "seat1_wins": 67,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 512,
+          "diagnostics_path": "matchups/03_b2_heuristicpublic__vs__05_b4_heuristicpubliccontrol/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B2 HeuristicPublic",
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "seat0_win_rate": 0.529296875,
+          "seat0_wins": 271,
+          "seat1_win_rate": 0.470703125,
+          "seat1_wins": 241,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/04_b3_heuristicpublicaggro__vs__04_b3_heuristicpublicaggro/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B3 HeuristicPublicAggro",
+          "opponent_policy_id": "B3 HeuristicPublicAggro",
+          "seat0_win_rate": 0.546875,
+          "seat0_wins": 70,
+          "seat1_win_rate": 0.453125,
+          "seat1_wins": 58,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 132,
+          "diagnostics_path": "matchups/04_b3_heuristicpublicaggro__vs__05_b4_heuristicpubliccontrol/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B3 HeuristicPublicAggro",
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "seat0_win_rate": 0.4696969696969697,
+          "seat0_wins": 62,
+          "seat1_win_rate": 0.5303030303030303,
+          "seat1_wins": 70,
+          "truncations": 0
+        },
+        {
+          "decisive_games": 128,
+          "diagnostics_path": "matchups/05_b4_heuristicpubliccontrol__vs__05_b4_heuristicpubliccontrol/diagnostics.json",
+          "draws": 0,
+          "engine_errors": 0,
+          "focal_policy_id": "B4 HeuristicPublicControl",
+          "opponent_policy_id": "B4 HeuristicPublicControl",
+          "seat0_win_rate": 0.453125,
+          "seat0_wins": 58,
+          "seat1_win_rate": 0.546875,
+          "seat1_wins": 70,
+          "truncations": 0
+        }
+      ],
+      "posterior": {
+        "ci_high": 0.5105888516103805,
+        "ci_low": 0.4772825694265128,
+        "mean": 0.49393238948280843,
+        "prob_gt_half_plus_delta": 1.8967383219603562e-11,
+        "prob_lt_half_minus_delta": 1.093453864839808e-07
+      },
+      "thresholds": {
+        "max_abs_delta_from_half": 0.05,
+        "posterior_probability": 0.95
+      }
+    },
+    "truncation_rate": {
+      "max_allowed_rate": 0.02,
+      "passed": true,
+      "rate": 0.0,
+      "total_games": 3460,
+      "truncated_games": 0
+    }
+  },
+  "final_eval": {
+    "dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval",
+    "policy_ids": [
+      "main_league_selected",
+      "B0 RandomLegal",
+      "B1 NoLeague baseline",
+      "B2 HeuristicPublic",
+      "B3 HeuristicPublicAggro",
+      "B4 HeuristicPublicControl"
+    ],
+    "selection": {
+      "mode": "explicit",
+      "policy_count": 6
+    },
+    "summary_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval/summary.json"
+  },
+  "final_eval_artifact_contract": {
+    "duplicate_matchups": [],
+    "expected_matchup_count": 21,
+    "message": "final_eval artifact contract is complete",
+    "missing_matchups": [],
+    "noncanonical_matchups": [],
+    "observed_matchup_count": 21,
+    "passed": true,
+    "policy_ids": [
+      "main_league_selected",
+      "B0 RandomLegal",
+      "B1 NoLeague baseline",
+      "B2 HeuristicPublic",
+      "B3 HeuristicPublicAggro",
+      "B4 HeuristicPublicControl"
+    ],
+    "policy_set": {
+      "message": "policy_set.json matches summary policy_ids",
+      "passed": true,
+      "policy_ids": [
+        "main_league_selected",
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "B3 HeuristicPublicAggro",
+        "B4 HeuristicPublicControl"
+      ],
+      "policy_set_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval/policy_set.json"
+    },
+    "reference_failures": [],
+    "sensitivity_summary": {
+      "cases": [
+        "S0",
+        "S1",
+        "S2"
+      ],
+      "message": "sensitivity summary covers S0-S2 and matches final_eval policy_ids",
+      "missing_cases": [],
+      "passed": true,
+      "policy_ids_match": true,
+      "summary_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/metagame/summary.json"
+    },
+    "summary_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval/summary.json"
+  },
+  "final_eval_guardrails": {
+    "alarms": [],
+    "message": null,
+    "passed": true,
+    "reason": null
+  },
+  "kind": "paper_readiness_summary_v2",
+  "manifest_contract": {
+    "consistency_checks": {
+      "config_canonical_json_matches_manifest": {
+        "file_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/config_canonical.json",
+        "message": "JSON file matches manifest",
+        "passed": true
+      },
+      "config_hash_file_matches_manifest": {
+        "file_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/config_hash256.txt",
+        "message": "text file matches manifest",
+        "observed": "21e524c785e6ab7115c9a2c05d07a47a78499cdc83bf0060ad939e0666e21205",
+        "passed": true
+      },
+      "determinism_report_exists": {
+        "message": "ok",
+        "passed": true,
+        "path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/determinism_report.json",
+        "reason": null
+      },
+      "environment_manifest_exists": {
+        "message": "ok",
+        "passed": true,
+        "path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/environment.json",
+        "reason": null
+      },
+      "run_summary_exists": {
+        "message": "ok",
+        "passed": true,
+        "path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/run_summary.json",
+        "reason": null
+      },
+      "spec_bundle_json_matches_manifest": {
+        "file_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/spec_bundle.json",
+        "message": "JSON file matches manifest",
+        "passed": true
+      },
+      "spec_hash_file_matches_manifest": {
+        "file_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/spec_hash256.txt",
+        "message": "text file matches manifest",
+        "observed": "a62917cf4825a9dfa3b3ca23c43bb29f6a4abaed0098140192ab326e12ae2319",
+        "passed": true
+      }
+    },
+    "fields": {
+      "config_canonical": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "config_hash256": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "evaluation_pinning": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "git_commit": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "git_dirty": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "hardware": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "policy_set_selection": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "run_id256": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "run_id64": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "seed_files": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "simulator": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "spec_bundle": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      },
+      "spec_hash256": {
+        "message": "ok",
+        "passed": true,
+        "reason": null
+      }
+    },
+    "invalid_fields": [],
+    "manifest_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/manifest.json",
+    "message": "manifest satisfies paper-readiness requirements",
+    "mismatches": [],
+    "missing_fields": [],
+    "passed": true
+  },
+  "passed": true,
+  "run_dir": {
+    "dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517"
+  },
+  "run_directory_audit": {
+    "artifact_count": 33,
+    "artifacts": {
+      "config_canonical_json": {
+        "category": "run_root",
+        "description": "Canonical config JSON",
+        "expected_paths": [
+          "config_canonical.json"
+        ],
+        "passed": true,
+        "resolved_path": "config_canonical.json"
+      },
+      "config_hash_txt": {
+        "category": "run_root",
+        "description": "Config SHA-256 text file",
+        "expected_paths": [
+          "config_hash256.txt"
+        ],
+        "passed": true,
+        "resolved_path": "config_hash256.txt"
+      },
+      "determinism_report_json": {
+        "category": "run_root",
+        "description": "Determinism report JSON",
+        "expected_paths": [
+          "determinism_report.json"
+        ],
+        "passed": true,
+        "resolved_path": "determinism_report.json"
+      },
+      "diagnostics_replay_verification": {
+        "category": "diagnostics",
+        "description": "Replay verification JSON",
+        "expected_paths": [
+          "eval/diagnostics/replay_verification.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/diagnostics/replay_verification.json"
+      },
+      "diagnostics_seat_bias": {
+        "category": "diagnostics",
+        "description": "Seat-bias diagnostic JSON",
+        "expected_paths": [
+          "eval/diagnostics/seat_bias.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/diagnostics/seat_bias.json"
+      },
+      "diagnostics_truncation_heatmap": {
+        "category": "diagnostics",
+        "description": "Truncation heatmap CSV",
+        "expected_paths": [
+          "eval/diagnostics/truncation_heatmap_data.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/diagnostics/truncation_heatmap_data.csv"
+      },
+      "environment_json": {
+        "category": "run_root",
+        "description": "Environment manifest JSON",
+        "expected_paths": [
+          "environment.json"
+        ],
+        "passed": true,
+        "resolved_path": "environment.json"
+      },
+      "final_eval_artifact_hashes": {
+        "category": "final_eval",
+        "description": "Final-eval artifact hashes JSON",
+        "expected_paths": [
+          "eval/final_eval/artifact_hashes.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/final_eval/artifact_hashes.json"
+      },
+      "final_eval_matchups_manifest": {
+        "category": "final_eval",
+        "description": "Final-eval matchup manifest CSV",
+        "expected_paths": [
+          "eval/final_eval/matchups.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/final_eval/matchups.csv"
+      },
+      "final_eval_payoff_matrix_export": {
+        "category": "final_eval",
+        "description": "Final-eval payoff matrix CSV export",
+        "expected_paths": [
+          "eval/final_eval/payoff_matrices/p_mean.csv",
+          "eval/final_eval/matrices/mean.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/final_eval/payoff_matrices/p_mean.csv"
+      },
+      "final_eval_policy_set": {
+        "category": "final_eval",
+        "description": "Final-eval policy set JSON",
+        "expected_paths": [
+          "eval/final_eval/policy_set.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/final_eval/policy_set.json"
+      },
+      "final_eval_posterior_samples": {
+        "category": "final_eval",
+        "description": "Final-eval posterior samples JSON",
+        "expected_paths": [
+          "eval/final_eval/posterior_samples.json",
+          "eval/final_eval/posterior_samples.npz"
+        ],
+        "passed": true,
+        "resolved_path": "eval/final_eval/posterior_samples.json"
+      },
+      "final_eval_summary": {
+        "category": "final_eval",
+        "description": "Final-eval summary JSON",
+        "expected_paths": [
+          "eval/final_eval/summary.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/final_eval/summary.json"
+      },
+      "paper_figures_pdf": {
+        "category": "figures",
+        "description": "Rendered paper figures (PDF)",
+        "glob": "figures/paper/*.pdf",
+        "matches": [
+          "figures/paper/fig_learning_curves.pdf",
+          "figures/paper/fig_matchup_heatmap.pdf",
+          "figures/paper/fig_seat_bias.pdf",
+          "figures/paper/fig_truncation_heatmap.pdf"
+        ],
+        "minimum_count": 1,
+        "passed": true
+      },
+      "paper_figures_png": {
+        "category": "figures",
+        "description": "Rendered paper figures (PNG)",
+        "glob": "figures/paper/*.png",
+        "matches": [
+          "figures/paper/fig_learning_curves.png",
+          "figures/paper/fig_matchup_heatmap.png",
+          "figures/paper/fig_seat_bias.png",
+          "figures/paper/fig_truncation_heatmap.png"
+        ],
+        "minimum_count": 1,
+        "passed": true
+      },
+      "run_manifest": {
+        "category": "run_root",
+        "description": "Run manifest JSON",
+        "expected_paths": [
+          "manifest.json"
+        ],
+        "passed": true,
+        "resolved_path": "manifest.json"
+      },
+      "run_summary_json": {
+        "category": "run_root",
+        "description": "Run summary JSON",
+        "expected_paths": [
+          "run_summary.json"
+        ],
+        "passed": true,
+        "resolved_path": "run_summary.json"
+      },
+      "sensitivity_s0_alpharank_stationary": {
+        "category": "sensitivity",
+        "description": "Sensitivity S0 AlphaRank stationary CSV",
+        "expected_paths": [
+          "eval/metagame/S0/alpharank/stationary_mean.csv",
+          "eval/final_eval/sensitivity/S0/alpharank/stationary_mean.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S0/alpharank/stationary_mean.csv"
+      },
+      "sensitivity_s0_nash_mixture": {
+        "category": "sensitivity",
+        "description": "Sensitivity S0 Nash mixture CSV",
+        "expected_paths": [
+          "eval/metagame/S0/nash/mixture_mean.csv",
+          "eval/final_eval/sensitivity/S0/nash/mixture_mean.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S0/nash/mixture_mean.csv"
+      },
+      "sensitivity_s0_payoff_matchups": {
+        "category": "sensitivity",
+        "description": "Sensitivity S0 payoff matchup CSV",
+        "expected_paths": [
+          "eval/metagame/S0/payoff/matchups.csv",
+          "eval/final_eval/sensitivity/S0/payoff/matchups.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S0/payoff/matchups.csv"
+      },
+      "sensitivity_s0_summary": {
+        "category": "sensitivity",
+        "description": "Sensitivity S0 summary JSON",
+        "expected_paths": [
+          "eval/metagame/S0/summary.json",
+          "eval/final_eval/sensitivity/S0/summary.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S0/summary.json"
+      },
+      "sensitivity_s1_alpharank_stationary": {
+        "category": "sensitivity",
+        "description": "Sensitivity S1 AlphaRank stationary CSV",
+        "expected_paths": [
+          "eval/metagame/S1/alpharank/stationary_mean.csv",
+          "eval/final_eval/sensitivity/S1/alpharank/stationary_mean.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S1/alpharank/stationary_mean.csv"
+      },
+      "sensitivity_s1_nash_mixture": {
+        "category": "sensitivity",
+        "description": "Sensitivity S1 Nash mixture CSV",
+        "expected_paths": [
+          "eval/metagame/S1/nash/mixture_mean.csv",
+          "eval/final_eval/sensitivity/S1/nash/mixture_mean.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S1/nash/mixture_mean.csv"
+      },
+      "sensitivity_s1_payoff_matchups": {
+        "category": "sensitivity",
+        "description": "Sensitivity S1 payoff matchup CSV",
+        "expected_paths": [
+          "eval/metagame/S1/payoff/matchups.csv",
+          "eval/final_eval/sensitivity/S1/payoff/matchups.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S1/payoff/matchups.csv"
+      },
+      "sensitivity_s1_summary": {
+        "category": "sensitivity",
+        "description": "Sensitivity S1 summary JSON",
+        "expected_paths": [
+          "eval/metagame/S1/summary.json",
+          "eval/final_eval/sensitivity/S1/summary.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S1/summary.json"
+      },
+      "sensitivity_s2_alpharank_stationary": {
+        "category": "sensitivity",
+        "description": "Sensitivity S2 AlphaRank stationary CSV",
+        "expected_paths": [
+          "eval/metagame/S2/alpharank/stationary_mean.csv",
+          "eval/final_eval/sensitivity/S2/alpharank/stationary_mean.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S2/alpharank/stationary_mean.csv"
+      },
+      "sensitivity_s2_nash_mixture": {
+        "category": "sensitivity",
+        "description": "Sensitivity S2 Nash mixture CSV",
+        "expected_paths": [
+          "eval/metagame/S2/nash/mixture_mean.csv",
+          "eval/final_eval/sensitivity/S2/nash/mixture_mean.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S2/nash/mixture_mean.csv"
+      },
+      "sensitivity_s2_payoff_matchups": {
+        "category": "sensitivity",
+        "description": "Sensitivity S2 payoff matchup CSV",
+        "expected_paths": [
+          "eval/metagame/S2/payoff/matchups.csv",
+          "eval/final_eval/sensitivity/S2/payoff/matchups.csv"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S2/payoff/matchups.csv"
+      },
+      "sensitivity_s2_summary": {
+        "category": "sensitivity",
+        "description": "Sensitivity S2 summary JSON",
+        "expected_paths": [
+          "eval/metagame/S2/summary.json",
+          "eval/final_eval/sensitivity/S2/summary.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/S2/summary.json"
+      },
+      "sensitivity_summary": {
+        "category": "sensitivity",
+        "description": "Sensitivity report summary JSON",
+        "expected_paths": [
+          "eval/metagame/summary.json",
+          "eval/final_eval/sensitivity/summary.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/metagame/summary.json"
+      },
+      "spec_bundle_json": {
+        "category": "run_root",
+        "description": "Spec bundle JSON",
+        "expected_paths": [
+          "spec_bundle.json"
+        ],
+        "passed": true,
+        "resolved_path": "spec_bundle.json"
+      },
+      "spec_hash_txt": {
+        "category": "run_root",
+        "description": "Spec bundle SHA-256 text file",
+        "expected_paths": [
+          "spec_hash256.txt"
+        ],
+        "passed": true,
+        "resolved_path": "spec_hash256.txt"
+      },
+      "training_metrics": {
+        "category": "training",
+        "description": "Training metrics JSONL or checkpoint interpolation provenance",
+        "expected_paths": [
+          "training/logs/training_metrics.jsonl",
+          "eval/diagnostics/checkpoint_interpolation_summary.json"
+        ],
+        "passed": true,
+        "resolved_path": "eval/diagnostics/checkpoint_interpolation_summary.json"
+      }
+    },
+    "message": "all required run-directory artifacts are present",
+    "missing_artifacts": [],
+    "passed": true
+  },
+  "scope": "run_dir"
+}

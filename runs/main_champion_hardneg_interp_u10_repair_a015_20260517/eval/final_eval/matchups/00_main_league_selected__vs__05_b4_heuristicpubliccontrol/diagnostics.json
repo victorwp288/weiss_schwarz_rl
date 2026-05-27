@@ -1,0 +1,32 @@
+{
+  "focal_policy_id": "main_league_selected",
+  "opponent_policy_id": "B4 HeuristicPublicControl",
+  "pair_count": 64,
+  "policy_breakdown": {
+    "B4 HeuristicPublicControl": {
+      "games_as_seat0": 64,
+      "games_as_seat1": 64,
+      "total_wins": 36,
+      "wins_as_seat0": 14,
+      "wins_as_seat1": 22
+    },
+    "main_league_selected": {
+      "games_as_seat0": 64,
+      "games_as_seat1": 64,
+      "total_wins": 92,
+      "wins_as_seat0": 42,
+      "wins_as_seat1": 50
+    }
+  },
+  "seat_results": {
+    "decisive_games": 128,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.4375,
+    "seat0_wins": 56,
+    "seat1_win_rate": 0.5625,
+    "seat1_wins": 72,
+    "total_games": 128,
+    "truncations": 0
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "champion_size": 4,
+  "champion_snapshots": [],
+  "pinned_snapshots": [
+    "main_interp_repair_a015",
+    "main_league_selected"
+  ],
+  "recent_size": 24,
+  "schema_version": 1,
+  "snapshots": [
+    {
+      "created_utc": "2026-05-20T02:59:51.472589+00:00",
+      "path": "training/snapshots/main_a025_b2pair70_u1_a075/weights.pt",
+      "policy_id": "main_a025_b2pair70_u1_a075",
+      "update": 1,
+      "weights_sha256": "39c7799b7d205f549b566e1366febfe12baa29e66db067980e75d79f2376764c"
+    },
+    {
+      "created_utc": "2026-05-17T23:22:34.891327+00:00",
+      "path": "training/snapshots/main_interp_repair_a015/weights.pt",
+      "policy_id": "main_interp_repair_a015",
+      "update": 5,
+      "weights_sha256": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26"
+    },
+    {
+      "created_utc": "2026-05-18T00:13:10.415921+00:00",
+      "path": "training/snapshots/main_league_selected/weights.pt",
+      "policy_id": "main_league_selected",
+      "update": 5,
+      "weights_sha256": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26"
+    }
+  ]
+}

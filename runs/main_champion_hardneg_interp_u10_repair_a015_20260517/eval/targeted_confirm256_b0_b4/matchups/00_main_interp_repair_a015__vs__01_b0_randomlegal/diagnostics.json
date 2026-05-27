@@ -1,0 +1,32 @@
+{
+  "focal_policy_id": "main_interp_repair_a015",
+  "opponent_policy_id": "B0 RandomLegal",
+  "pair_count": 256,
+  "policy_breakdown": {
+    "B0 RandomLegal": {
+      "games_as_seat0": 256,
+      "games_as_seat1": 256,
+      "total_wins": 0,
+      "wins_as_seat0": 0,
+      "wins_as_seat1": 0
+    },
+    "main_interp_repair_a015": {
+      "games_as_seat0": 256,
+      "games_as_seat1": 256,
+      "total_wins": 512,
+      "wins_as_seat0": 256,
+      "wins_as_seat1": 256
+    }
+  },
+  "seat_results": {
+    "decisive_games": 512,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.5,
+    "seat0_wins": 256,
+    "seat1_win_rate": 0.5,
+    "seat1_wins": 256,
+    "total_games": 512,
+    "truncations": 0
+  }
+}

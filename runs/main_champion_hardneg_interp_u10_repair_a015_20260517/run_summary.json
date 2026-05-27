@@ -1,0 +1,49 @@
+{
+  "artifact_roots": {
+    "eval": "eval",
+    "figures": "figures",
+    "replays": "replays",
+    "tensorboard": "tensorboard",
+    "training": "training"
+  },
+  "artifact_schema_version": "run_artifacts_v2",
+  "canonical_eval_completed": true,
+  "determinism_report_path": "determinism_report.json",
+  "environment_path": "environment.json",
+  "figure_outputs": [
+    "figures/paper/fig_matchup_heatmap.pdf",
+    "figures/paper/fig_matchup_heatmap.png",
+    "figures/paper/fig_truncation_heatmap.pdf",
+    "figures/paper/fig_truncation_heatmap.png",
+    "figures/paper/fig_seat_bias.pdf",
+    "figures/paper/fig_seat_bias.png",
+    "figures/paper/fig_learning_curves.pdf",
+    "figures/paper/fig_learning_curves.png"
+  ],
+  "final_eval_dir": "eval/final_eval",
+  "kind": "run_summary_v1",
+  "manifest_path": "manifest.json",
+  "metagame_dir": "eval/metagame",
+  "paper_grade": true,
+  "paper_readiness_summary_path": "paper_readiness_summary.json",
+  "policy_ids": [
+    "main_league_selected",
+    "B0 RandomLegal",
+    "B1 NoLeague baseline",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "policy_set_selection_mode": "explicit_cli",
+  "run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517",
+  "run_id256": "3d4656e0cbc4c388d7e82ee02fd4ab23331c130ea7f4bf0d95de2d6403ebe91d",
+  "run_id64": "60ec16af5599afba",
+  "runtime_mode": "interpolated_checkpoint",
+  "seed_derivation": {
+    "actor_seed_formula": "hash64(base_seed64, actor_id)",
+    "cli_seed_override": false,
+    "config_base_seed64": 20260212,
+    "effective_base_seed64": 20260212,
+    "episode_seed_formula": "hash64(actor_seed64, env_id, episode_index)"
+  }
+}

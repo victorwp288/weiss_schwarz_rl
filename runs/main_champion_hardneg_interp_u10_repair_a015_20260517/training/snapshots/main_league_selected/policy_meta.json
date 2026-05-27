@@ -1,0 +1,31 @@
+{
+  "alias_for_policy_id": "main_interp_repair_a015",
+  "format": "selected_candidate_alias_metadata_v1",
+  "policy_id": "main_league_selected",
+  "selection_summary": {
+    "min_required_anchor_score": 0.5,
+    "required_anchors": [
+      "B0 RandomLegal",
+      "B1 NoLeague baseline",
+      "B2 HeuristicPublic",
+      "B3 HeuristicPublicAggro",
+      "B4 HeuristicPublicControl"
+    ],
+    "selected": {
+      "aggregate_score": 0.7734375,
+      "required_anchor_mean": 0.7734375,
+      "required_anchor_min": 0.62890625,
+      "run_name": "main_champion_hardneg_interp_u10_repair_a015_20260517",
+      "selection_confirmation_summary_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm256_b0_b4/targeted_confirm256_summary.json",
+      "selection_score": 0.7300781249999999,
+      "selection_score_source": "targeted_confirm",
+      "snapshot_policy_id": "main_interp_repair_a015",
+      "train_policy_id": "targeted_confirm_main_interp_repair_a015",
+      "update_count": 5
+    }
+  },
+  "source_weights_path": "training/snapshots/main_interp_repair_a015/weights.pt",
+  "update": 5,
+  "weights_path": "training/snapshots/main_league_selected/weights.pt",
+  "weights_sha256": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26"
+}

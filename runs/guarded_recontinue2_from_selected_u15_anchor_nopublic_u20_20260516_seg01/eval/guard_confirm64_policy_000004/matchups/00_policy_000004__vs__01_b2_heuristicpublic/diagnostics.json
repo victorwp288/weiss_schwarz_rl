@@ -1,0 +1,32 @@
+{
+  "focal_policy_id": "policy_000004",
+  "opponent_policy_id": "B2 HeuristicPublic",
+  "pair_count": 64,
+  "policy_breakdown": {
+    "B2 HeuristicPublic": {
+      "games_as_seat0": 64,
+      "games_as_seat1": 64,
+      "total_wins": 35,
+      "wins_as_seat0": 16,
+      "wins_as_seat1": 19
+    },
+    "policy_000004": {
+      "games_as_seat0": 64,
+      "games_as_seat1": 64,
+      "total_wins": 93,
+      "wins_as_seat0": 45,
+      "wins_as_seat1": 48
+    }
+  },
+  "seat_results": {
+    "decisive_games": 128,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.4765625,
+    "seat0_wins": 61,
+    "seat1_win_rate": 0.5234375,
+    "seat1_wins": 67,
+    "total_games": 128,
+    "truncations": 0
+  }
+}

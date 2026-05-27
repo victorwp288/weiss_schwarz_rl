@@ -1,0 +1,125 @@
+{
+  "champion_size": 4,
+  "champion_snapshots": [
+    "seed_2e8b8a3d69_selected_candidate"
+  ],
+  "pinned_snapshots": [
+    "selected_candidate"
+  ],
+  "recent_size": 24,
+  "schema_version": 1,
+  "snapshots": [
+    {
+      "created_utc": "2026-05-16T11:08:33.358580+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_policy_000001/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_policy_000001",
+      "update": 0,
+      "weights_sha256": "384ed7e8b9a4b562fd737bd1465ed54c1b482aaa447fca4ba11c083357fabda4"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.389047+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_policy_000002/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_policy_000002",
+      "update": 0,
+      "weights_sha256": "7242ffd3532a06504b174902d6f146aadd108f5336b91fac270c1cfde695f92f"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.421398+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_policy_000003/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_policy_000003",
+      "update": 0,
+      "weights_sha256": "4d3dc65702eab789f5253921c9d302006458182849a662762af428978d1a8927"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.484117+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_policy_000004/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_policy_000004",
+      "update": 0,
+      "weights_sha256": "b969b80bc5e06dc85ee5cf640eda0e4a72772e5bb51dc26680ddae16db9195e5"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.120315+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_seed_a70215a8b6_policy_000001/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_seed_a70215a8b6_policy_000001",
+      "update": 0,
+      "weights_sha256": "eb37705884f701cbed6399ada0cf6a4a41d49cc7aa8b53eea416186fa58a0701"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.149086+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_seed_a70215a8b6_policy_000002/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_seed_a70215a8b6_policy_000002",
+      "update": 0,
+      "weights_sha256": "70feaffbb89137f620c7a2d46487f5b82594171fb442bef50c5d916fb21a9fc3"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.183316+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_seed_a70215a8b6_policy_000003/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_seed_a70215a8b6_policy_000003",
+      "update": 0,
+      "weights_sha256": "7d65d3c5a265058db45fc9283dbeebfda6262cfd4347528da9134d48f05d11d2"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.215080+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_seed_a70215a8b6_policy_000004/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_seed_a70215a8b6_policy_000004",
+      "update": 0,
+      "weights_sha256": "0001d89a72aed83b2f8f65846a2d4007b40b04644abbfd3d18816b31c9e2c74f"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.290844+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_seed_a70215a8b6_seed_87fcee775f_trajectory_bc_latest/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_seed_a70215a8b6_seed_87fcee775f_trajectory_bc_latest",
+      "update": 0,
+      "weights_sha256": "ce2f0825c96d0b0bc6c7a3c54b09cf655bd6475c69111f17ca1ca106eca0d49e"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.323523+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_seed_a70215a8b6_selected_candidate/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_seed_a70215a8b6_selected_candidate",
+      "update": 0,
+      "weights_sha256": "9c911dd7bf7eafdcc74c59ca55335d27c82d86b19e3efdad88bbf31d793c1bc2"
+    },
+    {
+      "created_utc": "2026-05-16T11:08:33.453819+00:00",
+      "path": "training/snapshots/seed_2e8b8a3d69_selected_candidate/weights.pt",
+      "policy_id": "seed_2e8b8a3d69_selected_candidate",
+      "update": 0,
+      "weights_sha256": "4ad756c5a437eb3ca557e8e61f749ec6d252f99152aa5c55a52d53c4ef48873f"
+    },
+    {
+      "created_utc": "2026-05-16T11:09:58.064726+00:00",
+      "path": "training/snapshots/policy_000001/weights.pt",
+      "policy_id": "policy_000001",
+      "update": 5,
+      "weights_sha256": "0da62a89810167dbfd5a702d80a41b60847bdfd8eb13fce0979100506637ed65"
+    },
+    {
+      "created_utc": "2026-05-16T11:11:19.250685+00:00",
+      "path": "training/snapshots/policy_000002/weights.pt",
+      "policy_id": "policy_000002",
+      "update": 10,
+      "weights_sha256": "805b831434b794350265198ef921f056943604c71be127aeb06368e5bfe5bb64"
+    },
+    {
+      "created_utc": "2026-05-16T11:12:55.826019+00:00",
+      "path": "training/snapshots/policy_000003/weights.pt",
+      "policy_id": "policy_000003",
+      "update": 15,
+      "weights_sha256": "66767c1e70c70d1706c058bfd38a7b20cb902c9740d96b6fb1ba664a2b65a685"
+    },
+    {
+      "created_utc": "2026-05-16T11:30:49.284005+00:00",
+      "path": "training/snapshots/selected_candidate/weights.pt",
+      "policy_id": "selected_candidate",
+      "update": 15,
+      "weights_sha256": "66767c1e70c70d1706c058bfd38a7b20cb902c9740d96b6fb1ba664a2b65a685"
+    },
+    {
+      "created_utc": "2026-05-16T11:14:34.723177+00:00",
+      "path": "training/snapshots/policy_000004/weights.pt",
+      "policy_id": "policy_000004",
+      "update": 20,
+      "weights_sha256": "f12ca0bd0101eb541829770423b5a80ed5b18ce175c127c3842be4a5ea026cda"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "failed_episode_count": 0,
+  "failed_replays": [],
+  "index_path": "replays/index.json",
+  "kind": "replay_verification_summary_v1",
+  "sampled_episode_count": 7,
+  "status": "ok",
+  "verified_episode_count": 7,
+  "verified_report_count": 7
+}

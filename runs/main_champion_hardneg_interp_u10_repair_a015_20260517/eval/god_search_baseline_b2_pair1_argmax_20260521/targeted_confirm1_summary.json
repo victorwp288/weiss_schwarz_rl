@@ -1,0 +1,51 @@
+{
+  "anchor_subset": {
+    "games": 2,
+    "mean": 0.5,
+    "wins": 1
+  },
+  "created_unix": 1779352359.9072049,
+  "elapsed_seconds": 3.074662685394287,
+  "eval_sampling_algorithm": "model_argmax_pinned_v1",
+  "focal_policy_id": "main_league_selected",
+  "games_per_row": 2,
+  "god_search": null,
+  "legacy_subset": {
+    "games": 0,
+    "mean": null,
+    "wins": 0
+  },
+  "model_sampling_temperature": 1.0,
+  "output_dir": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_baseline_b2_pair1_argmax_20260521",
+  "overall": {
+    "games": 2,
+    "mean": 0.5,
+    "wins": 1
+  },
+  "paired_seeds": 1,
+  "rows": [
+    {
+      "ci_high": 0.5,
+      "ci_low": 0.5,
+      "diagnostics_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_baseline_b2_pair1_argmax_20260521/matchups/00_main_league_selected__vs__01_b2_heuristicpublic/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "main_league_selected",
+      "games": 2,
+      "losses": 1,
+      "mean": 0.5,
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "paired_seeds": 1,
+      "prob_gt_half": 0.0,
+      "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_baseline_b2_pair1_argmax_20260521/matchups/00_main_league_selected__vs__01_b2_heuristicpublic/matchup_summary.json",
+      "truncations": 0,
+      "wins": 1
+    }
+  ],
+  "seed_file": {
+    "path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/configs/seeds/report_eval_seeds.txt",
+    "sha256": "5db0677f8ff932a95bb86cb91e6902de3ed3460ad8303858e169e0a17c728df0",
+    "source": "report_eval"
+  },
+  "stack_config": "configs/thesis/final_eval.yaml"
+}

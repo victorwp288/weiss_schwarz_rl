@@ -9,8 +9,8 @@ commands.
 
 | Path | Approx size | Git policy | Notes |
 | --- | ---: | --- | --- |
-| `runs/` | 124605.86 MB | Keep local, ignore in Git except `runs/README.md` | Full training/eval runs, checkpoints, snapshots, replay bundles, tensorboard files. |
-| `diagnostics/` | 663.71 MB | Keep local, ignore in Git | Raw audit outputs and replay bundles. Summaries should be promoted to docs or compact JSON artifacts before sharing. |
+| `runs/` | 124605.86 MB | Keep local by default, ignore in Git except `runs/README.md` and explicit private-backup force-adds | Full training/eval runs, checkpoints, snapshots, replay bundles, tensorboard files. |
+| `diagnostics/` | 663.71 MB | Keep local by default, ignore in Git except explicit private-backup force-adds | Raw audit outputs and replay bundles. Summaries should be promoted to docs or compact JSON artifacts before sharing. |
 | `run_logs/` | 0.36 MB | Track selected logs | Existing historical logs are tracked; new logs are small enough to keep when they support thesis claims. |
 | `vast_artifacts/` | 2.24 MB | Track | Compact thesis summaries from remote/Vast runs. |
 | `thesis_figures_final/` | 1.41 MB | Track | Final figure exports and snippets. |
@@ -23,6 +23,9 @@ commands.
 - Preserve all run and checkpoint files on disk.
 - Remove tracked run payloads from the Git index while keeping `runs/README.md`
   tracked.
+- For the private `final/progress` backup, force-add only the locked May 17-21
+  model/search artifact subset recorded in
+  `docs/private_backup_manifest_20260527.md`.
 - Track source, docs, configs, tests, compact summaries, and the human-play web
   source.
 - Ignore raw diagnostics, handoff bundles, local tool output, frontend build

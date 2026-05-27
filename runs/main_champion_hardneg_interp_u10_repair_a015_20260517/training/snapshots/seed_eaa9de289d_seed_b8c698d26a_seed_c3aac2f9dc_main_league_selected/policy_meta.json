@@ -1,0 +1,12 @@
+{
+  "format": "seeded_train_snapshot_metadata_v1",
+  "imported_from_policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+  "imported_from_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_from_selected_retention_b4guard_u5x3_20260518_seg01",
+  "imported_from_snapshot_path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected/weights.pt",
+  "imported_from_update": 0,
+  "imported_from_weights_sha256": "6b57761272d759071c385591d1e401e49faf4e6d5ef6ba38f5bddffd40b1ef2f",
+  "policy_id": "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+  "update": 0,
+  "weights_path": "training/snapshots/seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected/weights.pt",
+  "weights_sha256": "55d051c5b7e1d6d590b74074715ffdb07568681d26c1f92678002bfd049642cf"
+}

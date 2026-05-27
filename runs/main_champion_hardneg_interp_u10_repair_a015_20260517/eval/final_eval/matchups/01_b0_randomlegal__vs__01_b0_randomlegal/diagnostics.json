@@ -1,0 +1,25 @@
+{
+  "focal_policy_id": "B0 RandomLegal",
+  "opponent_policy_id": "B0 RandomLegal",
+  "pair_count": 256,
+  "policy_breakdown": {
+    "B0 RandomLegal": {
+      "games_as_seat0": 512,
+      "games_as_seat1": 512,
+      "total_wins": 512,
+      "wins_as_seat0": 252,
+      "wins_as_seat1": 260
+    }
+  },
+  "seat_results": {
+    "decisive_games": 512,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.4921875,
+    "seat0_wins": 252,
+    "seat1_win_rate": 0.5078125,
+    "seat1_wins": 260,
+    "total_games": 512,
+    "truncations": 0
+  }
+}

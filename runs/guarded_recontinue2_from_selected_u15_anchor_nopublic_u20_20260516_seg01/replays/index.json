@@ -1,0 +1,103 @@
+{
+  "kind": "replay_index_v1",
+  "samples": [
+    {
+      "bundle_path": "replays/bundles/replay_5101872b6ade0552.zip",
+      "episode_index": 202,
+      "error": null,
+      "focal_policy_id": "selected_candidate",
+      "matched": true,
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "pair_index": 101,
+      "raw_replay_path": "replays/raw/0101_0_9fad3604e5c141f3/episode_0000_00000002_5ec7024c8b113336.wsr",
+      "replay_key64": "5101872b6ade0552",
+      "swap_index": 0,
+      "verification_report_path": "replays/verification/replay_5101872b6ade0552.json",
+      "verification_status": "success"
+    },
+    {
+      "bundle_path": "replays/bundles/replay_c6b0f1552c0a6f76.zip",
+      "episode_index": 358,
+      "error": null,
+      "focal_policy_id": "B0 RandomLegal",
+      "matched": true,
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "pair_index": 179,
+      "raw_replay_path": null,
+      "replay_key64": "c6b0f1552c0a6f76",
+      "swap_index": 0,
+      "verification_report_path": "replays/verification/replay_c6b0f1552c0a6f76.json",
+      "verification_status": "success"
+    },
+    {
+      "bundle_path": "replays/bundles/replay_5d75060ac7eabc14.zip",
+      "episode_index": 248,
+      "error": null,
+      "focal_policy_id": "B2 HeuristicPublic",
+      "matched": true,
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "pair_index": 124,
+      "raw_replay_path": "replays/raw/0124_0_47988cabc9e83e0f/episode_0000_00000002_798a081d21e079dc.wsr",
+      "replay_key64": "5d75060ac7eabc14",
+      "swap_index": 0,
+      "verification_report_path": "replays/verification/replay_5d75060ac7eabc14.json",
+      "verification_status": "success"
+    },
+    {
+      "bundle_path": "replays/bundles/replay_3a7e1d4d03d5a37c.zip",
+      "episode_index": 131,
+      "error": null,
+      "focal_policy_id": "B2 HeuristicPublic",
+      "matched": true,
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "pair_index": 65,
+      "raw_replay_path": "replays/raw/0065_1_41b9f0f9088b467a/episode_0000_00000002_34b77baf5cfbe2a3.wsr",
+      "replay_key64": "3a7e1d4d03d5a37c",
+      "swap_index": 1,
+      "verification_report_path": "replays/verification/replay_3a7e1d4d03d5a37c.json",
+      "verification_status": "success"
+    },
+    {
+      "bundle_path": "replays/bundles/replay_8f3fea383f11f109.zip",
+      "episode_index": 59,
+      "error": null,
+      "focal_policy_id": "B3 HeuristicPublicAggro",
+      "matched": true,
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "pair_index": 29,
+      "raw_replay_path": "replays/raw/0029_1_4ef041c4df015e1c/episode_0000_00000002_12a53b29bff4a4e1.wsr",
+      "replay_key64": "8f3fea383f11f109",
+      "swap_index": 1,
+      "verification_report_path": "replays/verification/replay_8f3fea383f11f109.json",
+      "verification_status": "success"
+    },
+    {
+      "bundle_path": "replays/bundles/replay_12f0c8a1878a4f1b.zip",
+      "episode_index": 35,
+      "error": null,
+      "focal_policy_id": "B4 HeuristicPublicControl",
+      "matched": true,
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "pair_index": 17,
+      "raw_replay_path": "replays/raw/0017_1_dfc3df6d6b3bb20b/episode_0000_00000002_0b88d775503d1dd4.wsr",
+      "replay_key64": "12f0c8a1878a4f1b",
+      "swap_index": 1,
+      "verification_report_path": "replays/verification/replay_12f0c8a1878a4f1b.json",
+      "verification_status": "success"
+    },
+    {
+      "bundle_path": "replays/bundles/replay_e88bc4aa12309598.zip",
+      "episode_index": 273,
+      "error": null,
+      "focal_policy_id": "B4 HeuristicPublicControl",
+      "matched": true,
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "pair_index": 136,
+      "raw_replay_path": "replays/raw/0136_1_a30feba33173c33e/episode_0000_00000002_820d58af54e66d7e.wsr",
+      "replay_key64": "e88bc4aa12309598",
+      "swap_index": 1,
+      "verification_report_path": "replays/verification/replay_e88bc4aa12309598.json",
+      "verification_status": "success"
+    }
+  ]
+}

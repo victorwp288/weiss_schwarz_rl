@@ -1,0 +1,6 @@
+policy_id,mean_stationary_mass
+selected_candidate,1.0
+B0 RandomLegal,0.0
+B2 HeuristicPublic,0.0
+B3 HeuristicPublicAggro,0.0
+B4 HeuristicPublicControl,0.0

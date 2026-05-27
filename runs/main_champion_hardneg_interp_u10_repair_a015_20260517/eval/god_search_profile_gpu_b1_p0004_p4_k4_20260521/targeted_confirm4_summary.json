@@ -1,0 +1,79 @@
+{
+  "anchor_subset": {
+    "games": 16,
+    "mean": 0.875,
+    "wins": 14
+  },
+  "created_unix": 1779361929.1401021,
+  "elapsed_seconds": 206.01054048538208,
+  "eval_sampling_algorithm": "model_argmax_pinned_v1",
+  "focal_policy_id": "main_league_selected",
+  "games_per_row": 8,
+  "god_search": {
+    "apply_to_focal_only": true,
+    "fail_on_prefix_mismatch": true,
+    "max_rollout_decisions": 0,
+    "max_search_decisions_per_game": 1,
+    "mode": "same_world_prefix_rollout",
+    "rollout_policy": "argmax",
+    "rollouts_per_action": 1,
+    "top_k": 4,
+    "trace_limit": 8,
+    "verify_prefix_replay": true
+  },
+  "legacy_subset": {
+    "games": 0,
+    "mean": null,
+    "wins": 0
+  },
+  "model_sampling_temperature": 1.0,
+  "output_dir": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_profile_gpu_b1_p0004_p4_k4_20260521",
+  "overall": {
+    "games": 16,
+    "mean": 0.875,
+    "wins": 14
+  },
+  "paired_seeds": 4,
+  "rows": [
+    {
+      "ci_high": 1.0,
+      "ci_low": 1.0,
+      "diagnostics_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_profile_gpu_b1_p0004_p4_k4_20260521/matchups/00_main_league_selected__vs__01_b1_noleague_baseline/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "main_league_selected",
+      "games": 8,
+      "losses": 0,
+      "mean": 1.0,
+      "opponent_policy_id": "B1 NoLeague baseline",
+      "paired_seeds": 4,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_profile_gpu_b1_p0004_p4_k4_20260521/matchups/00_main_league_selected__vs__01_b1_noleague_baseline/matchup_summary.json",
+      "truncations": 0,
+      "wins": 8
+    },
+    {
+      "ci_high": 0.9558680828799312,
+      "ci_low": 0.5495403963380404,
+      "diagnostics_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_profile_gpu_b1_p0004_p4_k4_20260521/matchups/00_main_league_selected__vs__02_seed_c3aac2f9dc_policy_000004/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "main_league_selected",
+      "games": 8,
+      "losses": 2,
+      "mean": 0.75,
+      "opponent_policy_id": "seed_c3aac2f9dc_policy_000004",
+      "paired_seeds": 4,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_profile_gpu_b1_p0004_p4_k4_20260521/matchups/00_main_league_selected__vs__02_seed_c3aac2f9dc_policy_000004/matchup_summary.json",
+      "truncations": 0,
+      "wins": 6
+    }
+  ],
+  "seed_file": {
+    "path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/configs/seeds/report_eval_seeds.txt",
+    "sha256": "5db0677f8ff932a95bb86cb91e6902de3ed3460ad8303858e169e0a17c728df0",
+    "source": "report_eval"
+  },
+  "stack_config": "configs/thesis/final_eval_gpu.yaml"
+}

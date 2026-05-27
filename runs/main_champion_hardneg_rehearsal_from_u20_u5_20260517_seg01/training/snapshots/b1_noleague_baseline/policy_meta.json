@@ -1,0 +1,11 @@
+{
+  "format": "imported_train_snapshot_metadata_v1",
+  "imported_from_policy_id": "selected_candidate",
+  "imported_from_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01",
+  "imported_from_snapshot_path": "training/snapshots/selected_candidate/weights.pt",
+  "imported_from_weights_sha256": "66767c1e70c70d1706c058bfd38a7b20cb902c9740d96b6fb1ba664a2b65a685",
+  "policy_id": "b1_noleague_baseline",
+  "update": 15,
+  "weights_path": "training/snapshots/b1_noleague_baseline/weights.pt",
+  "weights_sha256": "014c9a63a5ec3819053a87a156b2ac57aa5859829cb7e343e861dcac408a04f0"
+}

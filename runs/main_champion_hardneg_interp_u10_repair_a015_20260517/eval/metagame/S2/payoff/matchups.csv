@@ -1,0 +1,22 @@
+case_id,scheme,focal_policy_id,opponent_policy_id,p_ij_mean,p_ji_mean,utility_ij_mean,utility_ji_mean,observed_paired_seed_count,paired_seed_count,excluded_paired_seed_count,has_payoff_samples
+S2,S2,main_league_selected,main_league_selected,0.5,0.5,0.0,0.0,64,64,0,True
+S2,S2,main_league_selected,B0 RandomLegal,1.0,0.0,1.0,-1.0,64,64,0,True
+S2,S2,main_league_selected,B1 NoLeague baseline,0.640625,0.359375,0.28125,-0.28125,64,64,0,True
+S2,S2,main_league_selected,B2 HeuristicPublic,0.78125,0.21875,0.5625,-0.5625,64,64,0,True
+S2,S2,main_league_selected,B3 HeuristicPublicAggro,0.703125,0.296875,0.40625,-0.40625,64,64,0,True
+S2,S2,main_league_selected,B4 HeuristicPublicControl,0.71875,0.28125,0.4375,-0.4375,64,64,0,True
+S2,S2,B0 RandomLegal,B0 RandomLegal,0.48046875,0.5,-0.0390625,0.0390625,256,256,0,True
+S2,S2,B0 RandomLegal,B1 NoLeague baseline,0.0078125,0.9921875,-0.984375,0.984375,64,64,0,True
+S2,S2,B0 RandomLegal,B2 HeuristicPublic,0.0234375,0.9765625,-0.953125,0.953125,64,64,0,True
+S2,S2,B0 RandomLegal,B3 HeuristicPublicAggro,0.015625,0.984375,-0.96875,0.96875,64,64,0,True
+S2,S2,B0 RandomLegal,B4 HeuristicPublicControl,0.0078125,0.9921875,-0.984375,0.984375,64,64,0,True
+S2,S2,B1 NoLeague baseline,B1 NoLeague baseline,0.5,0.5,0.0,0.0,64,64,0,True
+S2,S2,B1 NoLeague baseline,B2 HeuristicPublic,0.6953125,0.3046875,0.390625,-0.390625,64,64,0,True
+S2,S2,B1 NoLeague baseline,B3 HeuristicPublicAggro,0.6953125,0.3046875,0.390625,-0.390625,64,64,0,True
+S2,S2,B1 NoLeague baseline,B4 HeuristicPublicControl,0.671875,0.328125,0.34375,-0.34375,64,64,0,True
+S2,S2,B2 HeuristicPublic,B2 HeuristicPublic,0.5,0.5,0.0,0.0,64,64,0,True
+S2,S2,B2 HeuristicPublic,B3 HeuristicPublicAggro,0.3203125,0.6796875,-0.359375,0.359375,64,64,0,True
+S2,S2,B2 HeuristicPublic,B4 HeuristicPublicControl,0.494140625,0.505859375,-0.01171875,0.01171875,256,256,0,True
+S2,S2,B3 HeuristicPublicAggro,B3 HeuristicPublicAggro,0.5,0.5,0.0,0.0,64,64,0,True
+S2,S2,B3 HeuristicPublicAggro,B4 HeuristicPublicControl,0.42424242424242425,0.5757575757575757,-0.1515151515151515,0.1515151515151515,66,66,0,True
+S2,S2,B4 HeuristicPublicControl,B4 HeuristicPublicControl,0.5,0.5,0.0,0.0,64,64,0,True

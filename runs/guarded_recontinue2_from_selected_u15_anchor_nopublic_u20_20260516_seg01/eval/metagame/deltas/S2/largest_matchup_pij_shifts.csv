@@ -1,0 +1,11 @@
+baseline_case_id,case_id,focal_policy_id,opponent_policy_id,s0_p_ij_mean,case_p_ij_mean,delta_p_ij_mean,abs_delta_p_ij_mean,s0_has_payoff_samples,case_has_payoff_samples
+S0,S2,B0 RandomLegal,B2 HeuristicPublic,0.01953125,0.01953125,0.0,0.0,True,True
+S0,S2,B0 RandomLegal,B3 HeuristicPublicAggro,0.017578125,0.017578125,0.0,0.0,True,True
+S0,S2,B0 RandomLegal,B4 HeuristicPublicControl,0.017578125,0.017578125,0.0,0.0,True,True
+S0,S2,B2 HeuristicPublic,B3 HeuristicPublicAggro,0.3046875,0.3046875,0.0,0.0,True,True
+S0,S2,B2 HeuristicPublic,B4 HeuristicPublicControl,0.494140625,0.494140625,0.0,0.0,True,True
+S0,S2,B3 HeuristicPublicAggro,B4 HeuristicPublicControl,0.486328125,0.486328125,0.0,0.0,True,True
+S0,S2,selected_candidate,B0 RandomLegal,1.0,1.0,0.0,0.0,True,True
+S0,S2,selected_candidate,B2 HeuristicPublic,0.666015625,0.666015625,0.0,0.0,True,True
+S0,S2,selected_candidate,B3 HeuristicPublicAggro,0.64453125,0.64453125,0.0,0.0,True,True
+S0,S2,selected_candidate,B4 HeuristicPublicControl,0.626953125,0.626953125,0.0,0.0,True,True
