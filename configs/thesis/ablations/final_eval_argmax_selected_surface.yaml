@@ -1,0 +1,5 @@
+schema_version: 2
+description: "Diagnostic thesis final-eval surface: same selected main-league fixed-deck stack, but learned models use deterministic argmax over legal actions."
+extends: ../final_eval.yaml
+evaluation:
+  eval_sampling_algorithm: model_argmax_pinned_v1

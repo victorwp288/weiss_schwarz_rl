@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from weiss_rl.job_telemetry import (
+from weiss_rl.diagnostics.job_telemetry import (
     ProcessTreeTelemetrySampler,
     build_benchmark_summary,
     query_gpu_metrics,

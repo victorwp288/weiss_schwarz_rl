@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from weiss_rl.artifacts.reproducibility import legal_fingerprint_v1
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
 from weiss_rl.replay import runner as replay_runner
 from weiss_rl.replay.bundles import (
@@ -19,7 +20,6 @@ from weiss_rl.replay.bundles import (
     rerun_replay_bundle_fast,
     write_replay_bundle,
 )
-from weiss_rl.repro import legal_fingerprint_v1
 
 
 class FakeReplayEnv:
@@ -565,6 +565,8 @@ def test_build_replay_env_uses_fast_pool_factory_for_default_reruns(monkeypatch:
             "seed": 0,
             "reward_json": contract.reward_json,
             "curriculum_json": contract.curriculum_json,
+            "deck": contract.deck,
+            "opponent_deck": contract.opponent_deck,
         },
         "profile": "fast",
         "num_envs": 1,
@@ -581,6 +583,8 @@ def _rerun_contract(
     version: int = 2,
     reward_json: str | None = '{"objective":"terminal_pm1"}',
     curriculum_json: str | None = '{"version":"curriculum_v1"}',
+    deck: str | None = "preset:main_deck_5hy_yotsuba_v1",
+    opponent_deck: str | None = "preset:main_deck_5hy_yotsuba_v1",
 ) -> ReplayRerunContract:
     return ReplayRerunContract(
         version=version,
@@ -589,6 +593,8 @@ def _rerun_contract(
         max_ticks=10_000,
         reward_json=reward_json,
         curriculum_json=curriculum_json,
+        deck=deck,
+        opponent_deck=opponent_deck,
     )
 
 

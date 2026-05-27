@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,20 +10,65 @@ from typing import Any, Literal
 
 import numpy as np
 
-from weiss_rl.action_diagnostics import (
+from weiss_rl.actors.actor_worker_helpers import (
+    actor_behavior_logp_from_legal_ids as _actor_behavior_logp_from_legal_ids,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    batch_counter as _batch_counter,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    batch_episode_identity as _batch_episode_identity,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    batch_legal_ids_offsets as _batch_legal_ids_offsets,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    batch_legal_mask as _batch_legal_mask,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    batch_reward as _batch_reward,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    batch_to_play as _batch_to_play,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    checkpoint_update_from_path as _checkpoint_update_from_path,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    env_timeout_limits as _env_timeout_limits,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    episode_identity_or_zeros as _episode_identity_or_zeros,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    packed_legal_ids_prefix as _packed_legal_ids_prefix,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    policy_logits as _policy_logits,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    refresh_opponent_ids as _refresh_opponent_ids,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    sampled_opponent_policy_ids as _sampled_opponent_policy_ids,
+)
+from weiss_rl.actors.actor_worker_helpers import (
+    update_outcomes as _update_outcomes,
+)
+from weiss_rl.core.masking import (
+    MaskingAnomalyCounters,
+    resolve_pass_action_id,
+    sample_actions_from_legal_ids,
+    sample_actions_from_mask,
+)
+from weiss_rl.core.termination_reason import classify_episode_end_reason
+from weiss_rl.diagnostics.action_diagnostics import (
     make_action_sequence_state,
     reset_action_sequence_state,
     update_action_summary_from_ids,
     update_action_summary_from_mask,
 )
 from weiss_rl.league.outcomes import OnlineOutcomeTracker
-from weiss_rl.masking import (
-    MaskingAnomalyCounters,
-    masked_logp_from_legal_ids,
-    resolve_pass_action_id,
-    sample_actions_from_legal_ids,
-    sample_actions_from_mask,
-)
 from weiss_rl.replay.bundles import (
     ReplayRerunContract,
     ReplayStep,
@@ -33,7 +77,7 @@ from weiss_rl.replay.bundles import (
     write_fault_bundle,
     write_replay_bundle,
 )
-from weiss_rl.termination_reason import classify_episode_end_reason
+from weiss_rl.runtime_components.reward_shaping import apply_pass_with_nonpass_penalty as _apply_pass_penalty
 
 torch: ModuleType | None
 try:
@@ -43,19 +87,6 @@ except Exception:  # pragma: no cover
 
 
 LayoutName = Literal["i16_legal_ids", "mask"]
-
-_CHECKPOINT_METADATA_STEM = re.compile(r"(?:checkpoint_metadata|checkpoint)_(\d+)")
-_OPPONENT_ID_FIELDS = (
-    "opponent_policy_id_by_env",
-    "opponent_policy_ids",
-    "opponent_policy_id",
-    "opponent_id_by_env",
-    "opponent_ids",
-    "opponent_id",
-    "opponent_snapshot_id_by_env",
-    "opponent_snapshot_ids",
-    "opponent_snapshot_id",
-)
 
 
 def _nonfinite_indices(values: np.ndarray) -> np.ndarray:
@@ -71,6 +102,24 @@ def _configure_actor_torch_threads(actor_torch_threads: int) -> None:
     torch.set_num_threads(threads)
     with suppress(Exception):
         torch.set_num_interop_threads(1)
+
+
+def actor_behavior_logp_from_legal_ids(
+    logits: np.ndarray,
+    legal_ids: np.ndarray,
+    legal_offsets: np.ndarray,
+    actions: np.ndarray,
+    *,
+    pass_action_id: int | None = None,
+) -> np.ndarray:
+    """Compatibility wrapper for the public actor-worker masking helper."""
+    return _actor_behavior_logp_from_legal_ids(
+        logits,
+        legal_ids,
+        legal_offsets,
+        actions,
+        pass_action_id=pass_action_id,
+    )
 
 
 @dataclass(slots=True)
@@ -120,6 +169,7 @@ class ActorWorker:
     reload_interval_updates: int = 1000  # Deprecated alias for checkpoint metadata polling cadence.
     opponent_sampler: Any | None = None
     opponent_assignment_fn: Any | None = None
+    pass_with_nonpass_penalty: float = 0.0
 
     update_count: int = field(default=0, init=False)
     observed_checkpoint_update: int = field(default=0, init=False)
@@ -232,19 +282,29 @@ class ActorWorker:
             "pass_actions": 0,
             "main_move_actions": 0,
             "pass_with_nonpass_available": 0,
+            "pass_with_nonpass_penalty_count": 0,
+            "pass_with_nonpass_penalty_total_micros": 0,
             "max_consecutive_main_moves": 0,
         }
         action_sequence_state = make_action_sequence_state(N)
 
         for t in range(T):
             _refresh_opponent_ids(self.opponent_id_by_env, batch=batch, env=env, num_envs=N)
-            obs = np.asarray(batch.obs)
-            to_play = _batch_to_play(batch)
-            decision_id = np.asarray(batch.decision_id)
+            obs = np.array(batch.obs, copy=True)
+            to_play = np.array(_batch_to_play(batch), copy=True)
+            decision_id = np.array(batch.decision_id, copy=True)
             batch_episode_seed, batch_episode_key = _batch_episode_identity(batch)
+            if batch_episode_seed is not None:
+                batch_episode_seed = np.array(batch_episode_seed, dtype=np.uint64, copy=True)
+            if batch_episode_key is not None:
+                batch_episode_key = np.array(batch_episode_key, dtype=np.uint64, copy=True)
             episode_seed = _episode_identity_or_zeros(batch_episode_seed, num_envs=N)
             episode_key = _episode_identity_or_zeros(batch_episode_key, num_envs=N)
-            replay_episode_seed64 = self._resolve_replay_episode_seed64(batch_episode_seed, num_envs=N)
+            replay_episode_seed64 = np.array(
+                self._resolve_replay_episode_seed64(batch_episode_seed, num_envs=N),
+                dtype=np.uint64,
+                copy=True,
+            )
             self._sync_replay_episode_buffers(
                 episode_seed64=replay_episode_seed64,
                 simulator_episode_key=batch_episode_key,
@@ -270,12 +330,14 @@ class ActorWorker:
 
             if self.layout_name == "i16_legal_ids":
                 legal_ids, legal_offsets = _batch_legal_ids_offsets(batch)
-                packed_legal_ids_array = np.asarray(legal_ids, dtype=np.int64)
-                packed_legal_offsets_array = np.asarray(legal_offsets, dtype=np.int64)
+                legal_ids_array = np.array(legal_ids, copy=True)
+                legal_offsets_array = np.array(legal_offsets, copy=True)
+                packed_legal_ids_array = np.array(legal_ids_array, dtype=np.int64, copy=True)
+                packed_legal_offsets_array = np.array(legal_offsets_array, dtype=np.int64, copy=True)
                 actions, logp, ent = sample_actions_from_legal_ids(
                     logits,
-                    legal_ids,
-                    legal_offsets,
+                    legal_ids_array,
+                    legal_offsets_array,
                     rng=self._rng,
                     counters=anomaly,
                     pass_action_id=pass_action_id,
@@ -283,14 +345,96 @@ class ActorWorker:
                 # Keep per-env legal slices for replay fingerprinting (pre-step legality).
                 legal_slices: list[np.ndarray] = []
                 for i in range(N):
-                    start = int(legal_offsets[i])
-                    end = int(legal_offsets[i + 1])
-                    legal_slices.append(np.asarray(legal_ids[start:end], dtype=np.uint16))
+                    start = int(legal_offsets_array[i])
+                    end = int(legal_offsets_array[i + 1])
+                    legal_slices.append(np.array(legal_ids_array[start:end], dtype=np.uint16, copy=True))
 
-                legal_ids_prefix = _packed_legal_ids_prefix(legal_ids, legal_offsets)
+                legal_ids_prefix = _packed_legal_ids_prefix(legal_ids_array, legal_offsets_array)
                 offset_base = int(packed_legal_offsets[-1][-1])
-                packed_legal_ids.append(legal_ids_prefix.astype(np.int32, copy=False))
-                packed_legal_offsets.append((legal_offsets[1:] + offset_base).astype(np.uint32, copy=False))
+                packed_legal_ids.append(np.array(legal_ids_prefix, dtype=np.int32, copy=True))
+                packed_legal_offsets.append(np.array(legal_offsets_array[1:] + offset_base, dtype=np.uint32, copy=True))
+
+                if not np.all(np.isfinite(logp)):
+                    self._raise_numeric_fault(
+                        "non-finite actor sampled logp",
+                        step=t,
+                        obs=obs,
+                        to_play=to_play,
+                        decision_id=decision_id,
+                        episode_seed=episode_seed,
+                        episode_key=episode_key,
+                        logits=logits,
+                        actions=actions,
+                        logp=logp,
+                        entropy=ent,
+                        legal_ids=legal_ids_array,
+                        legal_offsets=legal_offsets_array,
+                    )
+                if not np.all(np.isfinite(ent)):
+                    self._raise_numeric_fault(
+                        "non-finite actor sampled entropy",
+                        step=t,
+                        obs=obs,
+                        to_play=to_play,
+                        decision_id=decision_id,
+                        episode_seed=episode_seed,
+                        episode_key=episode_key,
+                        logits=logits,
+                        actions=actions,
+                        logp=logp,
+                        entropy=ent,
+                        legal_ids=legal_ids_array,
+                        legal_offsets=legal_offsets_array,
+                    )
+            else:
+                legal_mask = _batch_legal_mask(batch)
+                if legal_mask.shape != (N, A):
+                    raise ValueError(f"expected legal_mask shape (N, A)=({N}, {A})")
+                legal_mask_array = np.array(legal_mask, copy=True)
+                if legal_mask_buf is None:
+                    legal_mask_buf = np.empty((T, N, A), dtype=legal_mask_array.dtype)
+                actions, logp, ent = sample_actions_from_mask(
+                    logits,
+                    legal_mask_array,
+                    rng=self._rng,
+                    counters=anomaly,
+                    pass_action_id=pass_action_id,
+                )
+                legal_mask_buf[t] = legal_mask_array
+
+                if not np.all(np.isfinite(logp)):
+                    self._raise_numeric_fault(
+                        "non-finite actor sampled logp",
+                        step=t,
+                        obs=obs,
+                        to_play=to_play,
+                        decision_id=decision_id,
+                        episode_seed=episode_seed,
+                        episode_key=episode_key,
+                        logits=logits,
+                        actions=actions,
+                        logp=logp,
+                        entropy=ent,
+                        legal_mask=legal_mask_array,
+                    )
+                if not np.all(np.isfinite(ent)):
+                    self._raise_numeric_fault(
+                        "non-finite actor sampled entropy",
+                        step=t,
+                        obs=obs,
+                        to_play=to_play,
+                        decision_id=decision_id,
+                        episode_seed=episode_seed,
+                        episode_key=episode_key,
+                        logits=logits,
+                        actions=actions,
+                        logp=logp,
+                        entropy=ent,
+                        legal_mask=legal_mask_array,
+                    )
+
+            next_batch = env.step(actions.astype(np.uint32, copy=False))
+            if self.layout_name == "i16_legal_ids":
                 update_action_summary_from_ids(
                     counters=action_counters,
                     state=action_sequence_state,
@@ -298,95 +442,37 @@ class ActorWorker:
                     legal_ids=packed_legal_ids_array,
                     legal_offsets=packed_legal_offsets_array,
                     pass_action_id=pass_action_id,
+                    main_move_action=getattr(next_batch, "main_move_action", None),
                 )
-
-                if not np.all(np.isfinite(logp)):
-                    self._raise_numeric_fault(
-                        "non-finite actor sampled logp",
-                        step=t,
-                        obs=obs,
-                        to_play=to_play,
-                        decision_id=decision_id,
-                        episode_seed=episode_seed,
-                        episode_key=episode_key,
-                        logits=logits,
-                        actions=actions,
-                        logp=logp,
-                        entropy=ent,
-                        legal_ids=legal_ids,
-                        legal_offsets=legal_offsets,
-                    )
-                if not np.all(np.isfinite(ent)):
-                    self._raise_numeric_fault(
-                        "non-finite actor sampled entropy",
-                        step=t,
-                        obs=obs,
-                        to_play=to_play,
-                        decision_id=decision_id,
-                        episode_seed=episode_seed,
-                        episode_key=episode_key,
-                        logits=logits,
-                        actions=actions,
-                        logp=logp,
-                        entropy=ent,
-                        legal_ids=legal_ids,
-                        legal_offsets=legal_offsets,
-                    )
             else:
-                legal_mask = _batch_legal_mask(batch)
-                if legal_mask.shape != (N, A):
-                    raise ValueError(f"expected legal_mask shape (N, A)=({N}, {A})")
-                if legal_mask_buf is None:
-                    legal_mask_buf = np.empty((T, N, A), dtype=legal_mask.dtype)
-                actions, logp, ent = sample_actions_from_mask(
-                    logits,
-                    legal_mask,
-                    rng=self._rng,
-                    counters=anomaly,
-                    pass_action_id=pass_action_id,
-                )
-                legal_mask_buf[t] = legal_mask
                 update_action_summary_from_mask(
                     counters=action_counters,
                     state=action_sequence_state,
                     actions=actions,
-                    legal_mask=legal_mask,
+                    legal_mask=legal_mask_array,
                     pass_action_id=pass_action_id,
+                    main_move_action=getattr(next_batch, "main_move_action", None),
                 )
-
-                if not np.all(np.isfinite(logp)):
-                    self._raise_numeric_fault(
-                        "non-finite actor sampled logp",
-                        step=t,
-                        obs=obs,
-                        to_play=to_play,
-                        decision_id=decision_id,
-                        episode_seed=episode_seed,
-                        episode_key=episode_key,
-                        logits=logits,
-                        actions=actions,
-                        logp=logp,
-                        entropy=ent,
-                        legal_mask=legal_mask,
-                    )
-                if not np.all(np.isfinite(ent)):
-                    self._raise_numeric_fault(
-                        "non-finite actor sampled entropy",
-                        step=t,
-                        obs=obs,
-                        to_play=to_play,
-                        decision_id=decision_id,
-                        episode_seed=episode_seed,
-                        episode_key=episode_key,
-                        logits=logits,
-                        actions=actions,
-                        logp=logp,
-                        entropy=ent,
-                        legal_mask=legal_mask,
-                    )
-
-            next_batch = env.step(actions.astype(np.uint32, copy=False))
             reward = _batch_reward(next_batch)
+            if self.layout_name == "i16_legal_ids":
+                reward_shaped, penalty_count, penalty_total_micros = _apply_pass_penalty(
+                    reward,
+                    actions,
+                    pass_action_id=pass_action_id,
+                    penalty=float(self.pass_with_nonpass_penalty),
+                    legal_ids=packed_legal_ids_array,
+                    legal_offsets=packed_legal_offsets_array,
+                )
+            else:
+                reward_shaped, penalty_count, penalty_total_micros = _apply_pass_penalty(
+                    reward,
+                    actions,
+                    pass_action_id=pass_action_id,
+                    penalty=float(self.pass_with_nonpass_penalty),
+                    legal_mask=legal_mask_array,
+                )
+            action_counters["pass_with_nonpass_penalty_count"] += penalty_count
+            action_counters["pass_with_nonpass_penalty_total_micros"] += penalty_total_micros
             terminated = np.asarray(next_batch.terminated)
             truncated = np.asarray(next_batch.truncated)
             engine_status = np.asarray(next_batch.engine_status)
@@ -414,7 +500,7 @@ class ActorWorker:
             to_play_buf[t] = to_play.astype(np.int8, copy=False)
             decision_id_buf[t] = decision_id.astype(np.int32, copy=False)
             action_buf[t] = actions.astype(np.uint32, copy=False)
-            reward_buf[t] = reward.astype(np.float32, copy=False)
+            reward_buf[t] = reward_shaped.astype(np.float32, copy=False)
             terminated_buf[t] = terminated.astype(np.bool_, copy=False)
             truncated_buf[t] = truncated.astype(np.bool_, copy=False)
             engine_status_buf[t] = engine_status.astype(np.int32, copy=False)
@@ -862,201 +948,3 @@ class ActorWorker:
                     continue
                 latest_checkpoint_update = max(latest_checkpoint_update, checkpoint_update)
         return latest_checkpoint_update
-
-
-def _checkpoint_update_from_path(checkpoint_path: Path) -> int | None:
-    match = _CHECKPOINT_METADATA_STEM.fullmatch(checkpoint_path.stem)
-    if match is None:
-        return None
-    return int(match.group(1))
-
-
-def _sampled_opponent_policy_ids(
-    opponent_sampler: Any,
-    *,
-    count: int,
-    rng: np.random.Generator,
-) -> tuple[str, ...]:
-    sampled_policy_ids = opponent_sampler.sample(count=count, rng=rng)
-    if isinstance(sampled_policy_ids, np.ndarray):
-        sampled_items = sampled_policy_ids.tolist()
-    else:
-        sampled_items = list(sampled_policy_ids)
-    if len(sampled_items) != count:
-        raise ValueError(f"opponent_sampler must return {count} policy ids")
-    return tuple(str(policy_id) for policy_id in sampled_items)
-
-
-def actor_behavior_logp_from_legal_ids(
-    logits: np.ndarray,
-    legal_ids: np.ndarray,
-    legal_offsets: np.ndarray,
-    actions: np.ndarray,
-    *,
-    pass_action_id: int | None = None,
-) -> np.ndarray:
-    return masked_logp_from_legal_ids(
-        logits,
-        legal_ids,
-        legal_offsets,
-        actions,
-        pass_action_id=pass_action_id,
-    )
-
-
-def _policy_logits(policy_logits_fn: Any, obs: np.ndarray, to_play: np.ndarray) -> np.ndarray:
-    if torch is not None:
-        with torch.inference_mode():
-            out = policy_logits_fn(obs, to_play)
-        if isinstance(out, torch.Tensor):
-            return out.detach().cpu().numpy().astype(np.float32, copy=False)
-    else:
-        out = policy_logits_fn(obs, to_play)
-    return np.asarray(out, dtype=np.float32)
-
-
-def _batch_to_play(batch: Any) -> np.ndarray:
-    if hasattr(batch, "to_play"):
-        return np.asarray(batch.to_play)
-    if hasattr(batch, "to_play_seat"):
-        return np.asarray(batch.to_play_seat)
-    if hasattr(batch, "actor"):
-        return np.asarray(batch.actor)
-    raise AttributeError("batch must expose .to_play, .to_play_seat, or .actor")
-
-
-def _batch_reward(batch: Any) -> np.ndarray:
-    if hasattr(batch, "reward"):
-        return np.asarray(batch.reward)
-    if hasattr(batch, "rewards"):
-        return np.asarray(batch.rewards)
-    raise AttributeError("batch must expose .reward or .rewards")
-
-
-def _batch_episode_identity(batch: Any) -> tuple[np.ndarray | None, np.ndarray | None]:
-    episode_seed = getattr(batch, "episode_seed", None)
-    episode_key = getattr(batch, "episode_key", None)
-    seed_array = None if episode_seed is None else np.asarray(episode_seed, dtype=np.uint64)
-    key_array = None if episode_key is None else np.asarray(episode_key, dtype=np.uint64)
-    return seed_array, key_array
-
-
-def _batch_counter(batch: Any, field_name: str, *, num_envs: int) -> np.ndarray:
-    values = getattr(batch, field_name, None)
-    if values is None:
-        return np.zeros((num_envs,), dtype=np.uint32)
-    array = np.asarray(values, dtype=np.uint32)
-    if array.shape != (num_envs,):
-        raise ValueError(f"{field_name} must have shape ({num_envs},)")
-    return array
-
-
-def _env_timeout_limits(env: Any) -> dict[str, int | None]:
-    return {
-        "max_decisions": _optional_int_attr(env, "max_decisions"),
-        "max_ticks": _optional_int_attr(env, "max_ticks"),
-        "max_no_progress_decisions": _optional_int_attr(env, "max_no_progress_decisions"),
-    }
-
-
-def _optional_int_attr(value: Any, attr_name: str) -> int | None:
-    raw_value = getattr(value, attr_name, None)
-    return None if raw_value is None else int(raw_value)
-
-
-def _episode_identity_or_zeros(identity: np.ndarray | None, *, num_envs: int) -> np.ndarray:
-    if identity is None:
-        return np.zeros((num_envs,), dtype=np.uint64)
-    return identity
-
-
-def _batch_legal_mask(batch: Any) -> np.ndarray:
-    if hasattr(batch, "mask"):
-        return np.asarray(batch.mask)
-    if hasattr(batch, "masks"):
-        return np.asarray(batch.masks)
-    raise AttributeError("mask layout batch must expose .mask or .masks")
-
-
-def _batch_legal_ids_offsets(batch: Any) -> tuple[np.ndarray, np.ndarray]:
-    ids_offsets = getattr(batch, "ids_offsets", None)
-    if ids_offsets is not None:
-        legal_ids, legal_offsets = ids_offsets
-        return np.asarray(legal_ids), np.asarray(legal_offsets)
-
-    if hasattr(batch, "legal_ids") and hasattr(batch, "legal_offsets"):
-        return np.asarray(batch.legal_ids), np.asarray(batch.legal_offsets)
-
-    raise AttributeError("ids_offsets layout batch must expose .ids_offsets or (.legal_ids, .legal_offsets)")
-
-
-def _packed_legal_ids_prefix(legal_ids: np.ndarray, legal_offsets: np.ndarray) -> np.ndarray:
-    used = 0 if legal_offsets.size == 0 else int(legal_offsets[-1])
-    if used < 0 or used > legal_ids.shape[0]:
-        raise ValueError(f"legal_ids prefix out of bounds: used={used}, capacity={legal_ids.shape[0]}")
-    return legal_ids[:used]
-
-
-def _refresh_opponent_ids(opponent_id_by_env: np.ndarray, *, batch: Any, env: Any, num_envs: int) -> None:
-    for source in (batch, env):
-        opponent_ids = _extract_opponent_ids(source, num_envs=num_envs)
-        if opponent_ids is None:
-            continue
-        known = opponent_ids != ""
-        if np.any(known):
-            opponent_id_by_env[known] = opponent_ids[known]
-
-
-def _extract_opponent_ids(source: Any, *, num_envs: int) -> np.ndarray | None:
-    if source is None:
-        return None
-    for field_name in _OPPONENT_ID_FIELDS:
-        if not hasattr(source, field_name):
-            continue
-        value = getattr(source, field_name)
-        if value is None:
-            continue
-        return _coerce_opponent_ids(value, num_envs=num_envs, field_name=field_name)
-    return None
-
-
-def _coerce_opponent_ids(value: Any, *, num_envs: int, field_name: str) -> np.ndarray:
-    if isinstance(value, str):
-        raw_values: list[Any] = [value] * num_envs
-    else:
-        array = np.asarray(value, dtype=object)
-        if array.ndim == 0:
-            raw_values = [array.item()] * num_envs
-        elif array.shape == (num_envs,):
-            raw_values = array.tolist()
-        else:
-            raise ValueError(f"{field_name} must be scalar or shape ({num_envs},)")
-
-    opponent_ids = np.empty((num_envs,), dtype=object)
-    for env_index, raw_value in enumerate(raw_values):
-        opponent_ids[env_index] = "" if raw_value is None else str(raw_value).strip()
-    return opponent_ids
-
-
-def _update_outcomes(
-    tracker: OnlineOutcomeTracker,
-    *,
-    opponent_ids: np.ndarray,
-    reward: np.ndarray,
-    engine_status: np.ndarray,
-    done: np.ndarray,
-) -> None:
-    valid_done = np.logical_and(done, np.asarray(engine_status) == 0)
-    for env_index in np.flatnonzero(valid_done):
-        tracker.update(
-            opponent_id=str(opponent_ids[int(env_index)]),
-            outcome=_outcome_token_from_reward(float(reward[int(env_index)])),
-        )
-
-
-def _outcome_token_from_reward(reward: float) -> str:
-    if reward > 0.0:
-        return "w"
-    if reward < 0.0:
-        return "l"
-    return "d"

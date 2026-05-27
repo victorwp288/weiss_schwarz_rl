@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from weiss_rl.artifacts.reproducibility import canonical_json_bytes, stable_hash64
 from weiss_rl.config.models import MetagameConfig, SensitivityCaseConfig, SensitivityConfig
 from weiss_rl.eval.export import load_eval_game_records
 from weiss_rl.eval.harness import EvalGameRecord
@@ -18,7 +19,6 @@ from weiss_rl.eval.payoff_folding import PayoffFoldScheme, paired_seed_scores
 from weiss_rl.eval.uncertainty import bayesian_bootstrap_posterior_samples
 from weiss_rl.metagame.alpharank import compute_stationary_distribution
 from weiss_rl.metagame.nash import solve_zero_sum_mixture
-from weiss_rl.repro import canonical_json_bytes, stable_hash64
 
 _SUPPORT_PROBABILITY_THRESHOLD = 0.05
 _TOP_SHIFT_LIMIT = 10

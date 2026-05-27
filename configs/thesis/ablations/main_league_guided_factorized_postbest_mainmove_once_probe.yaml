@@ -1,0 +1,7 @@
+schema_version: 2
+description: "Main league probe: continue from the confirmed teacherfade best with the main-move-only guard relaxed to permit one consecutive movement before forcing pass, testing a safer middle ground after raw allow-main-move hurt B4."
+extends: main_league_guided_factorized_postbest_floor_probe.yaml
+training:
+  action_surface:
+    force_pass_over_main_move_only: true
+    main_move_only_max_consecutive: 1

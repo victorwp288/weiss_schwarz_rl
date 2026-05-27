@@ -1,0 +1,48 @@
+schema_version: 2
+description: "Narrow one-update repair probe for the raw ext-preserve u2 candidate. Keeps the successful grouped128 learned-repair pressure, but only adds raw confirm256 anti-regression for the two persistent raw leaks: B2 fixed and old policy0001 learned. This avoids the broad all-learned preserve bucket that damped newer champion gains in the allpreserve repair probe. Start from raw ext-preserve policy_000002; continue only if paired confirm64 has fixed >= 0, learned > 0, and no old hard-negative row drops versus selected-a015."
+extends: main_league_champion_hardneg_selected_outcome_contrastive_edgehn_focus_probe.yaml
+league:
+  sampling:
+    hard_negative_focus_policy_ids:
+      - seed_b8c698d26a_seed_c3aac2f9dc_policy_000001
+      - seed_b8c698d26a_seed_c3aac2f9dc_policy_000002
+      - seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+      - seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+      - seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+    hard_negative_focus_weight_multiplier: 2.5
+training:
+  optimizer:
+    learning_rate: 0.000004
+  structured_aux:
+    policy_anchor_coef: 0.42
+    policy_anchor_top_action_coef: 0.09
+    paired_swing_dataset_path: runs/paired_outcome_contrastive_grouped128_plus_rawext256_allpreserve_20260519/paired_outcome_contrastive_grouped128_plus_rawext256_allpreserve.npz
+    paired_swing_coef: 0.05
+    paired_swing_batch_episodes: 20
+    paired_swing_focus_groups:
+      - name: grouped_fixed_preserve
+        source_labels:
+          - grouped128_fixed_preserve_B1 NoLeague baseline
+          - grouped128_fixed_preserve_B2 HeuristicPublic
+          - grouped128_fixed_preserve_B3 HeuristicPublicAggro
+          - grouped128_fixed_preserve_B4 HeuristicPublicControl
+        fraction: 0.15
+      - name: grouped_learned_repair
+        source_labels:
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.50
+      - name: rawext256_b2_fixed_preserve
+        source_labels:
+          - rawext256_allfixed_preserve_B2 HeuristicPublic
+        fraction: 0.25
+      - name: rawext256_policy1_learned_preserve
+        source_labels:
+          - rawext256_alllearned_preserve_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001
+        fraction: 0.10

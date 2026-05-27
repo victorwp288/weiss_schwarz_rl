@@ -1,0 +1,14 @@
+schema_version: 2
+description: "Selected-a015 champion/hard-negative continuation with overlapping champion/hard-negative lanes, the stratified winner-repair replay mix, and an added corrective B1 loss-state replay source. The corrective source is built from paired-confirm regressions where selected-a015 beat B1 but the overlap candidate lost; replay keeps candidate trajectory continuity while supervising only high-disagreement rows toward the B1 top action."
+extends: main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_b4b2guard_probe.yaml
+training:
+  structured_aux:
+    policy_anchor_coef: 0.60
+    policy_anchor_top_action_coef: 0.16
+    trajectory_bc_dataset_path: runs/trajectory_bc_winnerrepair_plus_b1_lossstate_policyb_topaction_20260519/trajectory_bc_winnerrepair_plus_b1_lossstate_policyb_topaction.npz
+    trajectory_bc_focus_source_labels:
+      - b1_lossstate_policyb_topaction
+    trajectory_bc_focus_fraction: 0.25
+    trajectory_bc_teacher_action_coef: 0.20
+    trajectory_bc_teacher_same_family_action_coef: 0.78
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.12

@@ -1,8 +1,0 @@
-{
-  "created_utc": "2026-05-06T19:53:56.298618+00:00",
-  "policy_id": "ppo_lite_best",
-  "source_checkpoint_path": "training/checkpoints/checkpoint_25.pt",
-  "source_metric_kind": "dev_eval_mean",
-  "source_metric_value": 0.5625,
-  "update": 25
-}

@@ -2,104 +2,78 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from weiss_rl.spec import normalize_spec_mismatch_policy, require_fail_on_spec_mismatch
-
 from .models import (
-    CurriculumCheckpointGuardConfig,
     CurriculumConfig,
-    CurriculumStallMonitorConfig,
-    DecisionKindTaggingConfig,
-    DeckSetSizeConfig,
     EnvironmentConfig,
     EvaluationConfig,
     ExperimentConfig,
-    FinalPolicySetSelectionConfig,
-    FixedAnchorSetConfig,
-    IdsConfig,
     LeagueConfig,
-    LeaguePoolConfig,
-    LeaguePromotionConfig,
-    LeagueSamplingConfig,
-    LeagueWarmupConfig,
-    LegalFingerprintChecksConfig,
-    LegalFingerprintConfig,
     LockedConfig,
     ModelConfig,
-    ModelDropoutConfig,
-    PromotionAnchorSetConfig,
-    PromotionGateConfig,
-    PromotionGateGuardrailsConfig,
     ReproducibilityConfig,
-    RewardDiscountConfig,
     RewardsConfig,
-    RewardShapingConfig,
-    RewardTruncationConfig,
-    SeedDerivationConfig,
-    SpecBundlePolicyConfig,
     StackConfig,
-    StopRulesConfig,
     SystemConfig,
-    SystemProfileConfig,
-    TrainingCheckpointingConfig,
     TrainingConfig,
-    TrainingExplorationConfig,
-    TrainingOptimizerConfig,
-    TrainingPpoConfig,
-    TrainingPrecisionConfig,
-    TrainingRolloutConfig,
-    TrainingStructuredAuxConfig,
-    TrainingStructuredMetricsConfig,
-    TrainingStructuredWarmstartConfig,
-    TrainingTeacherAuxConfig,
-    TrainingVTraceConfig,
 )
+from .parsing_utils import (
+    PRESET_TOP_LEVEL_KEYS,
+    deep_merge,
+    load_json,
+    load_preset_document,
+    load_yaml,
+    reject_unknown_keys,
+    require_bool,
+    require_choice,
+    require_float,
+    require_int,
+    require_int_list,
+    require_mapping,
+    require_str_list,
+    require_text,
+    resolve_repo_path,
+    resolve_repo_root,
+)
+from .sections_core import EXPERIMENT_ROLES, parse_experiment_config, parse_system_config
+from .sections_curriculum import normalize_curriculum_payload, parse_curriculum_config
+from .sections_environment import parse_environment_config, parse_rewards_config
+from .sections_evaluation import parse_evaluation_config
+from .sections_league import parse_league_config
+from .sections_model import (
+    MODEL_ENCODER_KINDS,
+    MODEL_RECURRENT_CORES,
+    STRUCTURED_POLICY_CONTRACTS,
+    parse_model_config,
+)
+from .sections_reproducibility import parse_reproducibility_config
+from .sections_training import (
+    TRAINING_ACTOR_POLICY_BACKENDS,
+    TRAINING_ALGORITHMS,
+    TRAINING_FIXED_OPPONENT_BACKENDS,
+    TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES,
+    TRAINING_PUBLIC_HEURISTIC_PROFILES,
+    TRAINING_STRUCTURED_METRICS_MODES,
+    TRAINING_TEACHER_AUX_MODES,
+    parse_training_config,
+)
+from .seed_sets import parse_seed_sets_override, resolve_seed_sets
 
-_EXPERIMENT_ROLES = frozenset(
-    {
-        "main",
-        "baseline_noleague",
-        "baseline_norecurrence",
-        "baseline_ppo_lite",
-        "ablation_discount",
-        "ablation_reward",
-    }
-)
-_MODEL_ENCODER_KINDS = frozenset({"mlp", "typed_v1", "structured_v2"})
-_STRUCTURED_POLICY_CONTRACTS = frozenset({"packed_v1", "factorized_v1"})
-_MODEL_RECURRENT_CORES = frozenset({"gru", "none"})
-_TRAINING_ALGORITHMS = frozenset(
-    {"impala_vtrace_gru", "impala_vtrace_ff", "ppo_lite_masked_v1", "structured_v2", "impala_vtrace_structured_v1"}
-)
-_TRAINING_STRUCTURED_METRICS_MODES = frozenset({"off", "sampled", "full"})
-_TRAINING_TEACHER_AUX_MODES = frozenset({"off", "warmstart_only", "always"})
-_TRAINING_FIXED_OPPONENT_BACKENDS = frozenset({"python_scalar", "python_batched", "simulator_native"})
-_TRAINING_ACTOR_POLICY_BACKENDS = frozenset({"model", "heuristic_public"})
-_TRAINING_PUBLIC_HEURISTIC_PROFILES = frozenset({"base", "aggressive", "control"})
-_TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES = frozenset({"mixture", "cycle"})
-_TOP_LEVEL_KEYS = frozenset(
-    {
-        "schema_version",
-        "extends",
-        "description",
-        "experiment",
-        "system",
-        "model",
-        "training",
-        "environment",
-        "rewards",
-        "curriculum",
-        "league",
-        "evaluation",
-        "reproducibility",
-    }
-)
+_EXPERIMENT_ROLES = EXPERIMENT_ROLES
+_MODEL_ENCODER_KINDS = MODEL_ENCODER_KINDS
+_STRUCTURED_POLICY_CONTRACTS = STRUCTURED_POLICY_CONTRACTS
+_MODEL_RECURRENT_CORES = MODEL_RECURRENT_CORES
+_TRAINING_ALGORITHMS = TRAINING_ALGORITHMS
+_TRAINING_STRUCTURED_METRICS_MODES = TRAINING_STRUCTURED_METRICS_MODES
+_TRAINING_TEACHER_AUX_MODES = TRAINING_TEACHER_AUX_MODES
+_TRAINING_FIXED_OPPONENT_BACKENDS = TRAINING_FIXED_OPPONENT_BACKENDS
+_TRAINING_ACTOR_POLICY_BACKENDS = TRAINING_ACTOR_POLICY_BACKENDS
+_TRAINING_PUBLIC_HEURISTIC_PROFILES = TRAINING_PUBLIC_HEURISTIC_PROFILES
+_TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES = TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES
+_TOP_LEVEL_KEYS = PRESET_TOP_LEVEL_KEYS
 _CANONICAL_CONFIG_KEYS = frozenset({"schema_version", "description", "config", "seed_sets"})
 _CONFIG_SECTION_KEYS = frozenset(
     {
@@ -118,1559 +92,107 @@ _CONFIG_SECTION_KEYS = frozenset(
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected mapping in {path}, got {type(data).__name__}")
-    return data
+    return load_yaml(path)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected mapping in {path}, got {type(data).__name__}")
-    return data
+    return load_json(path)
 
 
 def _resolve_repo_root(stack_file: Path) -> Path:
-    for candidate in stack_file.resolve().parents:
-        if (candidate / "configs").is_dir():
-            return candidate
-    raise FileNotFoundError(f"Could not resolve repo root for config path: {stack_file}")
+    return resolve_repo_root(stack_file)
 
 
 def _require_mapping(value: Any, *, context: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{context} must be a mapping, got {type(value).__name__}")
-    return dict(value)
+    return require_mapping(value, context=context)
 
 
 def _require_int(value: Any, *, field_name: str, minimum: int | None = None) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{field_name} must be an integer, got {type(value).__name__}")
-    if minimum is not None and value < minimum:
-        raise ValueError(f"{field_name} must be >= {minimum}, got {value}")
-    return value
+    return require_int(value, field_name=field_name, minimum=minimum)
 
 
 def _require_float(value: Any, *, field_name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{field_name} must be numeric, got {type(value).__name__}")
-    return float(value)
+    return require_float(value, field_name=field_name)
 
 
 def _require_bool(value: Any, *, field_name: str) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError(f"{field_name} must be a boolean, got {type(value).__name__}")
-    return value
+    return require_bool(value, field_name=field_name)
 
 
 def _require_text(value: Any, *, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} must be a non-empty string")
-    return value.strip()
+    return require_text(value, field_name=field_name)
 
 
 def _require_choice(value: Any, *, field_name: str, allowed: Collection[str]) -> str:
-    text = _require_text(value, field_name=field_name)
-    if text not in allowed:
-        allowed_values = ", ".join(sorted(allowed))
-        raise ValueError(f"{field_name} must be one of: {allowed_values}")
-    return text
+    return require_choice(value, field_name=field_name, allowed=allowed)
 
 
 def _require_str_list(value: Any, *, field_name: str) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise ValueError(f"{field_name} must be a list")
-    return tuple(_require_text(item, field_name=f"{field_name}[]") for item in value)
+    return require_str_list(value, field_name=field_name)
 
 
 def _require_int_list(value: Any, *, field_name: str) -> tuple[int, ...]:
-    if not isinstance(value, list):
-        raise ValueError(f"{field_name} must be a list")
-    return tuple(_require_int(item, field_name=f"{field_name}[]", minimum=0) for item in value)
+    return require_int_list(value, field_name=field_name)
 
 
 def _reject_unknown_keys(body: Mapping[str, Any], *, allowed: Collection[str], context: str) -> None:
-    unknown = sorted(key for key in body if key not in allowed)
-    if unknown:
-        raise ValueError(f"{context} has unsupported keys: {', '.join(unknown)}")
+    reject_unknown_keys(body, allowed=allowed, context=context)
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in overlay.items():
-        if key == "extends":
-            continue
-        if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
-            merged[key] = _deep_merge(dict(merged[key]), dict(value))
-        else:
-            merged[key] = value
-    return merged
+    return deep_merge(base, overlay)
 
 
 def _load_preset_document(path: Path, *, seen: set[Path] | None = None) -> dict[str, Any]:
-    resolved = path.resolve()
-    active = set() if seen is None else seen
-    if resolved in active:
-        raise ValueError(f"Config extends cycle detected at {resolved}")
-    active.add(resolved)
-    doc = _load_yaml(resolved)
-    _reject_unknown_keys(doc, allowed=_TOP_LEVEL_KEYS, context=str(resolved))
-    merged: dict[str, Any] = {}
-    parent = doc.get("extends")
-    if parent is not None:
-        parent_ref = _require_text(parent, field_name=f"{resolved}.extends")
-        merged = _load_preset_document((resolved.parent / parent_ref).resolve(), seen=active)
-    active.remove(resolved)
-    return _deep_merge(merged, doc)
+    return load_preset_document(path, seen=seen)
 
 
 def _resolve_repo_path(root: Path, raw_path: str) -> Path:
-    path = Path(raw_path)
-    return path if path.is_absolute() else (root / path).resolve()
+    return resolve_repo_path(root, raw_path)
 
 
 def _parse_experiment_config(body: dict[str, Any]) -> ExperimentConfig:
-    _reject_unknown_keys(body, allowed={"role"}, context="experiment")
-    return ExperimentConfig(
-        role=_require_choice(body["role"], field_name="experiment.role", allowed=_EXPERIMENT_ROLES),
-    )
+    return parse_experiment_config(body)
 
 
 def _parse_system_config(body: dict[str, Any]) -> SystemConfig:
-    _reject_unknown_keys(
-        body,
-        allowed={
-            "profile",
-            "mp_start_method",
-            "collection_backend",
-            "learner_device",
-            "actor_device",
-            "actor_process_count",
-            "envs_per_actor",
-            "total_envs",
-            "actor_torch_threads",
-            "learner_torch_threads",
-            "actor_queue_capacity_unrolls",
-            "learner_prefetch_batches",
-        },
-        context="system",
-    )
-    profile = _require_mapping(body["profile"], context="system.profile")
-    _reject_unknown_keys(
-        profile,
-        allowed={"training", "local_iteration", "ci_invariant_testing"},
-        context="system.profile",
-    )
-    return SystemConfig(
-        profile=SystemProfileConfig(
-            training=_require_text(profile["training"], field_name="system.profile.training"),
-            local_iteration=_require_text(profile["local_iteration"], field_name="system.profile.local_iteration"),
-            ci_invariant_testing=_require_text(
-                profile["ci_invariant_testing"],
-                field_name="system.profile.ci_invariant_testing",
-            ),
-        ),
-        mp_start_method=_require_text(body["mp_start_method"], field_name="system.mp_start_method"),
-        collection_backend=_require_choice(
-            body.get("collection_backend", "auto"),
-            field_name="system.collection_backend",
-            allowed=("auto", "central", "process"),
-        ),
-        learner_device=_require_text(body["learner_device"], field_name="system.learner_device"),
-        actor_device=_require_text(body["actor_device"], field_name="system.actor_device"),
-        actor_process_count=_require_int(
-            body["actor_process_count"], field_name="system.actor_process_count", minimum=1
-        ),
-        envs_per_actor=_require_int(body["envs_per_actor"], field_name="system.envs_per_actor", minimum=1),
-        total_envs=_require_int(body["total_envs"], field_name="system.total_envs", minimum=1),
-        actor_torch_threads=_require_int(
-            body["actor_torch_threads"], field_name="system.actor_torch_threads", minimum=1
-        ),
-        learner_torch_threads=_require_int(
-            body["learner_torch_threads"], field_name="system.learner_torch_threads", minimum=1
-        ),
-        actor_queue_capacity_unrolls=_require_int(
-            body["actor_queue_capacity_unrolls"],
-            field_name="system.actor_queue_capacity_unrolls",
-            minimum=1,
-        ),
-        learner_prefetch_batches=_require_int(
-            body["learner_prefetch_batches"],
-            field_name="system.learner_prefetch_batches",
-            minimum=1,
-        ),
-    )
+    return parse_system_config(body)
 
 
 def _parse_model_config(body: dict[str, Any]) -> ModelConfig:
-    _reject_unknown_keys(
-        body,
-        allowed={
-            "gru_hidden_size",
-            "encoder_mlp_width",
-            "encoder_mlp_layers",
-            "encoder_kind",
-            "structured_policy_contract",
-            "typed_feature_width",
-            "recurrent_core",
-            "candidate_scoring_chunk_size",
-            "cuda_learner_candidate_scoring_chunk_size",
-            "public_heuristic_logit_bias_scale",
-            "public_heuristic_actor_logit_bias_scale",
-            "public_heuristic_logit_bias_start_updates",
-            "public_heuristic_logit_bias_end_updates",
-            "public_heuristic_logit_bias_final_scale",
-            "public_heuristic_logit_bias_families",
-            "layer_norm",
-            "dropout",
-        },
-        context="model",
-    )
-    dropout = _require_mapping(body["dropout"], context="model.dropout")
-    _reject_unknown_keys(dropout, allowed={"family_a", "ablation"}, context="model.dropout")
-    public_heuristic_logit_bias_start_updates = _require_int(
-        body.get("public_heuristic_logit_bias_start_updates", 0),
-        field_name="model.public_heuristic_logit_bias_start_updates",
-        minimum=0,
-    )
-    public_heuristic_logit_bias_end_updates = _require_int(
-        body.get("public_heuristic_logit_bias_end_updates", -1),
-        field_name="model.public_heuristic_logit_bias_end_updates",
-        minimum=-1,
-    )
-    if (
-        public_heuristic_logit_bias_end_updates >= 0
-        and public_heuristic_logit_bias_end_updates < public_heuristic_logit_bias_start_updates
-    ):
-        raise ValueError(
-            "model.public_heuristic_logit_bias_end_updates must be >= model.public_heuristic_logit_bias_start_updates"
-        )
-    public_heuristic_logit_bias_final_scale = _require_float(
-        body.get(
-            "public_heuristic_logit_bias_final_scale",
-            body.get("public_heuristic_logit_bias_scale", 0.0),
-        ),
-        field_name="model.public_heuristic_logit_bias_final_scale",
-    )
-    if public_heuristic_logit_bias_final_scale < 0.0:
-        raise ValueError("model.public_heuristic_logit_bias_final_scale must be >= 0.0")
-    return ModelConfig(
-        gru_hidden_size=_require_int(body["gru_hidden_size"], field_name="model.gru_hidden_size", minimum=1),
-        encoder_mlp_width=_require_int(body["encoder_mlp_width"], field_name="model.encoder_mlp_width", minimum=1),
-        encoder_mlp_layers=_require_int(body["encoder_mlp_layers"], field_name="model.encoder_mlp_layers", minimum=1),
-        encoder_kind=_require_choice(
-            body.get("encoder_kind", "mlp"),
-            field_name="model.encoder_kind",
-            allowed=_MODEL_ENCODER_KINDS,
-        ),
-        structured_policy_contract=_require_choice(
-            body.get("structured_policy_contract", "packed_v1"),
-            field_name="model.structured_policy_contract",
-            allowed=_STRUCTURED_POLICY_CONTRACTS,
-        ),
-        typed_feature_width=_require_int(
-            body.get("typed_feature_width", 64),
-            field_name="model.typed_feature_width",
-            minimum=1,
-        ),
-        recurrent_core=_require_choice(
-            body.get("recurrent_core", "gru"),
-            field_name="model.recurrent_core",
-            allowed=_MODEL_RECURRENT_CORES,
-        ),
-        candidate_scoring_chunk_size=_require_int(
-            body.get("candidate_scoring_chunk_size", 65536),
-            field_name="model.candidate_scoring_chunk_size",
-            minimum=1,
-        ),
-        cuda_learner_candidate_scoring_chunk_size=_require_int(
-            body.get("cuda_learner_candidate_scoring_chunk_size", 262144),
-            field_name="model.cuda_learner_candidate_scoring_chunk_size",
-            minimum=1,
-        ),
-        public_heuristic_logit_bias_scale=_require_float(
-            body.get("public_heuristic_logit_bias_scale", 0.0),
-            field_name="model.public_heuristic_logit_bias_scale",
-        ),
-        public_heuristic_actor_logit_bias_scale=_require_float(
-            body.get("public_heuristic_actor_logit_bias_scale", -1.0),
-            field_name="model.public_heuristic_actor_logit_bias_scale",
-        ),
-        public_heuristic_logit_bias_start_updates=public_heuristic_logit_bias_start_updates,
-        public_heuristic_logit_bias_end_updates=public_heuristic_logit_bias_end_updates,
-        public_heuristic_logit_bias_final_scale=_require_float(
-            public_heuristic_logit_bias_final_scale,
-            field_name="model.public_heuristic_logit_bias_final_scale",
-        ),
-        public_heuristic_logit_bias_families=_require_str_list(
-            body.get("public_heuristic_logit_bias_families", []),
-            field_name="model.public_heuristic_logit_bias_families",
-        ),
-        layer_norm=_require_bool(body["layer_norm"], field_name="model.layer_norm"),
-        dropout=ModelDropoutConfig(
-            family_a=_require_float(dropout["family_a"], field_name="model.dropout.family_a"),
-            ablation=_require_float(dropout["ablation"], field_name="model.dropout.ablation"),
-        ),
-    )
+    return parse_model_config(body)
 
 
 def _parse_training_config(body: dict[str, Any]) -> TrainingConfig:
-    _reject_unknown_keys(
-        body,
-        allowed={
-            "algorithm",
-            "rollout",
-            "optimizer",
-            "exploration",
-            "precision",
-            "profile_timers",
-            "torch_profiler",
-            "checkpointing",
-            "vtrace",
-            "ppo",
-            "structured_aux",
-            "structured_warmstart",
-            "structured_metrics",
-            "teacher_aux",
-            "fixed_opponent_backend",
-            "actor_policy_backend",
-            "actor_heuristic_fraction",
-            "actor_heuristic_start_updates",
-            "actor_heuristic_end_updates",
-            "actor_heuristic_final_fraction",
-            "train_on_heuristic_actor_rows",
-            "diverse_opponent_actor_count",
-            "diverse_model_actor_count",
-            "diverse_opponent_batch_fraction",
-            "diverse_opponent_batch_wait_ms",
-            "heuristic_actor_hidden_state_tracking",
-        },
-        context="training",
-    )
-    rollout = _require_mapping(body["rollout"], context="training.rollout")
-    optimizer = _require_mapping(body["optimizer"], context="training.optimizer")
-    exploration = _require_mapping(body["exploration"], context="training.exploration")
-    precision = _require_mapping(body["precision"], context="training.precision")
-    checkpointing = _require_mapping(body["checkpointing"], context="training.checkpointing")
-    vtrace = _require_mapping(body["vtrace"], context="training.vtrace")
-    ppo = _require_mapping(body.get("ppo", {}), context="training.ppo")
-    structured_aux = _require_mapping(body.get("structured_aux", {}), context="training.structured_aux")
-    structured_warmstart = _require_mapping(
-        body.get("structured_warmstart", {}),
-        context="training.structured_warmstart",
-    )
-    structured_metrics = _require_mapping(
-        body.get("structured_metrics", {}),
-        context="training.structured_metrics",
-    )
-    teacher_aux = _require_mapping(body.get("teacher_aux", {}), context="training.teacher_aux")
-
-    _reject_unknown_keys(rollout, allowed={"unroll_length", "batch_unrolls_per_update"}, context="training.rollout")
-    _reject_unknown_keys(
-        optimizer,
-        allowed={"name", "learning_rate", "grad_norm_clip", "value_loss_coef"},
-        context="training.optimizer",
-    )
-    _reject_unknown_keys(
-        exploration,
-        allowed={"entropy_coef", "entropy_anneal_to", "entropy_anneal_steps_updates"},
-        context="training.exploration",
-    )
-    _reject_unknown_keys(
-        precision,
-        allowed={"mixed_precision", "compile_learner", "compile_actor_inference", "masking_math_float32"},
-        context="training.precision",
-    )
-    _reject_unknown_keys(
-        checkpointing,
-        allowed={"checkpoint_interval_updates", "snapshot_interval_updates", "actor_reload_interval_updates"},
-        context="training.checkpointing",
-    )
-    _reject_unknown_keys(vtrace, allowed={"rho_bar", "c_bar"}, context="training.vtrace")
-    _reject_unknown_keys(
-        ppo,
-        allowed={"clip_epsilon", "value_clip_epsilon", "gae_lambda", "epochs", "target_kl", "normalize_advantages"},
-        context="training.ppo",
-    )
-    _reject_unknown_keys(
-        structured_aux,
-        allowed={
-            "enabled",
-            "teacher_family_coef",
-            "teacher_slot_coef",
-            "teacher_move_source_coef",
-            "teacher_attack_type_coef",
-            "teacher_action_coef",
-            "teacher_same_family_action_coef",
-            "teacher_public_heuristic_coef",
-            "teacher_public_heuristic_start_updates",
-            "teacher_public_heuristic_end_updates",
-            "teacher_public_heuristic_final_coef",
-            "teacher_public_heuristic_temperature",
-            "teacher_public_heuristic_families",
-            "teacher_public_heuristic_profiles",
-            "teacher_public_heuristic_profile_mode",
-            "teacher_public_heuristic_profiles_end_updates",
-        },
-        context="training.structured_aux",
-    )
-    _reject_unknown_keys(
-        structured_warmstart,
-        allowed={
-            "enabled",
-            "updates",
-            "teacher_family_coef",
-            "teacher_slot_coef",
-            "teacher_move_source_coef",
-            "teacher_attack_type_coef",
-            "teacher_action_coef",
-            "teacher_same_family_action_coef",
-            "teacher_public_heuristic_coef",
-            "teacher_public_heuristic_temperature",
-            "teacher_public_heuristic_families",
-            "teacher_public_heuristic_profiles",
-            "teacher_public_heuristic_profile_mode",
-            "teacher_public_heuristic_profiles_end_updates",
-        },
-        context="training.structured_warmstart",
-    )
-    _reject_unknown_keys(structured_metrics, allowed={"mode"}, context="training.structured_metrics")
-    _reject_unknown_keys(teacher_aux, allowed={"mode"}, context="training.teacher_aux")
-
-    profile_timers = _require_bool(body.get("profile_timers", False), field_name="training.profile_timers")
-    torch_profiler = _require_bool(body.get("torch_profiler", False), field_name="training.torch_profiler")
-    fixed_opponent_backend = _require_choice(
-        body.get("fixed_opponent_backend", "python_scalar"),
-        field_name="training.fixed_opponent_backend",
-        allowed=_TRAINING_FIXED_OPPONENT_BACKENDS,
-    )
-    actor_policy_backend = _require_choice(
-        body.get("actor_policy_backend", "model"),
-        field_name="training.actor_policy_backend",
-        allowed=_TRAINING_ACTOR_POLICY_BACKENDS,
-    )
-    actor_heuristic_fraction = _require_float(
-        body.get("actor_heuristic_fraction", 1.0),
-        field_name="training.actor_heuristic_fraction",
-    )
-    if actor_heuristic_fraction < 0.0 or actor_heuristic_fraction > 1.0:
-        raise ValueError(
-            f"training.actor_heuristic_fraction must be between 0.0 and 1.0 inclusive, got {actor_heuristic_fraction}"
-        )
-    actor_heuristic_start_updates = _require_int(
-        body.get("actor_heuristic_start_updates", 0),
-        field_name="training.actor_heuristic_start_updates",
-        minimum=0,
-    )
-    actor_heuristic_end_updates = _require_int(
-        body.get("actor_heuristic_end_updates", -1),
-        field_name="training.actor_heuristic_end_updates",
-        minimum=-1,
-    )
-    if actor_heuristic_end_updates >= 0 and actor_heuristic_end_updates < actor_heuristic_start_updates:
-        raise ValueError("training.actor_heuristic_end_updates must be >= training.actor_heuristic_start_updates")
-    actor_heuristic_final_fraction = _require_float(
-        body.get("actor_heuristic_final_fraction", actor_heuristic_fraction),
-        field_name="training.actor_heuristic_final_fraction",
-    )
-    if actor_heuristic_final_fraction < 0.0 or actor_heuristic_final_fraction > 1.0:
-        raise ValueError(
-            "training.actor_heuristic_final_fraction must be between 0.0 and 1.0 inclusive, "
-            f"got {actor_heuristic_final_fraction}"
-        )
-    heuristic_actor_hidden_state_tracking = _require_bool(
-        body.get("heuristic_actor_hidden_state_tracking", True),
-        field_name="training.heuristic_actor_hidden_state_tracking",
-    )
-    train_on_heuristic_actor_rows = _require_bool(
-        body.get("train_on_heuristic_actor_rows", True),
-        field_name="training.train_on_heuristic_actor_rows",
-    )
-    diverse_opponent_actor_count = _require_int(
-        body.get("diverse_opponent_actor_count", 0),
-        field_name="training.diverse_opponent_actor_count",
-        minimum=0,
-    )
-    diverse_model_actor_count = _require_int(
-        body.get("diverse_model_actor_count", 0),
-        field_name="training.diverse_model_actor_count",
-        minimum=0,
-    )
-    diverse_opponent_batch_fraction = _require_float(
-        body.get("diverse_opponent_batch_fraction", 0.0),
-        field_name="training.diverse_opponent_batch_fraction",
-    )
-    if diverse_opponent_batch_fraction < 0.0 or diverse_opponent_batch_fraction > 1.0:
-        raise ValueError(
-            "training.diverse_opponent_batch_fraction must be between 0.0 and 1.0 inclusive, "
-            f"got {diverse_opponent_batch_fraction}"
-        )
-    diverse_opponent_batch_wait_ms = _require_int(
-        body.get("diverse_opponent_batch_wait_ms", 0),
-        field_name="training.diverse_opponent_batch_wait_ms",
-        minimum=0,
-    )
-    structured_aux_public_temperature = _require_float(
-        structured_aux.get("teacher_public_heuristic_temperature", 32.0),
-        field_name="training.structured_aux.teacher_public_heuristic_temperature",
-    )
-    if structured_aux_public_temperature <= 0.0:
-        raise ValueError("training.structured_aux.teacher_public_heuristic_temperature must be > 0")
-    structured_warmstart_public_temperature = _require_float(
-        structured_warmstart.get("teacher_public_heuristic_temperature", 32.0),
-        field_name="training.structured_warmstart.teacher_public_heuristic_temperature",
-    )
-    if structured_warmstart_public_temperature <= 0.0:
-        raise ValueError("training.structured_warmstart.teacher_public_heuristic_temperature must be > 0")
-    structured_aux_public_profiles = tuple(
-        name.strip().lower()
-        for name in _require_str_list(
-            structured_aux.get("teacher_public_heuristic_profiles", []),
-            field_name="training.structured_aux.teacher_public_heuristic_profiles",
-        )
-        if name.strip()
-    )
-    invalid_aux_public_profiles = sorted(set(structured_aux_public_profiles) - _TRAINING_PUBLIC_HEURISTIC_PROFILES)
-    if invalid_aux_public_profiles:
-        raise ValueError(
-            "training.structured_aux.teacher_public_heuristic_profiles contains unsupported profiles: "
-            + ", ".join(invalid_aux_public_profiles)
-        )
-    structured_warmstart_public_profiles = tuple(
-        name.strip().lower()
-        for name in _require_str_list(
-            structured_warmstart.get("teacher_public_heuristic_profiles", []),
-            field_name="training.structured_warmstart.teacher_public_heuristic_profiles",
-        )
-        if name.strip()
-    )
-    invalid_warmstart_public_profiles = sorted(
-        set(structured_warmstart_public_profiles) - _TRAINING_PUBLIC_HEURISTIC_PROFILES
-    )
-    if invalid_warmstart_public_profiles:
-        raise ValueError(
-            "training.structured_warmstart.teacher_public_heuristic_profiles contains unsupported profiles: "
-            + ", ".join(invalid_warmstart_public_profiles)
-        )
-    structured_aux_public_profile_mode = _require_choice(
-        structured_aux.get("teacher_public_heuristic_profile_mode", "mixture"),
-        field_name="training.structured_aux.teacher_public_heuristic_profile_mode",
-        allowed=_TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES,
-    )
-    structured_aux_public_start_updates = _require_int(
-        structured_aux.get("teacher_public_heuristic_start_updates", 0),
-        field_name="training.structured_aux.teacher_public_heuristic_start_updates",
-        minimum=0,
-    )
-    structured_aux_public_end_updates = _require_int(
-        structured_aux.get("teacher_public_heuristic_end_updates", -1),
-        field_name="training.structured_aux.teacher_public_heuristic_end_updates",
-        minimum=-1,
-    )
-    if (
-        structured_aux_public_end_updates >= 0
-        and structured_aux_public_end_updates < structured_aux_public_start_updates
-    ):
-        raise ValueError(
-            "training.structured_aux.teacher_public_heuristic_end_updates must be >= "
-            "training.structured_aux.teacher_public_heuristic_start_updates"
-        )
-    structured_aux_public_final_coef = _require_float(
-        structured_aux.get(
-            "teacher_public_heuristic_final_coef",
-            structured_aux.get("teacher_public_heuristic_coef", 0.0),
-        ),
-        field_name="training.structured_aux.teacher_public_heuristic_final_coef",
-    )
-    if structured_aux_public_final_coef < 0.0:
-        raise ValueError("training.structured_aux.teacher_public_heuristic_final_coef must be >= 0.0")
-    structured_aux_public_profiles_end_updates = _require_int(
-        structured_aux.get("teacher_public_heuristic_profiles_end_updates", -1),
-        field_name="training.structured_aux.teacher_public_heuristic_profiles_end_updates",
-        minimum=-1,
-    )
-    structured_warmstart_public_profile_mode = _require_choice(
-        structured_warmstart.get("teacher_public_heuristic_profile_mode", "mixture"),
-        field_name="training.structured_warmstart.teacher_public_heuristic_profile_mode",
-        allowed=_TRAINING_PUBLIC_HEURISTIC_PROFILE_MODES,
-    )
-    structured_warmstart_public_profiles_end_updates = _require_int(
-        structured_warmstart.get("teacher_public_heuristic_profiles_end_updates", -1),
-        field_name="training.structured_warmstart.teacher_public_heuristic_profiles_end_updates",
-        minimum=-1,
-    )
-
-    return TrainingConfig(
-        algorithm=_require_choice(body["algorithm"], field_name="training.algorithm", allowed=_TRAINING_ALGORITHMS),
-        rollout=TrainingRolloutConfig(
-            unroll_length=_require_int(
-                rollout["unroll_length"], field_name="training.rollout.unroll_length", minimum=1
-            ),
-            batch_unrolls_per_update=_require_int(
-                rollout["batch_unrolls_per_update"],
-                field_name="training.rollout.batch_unrolls_per_update",
-                minimum=1,
-            ),
-        ),
-        optimizer=TrainingOptimizerConfig(
-            name=_require_text(optimizer["name"], field_name="training.optimizer.name"),
-            learning_rate=_require_float(optimizer["learning_rate"], field_name="training.optimizer.learning_rate"),
-            grad_norm_clip=_require_float(optimizer["grad_norm_clip"], field_name="training.optimizer.grad_norm_clip"),
-            value_loss_coef=_require_float(
-                optimizer["value_loss_coef"], field_name="training.optimizer.value_loss_coef"
-            ),
-        ),
-        exploration=TrainingExplorationConfig(
-            entropy_coef=_require_float(exploration["entropy_coef"], field_name="training.exploration.entropy_coef"),
-            entropy_anneal_to=_require_float(
-                exploration["entropy_anneal_to"], field_name="training.exploration.entropy_anneal_to"
-            ),
-            entropy_anneal_steps_updates=_require_int(
-                exploration["entropy_anneal_steps_updates"],
-                field_name="training.exploration.entropy_anneal_steps_updates",
-                minimum=1,
-            ),
-        ),
-        precision=TrainingPrecisionConfig(
-            mixed_precision=_require_bool(
-                precision["mixed_precision"], field_name="training.precision.mixed_precision"
-            ),
-            compile_learner=_require_bool(
-                precision["compile_learner"], field_name="training.precision.compile_learner"
-            ),
-            compile_actor_inference=_require_bool(
-                precision.get("compile_actor_inference", False),
-                field_name="training.precision.compile_actor_inference",
-            ),
-            masking_math_float32=_require_bool(
-                precision["masking_math_float32"],
-                field_name="training.precision.masking_math_float32",
-            ),
-        ),
-        profile_timers=profile_timers,
-        torch_profiler=torch_profiler,
-        checkpointing=TrainingCheckpointingConfig(
-            checkpoint_interval_updates=_require_int(
-                checkpointing["checkpoint_interval_updates"],
-                field_name="training.checkpointing.checkpoint_interval_updates",
-                minimum=1,
-            ),
-            snapshot_interval_updates=_require_int(
-                checkpointing["snapshot_interval_updates"],
-                field_name="training.checkpointing.snapshot_interval_updates",
-                minimum=1,
-            ),
-            actor_reload_interval_updates=_require_int(
-                checkpointing["actor_reload_interval_updates"],
-                field_name="training.checkpointing.actor_reload_interval_updates",
-                minimum=1,
-            ),
-        ),
-        vtrace=TrainingVTraceConfig(
-            rho_bar=_require_float(vtrace["rho_bar"], field_name="training.vtrace.rho_bar"),
-            c_bar=_require_float(vtrace["c_bar"], field_name="training.vtrace.c_bar"),
-        ),
-        ppo=TrainingPpoConfig(
-            clip_epsilon=_require_float(ppo.get("clip_epsilon", 0.2), field_name="training.ppo.clip_epsilon"),
-            value_clip_epsilon=_require_float(
-                ppo.get("value_clip_epsilon", 0.2),
-                field_name="training.ppo.value_clip_epsilon",
-            ),
-            gae_lambda=_require_float(ppo.get("gae_lambda", 0.95), field_name="training.ppo.gae_lambda"),
-            epochs=_require_int(ppo.get("epochs", 4), field_name="training.ppo.epochs", minimum=1),
-            target_kl=_require_float(ppo.get("target_kl", 0.0), field_name="training.ppo.target_kl"),
-            normalize_advantages=_require_bool(
-                ppo.get("normalize_advantages", True),
-                field_name="training.ppo.normalize_advantages",
-            ),
-        ),
-        structured_aux=TrainingStructuredAuxConfig(
-            enabled=_require_bool(
-                structured_aux.get("enabled", False),
-                field_name="training.structured_aux.enabled",
-            ),
-            teacher_family_coef=_require_float(
-                structured_aux.get("teacher_family_coef", 0.0),
-                field_name="training.structured_aux.teacher_family_coef",
-            ),
-            teacher_slot_coef=_require_float(
-                structured_aux.get("teacher_slot_coef", 0.0),
-                field_name="training.structured_aux.teacher_slot_coef",
-            ),
-            teacher_move_source_coef=_require_float(
-                structured_aux.get("teacher_move_source_coef", 0.0),
-                field_name="training.structured_aux.teacher_move_source_coef",
-            ),
-            teacher_attack_type_coef=_require_float(
-                structured_aux.get("teacher_attack_type_coef", 0.0),
-                field_name="training.structured_aux.teacher_attack_type_coef",
-            ),
-            teacher_action_coef=_require_float(
-                structured_aux.get("teacher_action_coef", 0.0),
-                field_name="training.structured_aux.teacher_action_coef",
-            ),
-            teacher_same_family_action_coef=_require_float(
-                structured_aux.get("teacher_same_family_action_coef", 0.0),
-                field_name="training.structured_aux.teacher_same_family_action_coef",
-            ),
-            teacher_public_heuristic_coef=_require_float(
-                structured_aux.get("teacher_public_heuristic_coef", 0.0),
-                field_name="training.structured_aux.teacher_public_heuristic_coef",
-            ),
-            teacher_public_heuristic_start_updates=structured_aux_public_start_updates,
-            teacher_public_heuristic_end_updates=structured_aux_public_end_updates,
-            teacher_public_heuristic_final_coef=_require_float(
-                structured_aux_public_final_coef,
-                field_name="training.structured_aux.teacher_public_heuristic_final_coef",
-            ),
-            teacher_public_heuristic_temperature=structured_aux_public_temperature,
-            teacher_public_heuristic_families=_require_str_list(
-                structured_aux.get("teacher_public_heuristic_families", []),
-                field_name="training.structured_aux.teacher_public_heuristic_families",
-            ),
-            teacher_public_heuristic_profiles=structured_aux_public_profiles,
-            teacher_public_heuristic_profile_mode=structured_aux_public_profile_mode,
-            teacher_public_heuristic_profiles_end_updates=structured_aux_public_profiles_end_updates,
-        ),
-        structured_warmstart=TrainingStructuredWarmstartConfig(
-            enabled=_require_bool(
-                structured_warmstart.get("enabled", False),
-                field_name="training.structured_warmstart.enabled",
-            ),
-            updates=_require_int(
-                structured_warmstart.get("updates", 0),
-                field_name="training.structured_warmstart.updates",
-                minimum=0,
-            ),
-            teacher_family_coef=_require_float(
-                structured_warmstart.get("teacher_family_coef", 0.0),
-                field_name="training.structured_warmstart.teacher_family_coef",
-            ),
-            teacher_slot_coef=_require_float(
-                structured_warmstart.get("teacher_slot_coef", 0.0),
-                field_name="training.structured_warmstart.teacher_slot_coef",
-            ),
-            teacher_move_source_coef=_require_float(
-                structured_warmstart.get("teacher_move_source_coef", 0.0),
-                field_name="training.structured_warmstart.teacher_move_source_coef",
-            ),
-            teacher_attack_type_coef=_require_float(
-                structured_warmstart.get("teacher_attack_type_coef", 0.0),
-                field_name="training.structured_warmstart.teacher_attack_type_coef",
-            ),
-            teacher_action_coef=_require_float(
-                structured_warmstart.get("teacher_action_coef", 0.0),
-                field_name="training.structured_warmstart.teacher_action_coef",
-            ),
-            teacher_same_family_action_coef=_require_float(
-                structured_warmstart.get("teacher_same_family_action_coef", 0.0),
-                field_name="training.structured_warmstart.teacher_same_family_action_coef",
-            ),
-            teacher_public_heuristic_coef=_require_float(
-                structured_warmstart.get("teacher_public_heuristic_coef", 0.0),
-                field_name="training.structured_warmstart.teacher_public_heuristic_coef",
-            ),
-            teacher_public_heuristic_temperature=structured_warmstart_public_temperature,
-            teacher_public_heuristic_families=_require_str_list(
-                structured_warmstart.get("teacher_public_heuristic_families", []),
-                field_name="training.structured_warmstart.teacher_public_heuristic_families",
-            ),
-            teacher_public_heuristic_profiles=structured_warmstart_public_profiles,
-            teacher_public_heuristic_profile_mode=structured_warmstart_public_profile_mode,
-            teacher_public_heuristic_profiles_end_updates=structured_warmstart_public_profiles_end_updates,
-        ),
-        structured_metrics=TrainingStructuredMetricsConfig(
-            mode=_require_choice(
-                structured_metrics.get("mode", "off"),
-                field_name="training.structured_metrics.mode",
-                allowed=_TRAINING_STRUCTURED_METRICS_MODES,
-            ),
-        ),
-        teacher_aux=TrainingTeacherAuxConfig(
-            mode=_require_choice(
-                teacher_aux.get("mode", "always"),
-                field_name="training.teacher_aux.mode",
-                allowed=_TRAINING_TEACHER_AUX_MODES,
-            ),
-        ),
-        fixed_opponent_backend=fixed_opponent_backend,
-        actor_policy_backend=actor_policy_backend,
-        actor_heuristic_fraction=actor_heuristic_fraction,
-        actor_heuristic_start_updates=actor_heuristic_start_updates,
-        actor_heuristic_end_updates=actor_heuristic_end_updates,
-        actor_heuristic_final_fraction=actor_heuristic_final_fraction,
-        train_on_heuristic_actor_rows=train_on_heuristic_actor_rows,
-        diverse_opponent_actor_count=diverse_opponent_actor_count,
-        diverse_model_actor_count=diverse_model_actor_count,
-        diverse_opponent_batch_fraction=diverse_opponent_batch_fraction,
-        diverse_opponent_batch_wait_ms=diverse_opponent_batch_wait_ms,
-        heuristic_actor_hidden_state_tracking=heuristic_actor_hidden_state_tracking,
-    )
+    return parse_training_config(body)
 
 
 def _parse_environment_config(body: dict[str, Any]) -> EnvironmentConfig:
-    _reject_unknown_keys(
-        body,
-        allowed={
-            "observation_visibility",
-            "visibility",
-            "truncate_on_max_steps",
-            "max_raw_decisions_per_episode",
-            "max_decisions",
-            "max_decisions_per_episode",
-            "max_learner_steps_per_episode",
-            "max_ticks",
-            "deck_set_size",
-            "deck_pool",
-            "opponent_deck_pool",
-        },
-        context="environment",
-    )
-    deck_set_size = _require_mapping(body["deck_set_size"], context="environment.deck_set_size")
-    _reject_unknown_keys(deck_set_size, allowed={"bring_up", "paper"}, context="environment.deck_set_size")
-    return EnvironmentConfig(
-        observation_visibility=_require_text(
-            body["observation_visibility"],
-            field_name="environment.observation_visibility",
-        ),
-        visibility=_require_text(body["visibility"], field_name="environment.visibility"),
-        truncate_on_max_steps=_require_bool(
-            body["truncate_on_max_steps"], field_name="environment.truncate_on_max_steps"
-        ),
-        max_raw_decisions_per_episode=_require_int(
-            body["max_raw_decisions_per_episode"],
-            field_name="environment.max_raw_decisions_per_episode",
-            minimum=1,
-        ),
-        max_decisions=_require_int(body["max_decisions"], field_name="environment.max_decisions", minimum=1),
-        max_decisions_per_episode=_require_int(
-            body["max_decisions_per_episode"],
-            field_name="environment.max_decisions_per_episode",
-            minimum=1,
-        ),
-        max_learner_steps_per_episode=_require_int(
-            body["max_learner_steps_per_episode"],
-            field_name="environment.max_learner_steps_per_episode",
-            minimum=1,
-        ),
-        max_ticks=_require_int(body["max_ticks"], field_name="environment.max_ticks", minimum=1),
-        deck_set_size=DeckSetSizeConfig(
-            bring_up=_require_int(
-                deck_set_size["bring_up"], field_name="environment.deck_set_size.bring_up", minimum=1
-            ),
-            paper=_require_int(deck_set_size["paper"], field_name="environment.deck_set_size.paper", minimum=1),
-        ),
-        deck_pool=_require_str_list(body.get("deck_pool", []), field_name="environment.deck_pool"),
-        opponent_deck_pool=_require_str_list(
-            body.get("opponent_deck_pool", []),
-            field_name="environment.opponent_deck_pool",
-        ),
-    )
+    return parse_environment_config(body)
 
 
 def _parse_rewards_config(body: dict[str, Any]) -> RewardsConfig:
-    _reject_unknown_keys(body, allowed={"objective", "discount", "shaping", "truncation"}, context="rewards")
-    discount = _require_mapping(body["discount"], context="rewards.discount")
-    shaping = _require_mapping(body["shaping"], context="rewards.shaping")
-    truncation = _require_mapping(body["truncation"], context="rewards.truncation")
-    _reject_unknown_keys(discount, allowed={"gamma"}, context="rewards.discount")
-    _reject_unknown_keys(
-        shaping,
-        allowed={"enable_damage_shaping", "damage_reward", "level_reward", "board_reward", "no_progress_penalty"},
-        context="rewards.shaping",
-    )
-    _reject_unknown_keys(
-        truncation,
-        allowed={"reward", "bootstrap_value", "bootstrap_rule"},
-        context="rewards.truncation",
-    )
-    return RewardsConfig(
-        objective=_require_text(body["objective"], field_name="rewards.objective"),
-        discount=RewardDiscountConfig(
-            gamma=_require_float(discount["gamma"], field_name="rewards.discount.gamma"),
-        ),
-        shaping=RewardShapingConfig(
-            enable_damage_shaping=_require_bool(
-                shaping["enable_damage_shaping"],
-                field_name="rewards.shaping.enable_damage_shaping",
-            ),
-            damage_reward=_require_float(shaping["damage_reward"], field_name="rewards.shaping.damage_reward"),
-            level_reward=_require_float(shaping.get("level_reward", 0.0), field_name="rewards.shaping.level_reward"),
-            board_reward=_require_float(shaping.get("board_reward", 0.0), field_name="rewards.shaping.board_reward"),
-            no_progress_penalty=_require_float(
-                shaping.get("no_progress_penalty", 0.0),
-                field_name="rewards.shaping.no_progress_penalty",
-            ),
-        ),
-        truncation=RewardTruncationConfig(
-            reward=_require_float(truncation["reward"], field_name="rewards.truncation.reward"),
-            bootstrap_value=_require_bool(
-                truncation["bootstrap_value"],
-                field_name="rewards.truncation.bootstrap_value",
-            ),
-            bootstrap_rule=_require_text(
-                truncation["bootstrap_rule"],
-                field_name="rewards.truncation.bootstrap_rule",
-            ),
-        ),
-    )
+    return parse_rewards_config(body)
 
 
 def _normalize_curriculum_payload(value: Any, *, field_name: str) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, list):
-        return [_normalize_curriculum_payload(item, field_name=f"{field_name}[]") for item in value]
-    if isinstance(value, Mapping):
-        return {
-            _require_text(key, field_name=f"{field_name}.<key>"): _normalize_curriculum_payload(
-                item,
-                field_name=f"{field_name}.{key}",
-            )
-            for key, item in value.items()
-        }
-    raise ValueError(f"{field_name} contains unsupported value type: {type(value).__name__}")
+    return normalize_curriculum_payload(value, field_name=field_name)
 
 
 def _parse_curriculum_config(body: dict[str, Any] | None) -> CurriculumConfig:
-    if body is None:
-        return CurriculumConfig()
-    _reject_unknown_keys(body, allowed={"simulator", "stall_monitor", "checkpoint_guard"}, context="curriculum")
-    simulator = _require_mapping(body.get("simulator", {}), context="curriculum.simulator")
-    stall_monitor = _require_mapping(body.get("stall_monitor", {}), context="curriculum.stall_monitor")
-    checkpoint_guard = _require_mapping(body.get("checkpoint_guard", {}), context="curriculum.checkpoint_guard")
-    _reject_unknown_keys(
-        stall_monitor,
-        allowed={"enabled", "truncation_rate_threshold", "consecutive_evals"},
-        context="curriculum.stall_monitor",
-    )
-    _reject_unknown_keys(
-        checkpoint_guard,
-        allowed={
-            "enabled",
-            "rollback_score_margin",
-            "rollback_truncation_rate_threshold",
-            "rollback_max_prob_lt_half",
-            "min_best_score",
-            "promote_min_prob_gt_half",
-            "promote_max_ci_half_width",
-            "cooldown_updates",
-        },
-        context="curriculum.checkpoint_guard",
-    )
-    return CurriculumConfig(
-        simulator={
-            key: _normalize_curriculum_payload(value, field_name=f"curriculum.simulator.{key}")
-            for key, value in simulator.items()
-        },
-        stall_monitor=CurriculumStallMonitorConfig(
-            enabled=_require_bool(stall_monitor.get("enabled", False), field_name="curriculum.stall_monitor.enabled"),
-            truncation_rate_threshold=_require_float(
-                stall_monitor.get("truncation_rate_threshold", 1.0),
-                field_name="curriculum.stall_monitor.truncation_rate_threshold",
-            ),
-            consecutive_evals=_require_int(
-                stall_monitor.get("consecutive_evals", 2),
-                field_name="curriculum.stall_monitor.consecutive_evals",
-                minimum=1,
-            ),
-        ),
-        checkpoint_guard=CurriculumCheckpointGuardConfig(
-            enabled=_require_bool(
-                checkpoint_guard.get("enabled", False),
-                field_name="curriculum.checkpoint_guard.enabled",
-            ),
-            rollback_score_margin=_require_float(
-                checkpoint_guard.get("rollback_score_margin", 1.0),
-                field_name="curriculum.checkpoint_guard.rollback_score_margin",
-            ),
-            rollback_truncation_rate_threshold=_require_float(
-                checkpoint_guard.get("rollback_truncation_rate_threshold", 1.0),
-                field_name="curriculum.checkpoint_guard.rollback_truncation_rate_threshold",
-            ),
-            rollback_max_prob_lt_half=_require_float(
-                checkpoint_guard.get("rollback_max_prob_lt_half", 1.0),
-                field_name="curriculum.checkpoint_guard.rollback_max_prob_lt_half",
-            ),
-            min_best_score=_require_float(
-                checkpoint_guard.get("min_best_score", 1.0),
-                field_name="curriculum.checkpoint_guard.min_best_score",
-            ),
-            promote_min_prob_gt_half=_require_float(
-                checkpoint_guard.get("promote_min_prob_gt_half", 0.0),
-                field_name="curriculum.checkpoint_guard.promote_min_prob_gt_half",
-            ),
-            promote_max_ci_half_width=_require_float(
-                checkpoint_guard.get("promote_max_ci_half_width", 1.0),
-                field_name="curriculum.checkpoint_guard.promote_max_ci_half_width",
-            ),
-            cooldown_updates=_require_int(
-                checkpoint_guard.get("cooldown_updates", 0),
-                field_name="curriculum.checkpoint_guard.cooldown_updates",
-                minimum=0,
-            ),
-        ),
-    )
+    return parse_curriculum_config(body)
 
 
 def _parse_league_config(body: dict[str, Any]) -> LeagueConfig:
-    _reject_unknown_keys(body, allowed={"enabled", "pool", "sampling", "warmup", "promotion"}, context="league")
-    pool = _require_mapping(body["pool"], context="league.pool")
-    sampling = _require_mapping(body["sampling"], context="league.sampling")
-    warmup = _require_mapping(body["warmup"], context="league.warmup")
-    promotion = _require_mapping(body["promotion"], context="league.promotion")
-    anchor_set = _require_mapping(promotion["anchor_set_v1"], context="league.promotion.anchor_set_v1")
-    gate = _require_mapping(promotion["gate"], context="league.promotion.gate")
-    guardrails = _require_mapping(gate["guardrails"], context="league.promotion.gate.guardrails")
-
-    _reject_unknown_keys(
-        pool,
-        allowed={"recent_size", "champion_size", "champion_max_age_updates"},
-        context="league.pool",
-    )
-    _reject_unknown_keys(
-        sampling,
-        allowed={
-            "opponent_sampling",
-            "pfsp_power",
-            "pfsp_epsilon_uniform",
-            "pfsp_stats_source",
-            "pfsp_window_episodes",
-            "heuristic_public_start_updates",
-            "heuristic_public_mix_fraction",
-            "heuristic_public_mix_end_updates",
-            "heuristic_public_final_mix_fraction",
-            "heuristic_public_variant_mix_fraction",
-            "heuristic_public_variant_mix_end_updates",
-            "heuristic_public_variant_final_mix_fraction",
-            "noleague_baseline_mix_fraction",
-            "noleague_baseline_mix_end_updates",
-            "warmup_snapshot_mix_fraction",
-            "heuristic_public_reserved_envs_per_actor",
-            "noleague_baseline_reserved_envs_per_actor",
-            "champion_mix_fraction",
-            "hard_negative_mix_fraction",
-            "hard_negative_min_samples",
-            "hard_negative_max_win_rate",
-        },
-        context="league.sampling",
-    )
-    _reject_unknown_keys(
-        warmup,
-        allowed={"first_updates", "initial_window_episodes", "ramp_target_updates", "ramp_target_window_episodes"},
-        context="league.warmup",
-    )
-    _reject_unknown_keys(
-        promotion,
-        allowed={"enabled", "paired_seeds", "threshold", "anchor_set_v1", "seed_file", "gate"},
-        context="league.promotion",
-    )
-    _reject_unknown_keys(
-        anchor_set, allowed={"required", "optional_if_available"}, context="league.promotion.anchor_set_v1"
-    )
-    _reject_unknown_keys(
-        gate,
-        allowed={"uncertainty_method", "weighting", "seat_swap", "folding", "guardrails", "record_file"},
-        context="league.promotion.gate",
-    )
-    _reject_unknown_keys(
-        guardrails,
-        allowed={"max_prob_anchor_loss_below_0_45", "max_truncation_rate"},
-        context="league.promotion.gate.guardrails",
-    )
-
-    pfsp_stats_source = _require_text(
-        sampling["pfsp_stats_source"],
-        field_name="league.sampling.pfsp_stats_source",
-    )
-    if pfsp_stats_source != "online_outcomes":
-        raise ValueError("league.sampling.pfsp_stats_source currently only supports 'online_outcomes'")
-
-    return LeagueConfig(
-        enabled=_require_bool(body["enabled"], field_name="league.enabled"),
-        pool=LeaguePoolConfig(
-            recent_size=_require_int(pool["recent_size"], field_name="league.pool.recent_size", minimum=1),
-            champion_size=_require_int(pool["champion_size"], field_name="league.pool.champion_size", minimum=0),
-            champion_max_age_updates=_require_int(
-                pool.get("champion_max_age_updates", 0),
-                field_name="league.pool.champion_max_age_updates",
-                minimum=0,
-            ),
-        ),
-        sampling=LeagueSamplingConfig(
-            opponent_sampling=_require_text(
-                sampling["opponent_sampling"], field_name="league.sampling.opponent_sampling"
-            ),
-            pfsp_power=_require_float(sampling["pfsp_power"], field_name="league.sampling.pfsp_power"),
-            pfsp_epsilon_uniform=_require_float(
-                sampling["pfsp_epsilon_uniform"],
-                field_name="league.sampling.pfsp_epsilon_uniform",
-            ),
-            pfsp_stats_source=pfsp_stats_source,
-            pfsp_window_episodes=_require_int(
-                sampling["pfsp_window_episodes"],
-                field_name="league.sampling.pfsp_window_episodes",
-                minimum=1,
-            ),
-            heuristic_public_start_updates=_require_int(
-                sampling.get("heuristic_public_start_updates", 0),
-                field_name="league.sampling.heuristic_public_start_updates",
-                minimum=0,
-            ),
-            heuristic_public_mix_fraction=_require_float(
-                sampling.get("heuristic_public_mix_fraction", 0.0),
-                field_name="league.sampling.heuristic_public_mix_fraction",
-            ),
-            heuristic_public_mix_end_updates=_require_int(
-                sampling.get("heuristic_public_mix_end_updates", -1),
-                field_name="league.sampling.heuristic_public_mix_end_updates",
-                minimum=-1,
-            ),
-            heuristic_public_final_mix_fraction=_require_float(
-                sampling.get(
-                    "heuristic_public_final_mix_fraction",
-                    sampling.get("heuristic_public_mix_fraction", 0.0),
-                ),
-                field_name="league.sampling.heuristic_public_final_mix_fraction",
-            ),
-            heuristic_public_variant_mix_fraction=_require_float(
-                sampling.get("heuristic_public_variant_mix_fraction", 0.0),
-                field_name="league.sampling.heuristic_public_variant_mix_fraction",
-            ),
-            heuristic_public_variant_mix_end_updates=_require_int(
-                sampling.get("heuristic_public_variant_mix_end_updates", -1),
-                field_name="league.sampling.heuristic_public_variant_mix_end_updates",
-                minimum=-1,
-            ),
-            heuristic_public_variant_final_mix_fraction=_require_float(
-                sampling.get(
-                    "heuristic_public_variant_final_mix_fraction",
-                    sampling.get("heuristic_public_variant_mix_fraction", 0.0),
-                ),
-                field_name="league.sampling.heuristic_public_variant_final_mix_fraction",
-            ),
-            noleague_baseline_mix_fraction=_require_float(
-                sampling.get("noleague_baseline_mix_fraction", 0.0),
-                field_name="league.sampling.noleague_baseline_mix_fraction",
-            ),
-            noleague_baseline_mix_end_updates=_require_int(
-                sampling.get("noleague_baseline_mix_end_updates", -1),
-                field_name="league.sampling.noleague_baseline_mix_end_updates",
-                minimum=-1,
-            ),
-            warmup_snapshot_mix_fraction=_require_float(
-                sampling.get("warmup_snapshot_mix_fraction", 0.0),
-                field_name="league.sampling.warmup_snapshot_mix_fraction",
-            ),
-            heuristic_public_reserved_envs_per_actor=_require_int(
-                sampling.get("heuristic_public_reserved_envs_per_actor", 0),
-                field_name="league.sampling.heuristic_public_reserved_envs_per_actor",
-                minimum=0,
-            ),
-            noleague_baseline_reserved_envs_per_actor=_require_int(
-                sampling.get("noleague_baseline_reserved_envs_per_actor", 0),
-                field_name="league.sampling.noleague_baseline_reserved_envs_per_actor",
-                minimum=0,
-            ),
-            champion_mix_fraction=_require_float(
-                sampling.get("champion_mix_fraction", 0.35),
-                field_name="league.sampling.champion_mix_fraction",
-            ),
-            hard_negative_mix_fraction=_require_float(
-                sampling.get("hard_negative_mix_fraction", 0.2),
-                field_name="league.sampling.hard_negative_mix_fraction",
-            ),
-            hard_negative_min_samples=_require_int(
-                sampling.get("hard_negative_min_samples", 16),
-                field_name="league.sampling.hard_negative_min_samples",
-                minimum=1,
-            ),
-            hard_negative_max_win_rate=_require_float(
-                sampling.get("hard_negative_max_win_rate", 0.45),
-                field_name="league.sampling.hard_negative_max_win_rate",
-            ),
-        ),
-        warmup=LeagueWarmupConfig(
-            first_updates=_require_int(warmup["first_updates"], field_name="league.warmup.first_updates", minimum=0),
-            initial_window_episodes=_require_int(
-                warmup["initial_window_episodes"],
-                field_name="league.warmup.initial_window_episodes",
-                minimum=0,
-            ),
-            ramp_target_updates=_require_int(
-                warmup["ramp_target_updates"],
-                field_name="league.warmup.ramp_target_updates",
-                minimum=0,
-            ),
-            ramp_target_window_episodes=_require_int(
-                warmup["ramp_target_window_episodes"],
-                field_name="league.warmup.ramp_target_window_episodes",
-                minimum=0,
-            ),
-        ),
-        promotion=LeaguePromotionConfig(
-            enabled=_require_bool(promotion["enabled"], field_name="league.promotion.enabled"),
-            paired_seeds=_require_int(promotion["paired_seeds"], field_name="league.promotion.paired_seeds", minimum=1),
-            threshold=_require_text(promotion["threshold"], field_name="league.promotion.threshold"),
-            anchor_set_v1=PromotionAnchorSetConfig(
-                required=_require_str_list(
-                    anchor_set["required"], field_name="league.promotion.anchor_set_v1.required"
-                ),
-                optional_if_available=_require_str_list(
-                    anchor_set["optional_if_available"],
-                    field_name="league.promotion.anchor_set_v1.optional_if_available",
-                ),
-            ),
-            seed_file=_require_text(promotion["seed_file"], field_name="league.promotion.seed_file"),
-            gate=PromotionGateConfig(
-                uncertainty_method=_require_text(
-                    gate["uncertainty_method"],
-                    field_name="league.promotion.gate.uncertainty_method",
-                ),
-                weighting=_require_text(gate["weighting"], field_name="league.promotion.gate.weighting"),
-                seat_swap=_require_bool(gate["seat_swap"], field_name="league.promotion.gate.seat_swap"),
-                folding=_require_text(gate["folding"], field_name="league.promotion.gate.folding"),
-                guardrails=PromotionGateGuardrailsConfig(
-                    max_prob_anchor_loss_below_0_45=_require_float(
-                        guardrails["max_prob_anchor_loss_below_0_45"],
-                        field_name="league.promotion.gate.guardrails.max_prob_anchor_loss_below_0_45",
-                    ),
-                    max_truncation_rate=_require_float(
-                        guardrails["max_truncation_rate"],
-                        field_name="league.promotion.gate.guardrails.max_truncation_rate",
-                    ),
-                ),
-                record_file=_require_text(gate["record_file"], field_name="league.promotion.gate.record_file"),
-            ),
-        ),
-    )
+    return parse_league_config(body)
 
 
 def _parse_evaluation_config(body: dict[str, Any]) -> EvaluationConfig:
-    _reject_unknown_keys(
-        body,
-        allowed={
-            "seat_swap",
-            "eval_device",
-            "eval_inference_mode",
-            "eval_sampling_algorithm",
-            "eval_assert_sorted_legal_ids",
-            "seed_files",
-            "periodic_dev_eval_interval_updates",
-            "periodic_dev_eval_paired_seeds",
-            "final_policy_set_size",
-            "final_matrix_stage1_paired_seeds",
-            "final_matrix_stage2_adaptive_max_paired_seeds",
-            "stop_rules",
-            "replay_capture_rate_eval",
-            "regression_capture_count",
-            "legal_fingerprint_checks",
-            "decision_kind_tagging",
-            "final_policy_set_selection",
-        },
-        context="evaluation",
-    )
-    seed_files = _require_mapping(body["seed_files"], context="evaluation.seed_files")
-    stop_rules = _require_mapping(body["stop_rules"], context="evaluation.stop_rules")
-    legal = _require_mapping(body["legal_fingerprint_checks"], context="evaluation.legal_fingerprint_checks")
-    decision = _require_mapping(body["decision_kind_tagging"], context="evaluation.decision_kind_tagging")
-    selection = _require_mapping(body["final_policy_set_selection"], context="evaluation.final_policy_set_selection")
-    fixed_anchor = _require_mapping(
-        selection["fixed_anchor_set_v1"], context="evaluation.final_policy_set_selection.fixed_anchor_set_v1"
-    )
-    _reject_unknown_keys(
-        stop_rules, allowed={"stop_delta_ci_half_width", "stop_confidence"}, context="evaluation.stop_rules"
-    )
-    _reject_unknown_keys(
-        legal,
-        allowed={"enabled", "version", "require_strictly_increasing_legal_ids", "mismatch_policy"},
-        context="evaluation.legal_fingerprint_checks",
-    )
-    _reject_unknown_keys(
-        decision,
-        allowed={"required_for_training", "enable_python_derived_debug_tag"},
-        context="evaluation.decision_kind_tagging",
-    )
-    _reject_unknown_keys(
-        selection,
-        allowed={
-            "version",
-            "include_random_legal_baseline_b0",
-            "include_no_league_baseline_b1",
-            "include_heuristic_public_b2_if_exists",
-            "include_final_champion_snapshot",
-            "include_spaced_snapshots_near_percent_updates",
-            "remaining_slots_strategy",
-            "fixed_anchor_set_v1",
-            "seed_file",
-            "folding",
-            "seat_swap",
-            "tie_break",
-        },
-        context="evaluation.final_policy_set_selection",
-    )
-    _reject_unknown_keys(
-        fixed_anchor,
-        allowed={"required", "optional_if_available"},
-        context="evaluation.final_policy_set_selection.fixed_anchor_set_v1",
-    )
-    mismatch_policy = _require_text(
-        legal["mismatch_policy"],
-        field_name="evaluation.legal_fingerprint_checks.mismatch_policy",
-    )
-    if mismatch_policy != "hard_fail":
-        raise ValueError(
-            f"evaluation.legal_fingerprint_checks.mismatch_policy must be 'hard_fail', got {mismatch_policy!r}"
-        )
-    return EvaluationConfig(
-        seat_swap=_require_bool(body["seat_swap"], field_name="evaluation.seat_swap"),
-        eval_device=_require_text(body["eval_device"], field_name="evaluation.eval_device"),
-        eval_inference_mode=_require_bool(body["eval_inference_mode"], field_name="evaluation.eval_inference_mode"),
-        eval_sampling_algorithm=_require_text(
-            body["eval_sampling_algorithm"],
-            field_name="evaluation.eval_sampling_algorithm",
-        ),
-        eval_assert_sorted_legal_ids=_require_bool(
-            body["eval_assert_sorted_legal_ids"],
-            field_name="evaluation.eval_assert_sorted_legal_ids",
-        ),
-        seed_files={
-            key: _require_text(value, field_name=f"evaluation.seed_files.{key}") for key, value in seed_files.items()
-        },
-        periodic_dev_eval_interval_updates=_require_int(
-            body["periodic_dev_eval_interval_updates"],
-            field_name="evaluation.periodic_dev_eval_interval_updates",
-            minimum=0,
-        ),
-        periodic_dev_eval_paired_seeds=_require_int(
-            body["periodic_dev_eval_paired_seeds"],
-            field_name="evaluation.periodic_dev_eval_paired_seeds",
-            minimum=1,
-        ),
-        final_policy_set_size=_require_int(
-            body["final_policy_set_size"], field_name="evaluation.final_policy_set_size", minimum=1
-        ),
-        final_matrix_stage1_paired_seeds=_require_int(
-            body["final_matrix_stage1_paired_seeds"],
-            field_name="evaluation.final_matrix_stage1_paired_seeds",
-            minimum=1,
-        ),
-        final_matrix_stage2_adaptive_max_paired_seeds=_require_int(
-            body["final_matrix_stage2_adaptive_max_paired_seeds"],
-            field_name="evaluation.final_matrix_stage2_adaptive_max_paired_seeds",
-            minimum=1,
-        ),
-        stop_rules=StopRulesConfig(
-            stop_delta_ci_half_width=_require_float(
-                stop_rules["stop_delta_ci_half_width"],
-                field_name="evaluation.stop_rules.stop_delta_ci_half_width",
-            ),
-            stop_confidence=_require_float(
-                stop_rules["stop_confidence"],
-                field_name="evaluation.stop_rules.stop_confidence",
-            ),
-        ),
-        replay_capture_rate_eval=_require_float(
-            body["replay_capture_rate_eval"],
-            field_name="evaluation.replay_capture_rate_eval",
-        ),
-        regression_capture_count=_require_int(
-            body["regression_capture_count"],
-            field_name="evaluation.regression_capture_count",
-            minimum=0,
-        ),
-        legal_fingerprint_checks=LegalFingerprintChecksConfig(
-            enabled=_require_bool(legal["enabled"], field_name="evaluation.legal_fingerprint_checks.enabled"),
-            version=_require_text(legal["version"], field_name="evaluation.legal_fingerprint_checks.version"),
-            require_strictly_increasing_legal_ids=_require_bool(
-                legal["require_strictly_increasing_legal_ids"],
-                field_name="evaluation.legal_fingerprint_checks.require_strictly_increasing_legal_ids",
-            ),
-            mismatch_policy=_require_text(
-                mismatch_policy,
-                field_name="evaluation.legal_fingerprint_checks.mismatch_policy",
-            ),
-        ),
-        decision_kind_tagging=DecisionKindTaggingConfig(
-            required_for_training=_require_bool(
-                decision["required_for_training"],
-                field_name="evaluation.decision_kind_tagging.required_for_training",
-            ),
-            enable_python_derived_debug_tag=_require_bool(
-                decision["enable_python_derived_debug_tag"],
-                field_name="evaluation.decision_kind_tagging.enable_python_derived_debug_tag",
-            ),
-        ),
-        final_policy_set_selection=FinalPolicySetSelectionConfig(
-            version=_require_text(selection["version"], field_name="evaluation.final_policy_set_selection.version"),
-            include_random_legal_baseline_b0=_require_bool(
-                selection["include_random_legal_baseline_b0"],
-                field_name="evaluation.final_policy_set_selection.include_random_legal_baseline_b0",
-            ),
-            include_no_league_baseline_b1=_require_bool(
-                selection["include_no_league_baseline_b1"],
-                field_name="evaluation.final_policy_set_selection.include_no_league_baseline_b1",
-            ),
-            include_heuristic_public_b2_if_exists=_require_bool(
-                selection["include_heuristic_public_b2_if_exists"],
-                field_name="evaluation.final_policy_set_selection.include_heuristic_public_b2_if_exists",
-            ),
-            include_final_champion_snapshot=_require_bool(
-                selection["include_final_champion_snapshot"],
-                field_name="evaluation.final_policy_set_selection.include_final_champion_snapshot",
-            ),
-            include_spaced_snapshots_near_percent_updates=_require_int_list(
-                selection["include_spaced_snapshots_near_percent_updates"],
-                field_name="evaluation.final_policy_set_selection.include_spaced_snapshots_near_percent_updates",
-            ),
-            remaining_slots_strategy=_require_text(
-                selection["remaining_slots_strategy"],
-                field_name="evaluation.final_policy_set_selection.remaining_slots_strategy",
-            ),
-            fixed_anchor_set_v1=FixedAnchorSetConfig(
-                required=_require_str_list(
-                    fixed_anchor["required"],
-                    field_name="evaluation.final_policy_set_selection.fixed_anchor_set_v1.required",
-                ),
-                optional_if_available=_require_str_list(
-                    fixed_anchor["optional_if_available"],
-                    field_name="evaluation.final_policy_set_selection.fixed_anchor_set_v1.optional_if_available",
-                ),
-            ),
-            seed_file=_require_text(
-                selection["seed_file"], field_name="evaluation.final_policy_set_selection.seed_file"
-            ),
-            folding=_require_text(selection["folding"], field_name="evaluation.final_policy_set_selection.folding"),
-            seat_swap=_require_bool(
-                selection["seat_swap"], field_name="evaluation.final_policy_set_selection.seat_swap"
-            ),
-            tie_break=_require_text(
-                selection["tie_break"], field_name="evaluation.final_policy_set_selection.tie_break"
-            ),
-        ),
-    )
+    return parse_evaluation_config(body)
 
 
 def _parse_reproducibility_config(body: dict[str, Any]) -> ReproducibilityConfig:
-    _reject_unknown_keys(
-        body,
-        allowed={
-            "spec_bundle",
-            "ids",
-            "seed_derivation",
-            "seed_files",
-            "determinism_requirements",
-            "legal_fingerprint",
-        },
-        context="reproducibility",
-    )
-    spec_bundle = _require_mapping(body["spec_bundle"], context="reproducibility.spec_bundle")
-    ids = _require_mapping(body["ids"], context="reproducibility.ids")
-    seed_derivation = _require_mapping(body["seed_derivation"], context="reproducibility.seed_derivation")
-    seed_files = _require_mapping(body["seed_files"], context="reproducibility.seed_files")
-    legal_fingerprint = _require_mapping(body["legal_fingerprint"], context="reproducibility.legal_fingerprint")
-    _reject_unknown_keys(
-        spec_bundle,
-        allowed={"require_export_spec_bundle", "persist_in_manifest", "fail_on_spec_mismatch"},
-        context="reproducibility.spec_bundle",
-    )
-    _reject_unknown_keys(
-        ids,
-        allowed={
-            "run_id_hash",
-            "config_hash",
-            "spec_hash",
-            "store_full_256_bit_ids",
-            "store_short_64_bit_ids_for_filenames",
-        },
-        context="reproducibility.ids",
-    )
-    _reject_unknown_keys(
-        seed_derivation,
-        allowed={"base_seed64", "actor_seed_formula", "episode_seed_formula"},
-        context="reproducibility.seed_derivation",
-    )
-    _reject_unknown_keys(
-        legal_fingerprint,
-        allowed={"version", "compute_in_rl_layer", "canonical_bytes", "replay_eval_mismatch_policy"},
-        context="reproducibility.legal_fingerprint",
-    )
-    fail_on_spec_mismatch = _require_bool(
-        spec_bundle["fail_on_spec_mismatch"],
-        field_name="reproducibility.spec_bundle.fail_on_spec_mismatch",
-    )
-    require_fail_on_spec_mismatch(
-        fail_on_spec_mismatch,
-        source="reproducibility.spec_bundle.fail_on_spec_mismatch",
-    )
-    replay_eval_mismatch_policy = normalize_spec_mismatch_policy(
-        legal_fingerprint["replay_eval_mismatch_policy"],
-        source="reproducibility.legal_fingerprint.replay_eval_mismatch_policy",
-    )
-    return ReproducibilityConfig(
-        spec_bundle=SpecBundlePolicyConfig(
-            require_export_spec_bundle=_require_bool(
-                spec_bundle["require_export_spec_bundle"],
-                field_name="reproducibility.spec_bundle.require_export_spec_bundle",
-            ),
-            persist_in_manifest=_require_bool(
-                spec_bundle["persist_in_manifest"],
-                field_name="reproducibility.spec_bundle.persist_in_manifest",
-            ),
-            fail_on_spec_mismatch=fail_on_spec_mismatch,
-        ),
-        ids=IdsConfig(
-            run_id_hash=_require_text(ids["run_id_hash"], field_name="reproducibility.ids.run_id_hash"),
-            config_hash=_require_text(ids["config_hash"], field_name="reproducibility.ids.config_hash"),
-            spec_hash=_require_text(ids["spec_hash"], field_name="reproducibility.ids.spec_hash"),
-            store_full_256_bit_ids=_require_bool(
-                ids["store_full_256_bit_ids"],
-                field_name="reproducibility.ids.store_full_256_bit_ids",
-            ),
-            store_short_64_bit_ids_for_filenames=_require_bool(
-                ids["store_short_64_bit_ids_for_filenames"],
-                field_name="reproducibility.ids.store_short_64_bit_ids_for_filenames",
-            ),
-        ),
-        seed_derivation=SeedDerivationConfig(
-            base_seed64=_require_int(
-                seed_derivation["base_seed64"],
-                field_name="reproducibility.seed_derivation.base_seed64",
-                minimum=0,
-            ),
-            actor_seed_formula=_require_text(
-                seed_derivation["actor_seed_formula"],
-                field_name="reproducibility.seed_derivation.actor_seed_formula",
-            ),
-            episode_seed_formula=_require_text(
-                seed_derivation["episode_seed_formula"],
-                field_name="reproducibility.seed_derivation.episode_seed_formula",
-            ),
-        ),
-        seed_files={
-            key: _require_text(value, field_name=f"reproducibility.seed_files.{key}")
-            for key, value in seed_files.items()
-        },
-        determinism_requirements=_require_str_list(
-            body["determinism_requirements"],
-            field_name="reproducibility.determinism_requirements",
-        ),
-        legal_fingerprint=LegalFingerprintConfig(
-            version=_require_text(legal_fingerprint["version"], field_name="reproducibility.legal_fingerprint.version"),
-            compute_in_rl_layer=_require_bool(
-                legal_fingerprint["compute_in_rl_layer"],
-                field_name="reproducibility.legal_fingerprint.compute_in_rl_layer",
-            ),
-            canonical_bytes=_require_str_list(
-                legal_fingerprint["canonical_bytes"],
-                field_name="reproducibility.legal_fingerprint.canonical_bytes",
-            ),
-            replay_eval_mismatch_policy=replay_eval_mismatch_policy,
-        ),
-    )
+    return parse_reproducibility_config(body)
 
 
 def _resolve_seed_sets(
@@ -1680,26 +202,11 @@ def _resolve_seed_sets(
     evaluation: EvaluationConfig | None,
     reproducibility: ReproducibilityConfig | None,
 ) -> dict[str, Path]:
-    seed_sets: dict[str, Path] = {}
-    if evaluation is not None:
-        for key, path in evaluation.seed_files.items():
-            seed_sets[key] = _resolve_repo_path(root, path)
-    if league is not None and league.promotion.seed_file.strip():
-        seed_sets.setdefault("promotion_gate", _resolve_repo_path(root, league.promotion.seed_file))
-    if reproducibility is not None:
-        for key, path in reproducibility.seed_files.items():
-            seed_sets.setdefault(key, _resolve_repo_path(root, path))
-    return seed_sets
+    return resolve_seed_sets(root=root, league=league, evaluation=evaluation, reproducibility=reproducibility)
 
 
 def _parse_seed_sets_override(*, root: Path, seed_sets_doc: Mapping[str, Any]) -> dict[str, Path]:
-    return {
-        _require_text(key, field_name="seed_sets.<key>"): _resolve_repo_path(
-            root,
-            _require_text(value, field_name=f"seed_sets.{key}"),
-        )
-        for key, value in seed_sets_doc.items()
-    }
+    return parse_seed_sets_override(root=root, seed_sets_doc=seed_sets_doc)
 
 
 def _build_stack_config_from_component_doc(

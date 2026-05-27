@@ -1,0 +1,14 @@
+schema_version: 2
+description: "Main league probe: continue the guided factorized seed while fading supervised/public teacher pressure quickly, testing whether the post-seed policy drop is teacher-overconstraint rather than missing imitation."
+extends: main_league_guided_factorized_continuation_no_b1_anchor_probe.yaml
+curriculum:
+  checkpoint_guard:
+    stop_after_rollback: true
+training:
+  structured_aux:
+    teacher_supervised_start_updates: 0
+    teacher_supervised_end_updates: 50
+    teacher_supervised_final_scale: 0.25
+    teacher_public_heuristic_end_updates: 50
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_heuristic_profiles_end_updates: 50

@@ -1,0 +1,11 @@
+schema_version: 2
+description: "Row-deficit live probe from the a050p2 learned-push branch after two replay-free live probes recovered fixed rows but left champion/hard-negative learned rows flat. This keeps the same fixed B1/B2/B4 constraints and champion/hard-negative exposure, then adds explicit per-policy row-deficit sampling multipliers for the learned sentinel rows. Continue only after the live exposure gate passes; sentinel16 must be fixed nonnegative and learned nonnegative, and full13 confirm64 must be fixed >= 0 with learned > 0 versus selected-a015."
+extends: main_league_champion_hardneg_a050p2_live_learnedpush_rowgate_probe.yaml
+league:
+  sampling:
+    row_deficit_policy_weights:
+      seed_c3aac2f9dc_main_league_selected: 1.5
+      seed_c3aac2f9dc_policy_000001: 2.0
+      seed_c3aac2f9dc_policy_000003: 2.0
+      seed_c3aac2f9dc_policy_000004: 3.0
+      seed_c3aac2f9dc_policy_000005: 2.0

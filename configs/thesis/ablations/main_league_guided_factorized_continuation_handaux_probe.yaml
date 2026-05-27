@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Main league probe: guided factorized continuation with explicit hand-argument supervision for main-play and clock hand choices after B4 audit showed family-correct exact-action weakness."
+extends: main_league_guided_factorized_continuation_no_b1_anchor_probe.yaml
+training:
+  structured_aux:
+    teacher_hand_coef: 0.12

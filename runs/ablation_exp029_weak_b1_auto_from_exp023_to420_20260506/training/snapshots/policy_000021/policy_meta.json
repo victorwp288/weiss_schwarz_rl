@@ -1,8 +1,0 @@
-{
-  "format": "minimal_train_snapshot_metadata_v1",
-  "policy_id": "policy_000021",
-  "source_checkpoint_path": "training/checkpoints/checkpoint_420.pt",
-  "update": 420,
-  "weights_path": "training/snapshots/policy_000021/weights.pt",
-  "weights_sha256": "76dfd91ff7b23e33212d2ede980aeaf7ed05ade444fd08a201e9a4e9e74bccd9"
-}

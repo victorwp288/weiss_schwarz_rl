@@ -1,0 +1,16 @@
+targeted confirm start: focal=main_a025_b2exact_u1_a050 rows=13 paired_seeds=64 workers=1
+done 1/13 main_a025_b2exact_u1_a050 vs B0 RandomLegal mean=1.0 wins=128/128
+done 2/13 main_a025_b2exact_u1_a050 vs B1 NoLeague baseline mean=0.640625 wins=82/128
+done 3/13 main_a025_b2exact_u1_a050 vs B2 HeuristicPublic mean=0.7890625 wins=101/128
+done 4/13 main_a025_b2exact_u1_a050 vs B3 HeuristicPublicAggro mean=0.7109375 wins=91/128
+done 5/13 main_a025_b2exact_u1_a050 vs B4 HeuristicPublicControl mean=0.71875 wins=92/128
+done 6/13 main_a025_b2exact_u1_a050 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000001 mean=0.671875 wins=86/128
+done 7/13 main_a025_b2exact_u1_a050 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000002 mean=0.6328125 wins=81/128
+done 8/13 main_a025_b2exact_u1_a050 vs seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025 mean=0.59375 wins=76/128
+done 9/13 main_a025_b2exact_u1_a050 vs seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest mean=0.59375 wins=76/128
+done 10/13 main_a025_b2exact_u1_a050 vs seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected mean=0.546875 wins=70/128
+done 11/13 main_a025_b2exact_u1_a050 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000003 mean=0.546875 wins=70/128
+done 12/13 main_a025_b2exact_u1_a050 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000004 mean=0.546875 wins=70/128
+done 13/13 main_a025_b2exact_u1_a050 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000005 mean=0.59375 wins=76/128
+summary runs\main_champion_hardneg_interp_a025_b2exact_u1_a050_20260520\eval\targeted_confirm64_a025_b2exact_u1_a050\targeted_confirm64_summary.json
+{"games": 1664, "mean": 0.6604567307692307, "wins": 1099}

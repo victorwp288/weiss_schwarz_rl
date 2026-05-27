@@ -1,0 +1,7 @@
+schema_version: 2
+description: "Main league probe: conservative V-trace clipping plus a persistent cycled base/aggressive/control public-teacher floor, testing whether the near-miss V-trace clamp can retain B4/control without losing B2/B3."
+extends: main_league_guided_factorized_postbest_profile_floor_probe.yaml
+training:
+  vtrace:
+    rho_bar: 1.0
+    c_bar: 1.0

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from weiss_rl.structured_acceptance import build_structured_baseline_contract
+from weiss_rl.experiments.structured_acceptance import build_structured_baseline_contract
 
 _DEFAULT_SEEDS = (20260212, 20260213, 20260214)
 _DEFAULT_B2_ANCHOR = "B2 HeuristicPublic"

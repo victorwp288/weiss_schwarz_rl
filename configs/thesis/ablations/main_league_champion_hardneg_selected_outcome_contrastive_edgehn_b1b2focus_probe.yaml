@@ -1,0 +1,30 @@
+schema_version: 2
+description: "Continuation variant for the confirm256-passing edge-HN a0375 seed. Splits fixed preserve into B1/B2 and B3/B4 buckets because a0375 tied fixed aggregate at 256 but leaked B1/B2 while gaining B3. Keeps learned edge repair for policy000001/policy000005 and old hard-negative repair visible. Use only in short guarded segments with paired fixed >= 0 and learned > 0 gates."
+extends: main_league_champion_hardneg_selected_outcome_contrastive_edgehn_focus_probe.yaml
+training:
+  structured_aux:
+    policy_anchor_coef: 0.38
+    policy_anchor_top_action_coef: 0.08
+    paired_swing_coef: 0.045
+    paired_swing_focus_groups:
+      - name: outcome_fixed_b1b2_preserve
+        source_labels:
+          - grouped128_fixed_preserve_B1 NoLeague baseline
+          - grouped128_fixed_preserve_B2 HeuristicPublic
+        fraction: 0.30
+      - name: outcome_fixed_b3b4_preserve
+        source_labels:
+          - grouped128_fixed_preserve_B3 HeuristicPublicAggro
+          - grouped128_fixed_preserve_B4 HeuristicPublicControl
+        fraction: 0.15
+      - name: outcome_old_hardneg_repair
+        source_labels:
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+        fraction: 0.25
+      - name: outcome_edge_hardneg_repair
+        source_labels:
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.30

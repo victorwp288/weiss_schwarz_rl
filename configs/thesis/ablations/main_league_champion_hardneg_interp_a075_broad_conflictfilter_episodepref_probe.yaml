@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Episode-mean paired-outcome preference probe from a075. Uses the broad grouped128/rawext/b2pair70 dataset with current-state conflict rows masked, but hinges once per replay episode on the mean positive-vs-negative margin instead of forcing every local row independently. Must pass offline episode-margin diagnostics before sentinel eval."
+extends: main_league_champion_hardneg_interp_a075_broad_conflictfilter_mechpush_probe.yaml
+training:
+  structured_aux:
+    paired_swing_loss_scope: episode_mean

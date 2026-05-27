@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weiss_rl.structured_acceptance import build_structured_baseline_contract
+from weiss_rl.experiments.structured_acceptance import build_structured_baseline_contract
 
 
 def test_build_structured_baseline_contract_extracts_counts_and_targets() -> None:

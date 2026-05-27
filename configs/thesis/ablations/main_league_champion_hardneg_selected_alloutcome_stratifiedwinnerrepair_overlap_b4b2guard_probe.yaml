@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Selected-a015 champion/hard-negative continuation with stratified winner-repair replay and overlapping champion/hard-negative live lanes. This preserves the exact stratified replay recipe while fixing the opponent ecology issue where dynamic hard-negative selection can consume all imported champions out of the live champion bucket, making champion improvement hard to demonstrate separately from hard-negative pressure."
+extends: main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_b4b2guard_probe.yaml
+league:
+  sampling:
+    hard_negative_overlaps_champions: true

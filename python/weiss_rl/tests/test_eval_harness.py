@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from weiss_rl.artifacts.reproducibility import key256_to_hex, key256_to_short64, resolve_episode_key256, stable_hash64
 from weiss_rl.eval.harness import (
     GameResult,
     MatchupSummary,
@@ -20,7 +21,6 @@ from weiss_rl.eval.harness import (
     summarize_game_records,
     summarize_pair_outcomes,
 )
-from weiss_rl.repro import key256_to_hex, key256_to_short64, resolve_episode_key256, stable_hash64
 
 _RUN_ID256 = "ab" * 32
 _CONFIG_HASH256 = "cd" * 32
@@ -87,6 +87,35 @@ def test_build_seat_swapped_schedule_uses_fixed_seed_pair_order() -> None:
         ("champion", "baseline", 0),
         ("baseline", "champion", 1),
     ]
+    assert [(game.seat0_deck, game.seat1_deck) for game in schedule] == [
+        ("preset:main_deck_5hy_yotsuba_v1", "preset:main_deck_5hy_yotsuba_v1"),
+        ("preset:main_deck_5hy_yotsuba_v1", "preset:main_deck_5hy_yotsuba_v1"),
+        ("preset:main_deck_5hy_yotsuba_v1", "preset:main_deck_5hy_yotsuba_v1"),
+        ("preset:main_deck_5hy_yotsuba_v1", "preset:main_deck_5hy_yotsuba_v1"),
+    ]
+
+
+def test_build_seat_swapped_schedule_assigns_profile_decks_to_heuristics() -> None:
+    schedule = build_seat_swapped_schedule(
+        focal_policy_id="policy_000021",
+        opponent_policy_id="B3 HeuristicPublicAggro",
+        paired_seeds=[11],
+    )
+
+    assert [(game.seat0_policy_id, game.seat0_deck, game.seat1_policy_id, game.seat1_deck) for game in schedule] == [
+        (
+            "policy_000021",
+            "preset:main_deck_5hy_yotsuba_v1",
+            "B3 HeuristicPublicAggro",
+            "preset:aggro_deck_5hy_nino_v1",
+        ),
+        (
+            "B3 HeuristicPublicAggro",
+            "preset:aggro_deck_5hy_nino_v1",
+            "policy_000021",
+            "preset:main_deck_5hy_yotsuba_v1",
+        ),
+    ]
 
 
 def test_run_seat_swapped_matchup_emits_per_game_records_jsonl(tmp_path: Path) -> None:
@@ -123,6 +152,14 @@ def test_run_seat_swapped_matchup_emits_per_game_records_jsonl(tmp_path: Path) -
     assert [payload["swap_index"] for payload in payloads] == [0, 1]
     assert [payload["seat0_policy_id"] for payload in payloads] == ["champion", "baseline"]
     assert [payload["seat1_policy_id"] for payload in payloads] == ["baseline", "champion"]
+    assert [payload["seat0_deck"] for payload in payloads] == [
+        "preset:main_deck_5hy_yotsuba_v1",
+        "preset:main_deck_5hy_yotsuba_v1",
+    ]
+    assert [payload["seat1_deck"] for payload in payloads] == [
+        "preset:main_deck_5hy_yotsuba_v1",
+        "preset:main_deck_5hy_yotsuba_v1",
+    ]
     assert [payload["outcome"] for payload in payloads] == ["W", "D"]
     assert [payload["engine_status"] for payload in payloads] == [0, 5]
     assert [payload["config_hash256"] for payload in payloads] == [_CONFIG_HASH256, _CONFIG_HASH256]
@@ -444,6 +481,41 @@ def test_episode_key_prefers_simulator_value_and_falls_back_deterministically() 
     )
     assert without_simulator_key_a == without_simulator_key_b
     assert without_simulator_key_a != with_simulator_key
+
+
+def test_episode_key_fallback_includes_explicit_decks() -> None:
+    common = {
+        "pair_index": 0,
+        "swap_index": 0,
+        "episode_index": 0,
+        "episode_seed": 123,
+        "focal_policy_id": "policy_000021",
+        "opponent_policy_id": "B3 HeuristicPublicAggro",
+        "seat0_policy_id": "policy_000021",
+        "seat1_policy_id": "B3 HeuristicPublicAggro",
+        "focal_seat": 0,
+    }
+    main_vs_aggro = ScheduledGame(
+        **common,
+        seat0_deck="preset:main_deck_5hy_yotsuba_v1",
+        seat1_deck="preset:aggro_deck_5hy_nino_v1",
+    )
+    main_vs_main = ScheduledGame(
+        **common,
+        seat0_deck="preset:main_deck_5hy_yotsuba_v1",
+        seat1_deck="preset:main_deck_5hy_yotsuba_v1",
+    )
+    result = GameResult(
+        episode_seed=123,
+        terminated=True,
+        truncated=False,
+        winner_seat=0,
+        simulator_episode_key=None,
+    )
+
+    assert resolve_eval_episode_key(
+        scheduled_game=main_vs_aggro, result=result, run_id256=_RUN_ID256
+    ) != resolve_eval_episode_key(scheduled_game=main_vs_main, result=result, run_id256=_RUN_ID256)
 
 
 def test_game_result_from_step_uses_reward_perspective_seat() -> None:

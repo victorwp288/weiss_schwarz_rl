@@ -1,0 +1,9 @@
+schema_version: 2
+description: "Selected-a015 all-outcome champion/hard-negative continuation with stronger old-hard-negative focus and a lower learning rate. This follows the first focus-old-HN probe: confirm64 stopped learned-panel collapse, but confirm128 still regressed learned opponents, so this version increases only the hard-negative bucket multiplier and shortens the intended segment to avoid p5-style drift."
+extends: main_league_champion_hardneg_selected_alloutcome_focusoldhn_b4b2guard_probe.yaml
+league:
+  sampling:
+    hard_negative_focus_weight_multiplier: 8.0
+training:
+  optimizer:
+    learning_rate: 0.0000055

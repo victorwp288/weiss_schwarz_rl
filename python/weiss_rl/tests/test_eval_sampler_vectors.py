@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 
 import weiss_rl.eval.harness as eval_harness
-from weiss_rl.eval import EvalSamplerAnomalies, sample_action_pinned
+from weiss_rl.core.masking import masked_logp_from_legal_ids
+from weiss_rl.eval import EvalSamplerAnomalies, sample_action_pinned, select_action_argmax_pinned
 from weiss_rl.eval.harness import _normalize_cdf_probs
 from weiss_rl.eval.rng_pcg32 import NEXT_U64_ORDER, PCG32_XSH_RR_V1, Pcg32XshRrV1
-from weiss_rl.masking import masked_logp_from_legal_ids
 
 TEST_VECTORS_PATH = Path(__file__).with_name("test_vectors") / "pcg32_xsh_rr_v1.json"
 PINNED_VECTOR_SEEDS = [
@@ -103,11 +103,13 @@ def _expected_single_row_logp(
     action: int,
     *,
     pass_action_id: int | None = None,
+    temperature: float = 1.0,
 ) -> np.float32:
+    scaled_logits = logits / np.float32(temperature)
     legal_offsets = np.array([0, legal_ids.size], dtype=np.int64)
     actions = np.array([action], dtype=np.int64)
     logp = masked_logp_from_legal_ids(
-        logits[np.newaxis, :],
+        scaled_logits[np.newaxis, :],
         legal_ids,
         legal_offsets,
         actions,
@@ -213,6 +215,40 @@ def test_sample_action_pinned_returns_masking_core_logp() -> None:
     assert action == 4
     assert logp == pytest.approx(_expected_single_row_logp(logits, legal_ids, action), abs=1e-6)
     assert rng.calls == 1
+
+
+def test_sample_action_pinned_temperature_scales_model_distribution_and_logp() -> None:
+    logits = np.array([0.0, 1.0, -10.0], dtype=np.float32)
+    legal_ids = np.array([0, 1], dtype=np.uint32)
+    rng = _StubFloatRng(0.2)
+
+    action, logp = sample_action_pinned(logits, legal_ids, rng=rng, temperature=0.25)
+
+    assert action == 1
+    assert logp == pytest.approx(
+        _expected_single_row_logp(logits, legal_ids, action, temperature=0.25),
+        abs=1e-6,
+    )
+    assert rng.calls == 1
+
+
+def test_select_action_argmax_pinned_uses_legal_argmax_without_rng() -> None:
+    logits = np.array([2.0, 99.0, 0.5, 3.0, 3.0], dtype=np.float32)
+    legal_ids = np.array([0, 2, 3, 4], dtype=np.uint32)
+
+    action, logp = select_action_argmax_pinned(logits, legal_ids)
+
+    assert action == 3
+    assert logp == pytest.approx(_expected_single_row_logp(logits, legal_ids, action), abs=1e-6)
+
+
+def test_select_action_argmax_pinned_empty_legal_returns_pass() -> None:
+    logits = np.array([0.25, -0.5, 1.5, 0.75], dtype=np.float32)
+
+    action, logp = select_action_argmax_pinned(logits, np.array([], dtype=np.uint32), pass_action_id=3)
+
+    assert action == 3
+    assert logp == pytest.approx(0.0)
 
 
 def test_sample_action_pinned_rejects_non_finite_legal_logits() -> None:

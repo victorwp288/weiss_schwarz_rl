@@ -1,0 +1,10 @@
+schema_version: 2
+description: "Thesis selected ablation: non-recurrent IMPALA."
+extends: ../base_fixed_deck_structured.yaml
+experiment:
+  role: baseline_norecurrence
+model:
+  encoder_kind: mlp
+  recurrent_core: none
+training:
+  algorithm: impala_vtrace_ff

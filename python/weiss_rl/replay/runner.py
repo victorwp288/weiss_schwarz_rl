@@ -42,13 +42,17 @@ def require_supported_rerun_contract(meta: ReplayBundleMeta) -> ReplayRerunContr
 def build_replay_env(contract: ReplayRerunContract, *, env_factory: ReplayEnvFactory | None = None) -> Any:
     if env_factory is not None:
         return env_factory(contract)
+    max_decisions = int(contract.max_decisions)
+    max_ticks = int(contract.max_ticks)
     env_config = {
-        "max_decisions": int(contract.max_decisions),
-        "max_ticks": int(contract.max_ticks),
+        "max_decisions": max_decisions,
+        "max_ticks": max_ticks,
         "observation_visibility": contract.observation_visibility,
         "seed": 0,
         **({"reward_json": contract.reward_json} if contract.reward_json else {}),
         **({"curriculum_json": contract.curriculum_json} if contract.curriculum_json else {}),
+        **({"deck": contract.deck} if contract.deck else {}),
+        **({"opponent_deck": contract.opponent_deck} if contract.opponent_deck else {}),
     }
     pool, layout_name = make_env_pool_from_config(
         env_config,
@@ -69,8 +73,8 @@ def build_replay_env(contract: ReplayRerunContract, *, env_factory: ReplayEnvFac
         pool,
         legality="ids_offsets",
         engine_status_policy="passthrough",
-        max_decisions=int(env_config["max_decisions"]),
-        max_ticks=int(env_config["max_ticks"]),
+        max_decisions=max_decisions,
+        max_ticks=max_ticks,
         max_no_progress_decisions=max_no_progress_decisions,
     )
 

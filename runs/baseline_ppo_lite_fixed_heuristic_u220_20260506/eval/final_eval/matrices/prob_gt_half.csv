@@ -1,4 +1,0 @@
-focal_policy_id,B0 RandomLegal,B2 HeuristicPublic,ppo_lite_best
-B0 RandomLegal,0.633,0.0,0.034
-B2 HeuristicPublic,1.0,0.0,1.0
-ppo_lite_best,0.966,0.0,0.903

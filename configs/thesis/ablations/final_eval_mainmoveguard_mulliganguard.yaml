@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Final eval surface for ablations that use both mulligan confirm and pass-vs-main-move-only guards."
+extends: final_eval_mulliganguard.yaml
+training:
+  action_surface:
+    force_pass_over_main_move_only: true

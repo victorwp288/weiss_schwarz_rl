@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -209,6 +210,19 @@ def test_checkpoint_candidate_metric_rejects_low_confidence_dev_eval() -> None:
     assert metric_value is None
 
 
+def test_checkpoint_candidate_metric_waits_for_dev_eval_when_periodic_eval_enabled() -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+
+    metric_kind, metric_value = _checkpoint_candidate_metric(
+        stack=stack,
+        latest_metrics={"loss": 0.5},
+        dev_eval_summary=None,
+    )
+
+    assert metric_kind is None
+    assert metric_value is None
+
+
 def test_should_not_promote_best_checkpoint_when_candidate_metric_is_missing() -> None:
     assert (
         _should_promote_best_checkpoint(
@@ -246,8 +260,8 @@ def test_periodic_dev_eval_opponents_include_optional_b2_when_available(monkeypa
     monkeypatch.setattr(train_script, "HeuristicPublicPolicy", _FakeHeuristicPolicy)
 
     opponents = _periodic_dev_eval_opponents(
-        stack=stack,
-        contract=contract,
+        stack=cast(Any, stack),
+        contract=cast(Any, contract),
         run_dir=tmp_path,
         observation_dim=1,
         action_dim=2,
@@ -298,8 +312,8 @@ def test_periodic_dev_eval_opponents_include_extra_snapshot_anchor_from_promotio
     monkeypatch.setattr(train_script, "_load_snapshot_eval_model", lambda **kwargs: fake_model)
 
     opponents = _periodic_dev_eval_opponents(
-        stack=stack,
-        contract=contract,
+        stack=cast(Any, stack),
+        contract=cast(Any, contract),
         run_dir=tmp_path,
         observation_dim=1,
         action_dim=2,
@@ -365,8 +379,8 @@ def test_periodic_dev_eval_opponents_resolve_symbolic_snapshot_anchor_aliases(
     monkeypatch.setattr(train_script, "_load_snapshot_eval_model", lambda **kwargs: fake_model)
 
     opponents = _periodic_dev_eval_opponents(
-        stack=stack,
-        contract=contract,
+        stack=cast(Any, stack),
+        contract=cast(Any, contract),
         run_dir=tmp_path,
         observation_dim=1,
         action_dim=2,
@@ -402,6 +416,31 @@ def test_dev_eval_ineligibility_reasons_identify_borderline_confidence_only() ->
     )
 
     assert reasons == ("confidence_ci",)
+
+
+def test_dev_eval_ineligibility_reasons_apply_checkpoint_confidence_when_stall_monitor_disabled() -> None:
+    stack = load_stack_config(
+        _repo_root()
+        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_choiceexactmargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+    )
+    assert stack.config.curriculum is not None
+    assert stack.config.curriculum.stall_monitor.enabled is False
+    assert stack.config.curriculum.checkpoint_guard.enabled is True
+
+    reasons = _dev_eval_ineligibility_reasons(
+        stack,
+        dev_eval_summary={
+            "aggregate_score": 0.640625,
+            "anchors": {
+                "B0 RandomLegal": {"uncertainty": {"prob_gt_half": 1.0, "prob_lt_half": 0.0, "ci_half_width": 0.07}},
+                "B2 HeuristicPublic": {
+                    "uncertainty": {"prob_gt_half": 0.021, "prob_lt_half": 0.979, "ci_half_width": 0.16}
+                },
+            },
+        },
+    )
+
+    assert reasons == ("confidence_prob",)
 
 
 def test_confirmatory_dev_eval_request_targets_borderline_score_drop_for_reevaluation() -> None:
@@ -449,6 +488,66 @@ def test_confirmatory_dev_eval_request_targets_score_improving_borderline_candid
     assert int(request["target_pairs"]) >= 32
 
 
+def test_confirmatory_dev_eval_request_targets_multianchor_near_miss_candidate() -> None:
+    stack = load_stack_config(
+        _repo_root() / "configs/thesis/ablations/"
+        "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+    )
+
+    request = _confirmatory_dev_eval_request(
+        stack=stack,
+        existing_best_record=None,
+        dev_eval_summary={
+            "aggregate_score": 0.6953125,
+            "anchors": {
+                "B0 RandomLegal": {"uncertainty": {"mean": 1.0, "prob_gt_half": 1.0, "ci_half_width": 0.0}},
+                "B2 HeuristicPublic": {"uncertainty": {"mean": 0.6875, "prob_gt_half": 0.989, "ci_half_width": 0.14}},
+                "B3 HeuristicPublicAggro": {
+                    "uncertainty": {"mean": 0.625, "prob_gt_half": 0.899, "ci_half_width": 0.17}
+                },
+                "B4 HeuristicPublicControl": {
+                    "uncertainty": {"mean": 0.46875, "prob_gt_half": 0.359, "ci_half_width": 0.18}
+                },
+            },
+            "stall_monitor": {"worst_truncation_rate": 0.0},
+        },
+    )
+
+    assert request is not None
+    assert request["reasons"] == ["confidence_prob"]
+    assert request["current_score"] == pytest.approx(0.6953125)
+    assert request["worst_anchor_mean"] == pytest.approx(0.46875)
+    assert int(request["target_pairs"]) >= 32
+
+
+def test_confirmatory_dev_eval_request_rejects_multianchor_clear_anchor_failure() -> None:
+    stack = load_stack_config(
+        _repo_root() / "configs/thesis/ablations/"
+        "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+    )
+
+    request = _confirmatory_dev_eval_request(
+        stack=stack,
+        existing_best_record=None,
+        dev_eval_summary={
+            "aggregate_score": 0.6171875,
+            "anchors": {
+                "B0 RandomLegal": {"uncertainty": {"mean": 1.0, "prob_gt_half": 1.0, "ci_half_width": 0.0}},
+                "B2 HeuristicPublic": {"uncertainty": {"mean": 0.65625, "prob_gt_half": 0.962, "ci_half_width": 0.16}},
+                "B3 HeuristicPublicAggro": {
+                    "uncertainty": {"mean": 0.4375, "prob_gt_half": 0.212, "ci_half_width": 0.17}
+                },
+                "B4 HeuristicPublicControl": {
+                    "uncertainty": {"mean": 0.375, "prob_gt_half": 0.03, "ci_half_width": 0.13}
+                },
+            },
+            "stall_monitor": {"worst_truncation_rate": 0.0},
+        },
+    )
+
+    assert request is None
+
+
 def test_expand_periodic_dev_eval_paired_seeds_is_deterministic_and_unique() -> None:
     base_paired_seeds = list(range(8))
 
@@ -478,6 +577,7 @@ def test_expand_periodic_dev_eval_paired_seeds_is_deterministic_and_unique() -> 
 def test_entropy_coef_for_next_update_linearly_anneals() -> None:
     stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
     training = stack.config.training
+    assert training is not None
 
     assert _entropy_coef_for_next_update(training, update_count=0) == pytest.approx(training.entropy_coef)
     midpoint = _entropy_coef_for_next_update(

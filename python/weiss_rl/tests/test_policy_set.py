@@ -9,6 +9,7 @@ import pytest
 from weiss_rl.config import load_stack_config
 from weiss_rl.eval.policy_set import (
     DevEvalPolicySummary,
+    deck_id_for_policy_id,
     parse_training_policy_id,
     recommend_focal_policy_id,
     select_final_policy_set_deterministic_v1,
@@ -25,6 +26,15 @@ def _selection_config(**overrides: Any):
     stack = load_stack_config(canonical_stack_config_path())
     assert stack.config.evaluation is not None
     return replace(stack.config.evaluation.final_policy_set_selection, **overrides)
+
+
+def test_deck_id_for_policy_id_locks_primary_and_heuristic_decks() -> None:
+    assert deck_id_for_policy_id("policy_000021") == "preset:main_deck_5hy_yotsuba_v1"
+    assert deck_id_for_policy_id("B0 RandomLegal") == "preset:main_deck_5hy_yotsuba_v1"
+    assert deck_id_for_policy_id("B1 NoLeague baseline") == "preset:main_deck_5hy_yotsuba_v1"
+    assert deck_id_for_policy_id("B2 HeuristicPublic") == "preset:main_deck_5hy_yotsuba_v1"
+    assert deck_id_for_policy_id("B3 HeuristicPublicAggro") == "preset:aggro_deck_5hy_nino_v1"
+    assert deck_id_for_policy_id("B4 HeuristicPublicControl") == "preset:control_deck_jj_s66_v1"
 
 
 def _build_registry(
@@ -195,6 +205,45 @@ def test_selector_ranks_remaining_slots_by_anchor_set_then_policy_id() -> None:
         "policy_000150",
         "policy_000200",
         "policy_000250",
+    ]
+
+
+def test_thesis_final_eval_selector_includes_b0_through_b4_without_dev_eval_anchor_keys() -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "thesis" / "final_eval.yaml")
+    assert stack.config.evaluation is not None
+    config = replace(
+        stack.config.evaluation.final_policy_set_selection,
+        include_final_champion_snapshot=False,
+        include_spaced_snapshots_near_percent_updates=(),
+    )
+    summaries = {
+        "policy_000150": DevEvalPolicySummary(
+            policy_id="policy_000150",
+            aggregate_score=0.99,
+            anchor_scores={
+                "B0 RandomLegal": 0.70,
+                "B1 NoLeague baseline": 0.70,
+                "B2 HeuristicPublic": 0.70,
+                "B3 HeuristicPublicAggro": 0.68,
+                "B4 HeuristicPublicControl": 0.67,
+            },
+        )
+    }
+
+    selected = select_final_policy_set_deterministic_v1(
+        snapshot_registry=SnapshotRegistry(),
+        dev_eval_summaries=summaries,
+        config=config,
+        final_policy_set_size=6,
+    )
+
+    assert selected == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "B3 HeuristicPublicAggro",
+        "B4 HeuristicPublicControl",
+        "policy_000150",
     ]
 
 

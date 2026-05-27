@@ -1,0 +1,31 @@
+schema_version: 2
+description: "One-update opponent-context candidate-residual preference probe from a075. This freezes the base policy and trains only a zero-initialized bilinear legal-candidate residual adapter with group-balanced trajectory preference pressure over learned repair, B2 preserve, and policy0004 preserve pairs. It must pass context-covered preference margins before sentinel eval."
+extends: main_league_champion_hardneg_a075_context_candres_broad_conflictfilter_episodepref_probe.yaml
+model:
+  opponent_context_trainable_hidden_scale: 0.0
+  opponent_context_trainable_recurrent_scale: 0.0
+  opponent_context_trainable_action_bias_scale: 0.0
+  opponent_context_trainable_candidate_residual_scale: 1.0
+  opponent_context_candidate_residual_width: 32
+  opponent_context_candidate_residual_mode: bilinear
+  opponent_context_adapter_lr_multiplier: 2000.0
+  opponent_context_adapter_train_only: true
+training:
+  optimizer:
+    learning_rate: 0.0000001
+  structured_aux:
+    policy_anchor_coef: 0.0
+    policy_anchor_top_action_coef: 0.0
+    trajectory_retention_coef: 0.0
+    paired_swing_dataset_path: ""
+    paired_swing_every_updates: 0
+    paired_swing_coef: 0.0
+    paired_outcome_preference_dataset_path: runs/paired_outcome_preference_a075_balanced_micro_20260520/paired_outcome_preference_a075_balanced_micro.npz
+    paired_outcome_preference_every_updates: 1
+    paired_outcome_preference_aux_updates: 1
+    paired_outcome_preference_batch_episodes: 22
+    paired_outcome_preference_seed: 20260520
+    paired_outcome_preference_coef: 0.08
+    paired_outcome_preference_beta: 0.20
+    paired_outcome_preference_aggregation: mean
+    paired_outcome_preference_group_balance: true

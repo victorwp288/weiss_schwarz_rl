@@ -10,9 +10,9 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike
 
+from weiss_rl.core.masking import masked_log_softmax
 from weiss_rl.eval.harness import EvalGameRecord
 from weiss_rl.eval.payoff_folding import paired_seed_group_key, paired_seed_scores
-from weiss_rl.masking import masked_log_softmax
 
 __all__ = [
     "HiddenInfoLeakagePair",

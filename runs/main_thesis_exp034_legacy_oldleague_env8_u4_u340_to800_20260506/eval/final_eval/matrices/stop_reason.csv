@@ -1,6 +1,0 @@
-focal_policy_id,B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic,seed_2aaa98fc69_seed_ae46265326_policy_000016,policy_000021
-B0 RandomLegal,budget,decisive,decisive,decisive,decisive
-B1 NoLeague baseline,decisive,budget,decisive,decisive,decisive
-B2 HeuristicPublic,decisive,decisive,precision,decisive,decisive
-seed_2aaa98fc69_seed_ae46265326_policy_000016,decisive,decisive,decisive,precision,precision
-policy_000021,decisive,decisive,decisive,precision,precision

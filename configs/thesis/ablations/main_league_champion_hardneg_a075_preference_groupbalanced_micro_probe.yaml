@@ -1,0 +1,6 @@
+schema_version: 2
+description: "One-update a075 paired-outcome preference micro-probe with group-balanced DPO-style trajectory pressure. Learned repair, B2 preserve, and policy0004 preserve groups each contribute equally to the auxiliary loss. Must pass offline preference margin diagnostics before sentinel eval."
+extends: main_league_champion_hardneg_a075_preference_balanced_micro_probe.yaml
+training:
+  structured_aux:
+    paired_outcome_preference_group_balance: true

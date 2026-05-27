@@ -1,0 +1,5 @@
+schema_version: 2
+description: "B1 guided ablation: B2-exact low-entropy teacher run with deterministic dev-eval checkpoint gating."
+extends: public_teacher_b2exact_lowentropy_mainmoveguard_mulliganguard_reward.yaml
+evaluation:
+  eval_sampling_algorithm: model_argmax_pinned_v1

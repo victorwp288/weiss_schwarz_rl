@@ -1,0 +1,5 @@
+schema_version: 2
+description: "Higher-gain trainable opponent-context micro-probe from the a075 frontier. The adapter remains zero-initialized and old weights load unchanged, but the context contribution is amplified so a one-update paired-swing repair can test whether the side channel actually resolves B2/B3 versus learned hard-negative tension."
+extends: main_league_champion_hardneg_a075_context_trainable_conflict_probe.yaml
+model:
+  opponent_context_trainable_hidden_scale: 64.0

@@ -1,0 +1,5 @@
+schema_version: 2
+description: "Trainable opponent-context adapter micro-probe with an adapter-only learning-rate multiplier. This keeps the base policy on the conservative a075 continuation settings while allowing the zero-initialized opponent side channel to move enough in one update to test whether it can repair B2/B3 versus learned hard-negative conflict."
+extends: main_league_champion_hardneg_a075_context_trainable_conflict_probe.yaml
+model:
+  opponent_context_adapter_lr_multiplier: 10000.0

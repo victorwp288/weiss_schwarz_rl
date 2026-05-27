@@ -1,0 +1,26 @@
+schema_version: 2
+description: "Balanced consolidation probe after the B3/B4 rehearsal repair. Keeps B1 residency high enough to preserve the fixed-deck B1 gain, keeps public anchor rehearsal present, and leaves enough non-champion pool capacity plus a lower evidence floor for hard-negative sampling to remain visible during longer league continuation."
+extends: main_league_champion_hardneg_rehearsal_probe.yaml
+league:
+  pool:
+    champion_size: 6
+  sampling:
+    heuristic_public_mix_fraction: 0.06
+    heuristic_public_final_mix_fraction: 0.06
+    heuristic_public_variant_mix_fraction: 0.14
+    heuristic_public_variant_final_mix_fraction: 0.14
+    noleague_baseline_reserved_envs_per_actor: 4
+    noleague_baseline_mix_fraction: 0.28
+    noleague_baseline_mix_end_updates: -1
+    champion_mix_fraction: 0.20
+    hard_negative_mix_fraction: 0.16
+    hard_negative_min_samples: 2
+    hard_negative_max_win_rate: 0.55
+training:
+  structured_aux:
+    policy_anchor_coef: 0.16
+    policy_anchor_top_action_coef: 0.015
+    trajectory_bc_every_updates: 2
+    trajectory_bc_teacher_action_coef: 0.14
+    trajectory_bc_teacher_same_family_action_coef: 0.45
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.06

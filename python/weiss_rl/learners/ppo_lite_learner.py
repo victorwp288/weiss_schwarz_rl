@@ -11,7 +11,7 @@ import torch
 from torch import Tensor
 from torch.nn.utils import clip_grad_norm_
 
-from weiss_rl.training_logger import TrainingMetrics
+from weiss_rl.diagnostics.training_logger import TrainingMetrics
 
 from .impala_learner import (
     ImpalaLearner,
@@ -58,6 +58,11 @@ class PpoLiteLearner(ImpalaLearner):
     ppo_epochs: int = 4
     target_kl: float = 0.0
     normalize_advantages: bool = True
+
+    def __post_init__(self) -> None:
+        super(PpoLiteLearner, self).__post_init__()
+        if float(self.trajectory_retention_coef) != 0.0:
+            raise ValueError("trajectory_retention_coef is only supported by IMPALA/V-trace")
 
     def update(self, batch: Any) -> dict[str, float]:
         self.update_count += 1
@@ -250,9 +255,13 @@ class PpoLiteLearner(ImpalaLearner):
         }
         return total_loss, metrics, context
 
-    def _log_metrics(self, update_metrics: dict[str, float], batch: Any, *, context: dict[str, Any]) -> None:
+    def _log_metrics(
+        self, update_metrics: dict[str, float], batch: Any, *, context: dict[str, Any] | None = None
+    ) -> None:
         if not self.logger:
             return
+        if context is None:
+            context = {}
         elapsed = time.time() - self.start_time
         metrics = TrainingMetrics(
             update_count=self.update_count,

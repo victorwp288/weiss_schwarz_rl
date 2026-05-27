@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from weiss_rl.artifact_hygiene import default_artifact_roots, format_findings, run_artifact_hygiene_scan
+from weiss_rl.diagnostics.artifact_hygiene import default_artifact_roots, format_findings, run_artifact_hygiene_scan
 
 
 def _parse_args() -> argparse.Namespace:

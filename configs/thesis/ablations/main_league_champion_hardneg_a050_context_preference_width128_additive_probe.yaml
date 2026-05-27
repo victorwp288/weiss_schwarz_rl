@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Base-frozen opponent-context candidate-residual preference probe for the a050 confirm256 regression repair surface using a width128 additive residual. This tests whether a nonlinear state/meta/context adapter can repair B2/policy0004 rows with less same-family top-action drift than the bilinear residual."
+extends: main_league_champion_hardneg_a050_context_preference_width128_probe.yaml
+model:
+  opponent_context_candidate_residual_width: 128
+  opponent_context_candidate_residual_mode: additive

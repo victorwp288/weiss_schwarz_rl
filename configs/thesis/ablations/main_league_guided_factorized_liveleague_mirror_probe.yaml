@@ -1,0 +1,10 @@
+schema_version: 2
+description: "Main league probe: teacherfade continuation with live PFSP plus an explicit mirror/self-play lane, testing whether early league collapse comes from dropping on-policy rows too aggressively."
+extends: main_league_guided_factorized_liveleague_probe.yaml
+league:
+  sampling:
+    mirror_mix_fraction: 0.50
+    mirror_mix_end_updates: 100
+    mirror_final_mix_fraction: 0.25
+    champion_mix_fraction: 0.0
+    hard_negative_mix_fraction: 0.0

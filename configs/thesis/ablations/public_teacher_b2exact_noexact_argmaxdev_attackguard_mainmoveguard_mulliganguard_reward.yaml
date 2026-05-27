@@ -1,0 +1,8 @@
+schema_version: 2
+description: "B1 guided ablation: attack-guarded B2-exact run without exact candidate-ID distillation."
+extends: public_teacher_b2exact_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
+training:
+  structured_aux:
+    teacher_action_coef: 0.0
+    teacher_same_family_action_coef: 0.0
+    teacher_action_margin_coef: 0.0

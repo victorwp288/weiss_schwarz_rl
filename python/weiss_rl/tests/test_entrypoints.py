@@ -7,15 +7,16 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import torch
 
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import compute_config_hash256, load_stack_config
+from weiss_rl.core.spec import spec_bundle_hash
+from weiss_rl.experiments.toy_public_demo import public_demo_spec_hash256
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.model import PolicyValueModel
-from weiss_rl.spec import spec_bundle_hash
-from weiss_rl.toy_public_demo import public_demo_spec_hash256
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -24,7 +25,7 @@ def _mismatched_sha256(value: str) -> str:
     return ("0" if value[0] != "0" else "1") + value[1:]
 
 
-def _typed_observation_spec() -> dict[str, object]:
+def _typed_observation_spec() -> dict[str, Any]:
     return {
         "obs_encoding_version": 2,
         "dtype": "i32",
@@ -83,6 +84,8 @@ def _write_stub_weiss_sim(
     (tmp_path / "weiss_sim.py").write_text(
         "\n".join(
             (
+                "__version__ = '1.1.0'",
+                "",
                 "def build_info():",
                 "    return 'stub-build'",
                 "",
@@ -91,6 +94,14 @@ def _write_stub_weiss_sim(
                 "",
                 "def export_spec_bundle():",
                 f"    return {bundle!r}",
+                "",
+                "class _Cards:",
+                "    def presets(self):",
+                "        return ['main_deck_5hy_yotsuba_v1', 'aggro_deck_5hy_nino_v1', 'control_deck_jj_s66_v1']",
+                "    def preset_min_rules_profile(self, name):",
+                "        return 'approx'",
+                "",
+                "cards = _Cards()",
                 "",
             )
         ),
@@ -116,8 +127,12 @@ def _write_runtime_weiss_sim(
             (
                 "from types import SimpleNamespace",
                 "",
+                "__version__ = '1.1.0'",
                 f"_BUNDLE = {bundle!r}",
                 f"PASS_ACTION_ID = {pass_action_id}",
+                "OBS_LEN = 512",
+                "ACTION_SPACE_SIZE = 9",
+                f"SPEC_HASH = {spec_hash}",
                 f"EMPTY_EVAL_LEGAL_ROW = {empty_eval_legal_row!r}",
                 "",
                 "def build_info():",
@@ -195,11 +210,25 @@ def _write_runtime_weiss_sim(
                 "def _make_pool(**kwargs):",
                 "    return SimpleNamespace(pool=_Pool(kwargs['num_envs'], kwargs.get('seed', 7)))",
                 "",
+                "def make_pool(**kwargs):",
+                "    return _make_pool(**kwargs)",
+                "",
                 "def fast(**kwargs):",
                 "    return _make_pool(**kwargs)",
                 "",
                 "def inspect(**kwargs):",
                 "    return _make_pool(**kwargs)",
+                "",
+                "class EnvPoolBuffers:",
+                "    pass",
+                "",
+                "class _Cards:",
+                "    def presets(self):",
+                "        return ['main_deck_5hy_yotsuba_v1', 'aggro_deck_5hy_nino_v1', 'control_deck_jj_s66_v1']",
+                "    def preset_min_rules_profile(self, name):",
+                "        return 'approx'",
+                "",
+                "cards = _Cards()",
                 "",
                 "def _fill_reset(out, *, layout: str, seed: int) -> None:",
                 "    import numpy as np",
@@ -256,6 +285,13 @@ def _write_runtime_weiss_sim(
                 "            target = BatchOutMinimalI16LegalIds(pool.envs_len)",
                 "        _fill_step(target, layout=layout, seed=pool.seed)",
                 "        return target",
+                "",
+                "    def step_rl_sample_from_logits(self, pool, logits, *, layout: str, out=None, **kwargs):",
+                "        return self.step_rl(pool, logits, layout=layout, out=out)",
+                "",
+                "    def step_rl_sample_from_logits_with_logp(self, pool, logits, *, layout: str, out=None, **kwargs):",
+                "        result = self.step_rl(pool, logits, layout=layout, out=out)",
+                "        return SimpleNamespace(batch=result, actions=[0] * pool.envs_len, logp=[0.0] * pool.envs_len)",
                 "",
                 "rl = _Rl()",
             )
@@ -359,7 +395,7 @@ def _write_b1_baseline_run_fixture(tmp_path: Path, *, stack_config: Path, update
         observation_dim=512,
         config=stack.config.model,
         action_dim=9,
-        observation_spec=_typed_observation_spec(),  # type: ignore[arg-type]
+        observation_spec=_typed_observation_spec(),
     )
     payload = {
         "policy_id": "b1_noleague_baseline",
@@ -871,6 +907,41 @@ def test_eval_manifest_persistence_records_explicit_cli_policy_selection(tmp_pat
     }
 
 
+def test_eval_report_helpers_create_defaults_for_interpolated_runs(tmp_path: Path) -> None:
+    import scripts.eval as eval_script
+
+    run_dir = tmp_path / "runs" / "interpolated_eval"
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    layout.run_dir.mkdir(parents=True, exist_ok=True)
+    layout.manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id256": "ab" * 32,
+                "run_id64": "ab" * 8,
+                "evaluation_pinning": {"eval_device": "cpu"},
+                "seed_derivation": {"base_seed": 7},
+                "seed_files": {"report_eval": {"path": "seeds/report.txt", "sha256": "cd" * 32}},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    run_summary = eval_script._load_run_summary_or_default(layout)
+    determinism = eval_script._load_determinism_report_or_default(layout)
+    environment = eval_script._load_environment_or_default(layout)
+
+    assert run_summary["runtime_mode"] == "interpolated_checkpoint"
+    assert run_summary["run_id256"] == "ab" * 32
+    assert determinism["device_policy"]["learner"] == "interpolated_checkpoint"
+    assert determinism["device_policy"]["evaluation"] == "cpu"
+    assert determinism["seed_derivation"] == {"base_seed": 7}
+    assert environment["kind"] == "environment_manifest_v1"
+    assert environment["run_id256"] == "ab" * 32
+
+
 def test_eval_pipeline_persists_policy_selection_before_run_final_eval(tmp_path: Path, monkeypatch) -> None:
     import scripts.eval as eval_script
 
@@ -1105,6 +1176,22 @@ def test_eval_entrypoint_fails_fast_on_config_hash_mismatch(tmp_path: Path) -> N
 
     assert result.returncode != 0
     assert "--config-hash mismatch" in result.stderr
+
+
+def test_eval_entrypoint_requires_skip_readiness_when_skipping_required_outputs(tmp_path: Path) -> None:
+    _write_stub_weiss_sim(tmp_path, spec_hash=123)
+    stack_config = _copy_repo_configs(tmp_path)
+
+    result = _run_entrypoint(
+        tmp_path,
+        script_name="eval.py",
+        stack_config=stack_config,
+        spec_hash="",
+        extra_args=["--run-dir", str(tmp_path / "runs" / "candidate"), "--skip-metagame"],
+    )
+
+    assert result.returncode != 0
+    assert "--skip-metagame or --skip-figures requires --skip-readiness" in result.stderr
 
 
 def test_eval_entrypoint_exports_summary_json_and_csv(tmp_path: Path) -> None:

@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.action_catalog import ActionCatalog, DecodedAction
+from weiss_rl.core.action_catalog import ActionCatalog, DecodedAction
 
 _FRONT_ROW_SLOTS = (0, 1, 2)
 _BACK_ROW_SLOTS = (3, 4)
@@ -727,11 +727,11 @@ class HeuristicPublicPolicy:
             return stage_values[:, :, offset].astype(dtype, copy=False)
 
         return {
-            "occupied": _stage_component(0, dtype=np.int32) != 0,
-            "has_attacked": _stage_component(2, dtype=np.int32) != 0,
-            "power": _stage_component(3, dtype=np.int64),
-            "effective_soul": _stage_component(5, dtype=np.int64),
-            "side_attack_allowed": _stage_component(6, dtype=np.int32) != 0,
+            "occupied": _stage_component(0, dtype=np.dtype(np.int32)) != 0,
+            "has_attacked": _stage_component(2, dtype=np.dtype(np.int32)) != 0,
+            "power": _stage_component(3, dtype=np.dtype(np.int64)),
+            "effective_soul": _stage_component(5, dtype=np.dtype(np.int64)),
+            "side_attack_allowed": _stage_component(6, dtype=np.dtype(np.int32)) != 0,
         }
 
     def _decode(self, action_id: int) -> DecodedAction:
@@ -773,9 +773,7 @@ class HeuristicPublicPolicy:
         if family == "main_move":
             move_score = self._score_move(action, board)
             move_priority = (
-                profile.move_priority
-                if move_score > 0
-                else min(profile.move_priority, profile.pass_priority - 1)
+                profile.move_priority if move_score > 0 else min(profile.move_priority, profile.pass_priority - 1)
             )
             return (move_priority, move_score, 0, 0)
         if family == "choice_next_page":

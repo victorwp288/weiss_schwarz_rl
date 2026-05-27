@@ -1,0 +1,6 @@
+schema_version: 2
+description: "B1 reward ablation: full shaping, lower entropy, sync20 actor reloads, and stronger no-progress penalty."
+extends: full_shaping_entropy01_sync20_reward.yaml
+rewards:
+  shaping:
+    no_progress_penalty: 0.02

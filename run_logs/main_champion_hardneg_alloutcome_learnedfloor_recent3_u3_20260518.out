@@ -1,0 +1,77 @@
+================================================================================
+STARTUP CONTRACT
+================================================================================
+spec_hash:              a62917cf4825a9dfa3b3ca23c43bb29f6a4abaed0098140192ab326e12ae2319
+config_hash:            3d6be0cba9c46c00cc848ba956724ca1fa16c46c0e0e8b4b73e3f5e4adfccb32
+computed_run_id64:      b975a69c6a27e48a
+computed_run_id256:     8ae4276a9ca675b9d7907f1d259ca0200bcec605dc033658bdec54b913af1cc4
+run_label:              main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01
+run_dir_name:           main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01
+spec_mismatch_policy:   hard_fail
+================================================================================
+Verified runtime spec bundle: compat=8590000130 sha256=a62917cf4825a9dfa3b3ca23c43bb29f6a4abaed0098140192ab326e12ae2319
+Loaded stack config with 0 components
+Wrote manifest: C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\runs\main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01\manifest.json
+Structured profiling enabled: profile_timers=True torch_profiler=False structured_metrics_mode=sampled teacher_aux_mode=always fixed_opponent_backend=simulator_native
+Initialized learner weights: checkpoint=C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\runs\main_champion_hardneg_interp_u10_repair_a015_20260517\training\checkpoints\checkpoint_interpolated.pt source_update=5 source_init_schedule_offset=185 source_policy_version=1
+Overrode init-from-checkpoint guidance schedule offset: init_schedule_offset_updates=0
+Imported promotion anchor: anchor=B1 NoLeague baseline policy_id=b1_noleague_baseline source_run_dir=C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\runs\guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01
+Imported seeded snapshot pool: count=10 source_run_dir=C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_long_v1_u10_20260517_seg01
+Saved checkpoint metadata: C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\runs\main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01\training\checkpoints\checkpoint_metadata_1.json
+Promotion gate skipped during league warmup: update=1 effective_update=0 threshold=1 candidate=policy_000001
+Saved checkpoint metadata: C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\runs\main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01\training\checkpoints\checkpoint_metadata_2.json
+Promotion gate failed: update=2 candidate=policy_000002 reasons=anchor_loss_guardrail_exceeded,anchor_loss_guardrail_exceeded
+Saved checkpoint metadata: C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\runs\main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01\training\checkpoints\checkpoint_metadata_3.json
+Promotion gate failed: update=3 candidate=policy_000003 reasons=anchor_loss_guardrail_exceeded,anchor_loss_guardrail_exceeded
+Completed canonical single-node training run: loss=0.175651 policy_loss=0.025189 value_loss=0.111373 entropy=0.803675
+diagnostics\main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01_candidate_preconfirm.json
+targeted confirm start: focal=policy_000001 rows=13 paired_seeds=64 workers=1
+done 1/13 policy_000001 vs B0 RandomLegal mean=1.0 wins=128/128
+done 2/13 policy_000001 vs B1 NoLeague baseline mean=0.640625 wins=82/128
+done 3/13 policy_000001 vs B2 HeuristicPublic mean=0.78125 wins=100/128
+done 4/13 policy_000001 vs B3 HeuristicPublicAggro mean=0.7109375 wins=91/128
+done 5/13 policy_000001 vs B4 HeuristicPublicControl mean=0.71875 wins=92/128
+done 6/13 policy_000001 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000001 mean=0.671875 wins=86/128
+done 7/13 policy_000001 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000002 mean=0.6328125 wins=81/128
+done 8/13 policy_000001 vs seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025 mean=0.59375 wins=76/128
+done 9/13 policy_000001 vs seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest mean=0.59375 wins=76/128
+done 10/13 policy_000001 vs seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected mean=0.5546875 wins=71/128
+done 11/13 policy_000001 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000003 mean=0.5546875 wins=71/128
+done 12/13 policy_000001 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000004 mean=0.546875 wins=70/128
+done 13/13 policy_000001 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000005 mean=0.6015625 wins=77/128
+summary runs\main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01\eval\guard_confirm64_policy_000001\targeted_confirm64_summary.json
+{"games": 1664, "mean": 0.6616586538461539, "wins": 1101}
+targeted confirm start: focal=policy_000002 rows=13 paired_seeds=64 workers=1
+done 1/13 policy_000002 vs B0 RandomLegal mean=1.0 wins=128/128
+done 2/13 policy_000002 vs B1 NoLeague baseline mean=0.640625 wins=82/128
+done 3/13 policy_000002 vs B2 HeuristicPublic mean=0.78125 wins=100/128
+done 4/13 policy_000002 vs B3 HeuristicPublicAggro mean=0.7109375 wins=91/128
+done 5/13 policy_000002 vs B4 HeuristicPublicControl mean=0.71875 wins=92/128
+done 6/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000001 mean=0.671875 wins=86/128
+done 7/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000002 mean=0.6328125 wins=81/128
+done 8/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025 mean=0.59375 wins=76/128
+done 9/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest mean=0.59375 wins=76/128
+done 10/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected mean=0.5546875 wins=71/128
+done 11/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000003 mean=0.5546875 wins=71/128
+done 12/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000004 mean=0.546875 wins=70/128
+done 13/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000005 mean=0.6015625 wins=77/128
+summary runs\main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01\eval\guard_confirm64_policy_000002\targeted_confirm64_summary.json
+{"games": 1664, "mean": 0.6616586538461539, "wins": 1101}
+targeted confirm start: focal=policy_000003 rows=13 paired_seeds=64 workers=1
+done 1/13 policy_000003 vs B0 RandomLegal mean=1.0 wins=128/128
+done 2/13 policy_000003 vs B1 NoLeague baseline mean=0.640625 wins=82/128
+done 3/13 policy_000003 vs B2 HeuristicPublic mean=0.78125 wins=100/128
+done 4/13 policy_000003 vs B3 HeuristicPublicAggro mean=0.7265625 wins=93/128
+done 5/13 policy_000003 vs B4 HeuristicPublicControl mean=0.71875 wins=92/128
+done 6/13 policy_000003 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000001 mean=0.671875 wins=86/128
+done 7/13 policy_000003 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000002 mean=0.625 wins=80/128
+done 8/13 policy_000003 vs seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025 mean=0.5859375 wins=75/128
+done 9/13 policy_000003 vs seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest mean=0.5859375 wins=75/128
+done 10/13 policy_000003 vs seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected mean=0.5625 wins=72/128
+done 11/13 policy_000003 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000003 mean=0.5625 wins=72/128
+done 12/13 policy_000003 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000004 mean=0.546875 wins=70/128
+done 13/13 policy_000003 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000005 mean=0.6015625 wins=77/128
+summary runs\main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01\eval\guard_confirm64_policy_000003\targeted_confirm64_summary.json
+{"games": 1664, "mean": 0.6622596153846154, "wins": 1102}
+diagnostics\main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_seg01_candidate_selection.json
+{"status": "completed_unpublished_confirmation_insufficient", "summary_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/diagnostics/main_champion_hardneg_alloutcome_learnedfloor_recent3_u3_20260518_guarded_league_bootstrap_summary.json"}

@@ -1,0 +1,36 @@
+schema_version: 2
+description: "Grouped B1/B3 hard-negative repair plus fixed-win rehearsal with B2 isolated in its own replay-BC lane. This tests whether the coarse fixed-win group was diluting B2 protection while preserving champion and hard-negative learning pressure."
+extends: main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_b1hnlosstopaction_preservewinnerfocus_b1b3repair_grouped_fixedwin_b4b2guard_probe.yaml
+training:
+  structured_aux:
+    trajectory_bc_focus_groups:
+      - name: fixed_b2_win_rehearsal
+        source_labels:
+          - direct_b2_wins64
+        fraction: 0.16
+      - name: fixed_other_win_rehearsal
+        source_labels:
+          - fixed_b1_win64_rehearsal
+          - direct_b3_wins64
+          - direct_b4_wins64
+        fraction: 0.12
+      - name: fixed_lossstate_repair
+        source_labels:
+          - b1_lossstate_policyb_topaction
+          - b1_lossstate_confirm128_policyb_topaction
+          - b3_lossstate_confirm128_policyb_topaction
+        fraction: 0.14
+      - name: hard_negative_lossstate_repair
+        source_labels:
+          - hn_lossstate_policy000002_topaction
+          - hn_lossstate_checkpoint000025_topaction
+          - hn_lossstate_bestresponse_topaction
+          - hn_lossstate_mainleague_topaction
+          - hn_lossstate_policy000003_topaction
+          - hn_lossstate_policy000004_topaction
+        fraction: 0.14
+      - name: winner_extension_repair
+        source_labels:
+          - extensionrepair_p5_hardneg_disjoint_win16x6_a
+          - extensionrepair_p5_hardneg_disjoint_win16x6_b
+        fraction: 0.14

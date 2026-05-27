@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import math
-from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -13,17 +13,63 @@ from typing import Any
 import numpy as np
 import torch
 
-from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import StackConfig, compute_config_hash256, load_stack_config
+from weiss_rl.core.action_catalog import ActionCatalog
+from weiss_rl.core.masking import masked_log_softmax
+from weiss_rl.core.observation_layout import (
+    ObservationLayout,
+    ObservationPlayerBlock,
+    ObservationSlice,
+    parse_observation_layout,
+)
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
 from weiss_rl.eval.policy_set import heuristic_public_profile_name_for_policy_id
-from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotRegistry
-from weiss_rl.masking import masked_log_softmax
+from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotMeta, SnapshotRegistry
 from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, PolicyValueModel, build_policy_value_model
+from weiss_rl.models.observation_contract import header_field_index
+from weiss_rl.models.state_dict_compat import load_model_state_dict_with_context_compat
 from weiss_rl.replay.bundles import ReplayBundleMeta, ReplayStep, compute_legal_fingerprint64, load_replay_bundle
 from weiss_rl.replay.runner import ReplayEnvFactory, build_replay_env, require_supported_rerun_contract
+from weiss_rl.runtime_components.action_surface import (
+    filter_batch_main_move_only_rows_to_pass,
+    filter_batch_mulligan_select_after_select,
+    filter_batch_pass_when_attack_available,
+)
+from weiss_rl.runtime_components.legal_meta import action_catalog_indices
+
+_TRAJECTORY_NUMERIC_FIELDS = (
+    "raw_legal_action_count",
+    "self_level_count",
+    "self_clock_count",
+    "self_deck_count",
+    "self_hand_count",
+    "self_stock_count",
+    "self_waiting_room_count",
+    "self_memory_count",
+    "self_climax_count",
+    "self_stage_occupied_count",
+    "opponent_level_count",
+    "opponent_clock_count",
+    "opponent_deck_count",
+    "opponent_hand_count",
+    "opponent_stock_count",
+    "opponent_waiting_room_count",
+    "opponent_memory_count",
+    "opponent_climax_count",
+    "opponent_stage_occupied_count",
+)
+
+_TRACKED_LEGAL_FAMILIES = (
+    "clock_from_hand",
+    "main_play_character",
+    "main_move",
+    "climax_play",
+    "attack",
+    "pass",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +93,9 @@ def inspect_replay_bundle(
     top_k: int = 10,
     top_actions: int = 5,
     env_factory: ReplayEnvFactory | None = None,
+    accepted_snapshot_config_hashes: Iterable[str] = (),
+    opponent_context_policy_id: str | None = None,
+    require_opponent_context_index: bool = False,
 ) -> dict[str, Any]:
     if top_k < 0:
         raise ValueError("top_k must be >= 0")
@@ -55,6 +104,7 @@ def inspect_replay_bundle(
 
     bundle_path = Path(bundle_path).resolve()
     stack_config = load_stack_config(stack) if isinstance(stack, Path) else stack
+    extra_accepted_hashes = _normalize_config_hashes(accepted_snapshot_config_hashes)
     resolved_registry_path, resolved_run_dir, registry = _resolve_registry(
         run_dir=run_dir,
         snapshot_registry_path=snapshot_registry_path,
@@ -81,6 +131,7 @@ def inspect_replay_bundle(
             run_dir=resolved_run_dir,
             registry=registry,
             run_spec_bundle=run_spec_bundle,
+            extra_accepted_config_hashes=extra_accepted_hashes,
         )
         policy_b_loaded = _load_policy(
             spec=policy_b,
@@ -90,6 +141,7 @@ def inspect_replay_bundle(
             run_dir=resolved_run_dir,
             registry=registry,
             run_spec_bundle=run_spec_bundle,
+            extra_accepted_config_hashes=extra_accepted_hashes,
         )
 
         device = torch.device("cpu")
@@ -99,9 +151,20 @@ def inspect_replay_bundle(
         policy_b_hidden = (
             None if policy_b_loaded.model is None else policy_b_loaded.model.initial_seat_hidden(1, device=device)
         )
+        policy_a_opponent_context_index = _opponent_context_index_for_policy(
+            policy=policy_a_loaded,
+            opponent_context_policy_id=opponent_context_policy_id,
+            require_nonzero=require_opponent_context_index,
+        )
+        policy_b_opponent_context_index = _opponent_context_index_for_policy(
+            policy=policy_b_loaded,
+            opponent_context_policy_id=opponent_context_policy_id,
+            require_nonzero=require_opponent_context_index,
+        )
         spec_hash256 = bytes.fromhex(meta.spec_hash256)
 
         step_diffs: list[dict[str, Any]] = []
+        trajectory_records: list[dict[str, Any]] = []
         for step_index, expected_step in enumerate(steps):
             _require_pre_step_match(
                 step_index=step_index,
@@ -110,24 +173,52 @@ def inspect_replay_bundle(
                 spec_hash256=spec_hash256,
             )
 
-            legal_ids = _legal_ids_for_env_row(current_batch)
+            raw_legal_ids = _legal_ids_for_env_row(current_batch)
+            trajectory_records.append(
+                _build_trajectory_record(
+                    step_index=step_index,
+                    expected_step=expected_step,
+                    batch=current_batch,
+                    raw_legal_ids=raw_legal_ids,
+                    action_catalog=action_catalog,
+                    spec_bundle=run_spec_bundle,
+                )
+            )
+            policy_a_batch, policy_a_legal_ids = _policy_action_surface_batch_and_ids(
+                policy=policy_a_loaded,
+                stack=stack_config,
+                batch=current_batch,
+                legal_ids=raw_legal_ids,
+                pass_action_id=_pass_action_id(run_spec_bundle),
+            )
+            policy_b_batch, policy_b_legal_ids = _policy_action_surface_batch_and_ids(
+                policy=policy_b_loaded,
+                stack=stack_config,
+                batch=current_batch,
+                legal_ids=raw_legal_ids,
+                pass_action_id=_pass_action_id(run_spec_bundle),
+            )
             logits_a, policy_a_hidden = _forward_policy(
                 policy=policy_a_loaded,
-                batch=current_batch,
+                batch=policy_a_batch,
                 seat_hidden=policy_a_hidden,
-                legal_ids=legal_ids,
+                legal_ids=policy_a_legal_ids,
+                opponent_context_index=policy_a_opponent_context_index,
             )
             logits_b, policy_b_hidden = _forward_policy(
                 policy=policy_b_loaded,
-                batch=current_batch,
+                batch=policy_b_batch,
                 seat_hidden=policy_b_hidden,
-                legal_ids=legal_ids,
+                legal_ids=policy_b_legal_ids,
+                opponent_context_index=policy_b_opponent_context_index,
             )
             step_diffs.append(
                 _build_step_diff(
                     step_index=step_index,
                     expected_step=expected_step,
-                    legal_ids=legal_ids,
+                    raw_legal_ids=raw_legal_ids,
+                    legal_ids_a=policy_a_legal_ids,
+                    legal_ids_b=policy_b_legal_ids,
                     logits_a=logits_a,
                     logits_b=logits_b,
                     top_actions=top_actions,
@@ -175,7 +266,14 @@ def inspect_replay_bundle(
                 "rerun_contract": None if meta.rerun_contract is None else asdict(meta.rerun_contract),
             },
             "summary": _summarize_step_diffs(step_diffs, top_k=top_k),
+            "trajectory_summary": _summarize_trajectory_records(trajectory_records),
             "top_differences": _top_step_diffs(step_diffs, top_k=top_k),
+            "opponent_context": {
+                "policy_id": None if opponent_context_policy_id is None else str(opponent_context_policy_id),
+                "require_nonzero": bool(require_opponent_context_index),
+                "policy_a_index": policy_a_opponent_context_index,
+                "policy_b_index": policy_b_opponent_context_index,
+            },
             "compared_steps": compared_steps,
         }
         return report
@@ -210,12 +308,47 @@ def format_replay_inspection_report(report: dict[str, Any]) -> str:
         ),
         "top_differences:",
     ]
+    opponent_context = report.get("opponent_context")
+    if isinstance(opponent_context, Mapping) and opponent_context.get("policy_id"):
+        lines.insert(
+            5,
+            (
+                "opponent_context: "
+                f"policy_id={opponent_context.get('policy_id')} "
+                f"policy_a_index={opponent_context.get('policy_a_index')} "
+                f"policy_b_index={opponent_context.get('policy_b_index')}"
+            ),
+        )
     if summary["top_action_family_confusions"]:
         family_confusions = ", ".join(
             f"{item['policy_b_family']}->{item['policy_a_family']} x{item['count']}"
             for item in summary["top_action_family_confusions"]
         )
         lines.append(f"family_confusions: {family_confusions}")
+    if summary.get("actor_summaries"):
+        actor_lines = []
+        for item in summary["actor_summaries"]:
+            actor_lines.append(
+                f"actor={item['actor']} steps={item['compared_steps']} "
+                f"action_match={item['policy_a_matches_policy_b_top_action_rate']:.6f} "
+                f"family_match={item['policy_a_matches_policy_b_top_action_family_rate']:.6f} "
+                f"mean_tv={item['mean_total_variation']:.6f}"
+            )
+        lines.append("actor_summaries: " + "; ".join(actor_lines))
+    trajectory_summary = report.get("trajectory_summary")
+    if isinstance(trajectory_summary, dict) and trajectory_summary.get("recorded_family_counts"):
+        family_text = ", ".join(
+            f"{item['family']} x{item['count']}" for item in trajectory_summary["recorded_family_counts"][:6]
+        )
+        numeric = trajectory_summary.get("numeric_summaries", {})
+        self_clock = numeric.get("self_clock_count", {}) if isinstance(numeric, dict) else {}
+        opp_clock = numeric.get("opponent_clock_count", {}) if isinstance(numeric, dict) else {}
+        lines.append(
+            "trajectory: "
+            f"families={family_text} "
+            f"self_clock_mean={_format_optional_float(self_clock.get('mean'))} "
+            f"opp_clock_mean={_format_optional_float(opp_clock.get('mean'))}"
+        )
 
     for index, diff in enumerate(report["top_differences"], start=1):
         lines.append(
@@ -242,7 +375,7 @@ def format_replay_inspection_report(report: dict[str, Any]) -> str:
         )
         action_delta_text = ", ".join(
             (
-                f"{_format_action_descriptor(item)}:Δ={item['probability_delta_b_minus_a']:+.6f} "
+                f"{_format_action_descriptor(item)}:delta={item['probability_delta_b_minus_a']:+.6f} "
                 f"(A={item['probability_a']:.6f},B={item['probability_b']:.6f})"
             )
             for item in diff["top_action_deltas"]
@@ -279,6 +412,22 @@ def _resolve_registry(
     return resolved_registry_path, resolved_run_dir, registry
 
 
+def _opponent_context_index_for_policy(
+    *,
+    policy: LoadedReplayPolicy,
+    opponent_context_policy_id: str | None,
+    require_nonzero: bool,
+) -> int | None:
+    if policy.model is None or opponent_context_policy_id is None:
+        return None
+    context_index = int(policy.model.opponent_context_indices_for_policy_ids([opponent_context_policy_id])[0])
+    if require_nonzero and context_index == 0:
+        raise RuntimeError(
+            f"Replay policy {policy.label!r} has no opponent-context index for {opponent_context_policy_id!r}"
+        )
+    return context_index
+
+
 def _load_policy(
     *,
     spec: str,
@@ -288,6 +437,7 @@ def _load_policy(
     run_dir: Path | None,
     registry: SnapshotRegistry | None,
     run_spec_bundle: dict[str, Any] | None,
+    extra_accepted_config_hashes: set[str],
 ) -> LoadedReplayPolicy:
     normalized_spec = str(spec).strip()
     heuristic_profile = heuristic_public_profile_name_for_policy_id(normalized_spec)
@@ -311,12 +461,14 @@ def _load_policy(
     if not isinstance(model_state_dict, dict):
         raise RuntimeError(f"Snapshot weights payload missing model_state_dict: {weights_path}")
 
-    expected_config_hash256 = compute_config_hash256(stack)
+    accepted_config_hashes = _accepted_snapshot_config_hashes(stack=stack, run_dir=run_dir)
+    accepted_config_hashes.update(extra_accepted_config_hashes)
     observed_config_hash256 = str(payload.get("config_hash256", "")).strip()
-    if observed_config_hash256 and observed_config_hash256 != expected_config_hash256:
+    if observed_config_hash256 and observed_config_hash256 not in accepted_config_hashes:
+        accepted_text = ", ".join(sorted(accepted_config_hashes))
         raise RuntimeError(
             f"Snapshot config hash mismatch for {weights_path}: "
-            f"expected {expected_config_hash256}, observed {observed_config_hash256}"
+            f"accepted one of [{accepted_text}], observed {observed_config_hash256}"
         )
 
     model_config = stack.config.model
@@ -330,7 +482,11 @@ def _load_policy(
         observation_spec=_load_run_observation_spec(run_spec_bundle),
         spec_bundle=run_spec_bundle,
     ).to(torch.device("cpu"))
-    model.load_state_dict(model_state_dict)
+    load_model_state_dict_with_context_compat(
+        model,
+        model_state_dict,
+        context=f"replay snapshot {weights_path}",
+    )
     model.eval()
     return LoadedReplayPolicy(
         spec=str(spec),
@@ -351,6 +507,38 @@ def _load_run_spec_bundle(run_dir: Path | None) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         raise RuntimeError(f"spec_bundle.json must contain an object: {layout.spec_bundle_path}")
     return dict(payload)
+
+
+def _accepted_snapshot_config_hashes(*, stack: StackConfig, run_dir: Path | None) -> set[str]:
+    accepted_hashes = {compute_config_hash256(stack)}
+    run_manifest_hash = _load_run_manifest_config_hash(run_dir)
+    if run_manifest_hash is not None:
+        accepted_hashes.add(run_manifest_hash)
+    return accepted_hashes
+
+
+def _normalize_config_hashes(values: Iterable[str]) -> set[str]:
+    normalized: set[str] = set()
+    for value in values:
+        candidate = str(value).strip()
+        if candidate:
+            normalized.add(candidate)
+    return normalized
+
+
+def _load_run_manifest_config_hash(run_dir: Path | None) -> str | None:
+    if run_dir is None:
+        return None
+    layout = ArtifactLayout.from_run_dir(run_dir)
+    if not layout.manifest_path.is_file():
+        return None
+    payload = json.loads(layout.manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"manifest.json must contain an object: {layout.manifest_path}")
+    config_hash256 = payload.get("config_hash256")
+    if isinstance(config_hash256, str) and config_hash256.strip():
+        return config_hash256.strip()
+    return None
 
 
 def _load_run_observation_spec(spec_bundle: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -403,7 +591,10 @@ def _resolve_policy_weights_path(
     if run_dir is None:
         raise RuntimeError(f"Cannot resolve policy id {normalized_spec!r} without a run_dir")
 
-    snapshot_meta = next((snapshot for snapshot in registry.snapshots if snapshot.policy_id == normalized_spec), None)
+    snapshot_meta = _snapshot_by_policy_id_or_imported_seed_suffix(
+        registry=registry,
+        policy_id=normalized_spec,
+    )
     if snapshot_meta is None:
         raise RuntimeError(f"Unknown policy id: {normalized_spec!r}")
 
@@ -411,6 +602,32 @@ def _resolve_policy_weights_path(
     if not resolved_path.is_file():
         raise RuntimeError(f"Resolved policy weights path does not exist: {resolved_path}")
     return resolved_path, snapshot_meta.policy_id
+
+
+def _snapshot_by_policy_id_or_imported_seed_suffix(
+    *,
+    registry: SnapshotRegistry,
+    policy_id: str,
+) -> SnapshotMeta | None:
+    normalized = str(policy_id).strip()
+    for snapshot in registry.snapshots:
+        if snapshot.policy_id == normalized:
+            return snapshot
+    if not normalized.startswith("seed_"):
+        return None
+
+    suffix = f"_{normalized}"
+    matches = [
+        snapshot
+        for snapshot in registry.snapshots
+        if str(snapshot.policy_id).startswith("seed_") and str(snapshot.policy_id).endswith(suffix)
+    ]
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    match_ids = ", ".join(sorted(snapshot.policy_id for snapshot in matches))
+    raise RuntimeError(f"Ambiguous imported seed policy suffix {policy_id!r}; matches: {match_ids}")
 
 
 def _require_single_env_batch(batch: DecisionBoundaryBatch, *, context: str) -> DecisionBoundaryBatch:
@@ -495,12 +712,236 @@ def _legal_ids_for_env_row(batch: DecisionBoundaryBatch) -> np.ndarray:
     return np.asarray(legal_ids[start:end], dtype=np.uint32)
 
 
+def _policy_action_surface_batch_and_ids(
+    *,
+    policy: LoadedReplayPolicy,
+    stack: StackConfig,
+    batch: DecisionBoundaryBatch,
+    legal_ids: np.ndarray,
+    pass_action_id: int,
+) -> tuple[DecisionBoundaryBatch, np.ndarray]:
+    """Mirror eval-time model-only action-surface guards for replay scoring."""
+
+    if policy.model is None:
+        return batch, legal_ids
+    training_config = stack.config.training
+    if training_config is None:
+        return batch, legal_ids
+    mulligan_guard = bool(getattr(training_config, "mulligan_force_confirm_after_select", False))
+    main_move_guard = bool(getattr(training_config, "force_pass_over_main_move_only", False))
+    attack_guard = bool(getattr(training_config, "force_attack_over_pass_when_attack_legal", False))
+    if not mulligan_guard and not main_move_guard and not attack_guard:
+        return batch, legal_ids
+    action_catalog = getattr(policy.model, "action_catalog", None)
+    if action_catalog is None:
+        return batch, legal_ids
+
+    filtered_batch = batch
+    contract = getattr(policy.model, "_structured_observation_contract", None)
+    layout = getattr(contract, "layout", None)
+    field_index = None if layout is None else header_field_index(layout, "last_action_arg0")
+    last_action_arg0_index = -1 if field_index is None else int(field_index)
+    family_index, _attack_type_index = action_catalog_indices(action_catalog)
+    if mulligan_guard:
+        filtered_batch, _result = filter_batch_mulligan_select_after_select(
+            filtered_batch,
+            last_action_arg0_index=last_action_arg0_index,
+            mulligan_select_family_id=int(family_index.get("mulligan_select", -1)),
+            mulligan_confirm_family_id=int(family_index.get("mulligan_confirm", -1)),
+        )
+    if main_move_guard:
+        filtered_batch, _result = filter_batch_main_move_only_rows_to_pass(
+            filtered_batch,
+            pass_action_id=int(pass_action_id),
+            main_move_family_id=int(family_index.get("main_move", -1)),
+        )
+    if attack_guard:
+        filtered_batch, _result = filter_batch_pass_when_attack_available(
+            filtered_batch,
+            pass_action_id=int(pass_action_id),
+            attack_family_id=int(family_index.get("attack", -1)),
+        )
+    if filtered_batch.ids_offsets is None:
+        return batch, legal_ids
+    filtered_ids, filtered_offsets = filtered_batch.ids_offsets
+    return (
+        filtered_batch,
+        np.asarray(filtered_ids[int(filtered_offsets[0]) : int(filtered_offsets[1])], dtype=np.uint32),
+    )
+
+
+def _pass_action_id(spec_bundle: Mapping[str, Any] | None) -> int:
+    if spec_bundle is None:
+        return 51
+    action = spec_bundle.get("action")
+    if not isinstance(action, Mapping):
+        return 51
+    return int(action.get("pass_action_id", 51))
+
+
+def _build_trajectory_record(
+    *,
+    step_index: int,
+    expected_step: ReplayStep,
+    batch: DecisionBoundaryBatch,
+    raw_legal_ids: np.ndarray,
+    action_catalog: ActionCatalog | None,
+    spec_bundle: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    obs = np.asarray(batch.obs[0])
+    layout = _load_observation_layout(spec_bundle)
+    recorded_action = _action_descriptor(int(expected_step.action), action_catalog=action_catalog)
+    legal_family_counts = _legal_family_counts(raw_legal_ids=raw_legal_ids, action_catalog=action_catalog)
+    payload: dict[str, Any] = {
+        "step_index": int(step_index),
+        "decision_id": int(expected_step.decision_id),
+        "actor": int(expected_step.actor),
+        "recorded_action": int(expected_step.action),
+        "recorded_action_family": str(recorded_action.get("family", "unknown")),
+        "raw_legal_action_count": int(np.asarray(raw_legal_ids).shape[0]),
+        "has_nonpass_legal": bool(np.any(np.asarray(raw_legal_ids, dtype=np.int64) != _pass_action_id(spec_bundle))),
+        "legal_family_counts": _counter_items(legal_family_counts, key_names=("family",)),
+    }
+    for family in _TRACKED_LEGAL_FAMILIES:
+        payload[f"has_legal_{family}"] = int(legal_family_counts.get(family, 0)) > 0
+    if layout is not None:
+        for field_name in ("phase", "decision_kind", "active_player", "decision_player"):
+            field_index = header_field_index(layout, field_name)
+            if field_index is not None and field_index < obs.shape[0]:
+                payload[field_name] = _safe_int(obs[field_index])
+        if layout.player_blocks:
+            payload.update(
+                _player_trajectory_fields(
+                    obs=obs,
+                    block=layout.player_blocks[0],
+                    prefix="self",
+                    action_catalog=action_catalog,
+                    spec_bundle=spec_bundle,
+                )
+            )
+        if len(layout.player_blocks) > 1:
+            payload.update(
+                _player_trajectory_fields(
+                    obs=obs,
+                    block=layout.player_blocks[1],
+                    prefix="opponent",
+                    action_catalog=action_catalog,
+                    spec_bundle=spec_bundle,
+                )
+            )
+    return payload
+
+
+def _load_observation_layout(spec_bundle: Mapping[str, Any] | None) -> ObservationLayout | None:
+    if spec_bundle is None:
+        return None
+    observation = spec_bundle.get("observation")
+    if not isinstance(observation, Mapping):
+        return None
+    try:
+        return parse_observation_layout(observation)
+    except (TypeError, ValueError):
+        return None
+
+
+def _player_trajectory_fields(
+    *,
+    obs: np.ndarray,
+    block: ObservationPlayerBlock,
+    prefix: str,
+    action_catalog: ActionCatalog | None,
+    spec_bundle: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for name in (
+        "level_count",
+        "clock_count",
+        "deck_count",
+        "hand_count",
+        "stock_count",
+        "waiting_room_count",
+        "memory_count",
+        "climax_count",
+    ):
+        value = _player_scalar(obs=obs, block=block, slice_name=name)
+        if value is not None:
+            payload[f"{prefix}_{name}"] = value
+    stage_slice = _player_slice(block, "stage")
+    if stage_slice is not None:
+        payload[f"{prefix}_stage_occupied_count"] = _stage_occupied_count(
+            obs=obs,
+            stage_start=stage_slice.start,
+            stage_length=stage_slice.length,
+            action_catalog=action_catalog,
+            spec_bundle=spec_bundle,
+        )
+    return payload
+
+
+def _player_scalar(*, obs: np.ndarray, block: ObservationPlayerBlock, slice_name: str) -> int | None:
+    observation_slice = _player_slice(block, slice_name)
+    if observation_slice is None or observation_slice.start >= obs.shape[0]:
+        return None
+    return _safe_int(obs[observation_slice.start])
+
+
+def _player_slice(block: ObservationPlayerBlock, slice_name: str) -> ObservationSlice | None:
+    return next((current for current in block.slices if current.name == slice_name), None)
+
+
+def _stage_occupied_count(
+    *,
+    obs: np.ndarray,
+    stage_start: int,
+    stage_length: int,
+    action_catalog: ActionCatalog | None,
+    spec_bundle: Mapping[str, Any] | None,
+) -> int:
+    stage_slots = int(action_catalog.max_stage) if action_catalog is not None else 5
+    if stage_slots <= 0:
+        return 0
+    slot_width = max(int(stage_length) // stage_slots, 1)
+    observation = spec_bundle.get("observation") if isinstance(spec_bundle, Mapping) else None
+    sentinel_empty = 0
+    sentinel_hidden = -1
+    if isinstance(observation, Mapping):
+        sentinel_empty = int(observation.get("sentinel_empty_card", sentinel_empty))
+        sentinel_hidden = int(observation.get("sentinel_hidden", sentinel_hidden))
+    occupied = 0
+    for slot_index in range(stage_slots):
+        index = int(stage_start) + slot_index * slot_width
+        if index >= obs.shape[0] or index >= int(stage_start) + int(stage_length):
+            break
+        card_value = _safe_int(obs[index])
+        if card_value not in (sentinel_empty, sentinel_hidden):
+            occupied += 1
+    return occupied
+
+
+def _legal_family_counts(*, raw_legal_ids: np.ndarray, action_catalog: ActionCatalog | None) -> Counter[str]:
+    counter: Counter[str] = Counter()
+    if action_catalog is None:
+        return counter
+    for action_id in np.asarray(raw_legal_ids, dtype=np.int64).tolist():
+        try:
+            family = action_catalog.decode(int(action_id)).family
+        except ValueError:
+            family = "unknown"
+        counter[str(family)] += 1
+    return counter
+
+
+def _safe_int(value: Any) -> int:
+    return int(np.asarray(value).reshape(()).item())
+
+
 def _forward_policy(
     *,
     policy: LoadedReplayPolicy,
     batch: DecisionBoundaryBatch,
     seat_hidden: torch.Tensor | None,
     legal_ids: np.ndarray,
+    opponent_context_index: int | None = None,
 ) -> tuple[np.ndarray, torch.Tensor | None]:
     if policy.heuristic_policy is not None:
         chosen_action = int(
@@ -516,12 +957,16 @@ def _forward_policy(
     device = torch.device("cpu")
     acting_seat = int(batch.actor[0])
     with torch.inference_mode():
-        logits_tensor, _value_tensor, next_seat_hidden = policy.model.forward_seat_aware(
-            torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=device),
-            torch.as_tensor([acting_seat], device=device, dtype=torch.long),
-            seat_hidden,
+        logits, next_seat_hidden = model_eval_logits_for_legal_ids(
+            model=policy.model,
+            batch=batch,
+            current_seat=acting_seat,
+            seat_hidden=seat_hidden,
+            legal_ids=legal_ids,
+            action_dim=GLOBAL_ACTION_SPACE_SIZE,
+            device=device,
+            opponent_context_index=opponent_context_index,
         )
-    logits = logits_tensor[0].detach().cpu().numpy().astype(np.float32, copy=False)
     return logits, next_seat_hidden
 
 
@@ -529,38 +974,72 @@ def _build_step_diff(
     *,
     step_index: int,
     expected_step: ReplayStep,
-    legal_ids: np.ndarray,
+    raw_legal_ids: np.ndarray,
+    legal_ids_a: np.ndarray,
+    legal_ids_b: np.ndarray,
     logits_a: np.ndarray,
     logits_b: np.ndarray,
     top_actions: int,
     action_catalog: ActionCatalog | None,
 ) -> dict[str, Any]:
-    legal_mask = np.zeros((logits_a.shape[0],), dtype=bool)
-    legal_mask[np.asarray(legal_ids, dtype=np.int64)] = True
+    legal_mask_a = _legal_mask_from_ids(logits_a.shape[0], legal_ids_a)
+    legal_mask_b = _legal_mask_from_ids(logits_b.shape[0], legal_ids_b)
+    union_mask = legal_mask_a | legal_mask_b
     stacked_logits = np.stack((logits_a, logits_b), axis=0)
-    stacked_mask = np.stack((legal_mask, legal_mask), axis=0)
+    stacked_mask = np.stack((legal_mask_a, legal_mask_b), axis=0)
     log_probs = masked_log_softmax(stacked_logits, stacked_mask)
-    safe_log_probs = np.where(stacked_mask, log_probs, 0.0)
-    probs = np.exp(safe_log_probs.astype(np.float64, copy=False))
+    probs = np.zeros_like(log_probs, dtype=np.float64)
+    probs[stacked_mask] = np.exp(log_probs[stacked_mask].astype(np.float64, copy=False))
 
-    kl_divergence_ab = float(np.sum(probs[0] * (safe_log_probs[0] - safe_log_probs[1]), dtype=np.float64))
-    kl_divergence_ba = float(np.sum(probs[1] * (safe_log_probs[1] - safe_log_probs[0]), dtype=np.float64))
+    kl_divergence_ab = _kl_divergence(probs[0], probs[1])
+    kl_divergence_ba = _kl_divergence(probs[1], probs[0])
     probability_delta = probs[1] - probs[0]
-    total_variation = float(0.5 * np.sum(np.abs(probability_delta), dtype=np.float64))
+    total_variation = float(0.5 * np.sum(np.abs(probability_delta[union_mask]), dtype=np.float64))
     abs_probability_delta = np.abs(probability_delta)
-    legal_action_indices = np.flatnonzero(legal_mask)
-    ranked_action_indices = legal_action_indices[np.argsort(abs_probability_delta[legal_action_indices])[::-1]]
+    legal_action_indices_a = np.flatnonzero(legal_mask_a)
+    legal_action_indices_b = np.flatnonzero(legal_mask_b)
+    union_action_indices = np.flatnonzero(union_mask)
+    ranked_action_indices = union_action_indices[np.argsort(abs_probability_delta[union_action_indices])[::-1]]
     policy_a_top_action = _top_action_payload(
         probabilities=probs[0],
-        legal_indices=legal_action_indices,
+        legal_indices=legal_action_indices_a,
         action_catalog=action_catalog,
     )
     policy_b_top_action = _top_action_payload(
         probabilities=probs[1],
-        legal_indices=legal_action_indices,
+        legal_indices=legal_action_indices_b,
         action_catalog=action_catalog,
     )
+    policy_a_top_action_id = int(policy_a_top_action["action"])
     policy_b_top_action_id = int(policy_b_top_action["action"])
+    raw_legal_action_count = int(np.asarray(raw_legal_ids).shape[0])
+    policy_a_legal_action_count = int(legal_action_indices_a.shape[0])
+    policy_b_legal_action_count = int(legal_action_indices_b.shape[0])
+    policy_a_top_logit_margin = _top_margin(values=logits_a, legal_indices=legal_action_indices_a)
+    policy_a_top_probability_margin = _top_margin(values=probs[0], legal_indices=legal_action_indices_a)
+    policy_a_b_top_action_logit_gap = _gap_from_top_to_action(
+        values=logits_a,
+        legal_indices=legal_action_indices_a,
+        action_id=policy_b_top_action_id,
+    )
+    policy_a_b_top_action_same_family_logit_margin = _same_family_margin_to_action(
+        values=logits_a,
+        legal_indices=legal_action_indices_a,
+        action_id=policy_b_top_action_id,
+        action_catalog=action_catalog,
+    )
+    policy_a_family_masses = _family_probability_masses(
+        probabilities=probs[0],
+        legal_indices=legal_action_indices_a,
+        action_catalog=action_catalog,
+    )
+    policy_b_family_masses = _family_probability_masses(
+        probabilities=probs[1],
+        legal_indices=legal_action_indices_b,
+        action_catalog=action_catalog,
+    )
+    policy_a_top_family = str(policy_a_top_action.get("family", "unknown"))
+    policy_b_top_family = str(policy_b_top_action.get("family", "unknown"))
 
     return {
         "step_index": int(step_index),
@@ -568,19 +1047,37 @@ def _build_step_diff(
         "actor": int(expected_step.actor),
         "recorded_action": int(expected_step.action),
         "recorded_action_detail": _action_descriptor(int(expected_step.action), action_catalog=action_catalog),
+        "raw_legal_action_count": raw_legal_action_count,
+        "policy_a_legal_action_count": policy_a_legal_action_count,
+        "policy_b_legal_action_count": policy_b_legal_action_count,
+        "policy_a_legal_surface_removed_action_count": max(raw_legal_action_count - policy_a_legal_action_count, 0),
+        "policy_b_legal_surface_removed_action_count": max(raw_legal_action_count - policy_b_legal_action_count, 0),
+        "policy_a_legal_surface_is_filtered": policy_a_legal_action_count < raw_legal_action_count,
+        "policy_b_legal_surface_is_filtered": policy_b_legal_action_count < raw_legal_action_count,
+        "policy_b_top_action_legal_for_policy_a": bool(legal_mask_a[policy_b_top_action_id]),
+        "policy_a_top_action_legal_for_policy_b": bool(legal_mask_b[policy_a_top_action_id]),
         "total_variation": total_variation,
         "kl_divergence_ab": kl_divergence_ab,
         "kl_divergence_ba": kl_divergence_ba,
-        "max_abs_probability_delta": float(np.max(abs_probability_delta[legal_action_indices], initial=0.0)),
+        "max_abs_probability_delta": float(np.max(abs_probability_delta[union_action_indices], initial=0.0)),
         "policy_a_recorded_action_probability": float(probs[0, int(expected_step.action)]),
         "policy_b_recorded_action_probability": float(probs[1, int(expected_step.action)]),
         "policy_a_probability_on_policy_b_top_action": float(probs[0, policy_b_top_action_id]),
+        "policy_a_probability_on_policy_b_top_action_family": float(
+            policy_a_family_masses.get(policy_b_top_family, 0.0)
+        ),
+        "policy_a_top_logit_margin": policy_a_top_logit_margin,
+        "policy_a_top_probability_margin": policy_a_top_probability_margin,
+        "policy_a_gap_from_top_logit_to_policy_b_top_action": policy_a_b_top_action_logit_gap,
+        "policy_a_policy_b_top_action_same_family_logit_margin": (policy_a_b_top_action_same_family_logit_margin),
+        "policy_a_top_action_family_probability": float(policy_a_family_masses.get(policy_a_top_family, 0.0)),
+        "policy_b_top_action_family_probability": float(policy_b_family_masses.get(policy_b_top_family, 0.0)),
         "policy_a_rank_of_policy_b_top_action": _rank_of_action(
             probabilities=probs[0],
-            legal_indices=legal_action_indices,
+            legal_indices=legal_action_indices_a,
             action_id=policy_b_top_action_id,
         ),
-        "policy_a_matches_policy_b_top_action": int(policy_a_top_action["action"]) == policy_b_top_action_id,
+        "policy_a_matches_policy_b_top_action": policy_a_top_action_id == policy_b_top_action_id,
         "policy_a_matches_policy_b_top_action_family": (
             policy_a_top_action.get("family") == policy_b_top_action.get("family")
             if "family" in policy_a_top_action and "family" in policy_b_top_action
@@ -588,6 +1085,8 @@ def _build_step_diff(
         ),
         "policy_a_top_action": policy_a_top_action,
         "policy_b_top_action": policy_b_top_action,
+        "policy_a_family_probability_masses": policy_a_family_masses,
+        "policy_b_family_probability_masses": policy_b_family_masses,
         "top_action_deltas": [
             {
                 **_action_descriptor(int(action_index), action_catalog=action_catalog),
@@ -599,6 +1098,38 @@ def _build_step_diff(
             for action_index in ranked_action_indices.tolist()[:top_actions]
         ],
     }
+
+
+def _legal_mask_from_ids(action_dim: int, legal_ids: np.ndarray) -> np.ndarray:
+    legal_mask = np.zeros((int(action_dim),), dtype=bool)
+    legal_ids_array = np.asarray(legal_ids, dtype=np.int64)
+    if legal_ids_array.size:
+        legal_mask[legal_ids_array] = True
+    return legal_mask
+
+
+def _kl_divergence(probs_p: np.ndarray, probs_q: np.ndarray) -> float:
+    support = probs_p > 0.0
+    if not bool(np.any(support)):
+        return 0.0
+    q = np.maximum(probs_q[support], np.finfo(np.float64).tiny)
+    p = probs_p[support]
+    return float(np.sum(p * (np.log(p) - np.log(q)), dtype=np.float64))
+
+
+def _family_probability_masses(
+    *,
+    probabilities: np.ndarray,
+    legal_indices: np.ndarray,
+    action_catalog: ActionCatalog | None,
+) -> dict[str, float]:
+    if action_catalog is None:
+        return {}
+    masses: dict[str, float] = {}
+    for action_index in legal_indices.tolist():
+        family = action_catalog.decode(int(action_index)).family
+        masses[family] = masses.get(family, 0.0) + float(probabilities[int(action_index)])
+    return dict(sorted(masses.items(), key=lambda item: (-item[1], item[0])))
 
 
 def _top_action_payload(
@@ -621,8 +1152,57 @@ def _rank_of_action(*, probabilities: np.ndarray, legal_indices: np.ndarray, act
     sorted_indices = legal_indices[np.argsort(legal_probabilities)[::-1]]
     positions = np.flatnonzero(sorted_indices == int(action_id))
     if positions.size == 0:
-        raise RuntimeError(f"Expected action {action_id} to be legal in replay inspection")
+        return int(legal_indices.shape[0]) + 1
     return int(positions[0]) + 1
+
+
+def _top_margin(*, values: np.ndarray, legal_indices: np.ndarray) -> float | None:
+    if legal_indices.size < 2:
+        return None
+    legal_values = np.asarray(values[legal_indices], dtype=np.float64)
+    if not np.all(np.isfinite(legal_values)):
+        return None
+    top_two = np.sort(legal_values)[-2:]
+    return float(top_two[-1] - top_two[-2])
+
+
+def _gap_from_top_to_action(*, values: np.ndarray, legal_indices: np.ndarray, action_id: int) -> float | None:
+    if legal_indices.size == 0 or not bool(np.any(legal_indices == int(action_id))):
+        return None
+    legal_values = np.asarray(values[legal_indices], dtype=np.float64)
+    action_value = float(values[int(action_id)])
+    if not np.all(np.isfinite(legal_values)) or not math.isfinite(action_value):
+        return None
+    return float(np.max(legal_values) - action_value)
+
+
+def _same_family_margin_to_action(
+    *,
+    values: np.ndarray,
+    legal_indices: np.ndarray,
+    action_id: int,
+    action_catalog: ActionCatalog | None,
+) -> float | None:
+    if action_catalog is None or legal_indices.size == 0 or not bool(np.any(legal_indices == int(action_id))):
+        return None
+    action_value = float(values[int(action_id)])
+    if not math.isfinite(action_value):
+        return None
+    target_family = action_catalog.decode(int(action_id)).family
+    same_family_legal_indices = np.asarray(
+        [
+            int(legal_id)
+            for legal_id in legal_indices.tolist()
+            if int(legal_id) != int(action_id) and action_catalog.decode(int(legal_id)).family == target_family
+        ],
+        dtype=np.int64,
+    )
+    if same_family_legal_indices.size == 0:
+        return None
+    competitor_values = np.asarray(values[same_family_legal_indices], dtype=np.float64)
+    if not np.all(np.isfinite(competitor_values)):
+        return None
+    return float(action_value - np.max(competitor_values))
 
 
 def _action_descriptor(action_id: int, *, action_catalog: ActionCatalog | None) -> dict[str, Any]:
@@ -648,7 +1228,12 @@ def _action_descriptor(action_id: int, *, action_catalog: ActionCatalog | None) 
     return payload
 
 
-def _summarize_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -> dict[str, Any]:
+def _summarize_step_diffs(
+    step_diffs: Sequence[dict[str, Any]],
+    *,
+    top_k: int,
+    include_actor_summaries: bool = True,
+) -> dict[str, Any]:
     if not step_diffs:
         return {
             "compared_steps": 0,
@@ -660,8 +1245,26 @@ def _summarize_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -
             "policy_a_matches_policy_b_top_action_rate": 0.0,
             "policy_a_matches_policy_b_top_action_family_rate": 0.0,
             "policy_a_mean_probability_on_policy_b_top_action": 0.0,
+            "policy_a_mean_probability_on_policy_b_top_action_family": 0.0,
             "policy_a_median_rank_of_policy_b_top_action": 0.0,
+            "policy_a_probability_on_policy_b_top_action_percentiles": _percentile_summary([]),
+            "policy_a_top_logit_margin_percentiles": _percentile_summary([]),
+            "policy_a_top_probability_margin_percentiles": _percentile_summary([]),
+            "policy_a_gap_from_top_logit_to_policy_b_top_action_percentiles": _percentile_summary([]),
+            "policy_a_policy_b_top_action_same_family_logit_margin_percentiles": _percentile_summary([]),
+            "raw_legal_action_count_percentiles": _percentile_summary([]),
+            "policy_a_legal_action_count_percentiles": _percentile_summary([]),
+            "policy_b_legal_action_count_percentiles": _percentile_summary([]),
+            "policy_a_legal_surface_filter_rate": 0.0,
+            "policy_b_legal_surface_filter_rate": 0.0,
+            "policy_a_mean_raw_minus_policy_a_legal_action_count": 0.0,
+            "policy_b_mean_raw_minus_policy_b_legal_action_count": 0.0,
+            "policy_b_top_action_illegal_for_policy_a_rate": 0.0,
+            "policy_a_top_action_illegal_for_policy_b_rate": 0.0,
+            "policy_b_top_family_summaries": [],
             "top_action_family_confusions": [],
+            "policy_a_mean_family_probability_masses": [],
+            "actor_summaries": [],
         }
 
     total_variation = np.asarray([float(item["total_variation"]) for item in step_diffs], dtype=np.float64)
@@ -681,8 +1284,49 @@ def _summarize_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -
         [float(item["policy_a_probability_on_policy_b_top_action"]) for item in step_diffs],
         dtype=np.float64,
     )
+    policy_a_probability_on_policy_b_top_action_family = np.asarray(
+        [float(item["policy_a_probability_on_policy_b_top_action_family"]) for item in step_diffs],
+        dtype=np.float64,
+    )
     policy_a_rank_of_policy_b_top_action = np.asarray(
         [float(item["policy_a_rank_of_policy_b_top_action"]) for item in step_diffs],
+        dtype=np.float64,
+    )
+    policy_a_top_logit_margin = _finite_float_values(step_diffs, "policy_a_top_logit_margin")
+    policy_a_top_probability_margin = _finite_float_values(step_diffs, "policy_a_top_probability_margin")
+    policy_a_gap_from_top_logit_to_policy_b_top_action = _finite_float_values(
+        step_diffs,
+        "policy_a_gap_from_top_logit_to_policy_b_top_action",
+    )
+    policy_a_policy_b_top_action_same_family_logit_margin = _finite_float_values(
+        step_diffs,
+        "policy_a_policy_b_top_action_same_family_logit_margin",
+    )
+    raw_legal_action_counts = _finite_float_values(step_diffs, "raw_legal_action_count")
+    policy_a_legal_action_counts = _finite_float_values(step_diffs, "policy_a_legal_action_count")
+    policy_b_legal_action_counts = _finite_float_values(step_diffs, "policy_b_legal_action_count")
+    policy_a_removed_counts = np.asarray(
+        [float(item.get("policy_a_legal_surface_removed_action_count", 0.0)) for item in step_diffs],
+        dtype=np.float64,
+    )
+    policy_b_removed_counts = np.asarray(
+        [float(item.get("policy_b_legal_surface_removed_action_count", 0.0)) for item in step_diffs],
+        dtype=np.float64,
+    )
+    policy_a_surface_filtered = np.asarray(
+        [bool(item.get("policy_a_legal_surface_is_filtered", False)) for item in step_diffs],
+        dtype=np.float64,
+    )
+    policy_b_surface_filtered = np.asarray(
+        [bool(item.get("policy_b_legal_surface_is_filtered", False)) for item in step_diffs],
+        dtype=np.float64,
+    )
+    policy_b_top_illegal_for_policy_a = np.asarray(
+        [not bool(item.get("policy_b_top_action_legal_for_policy_a", True)) for item in step_diffs],
+        dtype=np.float64,
+    )
+    policy_a_top_illegal_for_policy_b = np.asarray(
+        [not bool(item.get("policy_a_top_action_legal_for_policy_b", True)) for item in step_diffs],
         dtype=np.float64,
     )
     confusion_counter: Counter[tuple[str, str]] = Counter()
@@ -690,7 +1334,10 @@ def _summarize_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -
         policy_b_family = str(item["policy_b_top_action"].get("family", "unknown"))
         policy_a_family = str(item["policy_a_top_action"].get("family", "unknown"))
         confusion_counter[(policy_b_family, policy_a_family)] += 1
-    return {
+    policy_a_mean_family_masses = _mean_family_probability_masses(
+        item.get("policy_a_family_probability_masses", {}) for item in step_diffs
+    )
+    summary = {
         "compared_steps": len(step_diffs),
         "top_k": int(top_k),
         "max_total_variation": float(np.max(total_variation)),
@@ -699,17 +1346,307 @@ def _summarize_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -
         "max_abs_probability_delta": float(np.max(max_abs_probability_delta)),
         "policy_a_matches_policy_b_top_action_rate": float(np.mean(policy_a_matches_policy_b_top_action)),
         "policy_a_matches_policy_b_top_action_family_rate": float(np.mean(policy_a_matches_policy_b_top_action_family)),
+        "policy_a_top_action_mismatch_count": int(len(step_diffs) - int(np.sum(policy_a_matches_policy_b_top_action))),
+        "policy_a_top_action_family_mismatch_count": int(
+            len(step_diffs) - int(np.sum(policy_a_matches_policy_b_top_action_family))
+        ),
         "policy_a_mean_probability_on_policy_b_top_action": float(np.mean(policy_a_probability_on_policy_b_top_action)),
+        "policy_a_mean_probability_on_policy_b_top_action_family": float(
+            np.mean(policy_a_probability_on_policy_b_top_action_family)
+        ),
         "policy_a_median_rank_of_policy_b_top_action": float(np.median(policy_a_rank_of_policy_b_top_action)),
+        "policy_a_probability_on_policy_b_top_action_percentiles": _percentile_summary(
+            policy_a_probability_on_policy_b_top_action.tolist()
+        ),
+        "policy_a_top_logit_margin_percentiles": _percentile_summary(policy_a_top_logit_margin),
+        "policy_a_top_probability_margin_percentiles": _percentile_summary(policy_a_top_probability_margin),
+        "policy_a_gap_from_top_logit_to_policy_b_top_action_percentiles": _percentile_summary(
+            policy_a_gap_from_top_logit_to_policy_b_top_action
+        ),
+        "policy_a_policy_b_top_action_same_family_logit_margin_percentiles": _percentile_summary(
+            policy_a_policy_b_top_action_same_family_logit_margin
+        ),
+        "raw_legal_action_count_percentiles": _percentile_summary(raw_legal_action_counts),
+        "policy_a_legal_action_count_percentiles": _percentile_summary(policy_a_legal_action_counts),
+        "policy_b_legal_action_count_percentiles": _percentile_summary(policy_b_legal_action_counts),
+        "policy_a_legal_surface_filter_rate": float(np.mean(policy_a_surface_filtered)),
+        "policy_b_legal_surface_filter_rate": float(np.mean(policy_b_surface_filtered)),
+        "policy_a_mean_raw_minus_policy_a_legal_action_count": float(np.mean(policy_a_removed_counts)),
+        "policy_b_mean_raw_minus_policy_b_legal_action_count": float(np.mean(policy_b_removed_counts)),
+        "policy_b_top_action_illegal_for_policy_a_rate": float(np.mean(policy_b_top_illegal_for_policy_a)),
+        "policy_a_top_action_illegal_for_policy_b_rate": float(np.mean(policy_a_top_illegal_for_policy_b)),
+        "policy_b_top_family_summaries": _policy_b_top_family_summaries(step_diffs),
         "top_action_family_confusions": [
             {
                 "policy_b_family": policy_b_family,
                 "policy_a_family": policy_a_family,
                 "count": int(count),
             }
-            for (policy_b_family, policy_a_family), count in confusion_counter.most_common(5)
+            for (policy_b_family, policy_a_family), count in confusion_counter.most_common()
         ],
+        "policy_a_mean_family_probability_masses": policy_a_mean_family_masses,
     }
+    if include_actor_summaries:
+        summary["actor_summaries"] = _actor_summaries(step_diffs, top_k=top_k)
+    return summary
+
+
+def _actor_summaries(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -> list[dict[str, Any]]:
+    by_actor: defaultdict[int, list[dict[str, Any]]] = defaultdict(list)
+    for item in step_diffs:
+        by_actor[int(item["actor"])].append(item)
+    summaries: list[dict[str, Any]] = []
+    for actor, actor_items in sorted(by_actor.items(), key=lambda item: item[0]):
+        actor_summary = _summarize_step_diffs(
+            actor_items,
+            top_k=top_k,
+            include_actor_summaries=False,
+        )
+        summaries.append(
+            {
+                "actor": int(actor),
+                "compared_steps": int(actor_summary["compared_steps"]),
+                "mean_total_variation": float(actor_summary["mean_total_variation"]),
+                "policy_a_matches_policy_b_top_action_rate": float(
+                    actor_summary["policy_a_matches_policy_b_top_action_rate"]
+                ),
+                "policy_a_matches_policy_b_top_action_family_rate": float(
+                    actor_summary["policy_a_matches_policy_b_top_action_family_rate"]
+                ),
+                "policy_a_mean_probability_on_policy_b_top_action": float(
+                    actor_summary["policy_a_mean_probability_on_policy_b_top_action"]
+                ),
+                "policy_a_mean_probability_on_policy_b_top_action_family": float(
+                    actor_summary["policy_a_mean_probability_on_policy_b_top_action_family"]
+                ),
+                "policy_a_median_rank_of_policy_b_top_action": float(
+                    actor_summary["policy_a_median_rank_of_policy_b_top_action"]
+                ),
+                "top_action_family_confusions": actor_summary["top_action_family_confusions"],
+                "policy_b_top_family_summaries": actor_summary["policy_b_top_family_summaries"],
+            }
+        )
+    return summaries
+
+
+def _summarize_trajectory_records(
+    records: Sequence[dict[str, Any]],
+    *,
+    include_actor_summaries: bool = True,
+) -> dict[str, Any]:
+    if not records:
+        return {
+            "compared_steps": 0,
+            "recorded_family_counts": [],
+            "phase_counts": [],
+            "decision_kind_counts": [],
+            "legal_family_presence_rates": [],
+            "numeric_summaries": {},
+            "recorded_family_summaries": [],
+            "actor_summaries": [],
+        }
+
+    recorded_family_counter: Counter[str] = Counter(
+        str(item.get("recorded_action_family", "unknown")) for item in records
+    )
+    phase_counter = _value_counter(records, "phase")
+    decision_kind_counter = _value_counter(records, "decision_kind")
+    legal_presence_rates = [
+        {
+            "family": family,
+            "rate": float(np.mean([bool(item.get(f"has_legal_{family}", False)) for item in records])),
+        }
+        for family in _TRACKED_LEGAL_FAMILIES
+    ]
+    numeric_summaries = {
+        field: _percentile_summary(_finite_float_values(records, field))
+        for field in _TRAJECTORY_NUMERIC_FIELDS
+        if any(field in item for item in records)
+    }
+    by_recorded_family: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in records:
+        by_recorded_family[str(item.get("recorded_action_family", "unknown"))].append(item)
+    recorded_family_summaries: list[dict[str, Any]] = []
+    for family, family_records in sorted(by_recorded_family.items(), key=lambda entry: (-len(entry[1]), entry[0])):
+        family_payload: dict[str, Any] = {
+            "family": family,
+            "count": len(family_records),
+            "rate": float(len(family_records) / len(records)),
+            "numeric_means": {
+                field: _mean_or_none(_finite_float_values(family_records, field))
+                for field in _TRAJECTORY_NUMERIC_FIELDS
+                if any(field in item for item in family_records)
+            },
+        }
+        recorded_family_summaries.append(family_payload)
+
+    summary: dict[str, Any] = {
+        "compared_steps": len(records),
+        "recorded_family_counts": _counter_items(recorded_family_counter, key_names=("family",)),
+        "phase_counts": _counter_items(phase_counter, key_names=("phase",)),
+        "decision_kind_counts": _counter_items(decision_kind_counter, key_names=("decision_kind",)),
+        "legal_family_presence_rates": legal_presence_rates,
+        "numeric_summaries": numeric_summaries,
+        "recorded_family_summaries": recorded_family_summaries,
+    }
+    if include_actor_summaries:
+        summary["actor_summaries"] = _trajectory_actor_summaries(records)
+    return summary
+
+
+def _trajectory_actor_summaries(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_actor: defaultdict[int, list[dict[str, Any]]] = defaultdict(list)
+    for item in records:
+        by_actor[int(item["actor"])].append(item)
+    summaries: list[dict[str, Any]] = []
+    for actor, actor_records in sorted(by_actor.items(), key=lambda entry: entry[0]):
+        actor_summary = _summarize_trajectory_records(actor_records, include_actor_summaries=False)
+        summaries.append(
+            {
+                "actor": int(actor),
+                "compared_steps": int(actor_summary["compared_steps"]),
+                "recorded_family_counts": actor_summary["recorded_family_counts"],
+                "phase_counts": actor_summary["phase_counts"],
+                "decision_kind_counts": actor_summary["decision_kind_counts"],
+                "legal_family_presence_rates": actor_summary["legal_family_presence_rates"],
+                "numeric_summaries": actor_summary["numeric_summaries"],
+                "recorded_family_summaries": actor_summary["recorded_family_summaries"],
+            }
+        )
+    return summaries
+
+
+def _value_counter(records: Sequence[Mapping[str, Any]], key: str) -> Counter[str]:
+    counter: Counter[str] = Counter()
+    for item in records:
+        if key in item:
+            counter[str(item[key])] += 1
+    return counter
+
+
+def _counter_items(counter: Counter[Any], *, key_names: tuple[str, ...]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for key, count in sorted(
+        counter.items(), key=lambda item: (-int(item[1]), tuple(str(part) for part in _tuple_value(item[0])))
+    ):
+        payload: dict[str, Any] = {"count": int(count)}
+        for key_name, part in zip(key_names, _tuple_value(key), strict=False):
+            payload[key_name] = part
+        items.append(payload)
+    return items
+
+
+def _tuple_value(value: Any) -> tuple[Any, ...]:
+    if isinstance(value, tuple):
+        return value
+    return (value,)
+
+
+def _mean_or_none(values: Sequence[float]) -> float | None:
+    finite_values = [float(value) for value in values if math.isfinite(float(value))]
+    if not finite_values:
+        return None
+    return float(np.mean(np.asarray(finite_values, dtype=np.float64)))
+
+
+def _finite_float_values(items: Iterable[Mapping[str, Any]], key: str) -> list[float]:
+    values: list[float] = []
+    for item in items:
+        value = item.get(key)
+        if isinstance(value, int | float) and math.isfinite(float(value)):
+            values.append(float(value))
+    return values
+
+
+def _policy_b_top_family_summaries(step_diffs: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_family: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in step_diffs:
+        family = str(item["policy_b_top_action"].get("family", "unknown"))
+        by_family[family].append(item)
+
+    summaries: list[dict[str, Any]] = []
+    for family, family_items in sorted(by_family.items(), key=lambda item: (-len(item[1]), item[0])):
+        action_matches = np.asarray(
+            [bool(item["policy_a_matches_policy_b_top_action"]) for item in family_items],
+            dtype=np.float64,
+        )
+        family_matches = np.asarray(
+            [bool(item["policy_a_matches_policy_b_top_action_family"]) for item in family_items],
+            dtype=np.float64,
+        )
+        probabilities = np.asarray(
+            [float(item["policy_a_probability_on_policy_b_top_action"]) for item in family_items],
+            dtype=np.float64,
+        )
+        family_probabilities = np.asarray(
+            [float(item["policy_a_probability_on_policy_b_top_action_family"]) for item in family_items],
+            dtype=np.float64,
+        )
+        policy_b_top_action_legal_for_policy_a = np.asarray(
+            [bool(item.get("policy_b_top_action_legal_for_policy_a", True)) for item in family_items],
+            dtype=np.float64,
+        )
+        policy_a_surface_filtered = np.asarray(
+            [bool(item.get("policy_a_legal_surface_is_filtered", False)) for item in family_items],
+            dtype=np.float64,
+        )
+        policy_a_removed_counts = np.asarray(
+            [float(item.get("policy_a_legal_surface_removed_action_count", 0.0)) for item in family_items],
+            dtype=np.float64,
+        )
+        same_family_margins = _finite_float_values(
+            family_items,
+            "policy_a_policy_b_top_action_same_family_logit_margin",
+        )
+        summaries.append(
+            {
+                "family": family,
+                "count": len(family_items),
+                "policy_a_matches_policy_b_top_action_rate": float(np.mean(action_matches)),
+                "policy_a_matches_policy_b_top_action_family_rate": float(np.mean(family_matches)),
+                "policy_a_mean_probability_on_policy_b_top_action": float(np.mean(probabilities)),
+                "policy_a_mean_probability_on_policy_b_top_action_family": float(np.mean(family_probabilities)),
+                "policy_b_top_action_legal_for_policy_a_rate": float(np.mean(policy_b_top_action_legal_for_policy_a)),
+                "policy_a_legal_surface_filter_rate": float(np.mean(policy_a_surface_filtered)),
+                "policy_a_mean_raw_minus_policy_a_legal_action_count": float(np.mean(policy_a_removed_counts)),
+                "policy_a_probability_on_policy_b_top_action_percentiles": _percentile_summary(probabilities.tolist()),
+                "policy_a_policy_b_top_action_same_family_logit_margin_percentiles": _percentile_summary(
+                    same_family_margins
+                ),
+            }
+        )
+    return summaries
+
+
+def _percentile_summary(values: Sequence[float]) -> dict[str, float | int | None]:
+    finite_values = np.asarray([float(value) for value in values if math.isfinite(float(value))], dtype=np.float64)
+    if finite_values.size == 0:
+        return {"count": 0, "mean": None, "p10": None, "p25": None, "p50": None, "p75": None, "p90": None}
+    return {
+        "count": int(finite_values.size),
+        "mean": float(np.mean(finite_values)),
+        "p10": float(np.percentile(finite_values, 10)),
+        "p25": float(np.percentile(finite_values, 25)),
+        "p50": float(np.percentile(finite_values, 50)),
+        "p75": float(np.percentile(finite_values, 75)),
+        "p90": float(np.percentile(finite_values, 90)),
+    }
+
+
+def _mean_family_probability_masses(family_masses: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    totals: dict[str, float] = {}
+    count = 0
+    for masses in family_masses:
+        count += 1
+        for family, mass in masses.items():
+            family_name = str(family)
+            totals[family_name] = totals.get(family_name, 0.0) + float(mass)
+    if count == 0:
+        return []
+    return [
+        {"family": family, "mean_probability": float(total / count)}
+        for family, total in sorted(totals.items(), key=lambda item: (-item[1], item[0]))
+    ]
 
 
 def _top_step_diffs(step_diffs: Sequence[dict[str, Any]], *, top_k: int) -> list[dict[str, Any]]:
@@ -737,6 +1674,12 @@ def _format_policy_source(policy_report: Mapping[str, Any]) -> str:
     if isinstance(weights_path, str) and weights_path:
         return weights_path
     return str(policy_report.get("kind", "unknown"))
+
+
+def _format_optional_float(value: Any) -> str:
+    if not isinstance(value, int | float) or not math.isfinite(float(value)):
+        return "n/a"
+    return f"{float(value):.3f}"
 
 
 def _format_action_descriptor(payload: Mapping[str, Any]) -> str:

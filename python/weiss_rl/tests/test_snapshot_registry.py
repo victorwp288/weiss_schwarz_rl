@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -22,6 +23,7 @@ from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
 from weiss_rl.learners.impala_learner import ImpalaLearner
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.tests._config_paths import canonical_stack_config_path
+from weiss_rl.training.snapshots import demote_registry_champions_newer_than, seed_snapshot_policy_id
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -77,6 +79,27 @@ def _canonical_config_with_role(stack: Any, *, experiment_role: str) -> dict[str
     return config_canonical
 
 
+def test_seed_snapshot_policy_id_preserves_hash_input_and_sanitizes_policy_id() -> None:
+    source_run_dir = Path("relative") / "seed_run"
+
+    policy_id = seed_snapshot_policy_id(
+        source_run_dir=source_run_dir,
+        source_policy_id=" folder/policy\\000010 ",
+    )
+
+    assert policy_id == "seed_c3bd127559_folder_policy_000010"
+
+
+def test_train_seed_snapshot_policy_id_wrapper_matches_training_helper() -> None:
+    train_script = _load_train_script_module()
+    source_run_dir = Path("relative") / "seed_run"
+
+    assert train_script._seed_snapshot_policy_id(
+        source_run_dir=source_run_dir,
+        source_policy_id="policy/000020",
+    ) == seed_snapshot_policy_id(source_run_dir=source_run_dir, source_policy_id="policy/000020")
+
+
 def _legacy_config_with_training_mode(stack: Any, *, training_mode: str) -> dict[str, Any]:
     config_sections = dict(cast(dict[str, Any], canonical_config_dict(stack).get("config", {})))
     config_sections.pop("experiment", None)
@@ -93,9 +116,10 @@ def _write_b1_baseline_run_fixture(
     spec_hash256: str = "cd" * 32,
     experiment_role: str = "baseline_noleague",
     legacy_training_mode: str | None = None,
+    stack_path: Path | None = None,
 ) -> Path:
     train_script = _load_train_script_module()
-    stack = load_stack_config(canonical_stack_config_path())
+    stack = load_stack_config(stack_path or canonical_stack_config_path())
     run_dir = tmp_path / "b1_run"
     training_paths = train_script._training_paths(run_dir)
     checkpoint_path = training_paths.checkpoints_dir / f"checkpoint_{update}.pt"
@@ -110,6 +134,9 @@ def _write_b1_baseline_run_fixture(
         config_hash256=config_hash256,
         device=torch.device("cpu"),
         model_state_dict=_make_policy_value_model(stack).state_dict(),
+        structured_policy_contract=None
+        if stack.config.model is None
+        else stack.config.model.structured_policy_contract,
     )
     registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
     registry.add_snapshot(
@@ -139,13 +166,70 @@ def _write_b1_baseline_run_fixture(
     return run_dir
 
 
+def _mark_fixture_as_locked_selected_candidate(run_dir: Path, *, update: int) -> None:
+    registry_path = run_dir / "training" / "snapshots" / "registry.json"
+    registry = SnapshotRegistry.load(registry_path)
+    snapshot = next(entry for entry in registry.snapshots if entry.policy_id == "selected_candidate")
+    metadata_path = run_dir / "training" / "snapshots" / "selected_candidate" / "policy_meta.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "format": "selected_candidate_alias_metadata_v1",
+                "policy_id": "selected_candidate",
+                "alias_for_policy_id": f"policy_{update // 5:06d}",
+                "update": update,
+                "weights_path": snapshot_weights_relpath("selected_candidate"),
+                "weights_sha256": snapshot.weights_sha256,
+                "source_weights_path": f"training/snapshots/policy_{update // 5:06d}/weights.pt",
+                "selection_summary": {
+                    "selected": {
+                        "snapshot_policy_id": f"policy_{update // 5:06d}",
+                        "update_count": update,
+                        "selection_score_source": "targeted_confirm",
+                    },
+                    "required_anchors": [
+                        "B2 HeuristicPublic",
+                        "B3 HeuristicPublicAggro",
+                        "B4 HeuristicPublicControl",
+                    ],
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "paper_readiness_summary.json").write_text(
+        json.dumps(
+            {
+                "passed": True,
+                "alarms": [],
+                "checks": {
+                    "baseline_win_rate_vs_b0": {
+                        "passed": True,
+                        "focal_policy_id": "selected_candidate",
+                        "baseline_policy_id": "B0 RandomLegal",
+                    }
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _write_seed_snapshot_run_fixture(
     tmp_path: Path,
     *,
     updates: tuple[int, ...] = (10, 20),
     champion_updates: tuple[int, ...] = (20,),
+    pinned_policy_ids: tuple[str, ...] = (),
     config_hash256: str = "ab" * 32,
     spec_hash256: str = "cd" * 32,
+    experiment_role: str = "main",
 ) -> Path:
     train_script = _load_train_script_module()
     stack = load_stack_config(canonical_stack_config_path())
@@ -174,10 +258,12 @@ def _write_seed_snapshot_run_fixture(
         )
     for update in champion_updates:
         registry.add_champion(f"policy_{update:06d}")
+    for policy_id in pinned_policy_ids:
+        registry.pin_snapshot(policy_id)
     registry.save(training_paths.snapshots_dir / "registry.json")
     (run_dir / "config_hash256.txt").write_text(f"{config_hash256}\n", encoding="utf-8")
     (run_dir / "spec_hash256.txt").write_text(f"{spec_hash256}\n", encoding="utf-8")
-    config_canonical = _canonical_config_with_role(stack, experiment_role="main")
+    config_canonical = _canonical_config_with_role(stack, experiment_role=experiment_role)
     (run_dir / "manifest.json").write_text(
         json.dumps({"config_canonical": config_canonical}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -514,6 +600,7 @@ def test_ensure_noleague_baseline_anchor_imports_frozen_snapshot_once(tmp_path: 
     assert snapshot.update == 5
     assert weights_path.is_file()
     assert snapshot.weights_sha256 == train_script._sha256_file(weights_path)
+    source_weights_sha256 = train_script._sha256_file(baseline_run_dir / snapshot_weights_relpath(policy_id))
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata == {
@@ -521,6 +608,7 @@ def test_ensure_noleague_baseline_anchor_imports_frozen_snapshot_once(tmp_path: 
         "imported_from_policy_id": policy_id,
         "imported_from_run_dir": baseline_run_dir.resolve().as_posix(),
         "imported_from_snapshot_path": snapshot_weights_relpath(policy_id),
+        "imported_from_weights_sha256": source_weights_sha256,
         "policy_id": policy_id,
         "update": 5,
         "weights_path": snapshot_weights_relpath(policy_id),
@@ -533,6 +621,7 @@ def test_ensure_noleague_baseline_anchor_imports_frozen_snapshot_once(tmp_path: 
     assert payload["imported_from_run_dir"] == baseline_run_dir.resolve().as_posix()
     assert payload["imported_from_policy_id"] == policy_id
     assert payload["imported_from_snapshot_path"] == snapshot_weights_relpath(policy_id)
+    assert payload["imported_from_weights_sha256"] == source_weights_sha256
 
     second_policy_id = train_script._ensure_noleague_baseline_anchor(
         stack=stack,
@@ -550,6 +639,121 @@ def test_ensure_noleague_baseline_anchor_imports_frozen_snapshot_once(tmp_path: 
     assert reloaded.champion_snapshots == []
     assert reloaded.pinned_snapshots == [policy_id]
     assert reloaded.snapshots[0].weights_sha256 == snapshot.weights_sha256
+
+
+def test_ensure_noleague_baseline_anchor_imports_locked_selected_candidate(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    selected_run_dir = _write_b1_baseline_run_fixture(
+        tmp_path,
+        update=15,
+        policy_id="selected_candidate",
+        experiment_role="guided_league_bootstrap",
+    )
+    _mark_fixture_as_locked_selected_candidate(selected_run_dir, update=15)
+
+    run_dir = tmp_path / "consumer_selected_run"
+    training_paths = train_script._training_paths(run_dir)
+    policy_id = train_script._ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        learner=SimpleNamespace(
+            model=_make_policy_value_model(stack),
+            update_count=0,
+            optimizer=None,
+            get_policy_version=lambda: 0,
+        ),
+        device=torch.device("cpu"),
+        config_hash256="ab" * 32,
+        baseline_run_dir=selected_run_dir,
+    )
+
+    assert policy_id == "b1_noleague_baseline"
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    snapshot = next(entry for entry in registry.snapshots if entry.policy_id == policy_id)
+    assert snapshot.update == 15
+    payload = torch.load(run_dir / snapshot_weights_relpath(policy_id), map_location="cpu", weights_only=True)
+    assert payload["imported_from_policy_id"] == "selected_candidate"
+    assert payload["imported_from_run_dir"] == selected_run_dir.resolve().as_posix()
+    assert payload["imported_from_weights_sha256"] == train_script._sha256_file(
+        selected_run_dir / snapshot_weights_relpath("selected_candidate")
+    )
+
+
+def test_ensure_noleague_baseline_anchor_rejects_unlocked_selected_candidate(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    selected_run_dir = _write_b1_baseline_run_fixture(
+        tmp_path,
+        update=15,
+        policy_id="selected_candidate",
+        experiment_role="guided_league_bootstrap",
+    )
+
+    with pytest.raises(FileNotFoundError, match="canonical B1 no-league baseline snapshot"):
+        train_script._ensure_noleague_baseline_anchor(
+            stack=stack,
+            training_paths=train_script._training_paths(tmp_path / "consumer_unlocked_selected_run"),
+            run_dir=tmp_path / "consumer_unlocked_selected_run",
+            learner=SimpleNamespace(
+                model=_make_policy_value_model(stack),
+                update_count=0,
+                optimizer=None,
+                get_policy_version=lambda: 0,
+            ),
+            device=torch.device("cpu"),
+            config_hash256="ab" * 32,
+            baseline_run_dir=selected_run_dir,
+        )
+
+
+def test_ensure_noleague_baseline_anchor_imports_explicit_b1_run_when_required_by_main_gate(
+    tmp_path: Path,
+) -> None:
+    train_script = _load_train_script_module()
+    stack_path = (
+        REPO_ROOT
+        / "configs"
+        / "thesis"
+        / ("main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml")
+    )
+    stack = load_stack_config(stack_path)
+    assert "B1 NoLeague baseline" in stack.config.league.promotion_anchor_set_v1.required
+    selected_run_dir = _write_b1_baseline_run_fixture(
+        tmp_path,
+        update=15,
+        policy_id="selected_candidate",
+        experiment_role="guided_league_bootstrap",
+        stack_path=stack_path,
+    )
+    _mark_fixture_as_locked_selected_candidate(selected_run_dir, update=15)
+
+    run_dir = tmp_path / "consumer_optional_b1_run"
+    training_paths = train_script._training_paths(run_dir)
+    policy_id = train_script._ensure_noleague_baseline_anchor(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=run_dir,
+        learner=SimpleNamespace(
+            model=_make_policy_value_model(stack),
+            update_count=0,
+            optimizer=None,
+            get_policy_version=lambda: 0,
+        ),
+        device=torch.device("cpu"),
+        config_hash256="ab" * 32,
+        baseline_run_dir=selected_run_dir,
+    )
+
+    assert policy_id == "b1_noleague_baseline"
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    assert registry.pinned_snapshots == [policy_id]
+    payload = torch.load(run_dir / snapshot_weights_relpath(policy_id), map_location="cpu", weights_only=True)
+    assert payload["imported_from_policy_id"] == "selected_candidate"
+    assert payload["imported_from_weights_sha256"] == train_script._sha256_file(
+        selected_run_dir / snapshot_weights_relpath("selected_candidate")
+    )
 
 
 def test_ensure_noleague_baseline_anchor_refreshes_current_run_alias_to_latest_update(tmp_path: Path) -> None:
@@ -707,6 +911,7 @@ def test_import_seed_snapshot_pool_imports_external_snapshots_and_champions(tmp_
 
     registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
     assert [snapshot.policy_id for snapshot in registry.snapshots] == expected_policy_ids
+    assert [snapshot.update for snapshot in registry.snapshots] == [0, 0]
     assert registry.champion_snapshots == [expected_policy_ids[-1]]
 
     weights_path = consumer_run_dir / snapshot_weights_relpath(expected_policy_ids[-1])
@@ -715,8 +920,186 @@ def test_import_seed_snapshot_pool_imports_external_snapshots_and_champions(tmp_
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata["format"] == "seeded_train_snapshot_metadata_v1"
     assert metadata["policy_id"] == expected_policy_ids[-1]
+    assert metadata["update"] == 0
+    assert metadata["imported_from_update"] == 20
     assert metadata["imported_from_run_dir"] == seed_run_dir.resolve().as_posix()
     assert metadata["imported_from_policy_id"] == "policy_000020"
+
+
+def test_import_seed_snapshot_pool_can_mark_all_seed_snapshots_as_training_champions(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    assert stack.config.league is not None
+    pool = replace(stack.config.league.pool, seed_snapshot_champion_import="all")
+    league = replace(stack.config.league, pool=pool)
+    stack = replace(stack, config=replace(stack.config, league=league))
+    seed_run_dir = _write_seed_snapshot_run_fixture(tmp_path, champion_updates=())
+    consumer_run_dir = tmp_path / "consumer_run_seedchampions"
+    training_paths = train_script._training_paths(consumer_run_dir)
+    bootstrap_learner = SimpleNamespace(
+        model=_make_policy_value_model(stack),
+        update_count=0,
+        optimizer=None,
+        get_policy_version=lambda: 0,
+    )
+
+    imported_policy_ids = train_script._import_seed_snapshot_pool(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=consumer_run_dir,
+        seed_snapshot_run_dir=seed_run_dir,
+        expected_model_state_dict=bootstrap_learner.model.state_dict(),
+        expected_config_canonical=canonical_config_dict(stack),
+        expected_spec_hash256="cd" * 32,
+    )
+
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    assert imported_policy_ids
+    assert registry.champion_snapshots == imported_policy_ids
+
+
+def test_import_seed_snapshot_pool_can_mark_pinned_seed_snapshots_as_training_champions(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    assert stack.config.league is not None
+    pool = replace(stack.config.league.pool, seed_snapshot_champion_import="pinned")
+    league = replace(stack.config.league, pool=pool)
+    stack = replace(stack, config=replace(stack.config, league=league))
+    seed_run_dir = _write_seed_snapshot_run_fixture(
+        tmp_path,
+        updates=(10, 20, 30),
+        champion_updates=(),
+        pinned_policy_ids=("policy_000020",),
+    )
+    consumer_run_dir = tmp_path / "consumer_run_pinned_seedchampions"
+    training_paths = train_script._training_paths(consumer_run_dir)
+    bootstrap_learner = SimpleNamespace(
+        model=_make_policy_value_model(stack),
+        update_count=0,
+        optimizer=None,
+        get_policy_version=lambda: 0,
+    )
+
+    imported_policy_ids = train_script._import_seed_snapshot_pool(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=consumer_run_dir,
+        seed_snapshot_run_dir=seed_run_dir,
+        expected_model_state_dict=bootstrap_learner.model.state_dict(),
+        expected_config_canonical=canonical_config_dict(stack),
+        expected_spec_hash256="cd" * 32,
+    )
+
+    expected_champion = train_script._seed_snapshot_policy_id(
+        source_run_dir=seed_run_dir.resolve(),
+        source_policy_id="policy_000020",
+    )
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    assert len(imported_policy_ids) == 3
+    assert registry.champion_snapshots == [expected_champion]
+
+
+def test_import_seed_snapshot_pool_can_import_only_pinned_seed_snapshots(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    assert stack.config.league is not None
+    pool = replace(
+        stack.config.league.pool,
+        seed_snapshot_champion_import="pinned",
+        seed_snapshot_import_filter="pinned",
+    )
+    league = replace(stack.config.league, pool=pool)
+    stack = replace(stack, config=replace(stack.config, league=league))
+    seed_run_dir = _write_seed_snapshot_run_fixture(
+        tmp_path,
+        updates=(10, 20, 30),
+        champion_updates=(),
+        pinned_policy_ids=("policy_000020",),
+    )
+    consumer_run_dir = tmp_path / "consumer_run_pinned_seed_filter"
+    training_paths = train_script._training_paths(consumer_run_dir)
+
+    imported_policy_ids = train_script._import_seed_snapshot_pool(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=consumer_run_dir,
+        seed_snapshot_run_dir=seed_run_dir,
+        expected_model_state_dict=_make_policy_value_model(stack).state_dict(),
+        expected_config_canonical=canonical_config_dict(stack),
+        expected_spec_hash256="cd" * 32,
+    )
+
+    expected_policy_id = train_script._seed_snapshot_policy_id(
+        source_run_dir=seed_run_dir.resolve(),
+        source_policy_id="policy_000020",
+    )
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    assert imported_policy_ids == [expected_policy_id]
+    assert [snapshot.policy_id for snapshot in registry.snapshots] == [expected_policy_id]
+    assert registry.champion_snapshots == [expected_policy_id]
+
+
+def test_import_seed_snapshot_pool_can_use_explicit_registry_json(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    assert stack.config.league is not None
+    seed_run_dir = _write_seed_snapshot_run_fixture(tmp_path, updates=(10, 20, 30), champion_updates=(20,))
+    source_registry = SnapshotRegistry.load(seed_run_dir / "training" / "snapshots" / "registry.json")
+    source_registry.champion_snapshots = ["policy_000030"]
+    explicit_registry = seed_run_dir / "training" / "snapshots" / "registry_explicit_champions.json"
+    source_registry.save(explicit_registry)
+    pool = replace(
+        stack.config.league.pool,
+        seed_snapshot_import_filter="source_champions",
+        seed_snapshot_registry_json=explicit_registry.as_posix(),
+    )
+    league = replace(stack.config.league, pool=pool)
+    stack = replace(stack, config=replace(stack.config, league=league))
+    consumer_run_dir = tmp_path / "consumer_run_explicit_registry"
+    training_paths = train_script._training_paths(consumer_run_dir)
+
+    imported_policy_ids = train_script._import_seed_snapshot_pool(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=consumer_run_dir,
+        seed_snapshot_run_dir=seed_run_dir,
+        expected_model_state_dict=_make_policy_value_model(stack).state_dict(),
+        expected_config_canonical=canonical_config_dict(stack),
+        expected_spec_hash256="cd" * 32,
+    )
+
+    expected_policy_id = train_script._seed_snapshot_policy_id(
+        source_run_dir=seed_run_dir.resolve(),
+        source_policy_id="policy_000030",
+    )
+    registry = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    assert imported_policy_ids == [expected_policy_id]
+    assert [snapshot.policy_id for snapshot in registry.snapshots] == [expected_policy_id]
+    assert registry.champion_snapshots == [expected_policy_id]
+
+
+def test_import_seed_snapshot_pool_accepts_guided_bootstrap_source_role(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    seed_run_dir = _write_seed_snapshot_run_fixture(
+        tmp_path,
+        champion_updates=(),
+        experiment_role="guided_league_bootstrap",
+    )
+    consumer_run_dir = tmp_path / "consumer_run_guided_bootstrap_seed"
+    training_paths = train_script._training_paths(consumer_run_dir)
+
+    imported_policy_ids = train_script._import_seed_snapshot_pool(
+        stack=stack,
+        training_paths=training_paths,
+        run_dir=consumer_run_dir,
+        seed_snapshot_run_dir=seed_run_dir,
+        expected_model_state_dict=_make_policy_value_model(stack).state_dict(),
+        expected_config_canonical=canonical_config_dict(stack),
+        expected_spec_hash256="cd" * 32,
+    )
+
+    assert len(imported_policy_ids) == 2
 
 
 def test_import_seed_snapshot_pool_rejects_environment_mismatch(tmp_path: Path) -> None:
@@ -737,6 +1120,23 @@ def test_import_seed_snapshot_pool_rejects_environment_mismatch(tmp_path: Path) 
             stack=stack,
             training_paths=train_script._training_paths(tmp_path / "consumer_run_seed_env_mismatch"),
             run_dir=tmp_path / "consumer_run_seed_env_mismatch",
+            seed_snapshot_run_dir=seed_run_dir,
+            expected_model_state_dict=_make_policy_value_model(stack).state_dict(),
+            expected_config_canonical=canonical_config_dict(stack),
+            expected_spec_hash256="cd" * 32,
+        )
+
+
+def test_import_seed_snapshot_pool_rejects_strict_b1_baseline_role(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    seed_run_dir = _write_seed_snapshot_run_fixture(tmp_path, experiment_role="baseline_noleague")
+
+    with pytest.raises(RuntimeError, match="Use --b1-baseline-run-dir for the strict B1 baseline"):
+        train_script._import_seed_snapshot_pool(
+            stack=stack,
+            training_paths=train_script._training_paths(tmp_path / "consumer_run_seed_role_mismatch"),
+            run_dir=tmp_path / "consumer_run_seed_role_mismatch",
             seed_snapshot_run_dir=seed_run_dir,
             expected_model_state_dict=_make_policy_value_model(stack).state_dict(),
             expected_config_canonical=canonical_config_dict(stack),
@@ -877,9 +1277,9 @@ def test_run_snapshot_promotion_gate_marks_passed_candidate_as_champion(tmp_path
         training_paths=training_paths,
         learner=SimpleNamespace(model=learner_model),
         candidate_policy_id=candidate_policy_id,
-        update_count=int(stack.config.league.warmup.first_updates),
-        league_reference_update=int(stack.config.league.warmup.first_updates),
-        policy_version=int(stack.config.league.warmup.first_updates),
+        update_count=int(cast(Any, stack.config.league).warmup.first_updates),
+        league_reference_update=int(cast(Any, stack.config.league).warmup.first_updates),
+        policy_version=int(cast(Any, stack.config.league).warmup.first_updates),
         run_id256="12" * 32,
         config_hash256="34" * 32,
         spec_hash256="56" * 32,
@@ -940,8 +1340,8 @@ def test_run_snapshot_promotion_gate_skips_during_warmup(tmp_path: Path, monkeyp
         training_paths=training_paths,
         learner=SimpleNamespace(model=learner_model),
         candidate_policy_id=candidate_policy_id,
-        update_count=int(stack.config.league.warmup.first_updates) - 1,
-        league_reference_update=int(stack.config.league.warmup.first_updates) - 1,
+        update_count=int(cast(Any, stack.config.league).warmup.first_updates) - 1,
+        league_reference_update=int(cast(Any, stack.config.league).warmup.first_updates) - 1,
         policy_version=7,
         run_id256="12" * 32,
         config_hash256="34" * 32,
@@ -1003,8 +1403,8 @@ def test_run_snapshot_promotion_gate_uses_effective_update_for_warmup(tmp_path: 
         training_paths=training_paths,
         learner=SimpleNamespace(model=learner_model),
         candidate_policy_id=candidate_policy_id,
-        update_count=int(stack.config.league.warmup.first_updates) + 20,
-        league_reference_update=int(stack.config.league.warmup.first_updates) - 20,
+        update_count=int(cast(Any, stack.config.league).warmup.first_updates) + 20,
+        league_reference_update=int(cast(Any, stack.config.league).warmup.first_updates) - 20,
         policy_version=220,
         run_id256="12" * 32,
         config_hash256="34" * 32,
@@ -1020,6 +1420,12 @@ def test_checkpoint_aliases_track_latest_and_best_and_restore_resume_state(tmp_p
     run_dir = tmp_path / "run"
     training_paths = train_script._training_paths(run_dir)
     artifacts = train_script._run_artifacts_from_existing_run_dir(run_dir)
+    alias_stack = SimpleNamespace(
+        config=SimpleNamespace(
+            curriculum=stack.config.curriculum,
+            evaluation=SimpleNamespace(periodic_dev_eval_interval_updates=25),
+        )
+    )
 
     learner = ImpalaLearner(
         model=_make_policy_value_model(stack),
@@ -1042,7 +1448,7 @@ def test_checkpoint_aliases_track_latest_and_best_and_restore_resume_state(tmp_p
     )
 
     tracker = train_script._publish_checkpoint_aliases(
-        stack=stack,
+        stack=alias_stack,
         training_paths=training_paths,
         artifacts=artifacts,
         checkpoint_path=checkpoint_path,
@@ -1050,9 +1456,9 @@ def test_checkpoint_aliases_track_latest_and_best_and_restore_resume_state(tmp_p
         latest_metrics={"loss": 1.25},
     )
     assert training_paths.latest_checkpoint_path.is_file()
-    assert training_paths.best_checkpoint_path.is_file()
-    assert tracker["latest"]["metric_kind"] == "training_loss"
-    assert tracker["best"]["metric_kind"] == "training_loss"
+    assert not training_paths.best_checkpoint_path.is_file()
+    assert tracker["latest"]["metric_kind"] is None
+    assert tracker["best"] is None
 
     learner.update_count = 4
     learner.policy_version = 3
@@ -1067,7 +1473,7 @@ def test_checkpoint_aliases_track_latest_and_best_and_restore_resume_state(tmp_p
         algorithm="impala_vtrace_gru",
     )
     tracker = train_script._publish_checkpoint_aliases(
-        stack=stack,
+        stack=alias_stack,
         training_paths=training_paths,
         artifacts=artifacts,
         checkpoint_path=second_checkpoint_path,
@@ -1119,7 +1525,295 @@ def test_checkpoint_aliases_track_latest_and_best_and_restore_resume_state(tmp_p
     assert restored_learner.start_time == preserved_start_time
 
 
-def test_finalize_from_best_checkpoint_rewrites_latest_alias(tmp_path: Path) -> None:
+def test_write_checkpoint_payload_shape_is_stable(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    training_paths = train_script._training_paths(tmp_path / "run")
+    learner = ImpalaLearner(
+        model=_make_policy_value_model(stack),
+        checkpoint_dir=training_paths.checkpoints_dir,
+        logs_dir=training_paths.logs_dir,
+        pass_action_id=0,
+    )
+    learner._optimizer_for_step()
+    learner.update_count = 9
+    learner.policy_version = 4
+    learner.total_samples_processed = 288
+    checkpoint_path = training_paths.checkpoints_dir / "checkpoint_9.pt"
+
+    payload = train_script._write_checkpoint(
+        checkpoint_path=checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+
+    expected_keys = {
+        "algorithm",
+        "config_hash256",
+        "device",
+        "format",
+        "grad_scaler_state_dict",
+        "init_schedule_offset_updates",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "policy_anchor_model_state_dict",
+        "policy_version",
+        "public_heuristic_actor_logit_bias_scale",
+        "public_heuristic_logit_bias_scale",
+        "recurrent_core",
+        "spec_hash256",
+        "total_samples_processed",
+        "update_count",
+    }
+    assert set(payload) == expected_keys
+    assert payload["format"] == "minimal_train_checkpoint_v1"
+    assert payload["update_count"] == 9
+    assert payload["policy_version"] == 4
+    assert payload["total_samples_processed"] == 288
+    assert payload["device"] == "cpu"
+    assert payload["spec_hash256"] == "ab" * 32
+    assert payload["algorithm"] == "impala_vtrace_gru"
+    assert isinstance(payload["model_state_dict"], dict)
+    assert isinstance(payload["optimizer_state_dict"], dict)
+    assert checkpoint_path.is_file()
+
+
+def _write_restore_checkpoint_fixture(
+    tmp_path: Path,
+) -> tuple[ModuleType, Any, Path, ImpalaLearner]:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(canonical_stack_config_path())
+    training_paths = train_script._training_paths(tmp_path / "run")
+
+    learner = ImpalaLearner(
+        model=_make_policy_value_model(stack),
+        checkpoint_dir=training_paths.checkpoints_dir,
+        logs_dir=training_paths.logs_dir,
+        pass_action_id=0,
+    )
+    learner._optimizer_for_step()
+    checkpoint_path = training_paths.checkpoints_dir / "checkpoint_bad.pt"
+    train_script._write_checkpoint(
+        checkpoint_path=checkpoint_path,
+        learner=learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+    restore_learner = ImpalaLearner(
+        model=_make_policy_value_model(stack),
+        checkpoint_dir=training_paths.checkpoints_dir,
+        logs_dir=training_paths.logs_dir,
+        pass_action_id=0,
+    )
+    return train_script, stack, checkpoint_path, restore_learner
+
+
+@pytest.mark.parametrize(
+    ("case_name", "match"),
+    [
+        ("non_dict_payload", "checkpoint payload must be a dict"),
+        ("unsupported_format", "unsupported checkpoint format"),
+        ("config_hash_mismatch", "checkpoint config hash mismatch"),
+        ("spec_hash_mismatch", "checkpoint spec hash mismatch"),
+        ("algorithm_mismatch", "checkpoint algorithm mismatch"),
+        ("missing_model_state_dict", "checkpoint is missing a model_state_dict"),
+    ],
+)
+def test_restore_checkpoint_rejects_invalid_payload_contracts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case_name: str,
+    match: str,
+) -> None:
+    train_script, stack, checkpoint_path, restore_learner = _write_restore_checkpoint_fixture(tmp_path)
+    monkeypatch.delenv("WEISS_RL_ALLOW_RESUME_CONFIG_MISMATCH", raising=False)
+
+    if case_name == "non_dict_payload":
+        torch.save(["not", "a", "dict"], checkpoint_path)
+    else:
+        payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        assert isinstance(payload, dict)
+        if case_name == "unsupported_format":
+            payload["format"] = "future_checkpoint_v999"
+        elif case_name == "config_hash_mismatch":
+            payload["config_hash256"] = "00" * 32
+        elif case_name == "spec_hash_mismatch":
+            payload["spec_hash256"] = "cd" * 32
+        elif case_name == "algorithm_mismatch":
+            payload["algorithm"] = "different_algorithm"
+        elif case_name == "missing_model_state_dict":
+            payload.pop("model_state_dict", None)
+        else:
+            raise AssertionError(f"unhandled case: {case_name}")
+        torch.save(payload, checkpoint_path)
+
+    with pytest.raises(RuntimeError, match=match):
+        train_script._restore_learner_from_checkpoint(
+            checkpoint_path=checkpoint_path,
+            learner=restore_learner,
+            stack=stack,
+            device=torch.device("cpu"),
+            expected_spec_hash256="ab" * 32,
+            algorithm="impala_vtrace_gru",
+        )
+
+
+def test_restore_checkpoint_allows_config_hash_mismatch_only_with_escape_hatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    train_script, stack, checkpoint_path, restore_learner = _write_restore_checkpoint_fixture(tmp_path)
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    assert isinstance(payload, dict)
+    payload["config_hash256"] = "00" * 32
+    torch.save(payload, checkpoint_path)
+
+    monkeypatch.setenv("WEISS_RL_ALLOW_RESUME_CONFIG_MISMATCH", "1")
+    resume_state = train_script._restore_learner_from_checkpoint(
+        checkpoint_path=checkpoint_path,
+        learner=restore_learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        expected_spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+
+    assert resume_state.checkpoint_path == checkpoint_path.resolve()
+
+
+def test_rollback_to_best_checkpoint_preserves_latest_alias_and_logs_event(tmp_path: Path) -> None:
+    train_script = _load_train_script_module()
+    stack = load_stack_config(REPO_ROOT / "configs" / "presets" / "typed_local.yaml")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    artifacts = SimpleNamespace(run_dir=run_dir)
+    training_paths = train_script._training_paths(run_dir)
+    learner = ImpalaLearner(
+        model=_make_policy_value_model(stack),
+        checkpoint_dir=training_paths.checkpoints_dir,
+        logs_dir=training_paths.logs_dir,
+        pass_action_id=0,
+    )
+    learner._optimizer_for_step()
+
+    learner.update_count = 160
+    learner.policy_version = 8
+    learner.total_samples_processed = 5120
+    best_checkpoint = training_paths.checkpoints_dir / "checkpoint_160.pt"
+    train_script._write_checkpoint(
+        checkpoint_path=best_checkpoint,
+        learner=learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+    train_script._publish_checkpoint_aliases(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        checkpoint_path=best_checkpoint,
+        learner=learner,
+        latest_metrics={"loss": 0.5},
+        dev_eval_summary={"aggregate_score": 0.65625, "stall_monitor": {"worst_truncation_rate": 0.0}},
+    )
+
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="policy_000160",
+        update=160,
+        weights_sha256="8" * 64,
+        path="training/snapshots/policy_000160/weights.pt",
+    )
+    registry.add_snapshot(
+        policy_id="policy_000220",
+        update=220,
+        weights_sha256="1" * 64,
+        path="training/snapshots/policy_000220/weights.pt",
+    )
+    registry.add_champion("policy_000160")
+    registry.add_champion("policy_000220")
+    registry.save(training_paths.snapshots_dir / "registry.json")
+
+    learner.update_count = 220
+    learner.policy_version = 11
+    learner.total_samples_processed = 7040
+    current_checkpoint = training_paths.checkpoints_dir / "checkpoint_220.pt"
+    train_script._write_checkpoint(
+        checkpoint_path=current_checkpoint,
+        learner=learner,
+        stack=stack,
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+    )
+    train_script._publish_checkpoint_aliases(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        checkpoint_path=current_checkpoint,
+        learner=learner,
+        latest_metrics={"loss": 0.1},
+        dev_eval_summary={"aggregate_score": 0.48, "stall_monitor": {"worst_truncation_rate": 0.0}},
+    )
+    latest_before_rollback = train_script._load_checkpoint_tracker(training_paths)["latest"]
+
+    runtime = SimpleNamespace(reset_count=0, refresh_count=0, publish_calls=[])
+    runtime.reset_outcome_tracker = lambda: setattr(runtime, "reset_count", runtime.reset_count + 1)
+    runtime.refresh_opponent_pool = lambda: setattr(runtime, "refresh_count", runtime.refresh_count + 1)
+
+    def _publish_snapshot(**kwargs: object) -> dict[str, float]:
+        runtime.publish_calls.append(kwargs)
+        return {"snapshot_publish_latency_ms": 1.25, "snapshot_apply_latency_ms": 2.5}
+
+    runtime.maybe_publish_snapshot = _publish_snapshot
+
+    event = train_script._maybe_rollback_to_best_checkpoint(
+        stack=stack,
+        training_paths=training_paths,
+        artifacts=artifacts,
+        runtime=runtime,
+        learner=learner,
+        model=cast(PolicyValueModel, learner.model),
+        device=torch.device("cpu"),
+        spec_hash256="ab" * 32,
+        algorithm="impala_vtrace_gru",
+        latest_metrics={"loss": 0.1},
+        dev_eval_summary={"aggregate_score": 0.48, "stall_monitor": {"worst_truncation_rate": 0.0}},
+        last_rollback_update=None,
+    )
+
+    assert event is not None
+    assert event["action"] == "rollback_to_best"
+    assert event["reasons"] == ["score_drop"]
+    assert event["best_update_count"] == 160
+    assert event["demoted_champions"] == ["policy_000220"]
+    assert runtime.reset_count == 1
+    assert runtime.refresh_count == 1
+    assert len(runtime.publish_calls) == 1
+    tracker = train_script._load_checkpoint_tracker(training_paths)
+    assert tracker["latest"] == latest_before_rollback
+    assert tracker["latest"]["metric_kind"] == "dev_eval_mean"
+    assert tracker["latest"]["metric_value"] == pytest.approx(0.48)
+    assert tracker["latest"]["source_checkpoint_path"].endswith("training/checkpoints/checkpoint_220.pt")
+    assert tracker["latest"]["update_count"] == 220
+    assert tracker["latest"]["policy_version"] == 11
+    assert training_paths.latest_checkpoint_path.read_bytes() != training_paths.best_checkpoint_path.read_bytes()
+    assert training_paths.latest_checkpoint_path.read_bytes() == current_checkpoint.read_bytes()
+    reloaded = SnapshotRegistry.load(training_paths.snapshots_dir / "registry.json")
+    assert reloaded.champion_snapshots == ["policy_000160"]
+    log_event = json.loads((training_paths.logs_dir / "checkpoint_guard.jsonl").read_text(encoding="utf-8"))
+    assert log_event["action"] == "rollback_to_best"
+    assert log_event["rolled_back_checkpoint_path"].endswith("training/checkpoints/best.pt")
+    assert log_event["demoted_champions"] == ["policy_000220"]
+
+
+def test_finalize_from_best_checkpoint_keeps_latest_alias_chronological(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
     stack = load_stack_config(REPO_ROOT / "configs" / "presets" / "typed_local.yaml")
     run_dir = tmp_path / "run"
@@ -1204,8 +1898,12 @@ def test_finalize_from_best_checkpoint_rewrites_latest_alias(tmp_path: Path) -> 
     assert runtime.refresh_count == 1
     tracker = train_script._load_checkpoint_tracker(training_paths)
     assert tracker["latest"]["metric_kind"] == "dev_eval_mean"
-    assert tracker["latest"]["metric_value"] == pytest.approx(0.65625)
-    assert tracker["latest"]["source_checkpoint_path"].endswith("training/checkpoints/best.pt")
+    assert tracker["latest"]["metric_value"] == pytest.approx(0.28125)
+    assert tracker["latest"]["source_checkpoint_path"].endswith("training/checkpoints/checkpoint_220.pt")
+    assert tracker["latest"]["update_count"] == 220
+    assert tracker["latest"]["policy_version"] == 11
+    assert training_paths.latest_checkpoint_path.read_bytes() == current_checkpoint.read_bytes()
+    assert training_paths.latest_checkpoint_path.read_bytes() != training_paths.best_checkpoint_path.read_bytes()
 
 
 def test_demote_registry_champions_newer_than_removes_newer_refs_only(tmp_path: Path) -> None:
@@ -1229,6 +1927,36 @@ def test_demote_registry_champions_newer_than_removes_newer_refs_only(tmp_path: 
 
     assert removed == ["policy_000120"]
     assert registry.champion_snapshots == ["policy_000080"]
+
+
+def test_demote_registry_champions_newer_than_updates_registry_file(tmp_path: Path) -> None:
+    snapshots_dir = tmp_path / "training" / "snapshots"
+    snapshots_dir.mkdir(parents=True)
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="policy_000080",
+        update=80,
+        weights_sha256="8" * 64,
+        path="training/snapshots/policy_000080/weights.pt",
+    )
+    registry.add_snapshot(
+        policy_id="policy_000120",
+        update=120,
+        weights_sha256="1" * 64,
+        path="training/snapshots/policy_000120/weights.pt",
+    )
+    registry.add_champion("policy_000080")
+    registry.add_champion("policy_000120")
+    registry.save(snapshots_dir / "registry.json")
+
+    removed = demote_registry_champions_newer_than(
+        SimpleNamespace(snapshots_dir=snapshots_dir),
+        update_count=80,
+    )
+
+    assert removed == ["policy_000120"]
+    reloaded = SnapshotRegistry.load(snapshots_dir / "registry.json")
+    assert reloaded.champion_snapshots == ["policy_000080"]
 
 
 def test_demote_stale_champions_removes_old_refs_only() -> None:
@@ -1256,10 +1984,14 @@ def test_demote_stale_champions_removes_old_refs_only() -> None:
 
 def test_resolve_resume_checkpoint_path_defaults_to_latest_alias(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
+    from weiss_rl.training.checkpoints import resolve_resume_checkpoint_path
+
     run_dir = tmp_path / "resume_run"
     latest_path = run_dir / "training" / "checkpoints" / "latest.pt"
+    observed_best_path = run_dir / "training" / "checkpoints" / "observed_best.pt"
     latest_path.parent.mkdir(parents=True, exist_ok=True)
     latest_path.write_bytes(b"checkpoint")
+    observed_best_path.write_bytes(b"observed")
 
     resolved = train_script._resolve_resume_checkpoint_path(
         resume_from="",
@@ -1267,6 +1999,18 @@ def test_resolve_resume_checkpoint_path_defaults_to_latest_alias(tmp_path: Path)
     )
 
     assert resolved == latest_path.resolve()
+    assert resolve_resume_checkpoint_path(resume_from="", resume_run_dir=run_dir) == latest_path.resolve()
+    assert (
+        train_script._resolve_resume_checkpoint_path(
+            resume_from="observed_best",
+            resume_run_dir=run_dir,
+        )
+        == observed_best_path.resolve()
+    )
+    assert (
+        resolve_resume_checkpoint_path(resume_from="observed_best", resume_run_dir=run_dir)
+        == observed_best_path.resolve()
+    )
 
 
 def test_periodic_dev_eval_runner_resets_env_with_scheduled_episode_seed(tmp_path: Path, monkeypatch) -> None:
@@ -1435,9 +2179,12 @@ def test_periodic_dev_eval_runner_uses_learner_scoring_mode(tmp_path: Path, monk
         focal_seat=0,
     )
 
-    runner.run_game(scheduled_game)
+    result = runner.run_game(scheduled_game)
 
     assert model.scoring_modes == ["learner"]
+    assert result.total_actions == 1
+    assert result.pass_actions == 1
+    assert result.pass_with_nonpass_available == 0
     assert env.closed is True
 
 
@@ -1686,12 +2433,12 @@ def test_simulator_eval_runner_uses_learner_scoring_mode(tmp_path: Path, monkeyp
     layout = ArtifactLayout.from_run_dir(tmp_path)
     layout.ensure_directories()
     runner = SimulatorEvalRunner(
-        stack=SimpleNamespace(config=SimpleNamespace(curriculum=None)),
+        stack=cast(Any, SimpleNamespace(config=SimpleNamespace(curriculum=None))),
         policies={
             "candidate": ResolvedEvalPolicy(
                 policy_id="candidate",
                 kind="snapshot_registry",
-                model=model,
+                model=cast(Any, model),
             )
         },
         artifact_layout=layout,
@@ -1703,7 +2450,7 @@ def test_simulator_eval_runner_uses_learner_scoring_mode(tmp_path: Path, monkeyp
         replay_capture_rate=0.0,
         regression_capture_count=0,
     )
-    monkeypatch.setattr(runner, "_build_ids_eval_env", lambda *, seed: env)
+    monkeypatch.setattr(runner, "_build_ids_eval_env", lambda *, seed, scheduled_game=None: env)
 
     scheduled_game = ScheduledGame(
         pair_index=0,

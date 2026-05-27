@@ -1,0 +1,6 @@
+schema_version: 2
+description: "B1 reward ablation: full shaping with sync5 actor reloads and family-level entropy regularization."
+extends: full_shaping_entropy01_sync5_reward.yaml
+training:
+  exploration:
+    entropy_scope: family

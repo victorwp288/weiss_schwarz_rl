@@ -1,7 +1,0 @@
-focal_policy_id,opponent_policy_id,matchup_dir,paired_seed_count,observed_paired_seed_count,excluded_paired_seed_count,has_payoff_samples,stop_reason
-B0 RandomLegal,B0 RandomLegal,matchups/00_b0_randomlegal__vs__00_b0_randomlegal,16,16,0,True,budget
-B0 RandomLegal,B2 HeuristicPublic,matchups/00_b0_randomlegal__vs__01_b2_heuristicpublic,16,16,0,True,decisive
-B0 RandomLegal,nogru_impala_best,matchups/00_b0_randomlegal__vs__02_nogru_impala_best,16,16,0,True,budget
-B2 HeuristicPublic,B2 HeuristicPublic,matchups/01_b2_heuristicpublic__vs__01_b2_heuristicpublic,16,16,0,True,precision
-B2 HeuristicPublic,nogru_impala_best,matchups/01_b2_heuristicpublic__vs__02_nogru_impala_best,16,16,0,True,decisive
-nogru_impala_best,nogru_impala_best,matchups/02_nogru_impala_best__vs__02_nogru_impala_best,16,16,0,True,budget

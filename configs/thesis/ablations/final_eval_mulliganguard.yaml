@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Final-eval contract for mulligan-guard ablations; preserves the trained model action surface."
+extends: "../final_eval.yaml"
+training:
+  action_surface:
+    mulligan_force_confirm_after_select: true

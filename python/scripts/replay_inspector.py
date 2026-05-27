@@ -73,6 +73,29 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional path to persist the structured JSON report",
     )
+    parser.add_argument(
+        "--accept-snapshot-config-hash",
+        action="append",
+        default=[],
+        help=(
+            "Additional snapshot config_hash256 to accept when intentionally comparing imported snapshots "
+            "from a different training stack. Repeatable."
+        ),
+    )
+    parser.add_argument(
+        "--opponent-context-policy-id",
+        type=str,
+        default=None,
+        help=(
+            "Optional opponent policy id used to supply opponent_context_index when scoring model policies. "
+            "Use this for opponent-conditioned adapter diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--require-opponent-context-index",
+        action="store_true",
+        help="Fail if a model policy cannot map --opponent-context-policy-id to a nonzero context index.",
+    )
     return parser
 
 
@@ -93,6 +116,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         snapshot_registry_path=args.snapshot_registry_json,
         top_k=args.top_k,
         top_actions=args.top_actions,
+        accepted_snapshot_config_hashes=args.accept_snapshot_config_hash,
+        opponent_context_policy_id=args.opponent_context_policy_id,
+        require_opponent_context_index=args.require_opponent_context_index,
     )
     if args.report_json is not None:
         write_replay_inspection_report(args.report_json, report)

@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from typing import Any
 
-from weiss_rl.repro import canonical_json_bytes, sha256_hex
+from weiss_rl.artifacts.reproducibility import canonical_json_bytes, sha256_hex
 
 from .models import StackConfig
 

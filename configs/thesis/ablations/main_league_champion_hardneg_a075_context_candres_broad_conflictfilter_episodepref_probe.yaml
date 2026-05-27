@@ -1,0 +1,19 @@
+schema_version: 2
+description: "Base-frozen opponent-context candidate-residual probe from a075. Uses the broad current-state conflict-filtered episode preference objective, but trains only a zero-initialized legal-candidate residual adapter instead of moving the trunk or recurrent hidden context. Must pass offline margin diagnostics before sentinel eval."
+extends: main_league_champion_hardneg_a075_context_broad_conflictfilter_episodepref_probe.yaml
+model:
+  opponent_context_trainable_hidden_scale: 0.0
+  opponent_context_trainable_recurrent_scale: 0.0
+  opponent_context_trainable_action_bias_scale: 0.0
+  opponent_context_trainable_candidate_residual_scale: 1.0
+  opponent_context_candidate_residual_width: 32
+  opponent_context_candidate_residual_mode: bilinear
+  opponent_context_adapter_lr_multiplier: 1500.0
+  opponent_context_adapter_train_only: true
+training:
+  optimizer:
+    learning_rate: 0.0000001
+  structured_aux:
+    paired_swing_aux_updates: 6
+    paired_swing_coef: 0.10
+    paired_swing_margin: 0.05

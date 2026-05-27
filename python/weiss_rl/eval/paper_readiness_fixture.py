@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from weiss_rl.artifacts import ArtifactLayout
 
@@ -39,8 +39,8 @@ def write_paper_readiness_run_fixture(run_dir: Path) -> Path:
         "policy_set_selection_details": {"mode": "deterministic_v1"},
     }
     _write_json(layout.manifest_path, manifest)
-    _write_json(layout.spec_bundle_path, manifest["spec_bundle"])
-    _write_json(layout.config_json_path, manifest["config_canonical"])
+    _write_json(layout.spec_bundle_path, cast(dict[str, Any], manifest["spec_bundle"]))
+    _write_json(layout.config_json_path, cast(dict[str, Any], manifest["config_canonical"]))
     _write_json(
         layout.environment_path,
         {

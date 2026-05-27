@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 
 import numpy as np
 import pytest
 import torch
 
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
+from weiss_rl.diagnostics.training_logger import TrainingLogger
 from weiss_rl.learners.impala_learner import ImpalaLearner, summarize_vtrace_diagnostics
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
 from weiss_rl.model import PolicyValueModel
-from weiss_rl.training_logger import TrainingLogger
 
 TEST_VECTORS_PATH = Path(__file__).with_name("test_vectors") / "vtrace_v1.json"
 
@@ -95,7 +95,7 @@ def _synthetic_training_batch(
         forward_kwargs["initial_hidden_state"] = initial_hidden_state
 
     with torch.no_grad():
-        _, values = learner._forward_time_major(torch.from_numpy(obs), **forward_kwargs)
+        _, values = learner._forward_time_major(torch.from_numpy(obs), **cast(Any, forward_kwargs))
 
     value_targets = values + torch.tensor(
         [[0.50, -0.25], [0.75, 0.50], [-0.50, 0.25]],
@@ -355,7 +355,7 @@ def test_impala_learner_logging_persists_returned_loss_metrics(tmp_path: Path) -
     assert record["vtrace_rho_p99"] == pytest.approx(update_metrics["vtrace_rho_p99"])
     assert record["vtrace_clip_rate"] == pytest.approx(update_metrics["vtrace_rho_clip_rate"])
     assert record["vtrace_c_clipped_rate"] == pytest.approx(update_metrics["vtrace_c_clip_rate"])
-    assert record["vtrace_rho_mean"] is None
+    assert record["vtrace_rho_mean"] == pytest.approx(update_metrics["vtrace_rho_mean"])
     assert record["kl_divergence"] is None
     assert record["custom_metrics"]["vtrace_batch_metrics_available"] == 0.0
     assert record["custom_metrics"]["vtrace_rho_p95"] == pytest.approx(update_metrics["vtrace_rho_p95"])

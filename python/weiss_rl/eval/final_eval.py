@@ -13,9 +13,14 @@ from typing import Any, cast
 import numpy as np
 
 from weiss_rl.artifacts import ArtifactLayout
+from weiss_rl.artifacts.reproducibility import canonical_json_bytes, hash_seed_file, stable_hash64
 from weiss_rl.config.models import FinalPolicySetSelectionConfig, StopRulesConfig
 from weiss_rl.eval.diagnostics import build_seat_advantage_diagnostics, write_matchup_diagnostics_json
 from weiss_rl.eval.export import build_matchup_export, write_matchup_summary_csv, write_matchup_summary_json
+from weiss_rl.eval.final_eval_matrices import MATRIX_FIELDS as _MATRIX_FIELDS
+from weiss_rl.eval.final_eval_matrices import build_matrix as _build_matrix
+from weiss_rl.eval.final_eval_matrices import covered_matrix_cells as _covered_matrix_cells
+from weiss_rl.eval.final_eval_matrices import posterior_samples_cell as _posterior_samples_cell
 from weiss_rl.eval.harness import (
     EvalGameRecord,
     EvalGameRunner,
@@ -25,38 +30,19 @@ from weiss_rl.eval.harness import (
     write_episodes_jsonl,
 )
 from weiss_rl.eval.payoff_folding import PayoffFoldScheme, paired_seed_scores
-from weiss_rl.eval.policy_set import DevEvalPolicySummary, select_final_policy_set_deterministic_v1
+from weiss_rl.eval.policy_set import (
+    DevEvalPolicySummary,
+    deck_id_for_policy_id,
+    select_final_policy_set_deterministic_v1,
+)
 from weiss_rl.eval.stage2 import summarize_stage2_records
 from weiss_rl.eval.uncertainty import bayesian_bootstrap_posterior_samples
-from weiss_rl.repro import canonical_json_bytes, hash_seed_file, stable_hash64
 
 __all__ = [
     "load_dev_eval_summaries",
     "resolve_final_policy_set",
     "run_final_eval",
 ]
-
-
-_MATRIX_FIELDS: tuple[str, ...] = (
-    "mean",
-    "ci_low",
-    "ci_high",
-    "ci_half_width",
-    "prob_gt_half",
-    "prob_lt_half",
-    "paired_seed_count",
-    "observed_paired_seeds",
-    "excluded_paired_seeds",
-    "has_payoff_samples",
-    "games",
-    "wins",
-    "losses",
-    "draws",
-    "truncations",
-    "engine_errors",
-    "stop_reason",
-    "should_stop",
-)
 
 
 def load_dev_eval_summaries(path: Path) -> dict[str, float | DevEvalPolicySummary]:
@@ -341,6 +327,11 @@ def _run_matchup(
         "used_paired_seeds": list(used_paired_seeds),
     }
     diagnostics_payload = build_seat_advantage_diagnostics(records)
+    god_search_diagnostics_fn = getattr(runner, "god_search_diagnostics", None)
+    if callable(god_search_diagnostics_fn):
+        god_search_diagnostics = god_search_diagnostics_fn()
+        if god_search_diagnostics is not None:
+            diagnostics_payload["god_search"] = god_search_diagnostics
     posterior_samples = _matchup_posterior_samples(
         records=records,
         scheme=scheme,
@@ -410,6 +401,8 @@ def _scheduled_game(
         seat0_policy_id=seat0_policy_id,
         seat1_policy_id=seat1_policy_id,
         focal_seat=focal_seat,
+        seat0_deck=deck_id_for_policy_id(seat0_policy_id),
+        seat1_deck=deck_id_for_policy_id(seat1_policy_id),
     )
 
 
@@ -547,130 +540,6 @@ def _build_final_eval_payload(
             for result in matchup_results
         ],
     }
-
-
-def _build_matrix(
-    *,
-    policy_ids: Sequence[str],
-    canonical_results_by_key: Mapping[tuple[int, int], dict[str, Any]],
-    field: str,
-) -> dict[str, Any]:
-    values = [
-        [
-            _matrix_cell_value(
-                canonical_results_by_key=canonical_results_by_key,
-                focal_index=focal_index,
-                opponent_index=opponent_index,
-                field=field,
-            )
-            for opponent_index, _opponent_policy_id in enumerate(policy_ids)
-        ]
-        for focal_index, _focal_policy_id in enumerate(policy_ids)
-    ]
-    return {
-        "policy_ids": list(policy_ids),
-        "values": values,
-    }
-
-
-def _matrix_cell_value(
-    *,
-    canonical_results_by_key: Mapping[tuple[int, int], dict[str, Any]],
-    focal_index: int,
-    opponent_index: int,
-    field: str,
-) -> Any:
-    result, reverse = _canonical_result_for_cell(
-        canonical_results_by_key=canonical_results_by_key,
-        focal_index=focal_index,
-        opponent_index=opponent_index,
-    )
-    payload = cast(Mapping[str, Any], result["summary"])
-    return _matrix_value(payload, field=field, reverse=reverse)
-
-
-def _matrix_value(payload: Mapping[str, Any], *, field: str, reverse: bool = False) -> Any:
-    summary = cast(Mapping[str, Any], payload["summary"])
-    uncertainty = cast(Mapping[str, Any], payload["uncertainty"])
-    if reverse:
-        return _reverse_matrix_value(payload=payload, summary=summary, uncertainty=uncertainty, field=field)
-    if field in uncertainty:
-        return uncertainty[field]
-    if field in summary:
-        return summary[field]
-    if field == "paired_seed_count":
-        return uncertainty["paired_seed_count"]
-    return payload[field]
-
-
-def _reverse_matrix_value(
-    *,
-    payload: Mapping[str, Any],
-    summary: Mapping[str, Any],
-    uncertainty: Mapping[str, Any],
-    field: str,
-) -> Any:
-    if field == "mean":
-        return _invert_optional_float(uncertainty["mean"])
-    if field == "ci_low":
-        return _invert_optional_float(uncertainty["ci_high"])
-    if field == "ci_high":
-        return _invert_optional_float(uncertainty["ci_low"])
-    if field == "prob_gt_half":
-        return uncertainty["prob_lt_half"]
-    if field == "prob_lt_half":
-        return uncertainty["prob_gt_half"]
-    if field == "wins":
-        return summary["losses"]
-    if field == "losses":
-        return summary["wins"]
-    if field in uncertainty:
-        return uncertainty[field]
-    if field in summary:
-        return summary[field]
-    if field == "paired_seed_count":
-        return uncertainty["paired_seed_count"]
-    return payload[field]
-
-
-def _invert_optional_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    return 1.0 - float(value)
-
-
-def _canonical_result_for_cell(
-    *,
-    canonical_results_by_key: Mapping[tuple[int, int], dict[str, Any]],
-    focal_index: int,
-    opponent_index: int,
-) -> tuple[dict[str, Any], bool]:
-    canonical_key = (min(focal_index, opponent_index), max(focal_index, opponent_index))
-    return canonical_results_by_key[canonical_key], focal_index > opponent_index
-
-
-def _posterior_samples_cell(
-    *,
-    canonical_results_by_key: Mapping[tuple[int, int], dict[str, Any]],
-    focal_index: int,
-    opponent_index: int,
-) -> list[float]:
-    result, reverse = _canonical_result_for_cell(
-        canonical_results_by_key=canonical_results_by_key,
-        focal_index=focal_index,
-        opponent_index=opponent_index,
-    )
-    samples = cast(Sequence[float], result["posterior_samples"])
-    if not reverse:
-        return [float(sample) for sample in samples]
-    return [1.0 - float(sample) for sample in samples]
-
-
-def _covered_matrix_cells(*, focal_index: int, opponent_index: int) -> list[dict[str, int]]:
-    cells = [{"focal_policy_index": focal_index, "opponent_policy_index": opponent_index}]
-    if focal_index != opponent_index:
-        cells.append({"focal_policy_index": opponent_index, "opponent_policy_index": focal_index})
-    return cells
 
 
 def _write_final_eval_artifacts(

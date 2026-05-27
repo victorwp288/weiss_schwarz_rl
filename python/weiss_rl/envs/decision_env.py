@@ -49,6 +49,8 @@ _COMMON_OUT_FIELDS = (
     "engine_status",
     "decision_count",
     "tick_count",
+    "main_move_action",
+    "main_pass_action",
     "spec_hash",
 )
 _VALID_ENGINE_STATUS_POLICIES = frozenset({"best_effort_reset", "hard_fail", "passthrough"})
@@ -83,6 +85,8 @@ class DecisionBoundaryBatch:
     episode_key: np.ndarray
     decision_kind: np.ndarray = field(default_factory=lambda: np.zeros((0,), dtype=np.int32))
     no_progress_count: np.ndarray = field(default_factory=lambda: np.zeros((0,), dtype=np.uint32))
+    main_move_action: np.ndarray = field(default_factory=lambda: np.zeros((0,), dtype=np.bool_))
+    main_pass_action: np.ndarray = field(default_factory=lambda: np.zeros((0,), dtype=np.bool_))
     episode_identity_source: EpisodeIdentitySource = "missing"
     action_space: int | None = None
     mask: np.ndarray | None = None
@@ -108,6 +112,12 @@ class DecisionBoundaryBatch:
         if int(self.no_progress_count.shape[0]) == 0 and self.no_progress_count.ndim == 1:
             object.__setattr__(self, "no_progress_count", np.zeros((num_envs,), dtype=np.uint32))
         _require_vector(self.no_progress_count, "no_progress_count", num_envs)
+        if int(self.main_move_action.shape[0]) == 0 and self.main_move_action.ndim == 1:
+            object.__setattr__(self, "main_move_action", np.zeros((num_envs,), dtype=np.bool_))
+        if int(self.main_pass_action.shape[0]) == 0 and self.main_pass_action.ndim == 1:
+            object.__setattr__(self, "main_pass_action", np.zeros((num_envs,), dtype=np.bool_))
+        _require_vector(self.main_move_action, "main_move_action", num_envs)
+        _require_vector(self.main_pass_action, "main_pass_action", num_envs)
         if self.episode_identity_source not in _VALID_EPISODE_IDENTITY_SOURCES:
             expected = ", ".join(sorted(_VALID_EPISODE_IDENTITY_SOURCES))
             raise ValueError(f"episode_identity_source must be one of: {expected}")
@@ -820,6 +830,18 @@ def _pack_batch(
         num_envs=num_envs,
         copy_arrays=copy_arrays,
     )
+    main_move_action = _step_flag_array(
+        step,
+        field_name="main_move_action",
+        num_envs=num_envs,
+        copy_arrays=copy_arrays,
+    )
+    main_pass_action = _step_flag_array(
+        step,
+        field_name="main_pass_action",
+        num_envs=num_envs,
+        copy_arrays=copy_arrays,
+    )
     episode_seed, episode_key, episode_identity_source = _batch_episode_identity(
         step,
         pool=pool,
@@ -848,6 +870,8 @@ def _pack_batch(
             episode_identity_source=episode_identity_source,
             action_space=mask_action_space,
             no_progress_count=no_progress_count,
+            main_move_action=main_move_action,
+            main_pass_action=main_pass_action,
             mask=_array_view_or_copy(mask, copy_arrays=copy_arrays),
         )
 
@@ -873,6 +897,8 @@ def _pack_batch(
         episode_identity_source=episode_identity_source,
         action_space=int(pool.action_space) if pool is not None and hasattr(pool, "action_space") else None,
         no_progress_count=no_progress_count,
+        main_move_action=main_move_action,
+        main_pass_action=main_pass_action,
         ids_offsets=(
             _packed_legal_ids_prefix(legal_ids, legal_offsets, copy_arrays=copy_arrays),
             _array_view_or_copy(legal_offsets, copy_arrays=copy_arrays),
@@ -922,6 +948,22 @@ def _step_counter_array(
     if values is None:
         return np.zeros((num_envs,), dtype=np.uint32)
     array = _array_view_or_copy(values, dtype=np.uint32, copy_arrays=copy_arrays)
+    if array.ndim != 1 or int(array.shape[0]) != num_envs:
+        raise ValueError(f"{field_name} must have shape ({num_envs},)")
+    return array
+
+
+def _step_flag_array(
+    step: Any,
+    *,
+    field_name: str,
+    num_envs: int,
+    copy_arrays: bool,
+) -> np.ndarray:
+    values = getattr(step, field_name, None)
+    if values is None:
+        return np.zeros((num_envs,), dtype=np.bool_)
+    array = _array_view_or_copy(values, dtype=np.bool_, copy_arrays=copy_arrays)
     if array.ndim != 1 or int(array.shape[0]) != num_envs:
         raise ValueError(f"{field_name} must have shape ({num_envs},)")
     return array

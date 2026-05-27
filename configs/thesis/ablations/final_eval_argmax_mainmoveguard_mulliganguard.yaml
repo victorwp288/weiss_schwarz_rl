@@ -1,0 +1,5 @@
+schema_version: 2
+description: "Diagnostic final eval surface: model policies use deterministic argmax over the guarded legal surface."
+extends: final_eval_mainmoveguard_mulliganguard.yaml
+evaluation:
+  eval_sampling_algorithm: model_argmax_pinned_v1

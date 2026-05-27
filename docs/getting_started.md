@@ -14,8 +14,9 @@ Goal: get a fresh clone to a successful verification run without needing a 1:1 w
 The repo now supports three useful lanes:
 
 - `configs/stack_smoke.yaml` with `make train-min` is the explicit scaffold-only path. It proves config loading, simulator provenance capture, and run-manifest writing, but it does not claim thesis-grade training.
-- `python/scripts/thesis_run.py --preset standard --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` is the canonical simulator-backed thesis path for local train/eval once the dedicated B1 anchor exists.
-- `python/scripts/thesis_run.py --preset standard-auto-gpu --run-label <run> --b1-baseline-run-dir runs/<baseline_run>` is the canonical Linux server variant when you want automatic multi-GPU actor sharding.
+- `python -m weiss_rl.cli train-b1 --profile thesis-local` is the canonical simulator-backed B1 path once you are ready for non-smoke training.
+- `python -m weiss_rl.cli train-main --profile thesis-local --b1-run runs/<baseline_run>` is the canonical local main-league path once the dedicated B1 anchor exists.
+- `python -m weiss_rl.cli train-main --profile thesis-server --b1-run runs/<baseline_run>` is the canonical server variant with process collectors.
 - `configs/presets/typed_thesis_locked.yaml` and `configs/presets/typed_local.yaml` remain available as lower-level legacy/compatibility stack surfaces.
 - `train.py --public-demo`, `eval.py --public-demo`, and `make_figures.py --public-demo` provide a synthetic public-safe toy/demo pipeline.
 
@@ -28,7 +29,7 @@ Repo paths in this guide are relative to the repo root.
 - Python >= 3.10, < 3.13
 - `uv` installed and available in your terminal (`pip install uv`)
 - Access to `weiss_sim` with `export_spec_bundle()` available.
-  - `uv sync --extra dev --extra sim` installs `weiss-sim 0.8.1`, which matches the current repo expectations.
+  - `uv sync --extra dev --extra sim` installs `weiss-sim 1.1.0`, which matches the current repo expectations.
   - If `weiss_sim` is already installed in your active Python environment, the probe uses that first.
   - Otherwise it checks `WEISS_SIM_PYTHONPATH` if set.
   - Otherwise it looks for a sibling checkout at `../weiss-schwarz-simulator/python` relative to this repo.
@@ -99,24 +100,27 @@ If you use `make train-min` instead, expect the same contract/manifest scaffold 
 
 ## Canonical simulator-backed run
 
-Use this for the real thesis-oriented train/eval path. It exercises the single-node queue runtime through the `DecisionBoundaryEnv` contract and validates against `weiss-sim 0.8.1`.
+Use this for the real thesis-oriented train/eval path. It exercises the single-node queue runtime through the `DecisionBoundaryEnv` contract and validates against `weiss-sim 1.1.0`.
 
 Requirements:
 
-- use `python/scripts/thesis_run.py --preset standard` for the local single-GPU path, or `--preset standard-auto-gpu` on a multi-GPU Linux node
-- install `weiss-sim 0.8.1` with `uv sync --extra dev --extra sim`, or otherwise ensure the active interpreter can import the same validated `weiss_sim`
+- use `python -m weiss_rl.cli` for the standard thesis surface
+- install `weiss-sim>=1.1.0,<2` with `uv sync --extra dev --extra sim`, or otherwise ensure the active interpreter can import the same validated `weiss_sim`
 - keep the run on a single machine for the canonical path
-- prepare a dedicated `baseline_noleague` run first and pass it through `--b1-baseline-run-dir`
+- prepare a dedicated B1 NoLeague run first and pass it through `--b1-run`
 
 Run:
 
 ```bash
-uv run python python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_tiny32_fast_noleague.yaml --run-label b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset standard --run-label thesis_local --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200 --skip-compare
-uv run python python/scripts/make_figures.py --run-dir runs/thesis_local
+uv run --extra dev --extra sim python -m weiss_rl.cli train-b1 --run-label b1_anchor_seed1 --profile thesis-local
+uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label thesis_local --b1-run runs/b1_anchor_seed1 --profile thesis-local
+uv run --extra dev --extra sim python -m weiss_rl.cli eval-final --run-dir runs/thesis_local --b1-run runs/b1_anchor_seed1
+uv run --extra dev python -m weiss_rl.cli figures --run-dir runs/thesis_local --format png --format pdf
 ```
 
-That wrapper call trains with `structured_acceptance_standard.yaml`, imports the canonical B1 anchor from the dedicated baseline run, and by default evaluates with `structured_acceptance_standard_thesis_eval.yaml`.
+The main call trains with `configs/thesis/main_league.yaml`, imports the
+canonical B1 anchor from the dedicated baseline run, and evaluates with
+`configs/thesis/final_eval.yaml`.
 
 Expected training artifacts when the runtime is available:
 
@@ -138,17 +142,17 @@ You should see fields like `run_id256`, `spec_hash256`, `config_hash256`, `simul
 These are the follow-up checks for the other top-level entrypoints:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
-uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
-uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
+uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/<run_dir> --b1-run runs/<b1_run>
+uv run --extra dev python -m weiss_rl.cli figures --run-dir runs/<run_dir>
+uv run --extra dev python -m weiss_rl.cli figures --run-dir runs/<run_dir> --fig-id seat_bias
 uv run python python/scripts/verify_repo.py
 ```
 
 Expected outcomes:
 
-- `eval.py` reports a contract check and seed-set summary when no `--episodes-jsonl` is supplied.
-- `make_figures.py` renders all paper figures by default, or a selected figure via `--fig-id` (`matchup_heatmap`, `truncation_heatmap`, `seat_bias`, `learning_curves`).
-- `make_figures.py` checks the selected figure inputs before rendering and writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`.
+- `smoke-eval` runs a tiny B0-B4 deterministic eval.
+- `figures` renders all paper figures by default, or a selected figure via `--fig-id` (`matchup_heatmap`, `truncation_heatmap`, `seat_bias`, `learning_curves`).
+- `figures` checks the selected figure inputs before rendering and writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`.
 
 ### Public-safe toy/demo e2e path
 

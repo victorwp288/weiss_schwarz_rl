@@ -1,0 +1,5 @@
+schema_version: 2
+description: "Guarded main-league bootstrap from the best confirmed guided seed checkpoint. This is the reproducible pivot when the strict B1 NoLeague gate is not yet cleared; use early B2/B3/B4 guards before treating it as a thesis candidate."
+extends: ablations/main_league_guided_factorized_liveleague_mirror_probe.yaml
+experiment:
+  role: guided_league_bootstrap

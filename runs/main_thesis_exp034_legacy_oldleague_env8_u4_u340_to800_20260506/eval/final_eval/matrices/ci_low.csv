@@ -1,6 +1,0 @@
-focal_policy_id,B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic,seed_2aaa98fc69_seed_ae46265326_policy_000016,policy_000021
-B0 RandomLegal,0.19272217986083412,0.0,0.0,0.0,0.0
-B1 NoLeague baseline,1.0,0.07000574635782453,0.6523708364114343,0.0,0.0
-B2 HeuristicPublic,1.0,0.004473040182473076,0.5,0.0,0.0
-seed_2aaa98fc69_seed_ae46265326_policy_000016,1.0,1.0,1.0,0.5,0.5
-policy_000021,1.0,1.0,1.0,0.5,0.5

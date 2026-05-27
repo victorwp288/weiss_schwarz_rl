@@ -1,0 +1,45 @@
+schema_version: 2
+description: "No-warmup champion/hard-negative continuation from the confirm128-passing a050 B2/old-HN u1 checkpoint. The previous u2 checkpoint proved real champion/hard-negative exposure can add learned strength, but confirm128 rejected it for a one-game B2 drop. This probe keeps the low LR, starts PFSP immediately, strengthens frozen-policy and trajectory retention, and shifts paired-swing capacity toward exact B2 anti-regression while preserving old hard-negative rows. Continue only if paired confirm shows fixed >= 0, learned > 0, no B0-B4 row drop, and nonzero champion/hard-negative sampled envs."
+extends: main_league_champion_hardneg_interp_a050_b2_oldhn_continue_probe.yaml
+league:
+  warmup:
+    first_updates: 0
+training:
+  optimizer:
+    learning_rate: 0.000002
+  structured_aux:
+    policy_anchor_coef: 0.48
+    policy_anchor_top_action_coef: 0.12
+    trajectory_retention_coef: 0.08
+    paired_swing_coef: 0.04
+    paired_swing_focus_groups:
+      - name: grouped_fixed_preserve
+        source_labels:
+          - grouped128_fixed_preserve_B1 NoLeague baseline
+          - grouped128_fixed_preserve_B2 HeuristicPublic
+          - grouped128_fixed_preserve_B3 HeuristicPublicAggro
+          - grouped128_fixed_preserve_B4 HeuristicPublicControl
+        fraction: 0.20
+      - name: grouped_learned_repair
+        source_labels:
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.30
+      - name: rawext256_b2_fixed_preserve
+        source_labels:
+          - rawext256_allfixed_preserve_B2 HeuristicPublic
+        fraction: 0.30
+      - name: rawext256_old_checkpoint_preserve
+        source_labels:
+          - rawext256_alllearned_preserve_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+        fraction: 0.10
+      - name: rawext256_old_bestresponse_preserve
+        source_labels:
+          - rawext256_alllearned_preserve_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+        fraction: 0.10

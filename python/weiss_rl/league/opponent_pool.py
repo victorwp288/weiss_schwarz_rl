@@ -42,6 +42,7 @@ def sample_opponent_snapshot_ids(
     count: int,
     rng: np.random.Generator,
     win_rates_by_snapshot_id: Mapping[str, float] | None = None,
+    weight_multipliers_by_snapshot_id: Mapping[str, float] | None = None,
     power: float = 2.0,
     eps_uniform: float = 0.2,
     neutral_win_rate: float = NEUTRAL_WIN_RATE,
@@ -57,6 +58,15 @@ def sample_opponent_snapshot_ids(
         neutral_win_rate=neutral_win_rate,
     )
     probabilities = pfsp_probabilities(win_rates, power=power, eps_uniform=eps_uniform)
+    if weight_multipliers_by_snapshot_id is not None:
+        multipliers = np.asarray(
+            [float(weight_multipliers_by_snapshot_id.get(snapshot_id, 1.0)) for snapshot_id in snapshot_ids],
+            dtype=np.float64,
+        )
+        if np.any(multipliers <= 0.0):
+            raise ValueError("weight multipliers must be positive")
+        probabilities = probabilities * multipliers
+        probabilities = probabilities / np.sum(probabilities)
     sampled_indices = rng.choice(len(snapshot_ids), size=count, replace=True, p=probabilities)
     return tuple(str(snapshot_ids[index]) for index in sampled_indices.tolist())
 

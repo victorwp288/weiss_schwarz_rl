@@ -1,0 +1,33 @@
+schema_version: 2
+description: "Selected-a015 all-outcome champion/hard-negative continuation with a learned-opponent push. This follows the confirm128 rejection of the learned-floor probe: keep the all-outcome replay-BC trust region and B2/B4 public floors, but reduce anchor/teacher pressure and shift more live exposure toward champions and hard negatives so the next segment must show real learned-opponent movement rather than only fixed-anchor repair."
+extends: main_league_champion_hardneg_selected_alloutcome_b2repair_b4guard_probe.yaml
+league:
+  sampling:
+    noleague_baseline_mix_fraction: 0.26
+    noleague_baseline_mix_end_updates: -1
+    heuristic_public_mix_fraction: 0.06
+    heuristic_public_final_mix_fraction: 0.06
+    heuristic_public_variant_mix_fraction: 0.12
+    heuristic_public_variant_final_mix_fraction: 0.12
+    champion_mix_fraction: 0.27
+    hard_negative_mix_fraction: 0.22
+    hard_negative_min_samples: 2
+    hard_negative_max_win_rate: 0.66
+training:
+  optimizer:
+    learning_rate: 0.0000065
+  exploration:
+    entropy_coef: 0.0014
+    actor_sampling_temperature: 0.88
+  structured_aux:
+    teacher_public_heuristic_coef: 0.012
+    teacher_public_heuristic_end_updates: -1
+    teacher_public_heuristic_final_coef: 0.012
+    teacher_public_heuristic_temperature: 2.0
+    policy_anchor_coef: 0.42
+    policy_anchor_top_action_coef: 0.08
+    policy_anchor_temperature: 0.70
+    trajectory_bc_batch_episodes: 8
+    trajectory_bc_teacher_action_coef: 0.12
+    trajectory_bc_teacher_same_family_action_coef: 0.52
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.06

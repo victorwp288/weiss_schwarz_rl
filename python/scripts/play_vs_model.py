@@ -10,8 +10,9 @@ from typing import Any, cast
 
 import numpy as np
 import torch
-from weiss_rl.action_catalog import ActionCatalog, DecodedAction
 from weiss_rl.config import load_stack_config
+from weiss_rl.core.action_catalog import ActionCatalog, DecodedAction
+from weiss_rl.core.simulator_contract import load_verified_simulator_contract
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
 from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
 from weiss_rl.eval import load_dev_eval_summaries, sample_action_pinned
@@ -19,7 +20,6 @@ from weiss_rl.eval.policy_set import recommend_focal_policy_id
 from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
 from weiss_rl.eval.simulator_runner import ResolvedEvalPolicy, resolve_eval_policies
 from weiss_rl.league.registry import SnapshotRegistry
-from weiss_rl.simulator_contract import load_verified_simulator_contract
 
 weiss_sim: ModuleType | None
 try:
@@ -376,7 +376,7 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=0.0, help="Model action temperature; 0.0 is greedy")
     parser.add_argument("--top-k", type=int, default=5, help="How many model suggestions to show")
     parser.add_argument(
-        "--deck", type=str, default="", help="Optional deck override, for example preset:quints_balanced_v2"
+        "--deck", type=str, default="", help="Optional deck override, for example preset:main_deck_5hy_yotsuba_v1"
     )
     parser.add_argument("--opponent-deck", type=str, default="", help="Optional opponent deck override")
     parser.add_argument("--list-decks", action="store_true", help="Print bundled deck presets and exit")

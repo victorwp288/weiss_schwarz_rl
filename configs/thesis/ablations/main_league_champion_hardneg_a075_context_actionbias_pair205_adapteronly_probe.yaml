@@ -1,0 +1,49 @@
+schema_version: 2
+description: "Pair205-only opponent-conditioned action-bias probe from the a075 frontier. The full conflict action-bias run trained on a mixed conflict bag and did not explicitly declare actions as the positive paired-swing source; this probe freezes the base model, trains only the zero-initialized per-opponent action-bias adapter, and asks whether the exact 104/124 pair205 contradiction can be split by opponent identity before any longer confirm escalation."
+extends: main_league_champion_hardneg_a075_context_actionbias_conflict_probe.yaml
+model:
+  opponent_context_trainable_hidden_scale: 0.0
+  opponent_context_trainable_recurrent_scale: 0.0
+  opponent_context_trainable_action_bias_scale: 1.0
+  opponent_context_adapter_lr_multiplier: 1000.0
+  opponent_context_adapter_train_only: true
+training:
+  optimizer:
+    learning_rate: 0.0000001
+  structured_aux:
+    teacher_family_coef: 0.0
+    teacher_slot_coef: 0.0
+    teacher_hand_coef: 0.0
+    teacher_move_source_coef: 0.0
+    teacher_attack_type_coef: 0.0
+    teacher_action_coef: 0.0
+    teacher_same_family_action_coef: 0.0
+    teacher_action_margin_coef: 0.0
+    teacher_same_family_action_margin_coef: 0.0
+    teacher_public_heuristic_coef: 0.0
+    teacher_public_nonpass_over_pass_coef: 0.0
+    trajectory_bc_every_updates: 0
+    policy_anchor_coef: 0.55
+    policy_anchor_top_action_coef: 0.14
+    paired_swing_dataset_path: runs/paired_outcome_contrastive_a075_pair205_only_20260520/paired_outcome_contrastive_a075_pair205_only.npz
+    paired_swing_every_updates: 1
+    paired_swing_aux_updates: 1
+    paired_swing_batch_episodes: 7
+    paired_swing_coef: 0.04
+    paired_swing_margin: 0.35
+    paired_swing_positive_action_source: actions
+    paired_swing_negative_action_source: teacher_action
+    paired_swing_focus_groups:
+      - name: pair205_fixed_preserve
+        source_labels:
+          - a075_loss_preserve_B2 HeuristicPublic
+          - a075_loss_preserve_seed_c3aac2f9dc_policy_000004
+        fraction: 0.30
+      - name: pair205_learned_repair
+        source_labels:
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.70

@@ -1,0 +1,10 @@
+schema_version: 2
+description: "Mechanistic-push variant of the a075 broad current-state conflict-filtered paired-swing probe. Uses more auxiliary paired-swing pressure for exactly one update to test whether the filtered noncontradictory objective can actually move local margins before any sentinel eval. Stop if filtered margins remain negative or learned/fixed sentinel regresses."
+extends: main_league_champion_hardneg_interp_a075_broad_conflictfilter_continue_probe.yaml
+training:
+  optimizer:
+    learning_rate: 0.000001
+  structured_aux:
+    paired_swing_aux_updates: 4
+    paired_swing_coef: 0.08
+    paired_swing_margin: 0.05

@@ -1,0 +1,38 @@
+Traceback (most recent call last):
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\scripts\train.py", line 966, in <module>
+    main()
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\scripts\train.py", line 962, in main
+    run_train_main(sys.modules[__name__])
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\weiss_rl\training\train_entrypoint_main.py", line 296, in run_train_main
+    metrics = api._run_minimal_training(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\scripts\train.py", line 934, in _run_minimal_training
+    return run_minimal_training_with_script_hooks(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\weiss_rl\training\minimal_entrypoint_hooks.py", line 47, in run_minimal_training_with_script_hooks
+    return api.run_minimal_training(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\weiss_rl\training\minimal_loop.py", line 314, in run_minimal_training
+    _ensure_noleague_baseline_anchor(
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\scripts\train.py", line 732, in _ensure_noleague_baseline_anchor
+    return ensure_noleague_baseline_anchor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\weiss_rl\training\noleague_anchor.py", line 94, in ensure_noleague_baseline_anchor
+    weights_path, weights_sha256, imported_update = import_noleague_baseline_anchor_fn(
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\scripts\train.py", line 654, in _import_noleague_baseline_anchor
+    _validate_imported_snapshot_contract(
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\weiss_rl\training\import_contracts.py", line 102, in validate_imported_snapshot_contract
+    raise RuntimeError(
+RuntimeError: Imported B1 baseline config does not match the current run for section='model'
+Traceback (most recent call last):
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\scripts\guarded_league_bootstrap.py", line 211, in <module>
+    main()
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\scripts\guarded_league_bootstrap.py", line 206, in main
+    summary = run_guarded_league_bootstrap(config)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\weiss_rl\experiments\guarded_league_bootstrap.py", line 544, in run_guarded_league_bootstrap
+    _run_command(train_command, cwd=repo_root, runner=runner, env=_fixed_hash_seed_env())
+  File "C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\python\weiss_rl\experiments\guarded_league_bootstrap.py", line 769, in _run_command
+    raise RuntimeError(f"command failed with exit code {completed.returncode}: {' '.join(command)}")
+RuntimeError: command failed with exit code 1: C:\Users\Bruger\Desktop\this one\weiss_schwarz_rl\.venv\Scripts\python.exe python/scripts/train.py --stack-config configs/thesis/ablations/main_league_champion_hardneg_a075_context_probe.yaml --run-label main_champion_hardneg_a075_context_u1_confirm64_20260520_seg01 --num-envs 288 --unroll-length 64 --max-updates 1 --runtime-mode train_async_fast --profile fast --device cuda --checkpoint-interval-updates 1 --seed-snapshot-run-dir runs/main_champion_hardneg_interp_a025_b2pair70_u1_a075_20260520 --b1-baseline-run-dir runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01 --init-from-checkpoint runs/main_champion_hardneg_interp_a025_b2pair70_u1_a075_20260520/training/checkpoints/checkpoint_interpolated.pt --override system.collection_backend=process --init-schedule-offset-updates 0 --override training.profile_timers=true

@@ -1,0 +1,29 @@
+schema_version: 2
+description: "Opponent-context continuation from the a075 frontier using the full confirm256 paired-swing conflict set. Unlike the non-conflict probe, this intentionally keeps the pair205 B2/policy0004 preserve versus learned repair contradiction and relies on opponent context to separate those objectives."
+extends: main_league_champion_hardneg_a075_context_probe.yaml
+league:
+  pool:
+    seed_snapshot_import_filter: source_champions
+    seed_snapshot_champion_import: source_champions
+training:
+  structured_aux:
+    paired_swing_dataset_path: runs/paired_outcome_contrastive_a075_context_conflict_full_20260520/paired_outcome_contrastive_a075_context_conflict_full.npz
+    paired_swing_coef: 0.04
+    paired_swing_batch_episodes: 11
+    paired_swing_focus_groups:
+      - name: a075_context_b2_preserve
+        source_labels:
+          - a075_loss_preserve_B2 HeuristicPublic
+        fraction: 0.27
+      - name: a075_context_p4_preserve
+        source_labels:
+          - a075_loss_preserve_seed_c3aac2f9dc_policy_000004
+        fraction: 0.18
+      - name: a075_context_learned_repair
+        source_labels:
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.55

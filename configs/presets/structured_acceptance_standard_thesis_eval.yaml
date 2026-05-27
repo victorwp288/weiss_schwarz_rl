@@ -1,3 +1,6 @@
 schema_version: 2
 description: canonical shipping/default structured_acceptance thesis-eval preset
 extends: structured_acceptance_tiny32_fast_tacticalbias_thesis_eval.yaml
+evaluation:
+  final_policy_set_selection:
+    include_heuristic_public_anchors_b2_b3_b4: true

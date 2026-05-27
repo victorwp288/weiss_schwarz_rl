@@ -1,0 +1,19 @@
+schema_version: 2
+description: "Continuation from the confirm128-positive trainable-context u1 candidate with a low-pressure selected-a015 learned-preserve trajectory replay. The replay rows are exact selected-a015 wins on learned rows where the u1 candidate lost, built through an eval-only registry containing the true main_interp_repair_a015 reference."
+extends: main_league_champion_hardneg_a075_context_trainable_conflict_probe.yaml
+training:
+  structured_aux:
+    trajectory_bc_dataset_path: runs/paired_flip_bc_context_trainable_u1_selected_learned_preserve_augreg_20260520/paired_flip_bc_context_trainable_u1_selected_learned_preserve_augreg.npz
+    trajectory_bc_every_updates: 1
+    trajectory_bc_aux_updates: 1
+    trajectory_bc_batch_episodes: 5
+    trajectory_bc_focus_groups:
+      - name: ctx_u1_selected_learned_preserve
+        source_labels:
+          - ctx_u1_selected_learned_preserve_seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - ctx_u1_selected_learned_preserve_seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001
+          - ctx_u1_selected_learned_preserve_seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+        fraction: 1.0
+    trajectory_bc_teacher_action_coef: 0.08
+    trajectory_bc_teacher_same_family_action_coef: 0.25
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.05

@@ -1,0 +1,17 @@
+schema_version: 2
+description: "Selected-a015 all-outcome champion/hard-negative continuation with extra replay-BC retention on the confirm128 extension-half seeds where focused/B2-retention candidates lost paired ground. This keeps old-hard-negative focus and public/B1 floors, but shifts the replay dataset toward extension-seed imported champion/hard-negative episodes before attempting a longer guarded segment."
+extends: main_league_champion_hardneg_selected_alloutcome_focusoldhn_b2retention_b4b2guard_probe.yaml
+training:
+  optimizer:
+    learning_rate: 0.0000038
+  exploration:
+    entropy_coef: 0.0008
+    actor_sampling_temperature: 0.82
+  structured_aux:
+    policy_anchor_coef: 0.56
+    policy_anchor_top_action_coef: 0.14
+    trajectory_bc_dataset_path: runs/trajectory_bc_selected_a015_all32_plus_confirm128ext16x3_20260518/trajectory_bc_selected_a015_all32_plus_confirm128ext16x3.npz
+    trajectory_bc_batch_episodes: 14
+    trajectory_bc_teacher_action_coef: 0.17
+    trajectory_bc_teacher_same_family_action_coef: 0.70
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.10

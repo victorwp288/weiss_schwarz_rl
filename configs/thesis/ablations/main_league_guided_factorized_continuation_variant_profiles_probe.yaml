@@ -1,0 +1,16 @@
+schema_version: 2
+description: "Main league probe: guided factorized continuation with B3/B4 heuristic variant opponents and cycled public-teacher profiles to test whether B2-only guidance causes anchor tradeoffs."
+extends: main_league_guided_factorized_continuation_no_b1_anchor_probe.yaml
+training:
+  structured_aux:
+    teacher_public_heuristic_profiles:
+      - base
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle
+    teacher_public_heuristic_profiles_end_updates: 150
+league:
+  sampling:
+    heuristic_public_variant_mix_fraction: 0.2
+    heuristic_public_variant_final_mix_fraction: 0.2
+    heuristic_public_variant_mix_end_updates: -1

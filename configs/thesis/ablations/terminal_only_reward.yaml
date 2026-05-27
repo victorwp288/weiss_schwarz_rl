@@ -1,0 +1,17 @@
+schema_version: 2
+description: "B1 reward ablation: terminal +/-1 only, no shaping, no truncation penalty."
+extends: reward_ablation_base.yaml
+rewards:
+  objective: terminal_only_pm1
+  discount:
+    gamma: 1.0
+  shaping:
+    enable_damage_shaping: false
+    damage_reward: 0.0
+    level_reward: 0.0
+    board_reward: 0.0
+    no_progress_penalty: 0.0
+  truncation:
+    reward: 0.0
+    bootstrap_value: true
+    bootstrap_rule: "if truncated and not terminated, bootstrap from V(next_state); if terminated, no bootstrap"

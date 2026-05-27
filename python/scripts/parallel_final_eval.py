@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from weiss_rl.artifacts import ArtifactLayout
+from weiss_rl.artifacts.reproducibility import parse_seed_file, require_fixed_python_hash_seed
 from weiss_rl.config import load_stack_config
+from weiss_rl.core.simulator_contract import load_verified_simulator_contract
 from weiss_rl.eval.final_eval import _build_final_eval_payload, _run_matchup, _write_final_eval_artifacts
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme
+from weiss_rl.eval.god_search import GodSearchConfig
 from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
-from weiss_rl.repro import parse_seed_file
-from weiss_rl.simulator_contract import load_verified_simulator_contract
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -23,10 +23,18 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _worker_output_dir(job: dict[str, Any], *, layout: ArtifactLayout) -> Path:
+    raw_output_dir = job.get("output_dir")
+    if raw_output_dir is None or str(raw_output_dir).strip() == "":
+        return layout.final_eval_dir
+    return Path(str(raw_output_dir))
+
+
 def _worker(job: dict[str, Any]) -> dict[str, Any]:
     stack = load_stack_config(Path(job["stack_config"]))
     run_dir = Path(job["run_dir"])
     layout = ArtifactLayout.from_run_dir(run_dir)
+    output_dir = _worker_output_dir(job, layout=layout)
     manifest = _load_json(layout.manifest_path)
     contract = load_verified_simulator_contract(
         stack.root,
@@ -62,9 +70,10 @@ def _worker(job: dict[str, Any]) -> dict[str, Any]:
         require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
         replay_capture_rate=float(evaluation.replay_capture_rate_eval),
         regression_capture_count=int(evaluation.regression_capture_count),
+        god_search_config=GodSearchConfig.from_mapping(job.get("god_search")),
     )
     return _run_matchup(
-        output_dir=layout.final_eval_dir,
+        output_dir=output_dir,
         focal_index=int(job["focal_index"]),
         opponent_index=int(job["opponent_index"]),
         focal_policy_id=str(job["focal_policy_id"]),
@@ -93,13 +102,27 @@ def main() -> None:
     parser.add_argument("--stage1-paired-seeds", type=int, default=16)
     parser.add_argument("--max-paired-seeds", type=int, default=16)
     parser.add_argument("--bootstrap-samples", type=int, default=1000)
-    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument(
+        "--allow-parallel-workers",
+        action="store_true",
+        help="Allow workers >1. Parallel simulator eval is experimental and should not be used for checkpoint selection.",
+    )
     parser.add_argument("--force-clear", action="store_true")
     args = parser.parse_args()
 
     policy_ids = [str(p).strip() for p in args.policy_id if str(p).strip()]
     if not policy_ids:
         raise SystemExit("provide at least one --policy-id")
+    if int(args.workers) > 1 and not bool(args.allow_parallel_workers):
+        raise SystemExit(
+            "final eval is deterministic only with --workers 1; "
+            "pass --allow-parallel-workers for exploratory non-selection runs"
+        )
+    try:
+        require_fixed_python_hash_seed("final eval")
+    except RuntimeError as err:
+        raise SystemExit(str(err)) from err
     stack = load_stack_config(args.stack_config)
     evaluation = stack.config.evaluation
     if evaluation is None:
@@ -109,7 +132,6 @@ def main() -> None:
     if args.force_clear and layout.final_eval_dir.exists():
         shutil.rmtree(layout.final_eval_dir)
     layout.final_eval_dir.mkdir(parents=True, exist_ok=True)
-    manifest = _load_json(layout.manifest_path)
     seed_file_path = stack.seed_sets["report_eval"]
     paired_seeds = parse_seed_file(seed_file_path)[: int(args.paired_seed_limit)]
     if len(paired_seeds) < int(args.max_paired_seeds):
@@ -123,8 +145,12 @@ def main() -> None:
                 {
                     "stack_config": args.stack_config.as_posix(),
                     "run_dir": args.run_dir.as_posix(),
-                    "snapshot_registry_json": None if args.snapshot_registry_json is None else args.snapshot_registry_json.as_posix(),
-                    "b1_baseline_run_dir": None if args.b1_baseline_run_dir is None else args.b1_baseline_run_dir.as_posix(),
+                    "snapshot_registry_json": None
+                    if args.snapshot_registry_json is None
+                    else args.snapshot_registry_json.as_posix(),
+                    "b1_baseline_run_dir": None
+                    if args.b1_baseline_run_dir is None
+                    else args.b1_baseline_run_dir.as_posix(),
                     "paired_seeds": paired_seeds,
                     "stage1_paired_seeds": int(args.stage1_paired_seeds),
                     "max_paired_seeds": int(args.max_paired_seeds),
@@ -145,8 +171,7 @@ def main() -> None:
             result = future.result()
             results.append(result)
             print(
-                f"completed {len(results)}/{len(jobs)}: "
-                f"{job['focal_policy_id']} vs {job['opponent_policy_id']}",
+                f"completed {len(results)}/{len(jobs)}: {job['focal_policy_id']} vs {job['opponent_policy_id']}",
                 flush=True,
             )
     results.sort(key=lambda item: (int(item["focal_index"]), int(item["opponent_index"])))
@@ -160,7 +185,11 @@ def main() -> None:
         stop_rules=evaluation.stop_rules,
         scheme=scheme,  # type: ignore[arg-type]
         sample_count=int(args.bootstrap_samples),
-        selection_payload={"mode": "explicit_parallel_cli", "policy_count": len(policy_ids), "workers": int(args.workers)},
+        selection_payload={
+            "mode": "explicit_parallel_cli",
+            "policy_count": len(policy_ids),
+            "workers": int(args.workers),
+        },
         metadata={"pipeline": {"kind": "parallel_final_eval_v1", "workers": int(args.workers)}},
         seed_file_path=seed_file_path,
     )

@@ -1,4 +1,0 @@
-focal_policy_id,B0 RandomLegal,B2 HeuristicPublic,ppo_lite_best
-B0 RandomLegal,budget,decisive,decisive
-B2 HeuristicPublic,decisive,precision,decisive
-ppo_lite_best,decisive,decisive,budget

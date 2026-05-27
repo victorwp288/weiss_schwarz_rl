@@ -5,12 +5,10 @@ from __future__ import annotations
 
 import json
 import math
-import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "vast_artifacts"
@@ -102,8 +100,7 @@ def targeted_rows():
     if b1_legacy_path.exists():
         for replacement in load_json(b1_legacy_path)["rows"]:
             rows = [
-                replacement if row["opponent_policy_id"] == replacement["opponent_policy_id"] else row
-                for row in rows
+                replacement if row["opponent_policy_id"] == replacement["opponent_policy_id"] else row for row in rows
             ]
 
     for row_path in sorted((ARTIFACTS / "main" / "confirm64_rows").glob("p21_vs_*_summary.json")):
@@ -125,10 +122,7 @@ def targeted_rows():
             "truncations": summary["truncations"],
             "engine_errors": summary["engine_errors"],
         }
-        rows = [
-            replacement if row["opponent_policy_id"] == replacement["opponent_policy_id"] else row
-            for row in rows
-        ]
+        rows = [replacement if row["opponent_policy_id"] == replacement["opponent_policy_id"] else row for row in rows]
 
     b3b4_path = ARTIFACTS / "main" / "p21_b3b4_loopfix_confirm64_summary.json"
     if b3b4_path.exists():
@@ -187,7 +181,7 @@ def figure_targeted_robustness():
         fontsize=11.8,
         pad=14,
     )
-    for yi, m, w, g in zip(y, means, wins, games):
+    for yi, m, w, g in zip(y, means, wins, games, strict=False):
         ax.text(101.5, yi, f"{w}/{g}", va="center", ha="left", fontsize=9.5)
         if m < 98:
             ax.text(m - 1.2, yi, f"{m:.1f}%", va="center", ha="right", color="white", fontsize=9.5)
@@ -207,7 +201,7 @@ def figure_b3b4_validity():
     fig, ax = plt.subplots(figsize=(6.4, 4.4))
     bars_valid = ax.bar(x - width / 2, valid_rates, width=width, color=GRAY, label="completed games")
     bars_win = ax.bar(x + width / 2, win_rates, width=width, color=TEAL, label="p21 win rate")
-    for bar, row in zip(bars_valid, rows):
+    for bar, row in zip(bars_valid, rows, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 2,
@@ -216,7 +210,7 @@ def figure_b3b4_validity():
             va="bottom",
             fontsize=9,
         )
-    for bar, row in zip(bars_win, rows):
+    for bar, row in zip(bars_win, rows, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 2,
@@ -310,7 +304,7 @@ def figure_p21_seat_advantage():
         fontsize=12.8,
         pad=12,
     )
-    for yi, value, row in zip(y, diff, rows):
+    for yi, value, _row in zip(y, diff, rows, strict=False):
         label = f"{value:+.1f} pp"
         xpos = value + (0.6 if value >= 0 else -0.6)
         ha = "left" if value >= 0 else "right"
@@ -360,7 +354,7 @@ def figure_close_legacy_stress():
         linewidth=1.2,
     )
     for bars, rows in ((b64, [rows64[key] for key in keys]), (b128, [rows128[key] for key in keys])):
-        for bar, row in zip(bars, rows):
+        for bar, row in zip(bars, rows, strict=False):
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + 1.2,
@@ -385,9 +379,17 @@ def figure_close_legacy_stress():
 def figure_result_decomposition():
     rows, _ = targeted_rows()
     groups = [
-        ("fixed anchors\nB0/B2", [r for r in rows if r["opponent_policy_id"] in ("B0 RandomLegal", "B2 HeuristicPublic")], TEAL),
+        (
+            "fixed anchors\nB0/B2",
+            [r for r in rows if r["opponent_policy_id"] in ("B0 RandomLegal", "B2 HeuristicPublic")],
+            TEAL,
+        ),
         ("B1 no-league", [r for r in rows if r["opponent_policy_id"] == "B1 NoLeague baseline"], AMBER),
-        ("B3/B4\nheuristics", [r for r in rows if r["opponent_policy_id"].startswith("B3") or r["opponent_policy_id"].startswith("B4")], PURPLE),
+        (
+            "B3/B4\nheuristics",
+            [r for r in rows if r["opponent_policy_id"].startswith("B3") or r["opponent_policy_id"].startswith("B4")],
+            PURPLE,
+        ),
         ("legacy neural\np11-p16", [r for r in rows if "policy_0000" in r["opponent_policy_id"]], BLUE),
     ]
     labels, means, counts, colors = [], [], [], []
@@ -403,7 +405,7 @@ def figure_result_decomposition():
     x = np.arange(len(labels))
     bars = ax.bar(x, means, color=colors, width=0.62)
     ax.axhline(50, color="#1F2328", linestyle="--", linewidth=1.1)
-    for bar, (wins, games), mean in zip(bars, counts, means):
+    for bar, (wins, games), mean in zip(bars, counts, means, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             min(mean + 2.2, 104),
@@ -446,7 +448,7 @@ def figure_legacy_margin_ladder():
         linewidth=1.2,
     )
     ax.axvline(0, color="#1F2328", linestyle="--", linewidth=1.1)
-    for yi, m, row in zip(y, margin, legacy):
+    for yi, m, row in zip(y, margin, legacy, strict=False):
         ax.text(
             m + (0.45 if m >= 0 else -0.45),
             yi,
@@ -481,8 +483,11 @@ def figure_candidate_selection_p21_p33():
     }
     keys.sort(key=lambda key: order.get(key, 10 + short_policy(key).__hash__() % 1000))
     # Stabilize legacy ordering after the anchors.
-    keys = [k for k in ("B1 NoLeague baseline", "B3 HeuristicPublicAggro", "B4 HeuristicPublicControl") if k in by33] + [
-        k for suffix in ("policy_000011", "policy_000012", "policy_000014", "policy_000015", "policy_000016")
+    keys = [
+        k for k in ("B1 NoLeague baseline", "B3 HeuristicPublicAggro", "B4 HeuristicPublicControl") if k in by33
+    ] + [
+        k
+        for suffix in ("policy_000011", "policy_000012", "policy_000014", "policy_000015", "policy_000016")
         for k in keys
         if suffix in k
     ]
@@ -497,7 +502,7 @@ def figure_candidate_selection_p21_p33():
     ax.bar(x - width / 2, p21, width=width, color=BLUE, label="p21 selected (confirm64)")
     ax.bar(x + width / 2, p33, width=width, color=GRAY, label="p33 candidate (confirm32)")
     ax.axhline(50, color="#1F2328", linestyle="--", linewidth=1.0)
-    for xi, d in zip(x, diff):
+    for xi, d in zip(x, diff, strict=False):
         ax.text(
             xi,
             max(p21[xi], p33[xi]) + 2.2,
@@ -536,7 +541,7 @@ def figure_anchor_ablation_endpoints():
         vals = [100 * latest["anchor_scores"][anchor] for anchor in anchors]
         offset = (idx - 1) * width
         bars = ax.bar(x + offset, vals, width=width, color=color, label=f"{label} u{latest['update_count']}")
-        for bar, val in zip(bars, vals):
+        for bar, val in zip(bars, vals, strict=False):
             ax.text(bar.get_x() + bar.get_width() / 2, val + 1.5, f"{val:.0f}", ha="center", va="bottom", fontsize=8.5)
     ax.axhline(80, color="#1F2328", linestyle=":", linewidth=1.0)
     ax.set_xticks(x, labels)
@@ -581,7 +586,16 @@ def figure_anchor_retention():
     ax.set_ylabel("Win rate / aggregate score (%)")
     ax.set_ylim(65, 102)
     ax.axhline(80, color="#1F2328", linestyle=":", lw=1.0)
-    ax.text(0.995, 0.02, "Dashed lines: B1 no-league retention", transform=ax.transAxes, ha="right", va="bottom", fontsize=9, color=GRAY)
+    ax.text(
+        0.995,
+        0.02,
+        "Dashed lines: B1 no-league retention",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=9,
+        color=GRAY,
+    )
     ax.legend(loc="lower left", frameon=False, fontsize=9)
     format_axes(ax)
     ax.grid(axis="y", color=LIGHT_GRID, linewidth=0.8)
@@ -647,10 +661,7 @@ def figure_baselines():
         "No-GRU": fixed_baseline_rows(ARTIFACTS / "nogru" / "final_summary.json"),
         "PPO-lite": fixed_baseline_rows(ARTIFACTS / "ppo" / "final_summary.json"),
     }
-    groups = {
-        model: {opp: rows[opp] for opp in ("B0 random", "B2 heuristic")}
-        for model, rows in groups_full.items()
-    }
+    groups = {model: {opp: rows[opp] for opp in ("B0 random", "B2 heuristic")} for model, rows in groups_full.items()}
     opponents = ["B0 random", "B2 heuristic"]
     x = np.arange(len(groups))
     width = 0.28
@@ -660,12 +671,12 @@ def figure_baselines():
     for k, opp in enumerate(opponents):
         vals = []
         labels = []
-        for model, rows in groups.items():
+        for _model, rows in groups.items():
             mean, wins, games = rows.get(opp, (math.nan, None, None))
             vals.append(mean * 100 if mean == mean else np.nan)
             labels.append("" if wins is None else f"{wins}/{games}")
         bars = ax.bar(x + (k - 0.5) * width, vals, width=width, color=colors[k], label=opp)
-        for bar, lab, val in zip(bars, labels, vals):
+        for bar, lab, val in zip(bars, labels, vals, strict=False):
             if lab:
                 ax.text(bar.get_x() + bar.get_width() / 2, val + 2.0, lab, ha="center", va="bottom", fontsize=8.5)
     ax.set_xticks(x, list(groups.keys()))
@@ -874,14 +885,18 @@ def write_captions():
     rows, evidence_text = targeted_rows()
     total_wins = sum(int(row["wins"]) for row in rows)
     total_games = sum(int(row["games"]) for row in rows)
-    b3b4 = [row for row in rows if row["opponent_policy_id"].startswith("B3") or row["opponent_policy_id"].startswith("B4")]
+    b3b4 = [
+        row for row in rows if row["opponent_policy_id"].startswith("B3") or row["opponent_policy_id"].startswith("B4")
+    ]
     b3b4_wins = sum(int(row["wins"]) for row in b3b4)
     b3b4_games = sum(int(row["games"]) for row in b3b4)
     legacy = [row for row in rows if "policy_0000" in row["opponent_policy_id"]]
     legacy_wins = sum(int(row["wins"]) for row in legacy)
     legacy_games = sum(int(row["games"]) for row in legacy)
     b1 = next((row for row in rows if row["opponent_policy_id"] == "B1 NoLeague baseline"), None)
-    b1_text = "not available" if b1 is None else f"{int(b1['wins'])}/{int(b1['games'])} ({100 * float(b1['mean']):.1f}%)"
+    b1_text = (
+        "not available" if b1 is None else f"{int(b1['wins'])}/{int(b1['games'])} ({100 * float(b1['mean']):.1f}%)"
+    )
     text = f"""# Thesis Figure Captions
 
 ## fig_main_targeted_robustness

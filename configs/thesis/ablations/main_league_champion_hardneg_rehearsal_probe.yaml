@@ -1,0 +1,32 @@
+schema_version: 2
+description: "Short repair/rehearsal probe for longer champion/hard-negative league continuations. Keeps learned champion and hard-negative pressure active, but rebalances exposure toward B2/B3/B4 public anchors and direct B2/B3/B4 winning trajectory BC after B3/B4 drift is detected."
+extends: main_league_champion_hardneg_long_probe.yaml
+league:
+  sampling:
+    heuristic_public_mix_fraction: 0.08
+    heuristic_public_final_mix_fraction: 0.08
+    heuristic_public_variant_mix_fraction: 0.20
+    heuristic_public_variant_final_mix_fraction: 0.20
+    noleague_baseline_reserved_envs_per_actor: 2
+    noleague_baseline_mix_fraction: 0.20
+    noleague_baseline_mix_end_updates: -1
+    champion_mix_fraction: 0.20
+    hard_negative_mix_fraction: 0.12
+training:
+  structured_aux:
+    policy_anchor_coef: 0.20
+    policy_anchor_top_action_coef: 0.02
+    policy_anchor_temperature: 0.75
+    trajectory_bc_dataset_path: runs/trajectory_bc_direct_b2_b3_b4_win_64_20260516/trajectory_bc_direct_b2_b3_b4_win_64.npz
+    trajectory_bc_every_updates: 1
+    trajectory_bc_aux_updates: 1
+    trajectory_bc_batch_episodes: 8
+    trajectory_bc_seed: 20260517
+    trajectory_bc_teacher_family_coef: 0.05
+    trajectory_bc_teacher_slot_coef: 0.05
+    trajectory_bc_teacher_move_source_coef: 0.02
+    trajectory_bc_teacher_attack_type_coef: 0.02
+    trajectory_bc_teacher_action_coef: 0.18
+    trajectory_bc_teacher_same_family_action_coef: 0.55
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.08
+    trajectory_bc_teacher_same_family_action_margin: 0.5

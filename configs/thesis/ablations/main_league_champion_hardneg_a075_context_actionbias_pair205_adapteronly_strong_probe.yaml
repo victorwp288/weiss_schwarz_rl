@@ -1,0 +1,14 @@
+schema_version: 2
+description: "Mechanistic strong version of the pair205 action-bias adapter-only probe. This is not a publication candidate config; it disables inherited retention/anchor drag and applies several paired-swing auxiliary steps to verify whether the opponent-conditioned action-bias adapter can actually split the 104/124 pair205 contradiction before any confirm-eval escalation."
+extends: main_league_champion_hardneg_a075_context_actionbias_pair205_adapteronly_probe.yaml
+model:
+  opponent_context_adapter_lr_multiplier: 10000.0
+training:
+  optimizer:
+    learning_rate: 0.000001
+  structured_aux:
+    policy_anchor_coef: 0.0
+    policy_anchor_top_action_coef: 0.0
+    trajectory_retention_coef: 0.0
+    paired_swing_aux_updates: 32
+    paired_swing_coef: 0.40

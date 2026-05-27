@@ -1,0 +1,30 @@
+schema_version: 2
+description: "Conservative selected-a015 online league continuation. Starts from the paper-ready selected checkpoint, disables replay-BC during online updates, lowers update pressure, strengthens the frozen-policy anchor, and shifts live exposure toward B1/B2/B3/B4 while keeping champion and hard-negative lanes visible. This is a stop-gated probe: it is only useful if paired fixed baselines do not drop while learned champion/hard-negative rows improve."
+extends: main_league_champion_hardneg_selected_retention_b4guard_probe.yaml
+league:
+  sampling:
+    noleague_baseline_reserved_envs_per_actor: 5
+    noleague_baseline_mix_fraction: 0.36
+    noleague_baseline_mix_end_updates: -1
+    heuristic_public_mix_fraction: 0.08
+    heuristic_public_final_mix_fraction: 0.08
+    heuristic_public_variant_mix_fraction: 0.20
+    heuristic_public_variant_final_mix_fraction: 0.20
+    champion_mix_fraction: 0.18
+    hard_negative_mix_fraction: 0.12
+    hard_negative_min_samples: 2
+    hard_negative_max_win_rate: 0.58
+    hard_negative_overlaps_champions: true
+training:
+  optimizer:
+    learning_rate: 0.000012
+  exploration:
+    entropy_coef: 0.0012
+    actor_sampling_temperature: 0.86
+  structured_aux:
+    policy_anchor_coef: 0.38
+    policy_anchor_top_action_coef: 0.08
+    policy_anchor_temperature: 0.66
+    trajectory_retention_coef: 0.05
+    trajectory_bc_every_updates: 0
+    trajectory_bc_dataset_path: ""

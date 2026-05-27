@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from weiss_rl.artifacts.manifest import RunManifest, build_seed_file_manifest, default_run_dir_name, write_run_artifacts
 from weiss_rl.config import canonical_config_dict, compute_config_hash256, load_stack_config
-from weiss_rl.manifest import RunManifest, build_seed_file_manifest, default_run_dir_name, write_run_artifacts
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 
@@ -21,6 +21,13 @@ def test_write_run_artifacts_creates_manifest_scaffold(tmp_path: Path) -> None:
         simulator={"version": "0.7.0"},
         spec_bundle={"spec_hash": 123},
         config_canonical=canonical_config_dict(stack),
+        seed_derivation={
+            "config_base_seed64": 20260212,
+            "effective_base_seed64": 20260514,
+            "cli_seed_override": True,
+            "actor_seed_formula": "hash64(base_seed64, actor_id)",
+            "episode_seed_formula": "hash64(actor_seed64, env_id, episode_index)",
+        },
         seed_files=build_seed_file_manifest(stack.seed_sets, root=stack.root),
         hardware={"platform": "test"},
         evaluation_pinning={"eval_sampling_algorithm": "pinned_cdf_pcg_v1"},
@@ -37,7 +44,13 @@ def test_write_run_artifacts_creates_manifest_scaffold(tmp_path: Path) -> None:
     assert artifacts.config_hash_path.read_text(encoding="utf-8") == f"{manifest.config_hash256}\n"
     assert artifacts.config_json_path.exists()
     assert json.loads(artifacts.spec_bundle_path.read_text(encoding="utf-8")) == {"spec_hash": 123}
-    assert json.loads(artifacts.manifest_path.read_text(encoding="utf-8"))["simulator"]["version"] == "0.7.0"
+    manifest_payload = json.loads(artifacts.manifest_path.read_text(encoding="utf-8"))
+    assert manifest_payload["simulator"]["version"] == "0.7.0"
+    assert manifest_payload["seed_derivation"]["effective_base_seed64"] == 20260514
+    run_summary_payload = json.loads(artifacts.run_summary_path.read_text(encoding="utf-8"))
+    determinism_payload = json.loads(artifacts.determinism_report_path.read_text(encoding="utf-8"))
+    assert run_summary_payload["seed_derivation"]["cli_seed_override"] is True
+    assert determinism_payload["seed_derivation"]["config_base_seed64"] == 20260212
     assert (artifacts.run_dir / "checkpoints").is_dir()
     assert (artifacts.run_dir / "eval").is_dir()
     assert (artifacts.run_dir / "figures").is_dir()

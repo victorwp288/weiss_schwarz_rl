@@ -1,0 +1,8 @@
+schema_version: 2
+description: "B1 reward ablation: full shaping with lower entropy pressure to test policy-drift/exploration collapse."
+extends: full_shaping_reward.yaml
+training:
+  exploration:
+    entropy_coef: 0.01
+    entropy_anneal_to: 0.003
+    entropy_anneal_steps_updates: 300000

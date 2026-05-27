@@ -52,6 +52,8 @@ def load_eval_game_records(path: Path) -> tuple[EvalGameRecord, ...]:
                     terminated=bool(payload["terminated"]),
                     truncated=bool(payload["truncated"]),
                     engine_status=int(payload["engine_status"]),
+                    seat0_deck=None if payload.get("seat0_deck") is None else str(payload["seat0_deck"]),
+                    seat1_deck=None if payload.get("seat1_deck") is None else str(payload["seat1_deck"]),
                     decision_count=int(payload.get("decision_count", 0)),
                     tick_count=int(payload.get("tick_count", 0)),
                     no_progress_count=int(payload.get("no_progress_count", 0)),
@@ -82,6 +84,7 @@ def build_matchup_export(
 ) -> dict[str, Any]:
     focal_policy_id, opponent_policy_id = _matchup_ids(records)
     _require_single_contract(records)
+    deck_context = _matchup_deck_context(records)
     decision = summarize_stage2_records(
         records,
         stop_rules=stop_rules,
@@ -116,6 +119,7 @@ def build_matchup_export(
     return {
         "focal_policy_id": focal_policy_id,
         "opponent_policy_id": opponent_policy_id,
+        "deck_context": deck_context,
         "scheme": scheme,
         "paired_seeds": decision.paired_seed_count,
         "observed_paired_seeds": decision.observed_paired_seeds,
@@ -157,6 +161,8 @@ def write_matchup_summary_csv(path: Path, payload: dict[str, Any]) -> None:
     row = {
         "focal_policy_id": payload["focal_policy_id"],
         "opponent_policy_id": payload["opponent_policy_id"],
+        "focal_deck": payload.get("deck_context", {}).get("focal_deck"),
+        "opponent_deck": payload.get("deck_context", {}).get("opponent_deck"),
         "scheme": payload["scheme"],
         "paired_seeds": payload["paired_seeds"],
         "max_paired_seeds": payload["max_paired_seeds"],
@@ -209,6 +215,29 @@ def _require_single_contract(records: tuple[EvalGameRecord, ...] | list[EvalGame
     spec_hashes = {record.spec_hash256 for record in records}
     if len(config_hashes) != 1 or len(spec_hashes) != 1:
         raise ValueError("summary export expects records for exactly one config/spec contract")
+
+
+def _matchup_deck_context(records: tuple[EvalGameRecord, ...] | list[EvalGameRecord]) -> dict[str, str | None]:
+    focal_decks: set[str | None] = set()
+    opponent_decks: set[str | None] = set()
+    for record in records:
+        if record.focal_seat == 0:
+            focal_decks.add(record.seat0_deck)
+            opponent_decks.add(record.seat1_deck)
+        else:
+            focal_decks.add(record.seat1_deck)
+            opponent_decks.add(record.seat0_deck)
+    return {
+        "focal_deck": _single_deck_or_none(focal_decks),
+        "opponent_deck": _single_deck_or_none(opponent_decks),
+    }
+
+
+def _single_deck_or_none(decks: set[str | None]) -> str | None:
+    normalized = {deck for deck in decks if deck is not None}
+    if len(normalized) == 1:
+        return next(iter(normalized))
+    return None
 
 
 def _normalize_optional_hash256(value: object, *, name: str) -> str | None:

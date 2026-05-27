@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Thesis final evaluation with replay capture disabled for determinism probes."
+extends: final_eval.yaml
+evaluation:
+  replay_capture_rate_eval: 0.0
+  regression_capture_count: 0

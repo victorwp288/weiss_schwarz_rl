@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from weiss_rl.structured_acceptance import build_structured_baseline_contract
+from weiss_rl.experiments.structured_acceptance import build_structured_baseline_contract
 
 
 def _build_parser() -> argparse.ArgumentParser:

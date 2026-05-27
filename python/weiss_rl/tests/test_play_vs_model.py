@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -43,15 +44,15 @@ def test_choose_policy_action_scales_logits_before_sampling(monkeypatch) -> None
     )
 
     play_script._choose_policy_action(
-        policy=policy,
-        batch=batch,
+        policy=cast(Any, policy),
+        batch=cast(Any, batch),
         legal_ids=np.asarray([0, 1, 2], dtype=np.uint32),
         pass_action_id=0,
         seat_hidden=torch.zeros((1, 1), dtype=torch.float32),
         rng=play_script.Pcg32XshRrV1(7),
         temperature=2.0,
         top_k=3,
-        catalog=SimpleNamespace(),
+        catalog=cast(Any, SimpleNamespace()),
     )
 
     assert np.allclose(captured["logits"], np.asarray([0.5, 1.5, -1.0], dtype=np.float32))
@@ -68,7 +69,7 @@ def test_advance_after_model_action_steps_even_without_tty(monkeypatch) -> None:
     monkeypatch.setattr(play_script.sys.stdin, "isatty", lambda: False, raising=False)
     monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(AssertionError(prompt)))
 
-    result = play_script._advance_after_model_action(env=_FakeEnv(), action=7)
+    result = cast(Any, play_script._advance_after_model_action(env=cast(Any, _FakeEnv()), action=7))
 
     assert result == "next-batch"
     assert len(stepped) == 1
@@ -86,7 +87,7 @@ def test_advance_after_model_action_continues_when_tty_input_hits_eof(monkeypatc
     monkeypatch.setattr(play_script.sys.stdin, "isatty", lambda: True, raising=False)
     monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError(prompt)))
 
-    result = play_script._advance_after_model_action(env=_FakeEnv(), action=9)
+    result = cast(Any, play_script._advance_after_model_action(env=cast(Any, _FakeEnv()), action=9))
 
     assert result == "next-batch"
     assert len(stepped) == 1
@@ -107,8 +108,8 @@ def test_prompt_human_action_translates_eof_to_keyboard_interrupt(monkeypatch) -
 
     with pytest.raises(KeyboardInterrupt, match="stdin closed while waiting for human input"):
         play_script._prompt_human_action(
-            batch=batch,
-            catalog=SimpleNamespace(),
+            batch=cast(Any, batch),
+            catalog=cast(Any, SimpleNamespace()),
             top_k_hints=[],
         )
 
@@ -140,18 +141,18 @@ def test_rank_policy_hint_options_do_not_sample(monkeypatch) -> None:
     )
 
     hints, next_hidden = play_script._rank_policy_hint_options(
-        policy=policy,
-        batch=batch,
+        policy=cast(Any, policy),
+        batch=cast(Any, batch),
         legal_ids=np.asarray([0, 1, 2], dtype=np.uint32),
         seat_hidden=torch.zeros((1, 1), dtype=torch.float32),
         top_k=2,
-        catalog=SimpleNamespace(),
+        catalog=cast(Any, SimpleNamespace()),
     )
 
-    assert hints == ["hint-a", "hint-b"]
-    assert torch.equal(next_hidden, torch.zeros((1, 1), dtype=torch.float32))
-    assert np.allclose(observed["logits"], np.asarray([1.0, 3.0, -2.0], dtype=np.float32))
-    assert np.array_equal(observed["legal_ids"], np.asarray([0, 1, 2], dtype=np.uint32))
+    assert cast(Any, hints) == ["hint-a", "hint-b"]
+    assert torch.equal(cast(torch.Tensor, next_hidden), torch.zeros((1, 1), dtype=torch.float32))
+    assert np.allclose(cast(np.ndarray, observed["logits"]), np.asarray([1.0, 3.0, -2.0], dtype=np.float32))
+    assert np.array_equal(cast(np.ndarray, observed["legal_ids"]), np.asarray([0, 1, 2], dtype=np.uint32))
     assert observed["top_k"] == 2
 
 

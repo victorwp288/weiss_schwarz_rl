@@ -1,0 +1,14 @@
+schema_version: 2
+description: "Movement-suppression probe from the a050p2 row-deficit live branch. Prior replay-free live probes changed exposure but produced learned-flat confirm64 results and near-zero preference-surface top-action movement. This keeps row-deficit champion/hard-negative exposure and fixed B2/B4/B1 constraints, but lowers policy-anchor/trajectory-retention drag and raises LR slightly. It is not a publication config: continue only if the post-update drift gate shows real target movement without top-action/family leakage, then sentinel must pass before any full confirm64."
+extends: main_league_champion_hardneg_a050p2_live_rowdeficit_probe.yaml
+training:
+  optimizer:
+    learning_rate: 0.0000024
+  exploration:
+    entropy_coef: 0.0012
+    actor_sampling_temperature: 0.88
+  structured_aux:
+    policy_anchor_coef: 0.18
+    policy_anchor_top_action_coef: 0.03
+    policy_anchor_temperature: 0.75
+    trajectory_retention_coef: 0.01

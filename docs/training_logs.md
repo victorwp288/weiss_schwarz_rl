@@ -21,9 +21,9 @@ If the legality surface is missing, V-trace diagnostics intentionally fall back 
 
 ## What is intentionally not claimed
 
-- no full multi-actor `train.py` pipeline yet
-- no actor-to-learner lag aggregation from a live training loop
-- no claim that the inline smoke path equals full end-to-end training readiness
+- no claim that this logging page fully documents the multi-actor `train.py` pipeline
+- no claim that every actor-to-learner lag metric is emitted in every runtime mode
+- no claim that the inline smoke path equals full end-to-end thesis training readiness
 
 ## Minimal usage
 
@@ -47,7 +47,7 @@ from pathlib import Path
 import numpy as np
 
 from weiss_rl.learners.impala_learner import ImpalaLearner
-from weiss_rl.training_logger import TrainingLogger
+from weiss_rl.diagnostics.training_logger import TrainingLogger
 
 learner = ImpalaLearner(
     checkpoint_dir=Path("runs/example/checkpoints"),
@@ -103,7 +103,7 @@ Optional caller-supplied fields exist for checkpoint-based actor sync lag:
 
 ```python
 from pathlib import Path
-from weiss_rl.training_logger import TrainingLogger
+from weiss_rl.diagnostics.training_logger import TrainingLogger
 
 is_valid, message = TrainingLogger.validate_jsonl(
     Path("runs/example/logs/training_metrics.jsonl")

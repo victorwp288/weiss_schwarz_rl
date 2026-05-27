@@ -60,6 +60,18 @@ class ModelConfig:
     public_heuristic_logit_bias_end_updates: int = -1
     public_heuristic_logit_bias_final_scale: float = 0.0
     public_heuristic_logit_bias_families: tuple[str, ...] = field(default_factory=tuple)
+    opponent_context_policy_ids: tuple[str, ...] = field(default_factory=tuple)
+    opponent_context_hidden_scale: float = 0.0
+    opponent_context_trainable_hidden_scale: float = 0.0
+    opponent_context_trainable_recurrent_scale: float = 0.0
+    opponent_context_trainable_action_bias_scale: float = 0.0
+    opponent_context_trainable_candidate_residual_scale: float = 0.0
+    opponent_context_candidate_residual_width: int = 32
+    opponent_context_candidate_residual_mode: str = "additive"
+    opponent_context_candidate_residual_action_ids: tuple[int, ...] = field(default_factory=tuple)
+    opponent_context_adapter_lr_multiplier: float = 1.0
+    opponent_context_adapter_train_only: bool = False
+    opponent_context_eval_policy_ids: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +93,8 @@ class TrainingExplorationConfig:
     entropy_coef: float
     entropy_anneal_to: float
     entropy_anneal_steps_updates: int
+    entropy_scope: str = "candidate"
+    actor_sampling_temperature: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +113,14 @@ class TrainingStructuredMetricsConfig:
 @dataclass(frozen=True, slots=True)
 class TrainingTeacherAuxConfig:
     mode: str = "always"
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingActionSurfaceConfig:
+    mulligan_force_confirm_after_select: bool = False
+    force_pass_over_main_move_only: bool = False
+    main_move_only_max_consecutive: int = 0
+    force_attack_over_pass_when_attack_legal: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,23 +147,87 @@ class TrainingPpoConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TrainingTrajectoryBcFocusGroupConfig:
+    name: str
+    source_labels: tuple[str, ...]
+    fraction: float
+
+
+@dataclass(frozen=True, slots=True)
 class TrainingStructuredAuxConfig:
     enabled: bool = False
     teacher_family_coef: float = 0.0
     teacher_slot_coef: float = 0.0
+    teacher_hand_coef: float = 0.0
     teacher_move_source_coef: float = 0.0
     teacher_attack_type_coef: float = 0.0
     teacher_action_coef: float = 0.0
     teacher_same_family_action_coef: float = 0.0
+    teacher_action_margin_coef: float = 0.0
+    teacher_action_margin: float = 0.5
+    teacher_same_family_action_margin_coef: float = 0.0
+    teacher_same_family_action_margin: float = 0.5
+    teacher_supervised_start_updates: int = 0
+    teacher_supervised_end_updates: int = -1
+    teacher_supervised_final_scale: float = 1.0
+    teacher_exact_action_families: tuple[str, ...] = field(default_factory=tuple)
     teacher_public_heuristic_coef: float = 0.0
     teacher_public_heuristic_start_updates: int = 0
     teacher_public_heuristic_end_updates: int = -1
     teacher_public_heuristic_final_coef: float = 0.0
     teacher_public_heuristic_temperature: float = 32.0
+    teacher_public_nonpass_over_pass_coef: float = 0.0
+    teacher_public_nonpass_over_pass_margin: float = 0.5
     teacher_public_heuristic_families: tuple[str, ...] = field(default_factory=tuple)
     teacher_public_heuristic_profiles: tuple[str, ...] = field(default_factory=tuple)
     teacher_public_heuristic_profile_mode: str = "mixture"
     teacher_public_heuristic_profiles_end_updates: int = -1
+    policy_anchor_coef: float = 0.0
+    policy_anchor_top_action_coef: float = 0.0
+    policy_anchor_temperature: float = 1.0
+    trajectory_retention_coef: float = 0.0
+    trajectory_retention_policy_ids: tuple[str, ...] = field(default_factory=tuple)
+    trajectory_retention_sources: tuple[str, ...] = field(default_factory=lambda: ("champions",))
+    trajectory_bc_dataset_path: str = ""
+    trajectory_bc_every_updates: int = 0
+    trajectory_bc_aux_updates: int = 1
+    trajectory_bc_batch_episodes: int = 8
+    trajectory_bc_seed: int = 20260516
+    trajectory_bc_focus_source_labels: tuple[str, ...] = field(default_factory=tuple)
+    trajectory_bc_focus_fraction: float = 0.0
+    trajectory_bc_focus_groups: tuple[TrainingTrajectoryBcFocusGroupConfig, ...] = field(default_factory=tuple)
+    trajectory_bc_teacher_family_coef: float = 0.05
+    trajectory_bc_teacher_slot_coef: float = 0.05
+    trajectory_bc_teacher_move_source_coef: float = 0.02
+    trajectory_bc_teacher_attack_type_coef: float = 0.02
+    trajectory_bc_teacher_action_coef: float = 0.20
+    trajectory_bc_teacher_same_family_action_coef: float = 0.60
+    trajectory_bc_teacher_same_family_action_margin_coef: float = 0.10
+    trajectory_bc_teacher_same_family_action_margin: float = 0.5
+    paired_swing_dataset_path: str = ""
+    paired_swing_every_updates: int = 0
+    paired_swing_aux_updates: int = 1
+    paired_swing_batch_episodes: int = 8
+    paired_swing_seed: int = 20260519
+    paired_swing_focus_source_labels: tuple[str, ...] = field(default_factory=tuple)
+    paired_swing_focus_fraction: float = 0.0
+    paired_swing_focus_groups: tuple[TrainingTrajectoryBcFocusGroupConfig, ...] = field(default_factory=tuple)
+    paired_swing_margin: float = 0.35
+    paired_swing_coef: float = 0.08
+    paired_swing_positive_action_source: str = "teacher_action"
+    paired_swing_negative_action_source: str = "actions"
+    paired_swing_conflict_filter: str = "none"
+    paired_swing_loss_scope: str = "row"
+    paired_swing_compare_to: str = "negative"
+    paired_outcome_preference_dataset_path: str = ""
+    paired_outcome_preference_every_updates: int = 0
+    paired_outcome_preference_aux_updates: int = 1
+    paired_outcome_preference_batch_episodes: int = 8
+    paired_outcome_preference_seed: int = 20260520
+    paired_outcome_preference_coef: float = 0.05
+    paired_outcome_preference_beta: float = 0.1
+    paired_outcome_preference_aggregation: str = "mean"
+    paired_outcome_preference_group_balance: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +236,7 @@ class TrainingStructuredWarmstartConfig:
     updates: int = 0
     teacher_family_coef: float = 0.0
     teacher_slot_coef: float = 0.0
+    teacher_hand_coef: float = 0.0
     teacher_move_source_coef: float = 0.0
     teacher_attack_type_coef: float = 0.0
     teacher_action_coef: float = 0.0
@@ -176,7 +263,9 @@ class TrainingConfig:
     structured_warmstart: TrainingStructuredWarmstartConfig
     structured_metrics: TrainingStructuredMetricsConfig = field(default_factory=TrainingStructuredMetricsConfig)
     teacher_aux: TrainingTeacherAuxConfig = field(default_factory=TrainingTeacherAuxConfig)
+    action_surface: TrainingActionSurfaceConfig = field(default_factory=TrainingActionSurfaceConfig)
     fixed_opponent_backend: str = "python_scalar"
+    fixed_model_opponent_action_selection: str = "sample"
     actor_policy_backend: str = "model"
     actor_heuristic_fraction: float = 1.0
     actor_heuristic_start_updates: int = 0
@@ -222,6 +311,14 @@ class TrainingConfig:
     @property
     def entropy_anneal_steps_updates(self) -> int:
         return int(self.exploration.entropy_anneal_steps_updates)
+
+    @property
+    def entropy_scope(self) -> str:
+        return str(self.exploration.entropy_scope)
+
+    @property
+    def actor_sampling_temperature(self) -> float:
+        return float(self.exploration.actor_sampling_temperature)
 
     @property
     def mixed_precision(self) -> bool:
@@ -296,12 +393,32 @@ class TrainingConfig:
         return self.teacher_aux.mode
 
     @property
+    def mulligan_force_confirm_after_select(self) -> bool:
+        return bool(self.action_surface.mulligan_force_confirm_after_select)
+
+    @property
+    def force_pass_over_main_move_only(self) -> bool:
+        return bool(self.action_surface.force_pass_over_main_move_only)
+
+    @property
+    def main_move_only_max_consecutive(self) -> int:
+        return int(self.action_surface.main_move_only_max_consecutive)
+
+    @property
+    def force_attack_over_pass_when_attack_legal(self) -> bool:
+        return bool(self.action_surface.force_attack_over_pass_when_attack_legal)
+
+    @property
     def teacher_family_coef(self) -> float:
         return float(self.structured_aux.teacher_family_coef)
 
     @property
     def teacher_slot_coef(self) -> float:
         return float(self.structured_aux.teacher_slot_coef)
+
+    @property
+    def teacher_hand_coef(self) -> float:
+        return float(self.structured_aux.teacher_hand_coef)
 
     @property
     def teacher_move_source_coef(self) -> float:
@@ -318,6 +435,38 @@ class TrainingConfig:
     @property
     def teacher_same_family_action_coef(self) -> float:
         return float(self.structured_aux.teacher_same_family_action_coef)
+
+    @property
+    def teacher_action_margin_coef(self) -> float:
+        return float(self.structured_aux.teacher_action_margin_coef)
+
+    @property
+    def teacher_action_margin(self) -> float:
+        return float(self.structured_aux.teacher_action_margin)
+
+    @property
+    def teacher_same_family_action_margin_coef(self) -> float:
+        return float(self.structured_aux.teacher_same_family_action_margin_coef)
+
+    @property
+    def teacher_same_family_action_margin(self) -> float:
+        return float(self.structured_aux.teacher_same_family_action_margin)
+
+    @property
+    def teacher_supervised_start_updates(self) -> int:
+        return int(self.structured_aux.teacher_supervised_start_updates)
+
+    @property
+    def teacher_supervised_end_updates(self) -> int:
+        return int(self.structured_aux.teacher_supervised_end_updates)
+
+    @property
+    def teacher_supervised_final_scale(self) -> float:
+        return float(self.structured_aux.teacher_supervised_final_scale)
+
+    @property
+    def teacher_exact_action_families(self) -> tuple[str, ...]:
+        return tuple(self.structured_aux.teacher_exact_action_families)
 
     @property
     def teacher_public_heuristic_coef(self) -> float:
@@ -340,6 +489,14 @@ class TrainingConfig:
         return float(self.structured_aux.teacher_public_heuristic_temperature)
 
     @property
+    def teacher_public_nonpass_over_pass_coef(self) -> float:
+        return float(self.structured_aux.teacher_public_nonpass_over_pass_coef)
+
+    @property
+    def teacher_public_nonpass_over_pass_margin(self) -> float:
+        return float(self.structured_aux.teacher_public_nonpass_over_pass_margin)
+
+    @property
     def teacher_public_heuristic_families(self) -> tuple[str, ...]:
         return tuple(self.structured_aux.teacher_public_heuristic_families)
 
@@ -354,6 +511,52 @@ class TrainingConfig:
     @property
     def teacher_public_heuristic_profiles_end_updates(self) -> int:
         return int(self.structured_aux.teacher_public_heuristic_profiles_end_updates)
+
+    @property
+    def policy_anchor_coef(self) -> float:
+        return float(self.structured_aux.policy_anchor_coef)
+
+    @property
+    def policy_anchor_top_action_coef(self) -> float:
+        return float(self.structured_aux.policy_anchor_top_action_coef)
+
+    @property
+    def policy_anchor_temperature(self) -> float:
+        return float(self.structured_aux.policy_anchor_temperature)
+
+    @property
+    def trajectory_retention_coef(self) -> float:
+        return float(self.structured_aux.trajectory_retention_coef)
+
+    @property
+    def trajectory_retention_policy_ids(self) -> tuple[str, ...]:
+        return tuple(self.structured_aux.trajectory_retention_policy_ids)
+
+    @property
+    def trajectory_retention_sources(self) -> tuple[str, ...]:
+        return tuple(self.structured_aux.trajectory_retention_sources)
+
+    @property
+    def trajectory_bc_dataset_path(self) -> str:
+        return str(self.structured_aux.trajectory_bc_dataset_path)
+
+    @property
+    def trajectory_bc_enabled(self) -> bool:
+        return bool(str(self.structured_aux.trajectory_bc_dataset_path).strip()) and (
+            int(self.structured_aux.trajectory_bc_every_updates) > 0
+        )
+
+    @property
+    def paired_swing_enabled(self) -> bool:
+        return bool(str(self.structured_aux.paired_swing_dataset_path).strip()) and (
+            int(self.structured_aux.paired_swing_every_updates) > 0
+        )
+
+    @property
+    def paired_outcome_preference_enabled(self) -> bool:
+        return bool(str(self.structured_aux.paired_outcome_preference_dataset_path).strip()) and (
+            int(self.structured_aux.paired_outcome_preference_every_updates) > 0
+        )
 
     @property
     def structured_warmstart_enabled(self) -> bool:
@@ -393,6 +596,10 @@ class RewardShapingConfig:
     level_reward: float
     board_reward: float
     no_progress_penalty: float
+    pass_with_nonpass_penalty: float = 0.0
+    mulligan_select_with_confirm_penalty: float = 0.0
+    terminal_outcome_backfill_reward: float = 0.0
+    terminal_outcome_trace_backfill_reward: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -431,6 +638,7 @@ class CurriculumCheckpointGuardConfig:
     promote_min_prob_gt_half: float
     promote_max_ci_half_width: float
     cooldown_updates: int
+    stop_after_rollback: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,6 +661,7 @@ class CurriculumConfig:
             promote_min_prob_gt_half=0.0,
             promote_max_ci_half_width=1.0,
             cooldown_updates=0,
+            stop_after_rollback=False,
         )
     )
 
@@ -470,6 +679,9 @@ class LeaguePoolConfig:
     recent_size: int
     champion_size: int
     champion_max_age_updates: int
+    seed_snapshot_champion_import: str = "source_champions"
+    seed_snapshot_import_filter: str = "all"
+    seed_snapshot_registry_json: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -501,6 +713,9 @@ class LeagueSamplingConfig:
     pfsp_epsilon_uniform: float
     pfsp_stats_source: str
     pfsp_window_episodes: int
+    mirror_mix_fraction: float
+    mirror_mix_end_updates: int
+    mirror_final_mix_fraction: float
     heuristic_public_start_updates: int
     heuristic_public_mix_fraction: float
     heuristic_public_mix_end_updates: int
@@ -517,6 +732,10 @@ class LeagueSamplingConfig:
     hard_negative_mix_fraction: float
     hard_negative_min_samples: int
     hard_negative_max_win_rate: float
+    hard_negative_focus_policy_ids: tuple[str, ...]
+    hard_negative_focus_weight_multiplier: float
+    row_deficit_policy_weights: tuple[tuple[str, float], ...]
+    hard_negative_overlaps_champions: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -622,6 +841,7 @@ class FinalPolicySetSelectionConfig:
     include_random_legal_baseline_b0: bool
     include_no_league_baseline_b1: bool
     include_heuristic_public_b2_if_exists: bool
+    include_heuristic_public_anchors_b2_b3_b4: bool
     include_final_champion_snapshot: bool
     include_spaced_snapshots_near_percent_updates: tuple[int, ...]
     remaining_slots_strategy: str
@@ -651,6 +871,7 @@ class EvaluationConfig:
     legal_fingerprint_checks: LegalFingerprintChecksConfig
     decision_kind_tagging: DecisionKindTaggingConfig
     final_policy_set_selection: FinalPolicySetSelectionConfig
+    model_sampling_temperature: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,16 @@
+targeted confirm start: focal=policy_000002 rows=13 paired_seeds=128 workers=1
+done 1/13 policy_000002 vs B0 RandomLegal mean=1.0 wins=256/256
+done 2/13 policy_000002 vs B1 NoLeague baseline mean=0.609375 wins=156/256
+done 3/13 policy_000002 vs B2 HeuristicPublic mean=0.7890625 wins=202/256
+done 4/13 policy_000002 vs B3 HeuristicPublicAggro mean=0.72265625 wins=185/256
+done 5/13 policy_000002 vs B4 HeuristicPublicControl mean=0.72265625 wins=185/256
+done 6/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000001 mean=0.640625 wins=164/256
+done 7/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000002 mean=0.578125 wins=148/256
+done 8/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025 mean=0.57421875 wins=147/256
+done 9/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest mean=0.57421875 wins=147/256
+done 10/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected mean=0.5625 wins=144/256
+done 11/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000003 mean=0.5625 wins=144/256
+done 12/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000004 mean=0.5703125 wins=146/256
+done 13/13 policy_000002 vs seed_b8c698d26a_seed_c3aac2f9dc_policy_000005 mean=0.5703125 wins=146/256
+summary runs\main_champion_hardneg_preservewinner_b1b3repair_from_u12_u2_confirm16_20260519_seg01\eval\repair_probe_confirm128_policy_000002\targeted_confirm128_summary.json
+{"games": 3328, "mean": 0.6520432692307693, "wins": 2170}
