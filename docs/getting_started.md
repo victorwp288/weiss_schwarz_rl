@@ -29,7 +29,7 @@ Repo paths in this guide are relative to the repo root.
 - Python >= 3.10, < 3.13
 - `uv` installed and available in your terminal (`pip install uv`)
 - Access to `weiss_sim` with `export_spec_bundle()` available.
-  - `uv sync --extra dev --extra sim` installs `weiss-sim 1.1.0`, which matches the current repo expectations.
+  - `uv sync --extra dev --extra sim` installs `weiss-sim 1.2.0`, which matches the current repo expectations.
   - If `weiss_sim` is already installed in your active Python environment, the probe uses that first.
   - Otherwise it checks `WEISS_SIM_PYTHONPATH` if set.
   - Otherwise it looks for a sibling checkout at `../weiss-schwarz-simulator/python` relative to this repo.
@@ -100,12 +100,12 @@ If you use `make train-min` instead, expect the same contract/manifest scaffold 
 
 ## Canonical simulator-backed run
 
-Use this for the real thesis-oriented train/eval path. It exercises the single-node queue runtime through the `DecisionBoundaryEnv` contract and validates against `weiss-sim 1.1.0`.
+Use this for the real thesis-oriented train/eval path. It exercises the single-node queue runtime through the `DecisionBoundaryEnv` contract and validates against `weiss-sim 1.2.0`.
 
 Requirements:
 
 - use `python -m weiss_rl.cli` for the standard thesis surface
-- install `weiss-sim>=1.1.0,<2` with `uv sync --extra dev --extra sim`, or otherwise ensure the active interpreter can import the same validated `weiss_sim`
+- install `weiss-sim>=1.2.0,<2` with `uv sync --extra dev --extra sim`, or otherwise ensure the active interpreter can import the same validated `weiss_sim`
 - keep the run on a single machine for the canonical path
 - prepare a dedicated B1 NoLeague run first and pass it through `--b1-run`
 

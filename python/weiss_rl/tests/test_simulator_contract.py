@@ -28,7 +28,7 @@ def _nested_spec_bundle(*, spec_hash: int = 123) -> dict[str, object]:
     }
 
 
-def _simulator_payload(*, version: str = "1.1.0", spec_hash: int = 123) -> dict[str, object]:
+def _simulator_payload(*, version: str = "1.2.0", spec_hash: int = 123) -> dict[str, object]:
     return {
         "simulator": {
             "version": version,
@@ -62,7 +62,7 @@ def test_load_simulator_contract_uses_installed_package_first(monkeypatch: pytes
 
     contract = load_simulator_contract(Path("/repo"))
 
-    assert contract.simulator["version"] == "1.1.0"
+    assert contract.simulator["version"] == "1.2.0"
     assert contract.simulator["compatibility_hash"] == "123"
     assert contract.simulator["probe_python"] == "/good/python"
     assert contract.simulator["probe_pythonpath"] is None
@@ -89,7 +89,7 @@ def test_load_simulator_contract_uses_first_success(monkeypatch: pytest.MonkeyPa
 
     contract = load_simulator_contract(Path("/repo"))
 
-    assert contract.simulator["version"] == "1.1.0"
+    assert contract.simulator["version"] == "1.2.0"
     assert contract.simulator["compatibility_hash"] == "123"
     assert contract.simulator["probe_python"] == "/good/python"
     assert contract.simulator["probe_pythonpath"] == (tmp_path / "sim").resolve().as_posix()
@@ -119,8 +119,8 @@ def test_load_simulator_contract_skips_invalid_spec_bundle_payload(
         load_simulator_contract(Path("/repo"))
 
 
-def test_load_simulator_contract_rejects_pre_1_1_simulator(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = _simulator_payload(version="0.7.0")
+def test_load_simulator_contract_rejects_pre_1_2_simulator(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = _simulator_payload(version="1.1.0")
 
     monkeypatch.setattr(
         "weiss_rl.core.simulator_contract._candidate_targets",
@@ -128,14 +128,18 @@ def test_load_simulator_contract_rejects_pre_1_1_simulator(monkeypatch: pytest.M
     )
     monkeypatch.setattr("weiss_rl.core.simulator_contract._run_probe", lambda target: payload)
 
-    with pytest.raises(RuntimeError, match="below required 1.1.0"):
+    with pytest.raises(RuntimeError, match="below required 1.2.0"):
         load_simulator_contract(Path("/repo"))
 
 
 def test_load_simulator_contract_rejects_missing_thesis_deck_presets(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _simulator_payload()
-    simulator = dict(payload["simulator"])  # type: ignore[index]
-    thesis_decks = dict(simulator["thesis_deck_presets"])  # type: ignore[index]
+    simulator = payload["simulator"]
+    assert isinstance(simulator, dict)
+    simulator = dict(simulator)
+    thesis_decks = simulator["thesis_deck_presets"]
+    assert isinstance(thesis_decks, dict)
+    thesis_decks = dict(thesis_decks)
     thesis_decks["available"] = ["main_deck_5hy_yotsuba_v1"]
     simulator["thesis_deck_presets"] = thesis_decks
     payload["simulator"] = simulator

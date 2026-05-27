@@ -54,8 +54,8 @@ payload = {
 print(json.dumps(payload, sort_keys=True))
 """.strip()
 
-MIN_WEISS_SIM_VERSION = "1.1.0"
-_MIN_WEISS_SIM_VERSION_PARTS = (1, 1, 0)
+MIN_WEISS_SIM_VERSION = "1.2.0"
+_MIN_WEISS_SIM_VERSION_PARTS = (1, 2, 0)
 THESIS_DECK_PRESETS = (
     "main_deck_5hy_yotsuba_v1",
     "aggro_deck_5hy_nino_v1",
@@ -108,7 +108,7 @@ def parse_version_parts(version: object) -> tuple[int, int, int] | None:
         parts.append(int(token))
     while len(parts) < 3:
         parts.append(0)
-    return tuple(parts[:3])
+    return (parts[0], parts[1], parts[2])
 
 
 def validate_simulator_runtime(simulator: dict[str, Any]) -> None:

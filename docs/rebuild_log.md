@@ -17153,3 +17153,102 @@ npm run build
 ### Next Action
 
 - Commit and push the cleaned tree to GitHub.
+
+## 2026-05-27 - Update Simulator Dependency to weiss-sim 1.2.0
+
+### What Changed
+
+- Updated the optional simulator dependency from `weiss-sim>=1.1.0,<2` to
+  `weiss-sim>=1.2.0,<2`.
+- Refreshed `uv.lock`, which now pins `weiss-sim==1.2.0`.
+- Raised the runtime simulator contract gate to require `weiss_sim.__version__`
+  `>=1.2.0`.
+- Updated active simulator docs, getting-started docs, runtime docs, project
+  instructions, rebuild plan references, and simulator-facing tests to the
+  1.2.0 contract.
+
+### Commands Run
+
+```powershell
+uv lock --upgrade-package weiss-sim
+uv sync --extra dev --extra sim
+uv run --extra dev --extra sim python -c "import json, weiss_sim; ..."
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_simulator_contract.py python/weiss_rl/tests/test_training_startup.py python/weiss_rl/tests/test_pool_factory.py python/weiss_rl/tests/test_rl_step_layout_contract_smoke.py python/weiss_rl/tests/test_training_environments.py python/weiss_rl/tests/test_heuristic_public.py --tb=short
+uv run --extra dev --extra sim python -m compileall -q python
+uv run --extra dev --extra sim python -m ruff check python/scripts python/weiss_rl scripts examples
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests --tb=short
+uv run --extra dev --extra sim python -m ruff format --check .
+uv run --extra dev --extra sim python -m mypy python
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/core/simulator_contract.py python/weiss_rl/tests/test_rl_step_layout_contract_smoke.py python/weiss_rl/tests/test_simulator_contract.py python/weiss_rl/tests/test_training_startup.py python/weiss_rl/tests/test_entrypoints.py
+uv run --extra dev --extra sim python -m mypy python/weiss_rl/core/simulator_contract.py python/weiss_rl/tests/test_rl_step_layout_contract_smoke.py python/weiss_rl/tests/test_simulator_contract.py python/weiss_rl/tests/test_training_startup.py
+```
+
+### Results
+
+- `uv lock` resolved 81 packages and updated `weiss-sim v1.1.0 -> v1.2.0`.
+- `uv sync --extra dev --extra sim` replaced the installed simulator package
+  with `weiss-sim==1.2.0`.
+- Installed simulator probe:
+  - version: `1.2.0`
+  - observation length: `378`
+  - action space: `527`
+  - pass action id: `51`
+  - compatibility hash: `8590000130`
+  - deck presets: `aggro_deck_5hy_nino_v1`,
+    `control_deck_jj_s66_v1`, `main_deck_5hy_yotsuba_v1`,
+    `starter_deck_ws02_v1`
+- Targeted simulator test subset passed: 65 passed.
+- Python compile check passed.
+- Ruff passed.
+- Full Python test suite passed: 1889 passed, 2 skipped, 14 warnings.
+- Scoped ruff format check on changed Python files passed.
+- Scoped mypy check on simulator-contract Python files passed.
+- Repo-wide ruff format check did not pass because 27 pre-existing files would
+  be reformatted.
+- Repo-wide mypy did not pass because mypy discovers `python/scripts/eval.py`
+  twice as `eval` and `scripts.eval`.
+
+### Tests Added
+
+- No new test files were added.
+- Existing simulator contract tests and fixtures were updated to enforce the
+  new minimum simulator version.
+
+### Failures Found
+
+- Repo-wide `ruff format --check .` reports 27 unrelated files that would be
+  reformatted.
+- Repo-wide `mypy python` stops before type-checking because
+  `python/scripts/eval.py` is found twice under different module names.
+- A scoped mypy pass initially exposed tuple-return and payload-narrowing type
+  issues in the simulator contract touched by this change.
+
+### Fixes Applied
+
+- Updated stale test stub versions from 1.1.0 to 1.2.0 so the stricter runtime
+  gate still exercises the intended startup paths.
+- Made version tuple parsing return fixed-length tuples and narrowed simulator
+  test payload dictionaries before mutation so the scoped mypy pass is clean.
+
+### Behavior Changes
+
+- Simulator-backed startup and contract collection now reject `weiss_sim`
+  versions below 1.2.0.
+- The core simulator dimensions and compatibility hash remain unchanged from
+  the previous recorded contract.
+
+### Performance Numbers
+
+- No training or simulator throughput benchmarks were run for this dependency
+  bump.
+
+### Remaining Risks
+
+- This pass validated compatibility and import/runtime contracts, but did not
+  run new training jobs or thesis eval jobs under v1.2.0.
+- Repo-wide formatting and mypy remain separate cleanup tasks; scoped checks on
+  the files touched by this simulator update pass.
+
+### Next Action
+
+- Commit and push the v1.2.0 dependency update.

@@ -1,7 +1,7 @@
 # Simulator Compatibility
 
 This repo's simulator-backed training and evaluation paths target the published
-`weiss-sim==1.1.0` package, or a sibling simulator checkout that exposes the
+`weiss-sim==1.2.0` package, or a sibling simulator checkout that exposes the
 same contract.
 
 ## Phase 0 Contract
@@ -10,7 +10,7 @@ The RL repo expects these stable simulator fields:
 
 | Surface | Expected value or method |
 | --- | --- |
-| Package version | semver-style `weiss_sim.__version__ >= "1.1.0"` |
+| Package version | semver-style `weiss_sim.__version__ >= "1.2.0"` |
 | Observation length | `weiss_sim.OBS_LEN == 378` |
 | Action space | `weiss_sim.ACTION_SPACE_SIZE == 527` |
 | Compatibility hash | `weiss_sim.SPEC_HASH == 8590000130` |
@@ -29,11 +29,11 @@ The canonical hot layouts are:
 | `mask` | Debug and compatibility paths that need dense legal masks. |
 | `nomask` | Compatibility surface for fetching packed ids through buffers. |
 | `i16_legal_ids` | Current RL packed-id path with action metadata. |
-| `i16_legal_ids_nometa` | Simulator 1.1 low-level hot path when metadata is not consumed. |
+| `i16_legal_ids_nometa` | Simulator 1.2 low-level hot path when metadata is not consumed. |
 
 ## Published Presets
 
-`weiss-sim==1.1.0` publishes these bundled deck preset names:
+`weiss-sim==1.2.0` publishes these bundled deck preset names:
 
 - `starter_deck_ws02_v1`
 - `main_deck_5hy_yotsuba_v1`

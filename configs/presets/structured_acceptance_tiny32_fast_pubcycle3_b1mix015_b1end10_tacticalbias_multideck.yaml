@@ -1,5 +1,5 @@
 schema_version: 2
-description: structured_acceptance tiny32 fast tactical-bias frontier with actor-level deck diversity across published weiss-sim 1.1 presets
+description: structured_acceptance tiny32 fast tactical-bias frontier with actor-level deck diversity across published weiss-sim 1.2 presets
 extends: structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop.yaml
 environment:
   deck_pool:

@@ -84,7 +84,7 @@ def _write_stub_weiss_sim(
     (tmp_path / "weiss_sim.py").write_text(
         "\n".join(
             (
-                "__version__ = '1.1.0'",
+                "__version__ = '1.2.0'",
                 "",
                 "def build_info():",
                 "    return 'stub-build'",
@@ -127,7 +127,7 @@ def _write_runtime_weiss_sim(
             (
                 "from types import SimpleNamespace",
                 "",
-                "__version__ = '1.1.0'",
+                "__version__ = '1.2.0'",
                 f"_BUNDLE = {bundle!r}",
                 f"PASS_ACTION_ID = {pass_action_id}",
                 "OBS_LEN = 512",

@@ -8,7 +8,7 @@ import pytest
 from weiss_rl.core.masking import assert_strictly_increasing_legal_ids
 from weiss_rl.envs.decision_env import DecisionBoundaryEnv
 
-MIN_WEISS_SIM_VERSION = (1, 1, 0)
+MIN_WEISS_SIM_VERSION = (1, 2, 0)
 weiss_sim: Any | None = None
 
 
@@ -36,7 +36,7 @@ def _version_tuple(version: str) -> tuple[int, int, int]:
     parts = [int(part) for part in release.split(".")]
     while len(parts) < 3:
         parts.append(0)
-    return tuple(parts[:3])
+    return (parts[0], parts[1], parts[2])
 
 
 def _make_pool(layout: Layout):
@@ -161,7 +161,7 @@ def test_rl_step_contract_smoke_covers_supported_layouts(layout: Layout) -> None
     assert next_actions.shape == (num_envs,)
 
 
-def test_weiss_sim_11_contract_surface_is_available() -> None:
+def test_weiss_sim_12_contract_surface_is_available() -> None:
     sim = _sim()
     version = getattr(sim, "__version__", "")
 

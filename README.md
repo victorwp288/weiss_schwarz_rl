@@ -139,7 +139,7 @@ cd ../..
 ```
 
 Then open `http://127.0.0.1:8765/`. If `/api/health` does not report
-`human_decision_view: true`, install or sync against `weiss-sim>=1.1.0` with
+`human_decision_view: true`, install or sync against `weiss-sim>=1.2.0` with
 the human decision view API before launching the web server.
 
 ## Contributing safely

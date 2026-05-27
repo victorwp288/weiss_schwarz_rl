@@ -9,7 +9,7 @@ normal work and keep `python/scripts/*` for compatibility and diagnostics.
 uv sync --extra dev --extra sim
 ```
 
-The simulator dependency is `weiss-sim>=1.1.0,<2`. Startup now checks the active
+The simulator dependency is `weiss-sim>=1.2.0,<2`. Startup now checks the active
 simulator version, required stepping APIs, and the three thesis deck presets.
 
 ## Standard Commands

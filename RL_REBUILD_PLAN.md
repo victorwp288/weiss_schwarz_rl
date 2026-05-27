@@ -13,7 +13,7 @@ core B1/main fixed-deck evidence path.
 
 This plan rebuilds `weiss_schwarz_rl` into a lean, reproducible, thesis-grade
 reinforcement learning system for Weiss Schwarz. The target simulator dependency
-is `weiss-sim` / `weiss-schwarz-simulator` version `1.1.0` or newer.
+is `weiss-sim` / `weiss-schwarz-simulator` version `1.2.0` or newer.
 
 The goal is not merely cleanup. The repo should become a reliable research
 machine that can train, evaluate, document, and defend:
@@ -110,7 +110,7 @@ Target direction:
 
 Current pieces:
 
-- `pyproject.toml` exposes `weiss-sim==1.1.0` through the optional `sim` extra.
+- `pyproject.toml` exposes `weiss-sim>=1.2.0,<2` through the optional `sim` extra.
 - `python/weiss_rl/core/simulator_contract.py` probes `weiss_sim`, exports the
   spec bundle, hashes the canonical JSON, and records simulator metadata.
 - `python/weiss_rl/core/spec.py` parses action/observation contract data.
@@ -126,7 +126,7 @@ Current pieces:
 
 Problems:
 
-- Simulator 1.1.0 validation is not one shared startup path for train, eval,
+- Simulator 1.2.0 validation is not one shared startup path for train, eval,
   replay, diagnostics, and figures.
 - Some code still treats hard-coded action count/pass id facts as fallback
   defaults rather than checked simulator-1.1 contract facts.
@@ -135,7 +135,7 @@ Problems:
 Target direction:
 
 - Centralize simulator validation and require it for all non-demo workflows.
-- Make the simulator 1.1.0 optimized `fast` packed legal-id path the standard
+- Make the simulator 1.2.0 optimized `fast` packed legal-id path the standard
   route for thesis train/eval.
 - Keep debug/mask paths only for diagnostics or legacy tests.
 
@@ -435,7 +435,7 @@ Slow or non-thesis paths:
 
 Target:
 
-- Use simulator 1.1.0 optimized packed legal-id path by default.
+- Use simulator 1.2.0 optimized packed legal-id path by default.
 - Benchmark B1 and league routes separately.
 
 ### 2.5 Confusing Scripts
@@ -623,7 +623,7 @@ Target docs:
 - `docs/training.md`: training internals and standard lanes
 - `docs/evaluation.md`: final eval, CIs, seeds, replays
 - `docs/artifact_contract.md`: canonical run tree
-- `docs/simulator_compatibility.md`: simulator 1.1.0 contract
+- `docs/simulator_compatibility.md`: simulator 1.2.0 contract
 - `docs/testing.md`: test lanes and commands
 - `docs/rebuild_log.md`: milestone log
 - `docs/archive/`: historical notes and legacy result provenance
@@ -633,7 +633,7 @@ Target docs:
 Test lanes:
 
 - Unit: pure functions, config parser, action catalog, schedule math.
-- Simulator: live `weiss_sim>=1.1.0` contract tests.
+- Simulator: live `weiss_sim>=1.2.0` contract tests.
 - Integration: short train/eval paths with tiny budgets.
 - Artifact: manifest/readiness/figure layout.
 - Deterministic eval: seed pairing, seat swaps, policy set.
@@ -667,13 +667,13 @@ Thesis:
 - figure exports
 - readiness summary
 
-## 4. Simulator 1.1.0 Integration Plan
+## 4. Simulator 1.2.0 Integration Plan
 
 ### 4.1 Standard Routes Use Optimized Simulator Path
 
 Tasks:
 
-1. Make `weiss-sim>=1.1.0` part of the default thesis install path.
+1. Make `weiss-sim>=1.2.0` part of the default thesis install path.
 2. Keep `uv sync --extra dev --extra sim` as the explicit validation install.
 3. Centralize simulator startup validation.
 4. Use `profile=fast`, `legality=ids_offsets`, and packed `i16_legal_ids` for
@@ -720,7 +720,7 @@ Each path should be either:
 
 Required tests:
 
-- simulator version is `>=1.1.0`
+- simulator version is `>=1.2.0`
 - required reset/step/fused APIs exist
 - action space size and pass id match exported spec
 - action ids decode round-trip through `ActionCatalog`
@@ -822,7 +822,7 @@ Suggested phases:
    - saved seeds
    - final eval and figures
 
-### 6.4 Reward Shaping Candidates Enabled by Simulator 1.1.0
+### 6.4 Reward Shaping Candidates Enabled by Simulator 1.2.0
 
 Candidates:
 
@@ -1271,7 +1271,7 @@ Risks:
 
 Objective:
 
-- Make simulator 1.1.0 and fixed deck policy a shared enforced contract.
+- Make simulator 1.2.0 and fixed deck policy a shared enforced contract.
 
 Expected code artifacts:
 

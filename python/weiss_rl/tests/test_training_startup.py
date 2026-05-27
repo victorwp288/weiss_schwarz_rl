@@ -25,7 +25,7 @@ def _complete_stack() -> SimpleNamespace:
     )
 
 
-def _runtime_module(*, version: str = "1.1.0", rl: object | None = None, omit: tuple[str, ...] = ()) -> SimpleNamespace:
+def _runtime_module(*, version: str = "1.2.0", rl: object | None = None, omit: tuple[str, ...] = ()) -> SimpleNamespace:
     values = {
         "__version__": version,
         "fast": object(),
@@ -171,7 +171,7 @@ def test_runtime_prerequisite_failure_reports_old_simulator_version(monkeypatch:
     monkeypatch.setattr(startup.importlib, "import_module", lambda name: _runtime_module(version="0.8.1"))
 
     assert (
-        startup.runtime_training_prerequisite_failure(stack) == "active weiss_sim version 0.8.1 is below required 1.1.0"
+        startup.runtime_training_prerequisite_failure(stack) == "active weiss_sim version 0.8.1 is below required 1.2.0"
     )
 
 

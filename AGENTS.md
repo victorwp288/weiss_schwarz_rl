@@ -14,7 +14,7 @@ The goal is to make the repo a lean, clean, reproducible research system that ca
 6. Main league thesis model
 7. Baselines and ablations
 
-Use `weiss-schwarz-simulator` version 1.1.0 or newer as the standard simulator dependency.
+Use `weiss-schwarz-simulator` version 1.2.0 or newer as the standard simulator dependency.
 
 ## Current objective
 
@@ -125,7 +125,7 @@ The rebuild is not complete until:
 1. `RL_REBUILD_PLAN.md` has been executed or updated with justified changes
 2. The repo has a small clear thesis workflow
 3. Standard training and eval commands work without flag soup
-4. Simulator 1.1.0 optimized path is the default
+4. Simulator 1.2.0 optimized path is the default
 5. Fixed deck policy is implemented and tested
 6. B1 baseline path is trainable and evaluable
 7. Main league path is trainable and evaluable
