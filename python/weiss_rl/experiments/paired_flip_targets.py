@@ -331,7 +331,9 @@ def _write_episode_set(
     pair_index_set = {int(pair_index) for pair_index in pair_indices}
     selected = tuple(
         record
-        for record in sorted(records, key=lambda item: (int(item.pair_index), int(item.swap_index), int(item.episode_seed)))
+        for record in sorted(
+            records, key=lambda item: (int(item.pair_index), int(item.swap_index), int(item.episode_seed))
+        )
         if int(record.pair_index) in pair_index_set
     )
     _require_complete_seat_swaps(selected, source=source, opponent=opponent)

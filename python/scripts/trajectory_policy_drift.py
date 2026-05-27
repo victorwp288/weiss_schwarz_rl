@@ -319,7 +319,9 @@ def _score_policy(
             top_actions = result.top_action_ids.detach().cpu().numpy().astype(np.int64, copy=False).reshape(-1)
             target_logp = result.action_logp.detach().cpu().numpy().astype(np.float64, copy=False).reshape(-1)
             values = result.values.detach().cpu().numpy().astype(np.float64, copy=False).reshape(-1)
-            top_action_tensor = torch.as_tensor(top_actions.reshape(dataset.actions.shape), device=device, dtype=torch.long)
+            top_action_tensor = torch.as_tensor(
+                top_actions.reshape(dataset.actions.shape), device=device, dtype=torch.long
+            )
             top_result = model.evaluate_factorized_sequence_packed_seat_aware(
                 obs,
                 acting_seat,

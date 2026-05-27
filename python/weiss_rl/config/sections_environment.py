@@ -128,8 +128,7 @@ def parse_rewards_config(body: dict[str, Any]) -> RewardsConfig:
     )
     if terminal_outcome_backfill_reward < 0.0:
         raise ValueError(
-            "rewards.shaping.terminal_outcome_backfill_reward must be >= 0.0, "
-            f"got {terminal_outcome_backfill_reward}"
+            f"rewards.shaping.terminal_outcome_backfill_reward must be >= 0.0, got {terminal_outcome_backfill_reward}"
         )
     terminal_outcome_trace_backfill_reward = require_float(
         shaping.get("terminal_outcome_trace_backfill_reward", 0.0),

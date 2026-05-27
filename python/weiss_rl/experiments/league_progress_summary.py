@@ -106,9 +106,7 @@ def build_league_progress_summary(
     policy_exposure_totals: dict[str, dict[str, float]] = {
         group: defaultdict(float) for group in POLICY_EXPOSURE_GROUPS
     }
-    policy_exposure_max: dict[str, dict[str, float]] = {
-        group: defaultdict(float) for group in POLICY_EXPOSURE_GROUPS
-    }
+    policy_exposure_max: dict[str, dict[str, float]] = {group: defaultdict(float) for group in POLICY_EXPOSURE_GROUPS}
     update_count_min: int | None = None
     update_count_max: int | None = None
     records_seen = 0
@@ -336,7 +334,9 @@ def _summarize_groups(opponent_summaries: list[dict[str, Any]]) -> dict[str, dic
         }
         first_rate = output[group]["first_observed"]["win_rate"]
         last_rate = output[group]["last_observed"]["win_rate"]
-        output[group]["delta_last_minus_first"] = None if first_rate is None or last_rate is None else last_rate - first_rate
+        output[group]["delta_last_minus_first"] = (
+            None if first_rate is None or last_rate is None else last_rate - first_rate
+        )
     return output
 
 

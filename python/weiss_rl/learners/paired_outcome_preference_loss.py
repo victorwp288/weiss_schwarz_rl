@@ -58,7 +58,10 @@ def paired_outcome_preference_loss(
         raise ValueError("preference_pair_weights must match logp shape")
     if retention_scope_mask is not None and retention_scope_mask.shape != current_action_logp.shape:
         raise ValueError("retention_scope_mask must match logp shape")
-    if top_action_retention_scope_mask is not None and top_action_retention_scope_mask.shape != current_action_logp.shape:
+    if (
+        top_action_retention_scope_mask is not None
+        and top_action_retention_scope_mask.shape != current_action_logp.shape
+    ):
         raise ValueError("top_action_retention_scope_mask must match logp shape")
     if group_balance and preference_group_ids is None:
         raise ValueError("preference_group_ids are required when group_balance is enabled")
@@ -103,9 +106,7 @@ def paired_outcome_preference_loss(
         None if preference_group_ids is None else preference_group_ids.reshape(-1).to(device=device, dtype=torch.long)
     )
     pair_weight_rows = (
-        None
-        if preference_pair_weights is None
-        else preference_pair_weights.reshape(-1).to(device=device, dtype=dtype)
+        None if preference_pair_weights is None else preference_pair_weights.reshape(-1).to(device=device, dtype=dtype)
     )
     mask = loss_mask.reshape(-1).to(device=device, dtype=torch.bool)
     retention_scope = (
@@ -235,9 +236,7 @@ def paired_outcome_preference_loss(
     metrics = {
         f"{metric_prefix}_loss": float(loss.detach().item()),
         f"{metric_prefix}_pair_count": float(margin_tensor.numel()),
-        f"{metric_prefix}_edge_count": float(margin_tensor.numel())
-        if normalized_aggregation == "edge_mean"
-        else 0.0,
+        f"{metric_prefix}_edge_count": float(margin_tensor.numel()) if normalized_aggregation == "edge_mean" else 0.0,
         f"{metric_prefix}_candidate_pair_count": float(unique_pair_ids.numel()),
         f"{metric_prefix}_incomplete_pair_count": float(incomplete_pair_count),
         f"{metric_prefix}_valid_rows": float(valid_row_count),
@@ -277,9 +276,7 @@ def paired_outcome_preference_loss(
         f"{metric_prefix}_top_action_retention_reference_top_only": 1.0
         if top_action_retention_reference_top_only
         else 0.0,
-        f"{metric_prefix}_top_action_retention_scoped": 1.0
-        if top_action_retention_scope_mask is not None
-        else 0.0,
+        f"{metric_prefix}_top_action_retention_scoped": 1.0 if top_action_retention_scope_mask is not None else 0.0,
     }
     metrics.update(retention_metrics)
     metrics.update(top_retention_metrics)
@@ -427,8 +424,8 @@ def _retention_loss_and_metrics(
     if reference_top_only:
         if reference_best_non_target is None:
             raise ValueError("reference_best_non_target_logp is required when retention_reference_top_only is enabled")
-        retention_mask = retention_mask & torch.isfinite(reference_best_non_target) & (
-            reference >= reference_best_non_target
+        retention_mask = (
+            retention_mask & torch.isfinite(reference_best_non_target) & (reference >= reference_best_non_target)
         )
     zero = _finite_graph_zero(current)
     row_count = int(retention_mask.sum().detach().cpu().item())
@@ -486,8 +483,8 @@ def _top_action_retention_loss_and_metrics(
             raise ValueError(
                 "reference_best_non_target_logp is required when top_action_retention_reference_top_only is enabled"
             )
-        retention_mask = retention_mask & torch.isfinite(reference_best_non_target) & (
-            reference >= reference_best_non_target
+        retention_mask = (
+            retention_mask & torch.isfinite(reference_best_non_target) & (reference >= reference_best_non_target)
         )
     row_count = int(retention_mask.sum().detach().cpu().item())
     if row_count <= 0:

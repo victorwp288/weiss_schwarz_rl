@@ -45,9 +45,7 @@ def build_paired_outcome_preference_surface_cluster_report(
     }
     edges = _aligned_different_action_edges(dataset, bundles=bundles, catalog=catalog)
     exact_surface_edges = [edge for edge in edges if bool(edge["same_current_state"]) and bool(edge["same_history"])]
-    current_only_edges = [
-        edge for edge in edges if bool(edge["same_current_state"]) and not bool(edge["same_history"])
-    ]
+    current_only_edges = [edge for edge in edges if bool(edge["same_current_state"]) and not bool(edge["same_history"])]
     surface_clusters = _surface_clusters(
         exact_surface_edges,
         context_index_by_policy_id=context_index_by_policy_id,
@@ -217,11 +215,7 @@ def _surface_clusters(
                 "missing_context_opponent_policy_ids": missing_context_ids,
                 "opponent_rows": opponent_rows,
                 "source_pair_indices": sorted(
-                    {
-                        int(edge["source_pair_index"])
-                        for edge in group
-                        if edge.get("source_pair_index") is not None
-                    }
+                    {int(edge["source_pair_index"]) for edge in group if edge.get("source_pair_index") is not None}
                 ),
                 "examples": [_jsonable(edge) for edge in group[: max(0, max_examples)]],
             }
@@ -280,9 +274,9 @@ def _exact_reverse_count(edges: Sequence[Mapping[str, Any]]) -> int:
     count = 0
     for left_index, left in enumerate(edges):
         for right in edges[left_index + 1 :]:
-            if int(left["preferred_action"]) == int(right["rejected_action"]) and int(
-                left["rejected_action"]
-            ) == int(right["preferred_action"]):
+            if int(left["preferred_action"]) == int(right["rejected_action"]) and int(left["rejected_action"]) == int(
+                right["preferred_action"]
+            ):
                 count += 1
     return count
 

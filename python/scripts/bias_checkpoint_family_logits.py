@@ -94,10 +94,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     summary_path = output_layout.run_dir / "eval" / "diagnostics" / "family_logit_bias_surgery_summary.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(
-        f"Family-bias checkpoint written to {checkpoint_path}; "
-        f"policy_id={args.policy_id}; summary={summary_path}"
-    )
+    print(f"Family-bias checkpoint written to {checkpoint_path}; policy_id={args.policy_id}; summary={summary_path}")
     return 0
 
 

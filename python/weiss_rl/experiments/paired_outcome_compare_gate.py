@@ -60,8 +60,7 @@ def _evaluate_one_compare(*, path: Path, config: PairedOutcomeCompareGateConfig)
     fixed_opponents = {str(item) for item in payload.get("fixed_opponents", []) if isinstance(item, str)}
     learned_opponents = {str(item) for item in payload.get("learned_opponents", []) if isinstance(item, str)}
     present_opponents = {
-        str(row.get("candidate_opponent_policy_id") or row.get("baseline_opponent_policy_id") or "")
-        for row in rows
+        str(row.get("candidate_opponent_policy_id") or row.get("baseline_opponent_policy_id") or "") for row in rows
     }
     present_opponents = {opponent for opponent in present_opponents if opponent}
 

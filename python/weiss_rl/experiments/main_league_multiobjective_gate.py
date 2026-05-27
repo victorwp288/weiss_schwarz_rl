@@ -214,9 +214,7 @@ def _resolve_score_row(scores: Mapping[str, dict[str, Any]], opponent: str) -> _
     if row is not None:
         return _ResolvedScoreRow(row=row, opponent_policy_id=opponent)
     suffix_matches = tuple(
-        row_opponent
-        for row_opponent in scores
-        if _is_seed_wrapped_suffix_match(str(row_opponent), str(opponent))
+        row_opponent for row_opponent in scores if _is_seed_wrapped_suffix_match(str(row_opponent), str(opponent))
     )
     if len(suffix_matches) == 1:
         resolved = suffix_matches[0]

@@ -23,7 +23,9 @@ def _call_accepts_keyword(callable_obj: Any, keyword: str) -> bool:
     return any(parameter.kind == Parameter.VAR_KEYWORD for parameter in parameters.values())
 
 
-def _add_opponent_context_if_supported(callable_obj: Any, kwargs: dict[str, Any], context_tensor: torch.Tensor | None) -> None:
+def _add_opponent_context_if_supported(
+    callable_obj: Any, kwargs: dict[str, Any], context_tensor: torch.Tensor | None
+) -> None:
     if context_tensor is not None and _call_accepts_keyword(callable_obj, "opponent_context_index"):
         kwargs["opponent_context_index"] = context_tensor
 

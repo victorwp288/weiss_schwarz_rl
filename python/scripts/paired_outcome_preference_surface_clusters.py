@@ -58,13 +58,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "output_json": args.output_json.as_posix(),
                 "aligned_different_action_count": report["aligned_different_action_count"],
-                "same_public_surface_different_action_count": report[
-                    "same_public_surface_different_action_count"
-                ],
+                "same_public_surface_different_action_count": report["same_public_surface_different_action_count"],
                 "surface_conflict_count": report["surface_conflict_count"],
-                "opponent_context_resolvable_conflict_count": report[
-                    "opponent_context_resolvable_conflict_count"
-                ],
+                "opponent_context_resolvable_conflict_count": report["opponent_context_resolvable_conflict_count"],
                 "opponent_context_required_missing_mapping_count": report[
                     "opponent_context_required_missing_mapping_count"
                 ],

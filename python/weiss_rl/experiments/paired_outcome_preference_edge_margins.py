@@ -202,18 +202,15 @@ def evaluate_edge_margin_rows(
         failures.append(f"min_delta_below:{min_delta:.6g}<{float(config.min_min_delta):.6g}")
     if edge_improved_fraction < float(config.min_edge_improved_fraction):
         failures.append(
-            f"edge_improved_fraction_below:{edge_improved_fraction:.6g}<"
-            f"{float(config.min_edge_improved_fraction):.6g}"
+            f"edge_improved_fraction_below:{edge_improved_fraction:.6g}<{float(config.min_edge_improved_fraction):.6g}"
         )
     if edge_worsened_fraction > float(config.max_edge_worsened_fraction):
         failures.append(
-            f"edge_worsened_fraction_above:{edge_worsened_fraction:.6g}>"
-            f"{float(config.max_edge_worsened_fraction):.6g}"
+            f"edge_worsened_fraction_above:{edge_worsened_fraction:.6g}>{float(config.max_edge_worsened_fraction):.6g}"
         )
     if same_state_deltas and same_state_mean_delta < float(config.min_same_state_mean_delta):
         failures.append(
-            f"same_state_mean_delta_below:{same_state_mean_delta:.6g}<"
-            f"{float(config.min_same_state_mean_delta):.6g}"
+            f"same_state_mean_delta_below:{same_state_mean_delta:.6g}<{float(config.min_same_state_mean_delta):.6g}"
         )
 
     required = {str(group) for group in config.required_groups}
@@ -301,10 +298,7 @@ def _summaries(rows: Sequence[Mapping[str, Any]], *, required_groups: Sequence[s
             _summary_row(label, group_rows, required=label in required)
             for label, group_rows in sorted(by_group.items())
         ],
-        "pairs": [
-            _pair_summary_row(pair_id, pair_rows)
-            for pair_id, pair_rows in sorted(by_pair.items())
-        ],
+        "pairs": [_pair_summary_row(pair_id, pair_rows) for pair_id, pair_rows in sorted(by_pair.items())],
     }
 
 

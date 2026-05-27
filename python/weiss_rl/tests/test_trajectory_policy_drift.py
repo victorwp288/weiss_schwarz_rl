@@ -108,9 +108,7 @@ def test_summarize_policy_drift_identifies_lost_target_top_actions_and_drops() -
     assert margin_summary["near_tie_thresholds"][0]["count"] == 1
     assert margin_summary["near_tie_thresholds"][2]["count"] == 2
     assert summary["largest_target_probability_drops"][0]["row_index"] == 0
-    assert summary["lost_target_top_action_examples"][0]["candidate_top_over_target_logp_margin"] == pytest.approx(
-        5e-5
-    )
+    assert summary["lost_target_top_action_examples"][0]["candidate_top_over_target_logp_margin"] == pytest.approx(5e-5)
 
 
 def test_summarize_policy_drift_by_group_splits_rows_by_label() -> None:

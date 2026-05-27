@@ -73,9 +73,7 @@ def publish_checkpoint_snapshot(
         model_state_dict=model_state_dict,
         structured_policy_contract=_manifest_structured_policy_contract(run_dir),
         public_heuristic_logit_bias_scale=_optional_float(payload.get("public_heuristic_logit_bias_scale")),
-        public_heuristic_actor_logit_bias_scale=_optional_float(
-            payload.get("public_heuristic_actor_logit_bias_scale")
-        ),
+        public_heuristic_actor_logit_bias_scale=_optional_float(payload.get("public_heuristic_actor_logit_bias_scale")),
     )
     metadata_path = weights_path.parent / SNAPSHOT_METADATA_FILENAME
     metadata = _json_object(metadata_path)

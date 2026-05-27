@@ -224,9 +224,7 @@ def _collector_process_main_impl(
         pass_with_nonpass_penalty=float(getattr(config, "pass_with_nonpass_penalty", 0.0)),
         mulligan_select_with_confirm_penalty=float(getattr(config, "mulligan_select_with_confirm_penalty", 0.0)),
         terminal_outcome_backfill_reward=float(getattr(config, "terminal_outcome_backfill_reward", 0.0)),
-        terminal_outcome_trace_backfill_reward=float(
-            getattr(config, "terminal_outcome_trace_backfill_reward", 0.0)
-        ),
+        terminal_outcome_trace_backfill_reward=float(getattr(config, "terminal_outcome_trace_backfill_reward", 0.0)),
         actor_sampling_temperature=float(getattr(config, "actor_sampling_temperature", 1.0)),
         mulligan_force_confirm_after_select=bool(getattr(config, "mulligan_force_confirm_after_select", False)),
         force_pass_over_main_move_only=bool(getattr(config, "force_pass_over_main_move_only", False)),

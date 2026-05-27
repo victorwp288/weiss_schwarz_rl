@@ -84,9 +84,7 @@ def build_runtime_config(
         mulligan_select_with_confirm_penalty=float(
             getattr(reward_shaping, "mulligan_select_with_confirm_penalty", 0.0)
         ),
-        terminal_outcome_backfill_reward=float(
-            getattr(reward_shaping, "terminal_outcome_backfill_reward", 0.0)
-        ),
+        terminal_outcome_backfill_reward=float(getattr(reward_shaping, "terminal_outcome_backfill_reward", 0.0)),
         terminal_outcome_trace_backfill_reward=float(
             getattr(reward_shaping, "terminal_outcome_trace_backfill_reward", 0.0)
         ),
@@ -97,7 +95,5 @@ def build_runtime_config(
         force_attack_over_pass_when_attack_legal=bool(
             getattr(training, "force_attack_over_pass_when_attack_legal", False)
         ),
-        fixed_model_opponent_action_selection=str(
-            getattr(training, "fixed_model_opponent_action_selection", "sample")
-        ),
+        fixed_model_opponent_action_selection=str(getattr(training, "fixed_model_opponent_action_selection", "sample")),
     )

@@ -122,7 +122,9 @@ def list_policies_for_run(run_dir: Path) -> list[PolicySummary]:
         PolicySummary(policy_id=NO_LEAGUE_POLICY_ID, label="B1 NoLeague baseline", kind="baseline"),
         PolicySummary(policy_id=HEURISTIC_PUBLIC_POLICY_ID, label="B2 HeuristicPublic", kind="heuristic"),
         PolicySummary(policy_id=HEURISTIC_PUBLIC_AGGRO_POLICY_ID, label="B3 HeuristicPublicAggro", kind="heuristic"),
-        PolicySummary(policy_id=HEURISTIC_PUBLIC_CONTROL_POLICY_ID, label="B4 HeuristicPublicControl", kind="heuristic"),
+        PolicySummary(
+            policy_id=HEURISTIC_PUBLIC_CONTROL_POLICY_ID, label="B4 HeuristicPublicControl", kind="heuristic"
+        ),
     ]
     seen = {policy.policy_id for policy in policies}
     for row in sorted(

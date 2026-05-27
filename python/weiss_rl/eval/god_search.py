@@ -38,17 +38,12 @@ class GodSearchConfig:
         if self.top_k < 1:
             raise ValueError(f"god-search top_k must be >= 1, got {self.top_k}")
         if self.rollouts_per_action < 1:
-            raise ValueError(
-                f"god-search rollouts_per_action must be >= 1, got {self.rollouts_per_action}"
-            )
+            raise ValueError(f"god-search rollouts_per_action must be >= 1, got {self.rollouts_per_action}")
         if self.max_rollout_decisions < 0:
-            raise ValueError(
-                f"god-search max_rollout_decisions must be >= 0, got {self.max_rollout_decisions}"
-            )
+            raise ValueError(f"god-search max_rollout_decisions must be >= 0, got {self.max_rollout_decisions}")
         if self.max_search_decisions_per_game < 0:
             raise ValueError(
-                "god-search max_search_decisions_per_game must be >= 0, "
-                f"got {self.max_search_decisions_per_game}"
+                f"god-search max_search_decisions_per_game must be >= 0, got {self.max_search_decisions_per_game}"
             )
         if self.rollout_policy not in {"eval", "argmax", "sample"}:
             raise ValueError(f"unknown god-search rollout_policy: {self.rollout_policy!r}")
@@ -131,9 +126,7 @@ class GodSearchStats:
                 "prefix_replay_failures": int(self.prefix_replay_failures),
             },
             "changed_fraction": (
-                None
-                if self.search_decisions <= 0
-                else float(self.changed_decisions) / float(self.search_decisions)
+                None if self.search_decisions <= 0 else float(self.changed_decisions) / float(self.search_decisions)
             ),
             "traces": list(self.traces),
         }

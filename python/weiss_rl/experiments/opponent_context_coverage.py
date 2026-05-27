@@ -74,7 +74,9 @@ def context_coverage_failures_from_report(
     label = f"{prefix}_" if prefix else ""
     context_count = _safe_int(report.get(context_count_key))
     if context_count <= 0:
-        failures.append("missing_opponent_context" if not prefix or prefix == "current" else f"missing_{prefix}_context")
+        failures.append(
+            "missing_opponent_context" if not prefix or prefix == "current" else f"missing_{prefix}_context"
+        )
 
     episode_count = _safe_int(report.get("episode_count"))
     if require_all_episodes and episode_count > 0 and context_count < episode_count:

@@ -217,7 +217,9 @@ class HumanPlaySession:
                 elapsed_ms=elapsed_ms,
             )
 
-    def _select_model_action(self, *, legal_ids: np.ndarray) -> tuple[int, torch.Tensor | None, tuple[ActionOption, ...]]:
+    def _select_model_action(
+        self, *, legal_ids: np.ndarray
+    ) -> tuple[int, torch.Tensor | None, tuple[ActionOption, ...]]:
         ranked = self._rank_model_actions(legal_ids=legal_ids)
         if self.config.god_search.enabled:
             action, next_hidden = self.runner._select_action(  # noqa: SLF001
@@ -404,7 +406,9 @@ class HumanPlaySession:
                 "human_deck": self.config.human_deck,
                 "model_deck": self.config.model_deck,
                 "snapshot_registry_json": (
-                    None if self.config.snapshot_registry_json is None else self.config.snapshot_registry_json.as_posix()
+                    None
+                    if self.config.snapshot_registry_json is None
+                    else self.config.snapshot_registry_json.as_posix()
                 ),
                 "model_sampling_algorithm": self.config.model_sampling_algorithm,
                 "search_rollout_opponent_policy_id": self.search_rollout_opponent_policy_id,

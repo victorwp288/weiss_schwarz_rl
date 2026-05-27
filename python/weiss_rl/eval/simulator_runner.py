@@ -623,7 +623,7 @@ class SimulatorEvalRunner(EvalGameRunner):
                                 legal_ids=legal_ids,
                             ),
                         )
-                )
+                    )
                 seat_hidden[current_seat] = next_hidden
                 action_history.append(int(action))
                 batch = next_batch
@@ -964,7 +964,9 @@ class SimulatorEvalRunner(EvalGameRunner):
             game_search_state["searched"] = int(game_search_state.get("searched", 0)) + 1
         self._god_search_stats.search_decisions += 1
 
-        root_logit_by_action = {int(action): float(np.asarray(root_logits, dtype=np.float32)[int(action)]) for action in candidates}
+        root_logit_by_action = {
+            int(action): float(np.asarray(root_logits, dtype=np.float32)[int(action)]) for action in candidates
+        }
         candidate_scores: dict[int, list[float]] = {int(action): [] for action in candidates}
         rollout_details: dict[int, list[dict[str, Any]]] = {int(action): [] for action in candidates}
         decision_id = int(np.asarray(batch.decision_id, dtype=np.int64)[0])
@@ -1112,7 +1114,9 @@ class SimulatorEvalRunner(EvalGameRunner):
                     }
                 rollout_decisions += 1
                 branch_seat = int(batch.actor[0])
-                branch_policy_id = scheduled_game.seat0_policy_id if branch_seat == 0 else scheduled_game.seat1_policy_id
+                branch_policy_id = (
+                    scheduled_game.seat0_policy_id if branch_seat == 0 else scheduled_game.seat1_policy_id
+                )
                 branch_opponent_id = (
                     scheduled_game.seat1_policy_id if branch_seat == 0 else scheduled_game.seat0_policy_id
                 )
