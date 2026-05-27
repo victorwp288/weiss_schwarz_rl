@@ -2,7 +2,39 @@
 
 The repo now has one public config system: grouped presets.
 
-## Main Presets
+## Thesis Configs
+
+Use these for standard work:
+
+- `thesis/b1_noleague.yaml`
+- `thesis/main_league.yaml`
+- `thesis/main_league_auto_gpu.yaml`
+- `thesis/final_eval.yaml`
+- `thesis/multideck_exploratory.yaml`
+- `thesis/ablations/norecurrence_impala.yaml`
+- `thesis/ablations/ppo_lite.yaml`
+
+These names are the public thesis surface. They may extend older presets
+internally, but operators should not need to know those chains.
+The standard B1 and main league training configs use the medium64 structured
+model surface (`gru_hidden_size: 64`, `encoder_mlp_width: 64`,
+`typed_feature_width: 16`) so the thesis runs are not locked to the earlier
+tiny32 probe model.
+
+## Compatibility Presets
+
+Current compatibility presets:
+
+- `presets/structured_acceptance_standard.yaml`
+  - Canonical current training recipe.
+- `presets/structured_acceptance_standard_auto_gpu.yaml`
+  - Canonical Linux server variant with automatic multi-GPU actor sharding.
+- `presets/structured_acceptance_standard_thesis_eval.yaml`
+  - Richer final-eval companion.
+- `presets/structured_acceptance_standard_multideck.yaml`
+  - Deck-diversity/generalization variant.
+
+Legacy typed presets remain available for compatibility and lower-level work:
 
 - `presets/typed_thesis_locked.yaml`
   - Thesis-safe default.

@@ -1,0 +1,17 @@
+schema_version: 2
+description: "Selected-a015 champion/hard-negative continuation with overlapping live league lanes, preserved stratified winner-repair replay focus, B1 loss-state top-action repair, and hard-negative/champion loss-state top-action repair. This keeps the original extension-repair source labels visible to the replay sampler while adding the newer B1 and imported-opponent corrective rows."
+extends: main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_b1hnlosstopaction_b4b2guard_probe.yaml
+training:
+  structured_aux:
+    trajectory_bc_dataset_path: runs/trajectory_bc_winnerrepair_preserved_plus_b1_plus_hn_lossstate_tv010_20260519/trajectory_bc_winnerrepair_preserved_plus_b1_plus_hn_lossstate_tv010.npz
+    trajectory_bc_focus_source_labels:
+      - extensionrepair_p5_hardneg_disjoint_win16x6_a
+      - extensionrepair_p5_hardneg_disjoint_win16x6_b
+      - b1_lossstate_policyb_topaction
+      - hn_lossstate_policy000002_topaction
+      - hn_lossstate_checkpoint000025_topaction
+      - hn_lossstate_bestresponse_topaction
+      - hn_lossstate_mainleague_topaction
+      - hn_lossstate_policy000003_topaction
+      - hn_lossstate_policy000004_topaction
+    trajectory_bc_focus_fraction: 0.50

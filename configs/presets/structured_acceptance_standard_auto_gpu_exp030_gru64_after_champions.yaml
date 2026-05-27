@@ -1,0 +1,7 @@
+schema_version: 2
+description: "exp-030 prepared GRU-after-champions successor: reuse champion+B1 guardrail league, bump recurrent capacity after champion-facing candidate exists"
+extends: structured_acceptance_standard_auto_gpu_exp029_champion_b1_guardrail.yaml
+model:
+  gru_hidden_size: 64
+  encoder_mlp_width: 64
+  typed_feature_width: 16

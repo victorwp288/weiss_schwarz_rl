@@ -1,0 +1,9 @@
+schema_version: 2
+description: "Selected guided-bootstrap continuation with KL anchoring plus a small constant public-heuristic floor. This makes the post-selected guidance pressure explicit instead of relying on schedule-reset artifacts after resume."
+extends: main_league_guided_bootstrap_selected_anchor.yaml
+training:
+  structured_aux:
+    teacher_public_heuristic_coef: 0.04
+    teacher_public_heuristic_end_updates: -1
+    teacher_public_heuristic_final_coef: 0.04
+    teacher_public_heuristic_profiles_end_updates: -1

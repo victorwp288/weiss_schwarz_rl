@@ -786,7 +786,9 @@ def test_build_paper_readiness_summary_ignores_baseline_aliases_and_heuristic_va
         },
         "matchups": matchups,
     }
-    summary_payload["posterior_samples"]["values"][-1][0] = [0.9, 0.92, 0.88, 0.94]
+    posterior_samples = cast(dict[str, Any], summary_payload["posterior_samples"])
+    posterior_values = cast(list[list[list[float]]], posterior_samples["values"])
+    posterior_values[-1][0] = [0.9, 0.92, 0.88, 0.94]
     (final_eval_dir / "summary.json").write_text(
         json.dumps(summary_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -813,6 +815,28 @@ def test_build_paper_readiness_summary_audits_run_directory_artifacts(tmp_path: 
     assert payload["final_eval_artifact_contract"]["passed"] is True
     assert payload["final_eval_guardrails"]["passed"] is True
     assert payload["checks"]["baseline_win_rate_vs_b0"]["focal_policy_id"] == "policy_000300"
+
+
+def test_build_paper_readiness_summary_accepts_interpolation_provenance_instead_of_training_metrics(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_run_dir_fixture(tmp_path)
+    (run_dir / "training" / "logs" / "training_metrics.jsonl").unlink()
+    _write_json(
+        run_dir / "eval" / "diagnostics" / "checkpoint_interpolation_summary.json",
+        {
+            "first_checkpoint": "runs/source_a/training/checkpoints/checkpoint_10.pt",
+            "second_checkpoint": "runs/source_b/training/checkpoints/checkpoint_5.pt",
+            "second_weight": 0.15,
+        },
+    )
+
+    payload = build_paper_readiness_summary(run_dir=run_dir)
+
+    assert payload["passed"] is True
+    assert payload["run_directory_audit"]["artifacts"]["training_metrics"]["resolved_path"] == (
+        "eval/diagnostics/checkpoint_interpolation_summary.json"
+    )
 
 
 def test_build_paper_readiness_summary_accepts_documented_unresolved_manifest_policy_selection(tmp_path: Path) -> None:

@@ -1,0 +1,71 @@
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{thesis_figures_final/fig_main_targeted_robustness.pdf}
+\caption{Targeted confirm64 evaluation of the selected main League GRU policy against fixed anchors, corrected B3/B4 public heuristics, and legacy league snapshots. Error bars show bootstrap confidence intervals over paired seeds.}
+\label{fig:main-targeted-robustness}
+\end{figure}
+
+\input{thesis_figures_final/main_p21_results_table.tex}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_b3b4_fixed_validation.pdf}
+\caption{Validation of the corrected B3/B4 evaluation rows. The corrected aggressive/control heuristic opponents complete all games without truncation, and the selected policy remains above parity against both profiles.}
+\label{fig:b3b4-fixed-validation}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_p21_seat_advantage.pdf}
+\caption{Seat sensitivity diagnostic for the targeted confirm64 table. Evaluations are paired and seat-swapped, so the measured first/second-seat asymmetry is diagnostic rather than a confound in the reported win rates.}
+\label{fig:p21-seat-sensitivity}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_result_decomposition.pdf}
+\caption{Decomposition of the targeted confirm64 table by opponent group. The fixed anchors are solved, B1 and B3/B4 remain clearly above parity, and the legacy neural block is positive but more modest.}
+\label{fig:result-decomposition}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_legacy_margin_ladder.pdf}
+\caption{Per-opponent margins above parity for the legacy neural snapshots. This figure makes clear that late legacy rows remain positive but close.}
+\label{fig:legacy-margin-ladder}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\linewidth]{thesis_figures_final/fig_close_legacy_stress.pdf}
+\caption{Stress check for the two closest legacy neural rows. The rows remain slightly above parity at confirm128, but the margins are narrow and should be reported conservatively.}
+\label{fig:close-legacy-stress}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{thesis_figures_final/fig_candidate_p21_vs_p33.pdf}
+\caption{Candidate selection check comparing the selected p21 snapshot against the later p33 snapshot on their common targeted opponents. p33 uses confirm32 while p21 uses confirm64, so this is a selection diagnostic rather than the headline comparison.}
+\label{fig:candidate-p21-p33}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.88\linewidth]{thesis_figures_final/fig_anchor_retention.pdf}
+\caption{Periodic development evaluation for the main model and B1-pressure ablations. Solid lines show aggregate anchor performance; dashed lines show B1 no-league retention.}
+\label{fig:anchor-retention}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{thesis_figures_final/fig_anchor_ablation_endpoints.pdf}
+\caption{Endpoint anchor retention for the main model and B1-pressure ablations. This summarizes why B1 pressure is discussed as an ablation rather than treating every training variant as equally robust.}
+\label{fig:anchor-ablation-endpoints}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\linewidth]{thesis_figures_final/fig_baseline_fixed_grid.pdf}
+\caption{Fixed-opponent baseline sanity checks. No-GRU and PPO-lite were not evaluated against the full B1/league opponent set, so this figure is a fixed-anchor baseline comparison rather than a full league-robustness comparison.}
+\label{fig:fixed-baseline-grid}
+\end{figure}

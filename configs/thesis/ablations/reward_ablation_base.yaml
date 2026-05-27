@@ -1,0 +1,21 @@
+schema_version: 2
+description: "Shared B1 reward-ablation base. Keeps the clean NoLeague route but does not require an imported B1 anchor for periodic dev eval."
+extends: ../b1_noleague.yaml
+experiment:
+  role: ablation_reward
+league:
+  promotion:
+    anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B1 NoLeague baseline
+        - B2 HeuristicPublic
+evaluation:
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B1 NoLeague baseline
+        - B2 HeuristicPublic

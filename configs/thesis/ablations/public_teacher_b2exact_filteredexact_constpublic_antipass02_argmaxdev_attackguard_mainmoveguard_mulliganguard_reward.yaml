@@ -1,0 +1,7 @@
+schema_version: 2
+description: "B1 guided ablation: filtered-exact constant-public run with light public-teacher non-pass-over-pass margin."
+extends: public_teacher_b2exact_filteredexact_constpublic_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
+training:
+  structured_aux:
+    teacher_public_nonpass_over_pass_coef: 0.02
+    teacher_public_nonpass_over_pass_margin: 0.50

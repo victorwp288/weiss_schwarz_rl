@@ -1,0 +1,44 @@
+schema_version: 2
+description: "Main league thesis model. Medium64 structured model, model-actor training, fixed deck: preset:main_deck_5hy_yotsuba_v1."
+extends: ../presets/structured_acceptance_standard.yaml
+model:
+  gru_hidden_size: 64
+  encoder_mlp_width: 64
+  typed_feature_width: 16
+  public_heuristic_logit_bias_scale: 0.0
+  public_heuristic_actor_logit_bias_scale: 0.0
+  public_heuristic_logit_bias_families: []
+training:
+  actor_policy_backend: model
+  actor_heuristic_fraction: 0.0
+  actor_heuristic_final_fraction: 0.0
+  diverse_opponent_actor_count: 999
+  diverse_model_actor_count: 999
+  diverse_opponent_batch_fraction: 1.0
+  train_on_heuristic_actor_rows: false
+  teacher_aux:
+    mode: "off"
+  structured_aux:
+    enabled: false
+    teacher_family_coef: 0.0
+    teacher_slot_coef: 0.0
+    teacher_move_source_coef: 0.0
+    teacher_attack_type_coef: 0.0
+    teacher_action_coef: 0.0
+    teacher_same_family_action_coef: 0.0
+    teacher_public_heuristic_coef: 0.0
+  structured_warmstart:
+    enabled: false
+    updates: 0
+    teacher_family_coef: 0.0
+    teacher_slot_coef: 0.0
+    teacher_move_source_coef: 0.0
+    teacher_attack_type_coef: 0.0
+    teacher_action_coef: 0.0
+    teacher_same_family_action_coef: 0.0
+    teacher_public_heuristic_coef: 0.0
+league:
+  sampling:
+    heuristic_public_mix_fraction: 0.2
+    noleague_baseline_mix_fraction: 0.15
+    noleague_baseline_mix_end_updates: -1

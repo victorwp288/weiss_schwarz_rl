@@ -1,0 +1,7 @@
+schema_version: 2
+description: "Main league probe: continue from the confirmed teacherfade best with KL anchoring to the starting policy, testing whether post-best drift is an unconstrained policy-update problem rather than missing teacher pressure."
+extends: main_league_guided_factorized_postbest_floor_probe.yaml
+training:
+  structured_aux:
+    policy_anchor_coef: 0.08
+    policy_anchor_temperature: 1.0

@@ -1,0 +1,31 @@
+schema_version: 2
+description: "Mechanistic pair205 probe using a bilinear state/candidate residual. The per-context vector directly weights packed candidate features, so gradients can separate fixed-preserve and learned-repair contexts without a global action-ID bias."
+extends: main_league_champion_hardneg_a075_context_candidate_residual_pair205_adapteronly_minflip_probe.yaml
+model:
+  opponent_context_trainable_action_bias_scale: 0.0
+  opponent_context_trainable_candidate_residual_scale: 1.0
+  opponent_context_candidate_residual_width: 32
+  opponent_context_candidate_residual_mode: bilinear
+  opponent_context_adapter_lr_multiplier: 2000.0
+training:
+  structured_aux:
+    paired_swing_aux_updates: 8
+    paired_swing_coef: 0.08
+    paired_swing_margin: 0.05
+    paired_swing_focus_groups:
+      - name: pair205_b2_fixed_preserve
+        source_labels:
+          - a075_loss_preserve_B2 HeuristicPublic
+        fraction: 0.25
+      - name: pair205_policy0004_fixed_preserve
+        source_labels:
+          - a075_loss_preserve_seed_c3aac2f9dc_policy_000004
+        fraction: 0.25
+      - name: pair205_learned_repair
+        source_labels:
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.50

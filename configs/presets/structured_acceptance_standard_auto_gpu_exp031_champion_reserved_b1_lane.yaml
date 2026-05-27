@@ -1,0 +1,41 @@
+schema_version: 2
+description: "exp-031 champion pressure with explicit reserved B1 lane: fix exp028/029 B1 collapse while preserving champion/hard-negative training before GRU"
+extends: structured_acceptance_standard_auto_gpu.yaml
+training:
+  fixed_opponent_backend: simulator_native
+  actor_policy_backend: model
+  actor_heuristic_fraction: 0.0
+  actor_heuristic_final_fraction: 0.0
+  train_on_heuristic_actor_rows: false
+  diverse_opponent_actor_count: 999
+  diverse_model_actor_count: 999
+  diverse_opponent_batch_fraction: 1.0
+  structured_warmstart:
+    enabled: false
+    updates: 0
+evaluation:
+  periodic_dev_eval_interval_updates: 25
+  periodic_dev_eval_paired_seeds: 8
+league:
+  warmup:
+    first_updates: 0
+    initial_window_episodes: 512
+    ramp_target_updates: 1
+    ramp_target_window_episodes: 4096
+  pool:
+    recent_size: 24
+    champion_size: 4
+    champion_max_age_updates: 0
+  sampling:
+    noleague_baseline_reserved_envs_per_actor: 1
+    heuristic_public_reserved_envs_per_actor: 0
+    noleague_baseline_mix_fraction: 0.15
+    noleague_baseline_mix_end_updates: -1
+    heuristic_public_mix_fraction: 0.0
+    heuristic_public_final_mix_fraction: 0.0
+    heuristic_public_mix_end_updates: 1
+    champion_mix_fraction: 0.55
+    hard_negative_mix_fraction: 0.15
+    hard_negative_min_samples: 4
+    hard_negative_max_win_rate: 0.55
+    pfsp_epsilon_uniform: 0.20

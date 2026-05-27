@@ -1,0 +1,42 @@
+schema_version: 2
+description: "Extension-half anti-regression continuation from the a0375 frontier. Uses the full grouped128 paired-outcome contrastive dataset plus exact pair-index>=128 selected-a015 preserve rows where a0375 lost. The replay batch is balanced between original fixed/learned repair and extension fixed/learned preserve. Intended for very short guarded continuation only."
+extends: main_league_champion_hardneg_selected_outcome_contrastive_edgehn_focus_probe.yaml
+training:
+  optimizer:
+    learning_rate: 0.000008
+  structured_aux:
+    policy_anchor_coef: 0.42
+    policy_anchor_top_action_coef: 0.09
+    paired_swing_dataset_path: runs/paired_outcome_contrastive_grouped128_plus_extpreserve_a0375_20260519/paired_outcome_contrastive_grouped128_plus_extpreserve_a0375.npz
+    paired_swing_coef: 0.04
+    paired_swing_batch_episodes: 20
+    paired_swing_focus_groups:
+      - name: grouped_fixed_preserve
+        source_labels:
+          - grouped128_fixed_preserve_B1 NoLeague baseline
+          - grouped128_fixed_preserve_B2 HeuristicPublic
+          - grouped128_fixed_preserve_B3 HeuristicPublicAggro
+          - grouped128_fixed_preserve_B4 HeuristicPublicControl
+        fraction: 0.25
+      - name: grouped_learned_repair
+        source_labels:
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004
+          - grouped128_learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.25
+      - name: ext256_fixed_preserve
+        source_labels:
+          - ext256_fixed_preserveB1 NoLeague baseline
+          - ext256_fixed_preserveB2 HeuristicPublic
+          - ext256_fixed_preserveB3 HeuristicPublicAggro
+        fraction: 0.25
+      - name: ext256_learned_preserve
+        source_labels:
+          - ext256_learned_preserveseed_b8c698d26a_seed_c3aac2f9dc_policy_000001
+          - ext256_learned_preserveseed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.25

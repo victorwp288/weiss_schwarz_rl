@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any, cast
 
 from weiss_rl.artifacts import ArtifactLayout
-from weiss_rl.cli_banner import print_startup_banner
+from weiss_rl.artifacts.reproducibility import parse_seed_file
 from weiss_rl.config import compute_config_hash256, load_stack_config, load_study_config
+from weiss_rl.core.simulator_contract import load_verified_simulator_contract
+from weiss_rl.core.spec import assert_spec_bundle_contract
+from weiss_rl.diagnostics.cli_banner import print_startup_banner
+from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger, tensorboard_unavailable_reason
 from weiss_rl.eval import (
     build_matchup_export,
     build_paper_readiness_summary,
@@ -25,13 +32,7 @@ from weiss_rl.eval import (
 from weiss_rl.eval.payoff_folding import PayoffFoldScheme
 from weiss_rl.eval.policy_set import recommend_focal_policy_id
 from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
-from weiss_rl.metagame import build_sensitivity_report
-from weiss_rl.plotting.paper_figures import render_paper_figures
-from weiss_rl.repro import parse_seed_file
-from weiss_rl.simulator_contract import load_verified_simulator_contract
-from weiss_rl.spec import assert_spec_bundle_contract
-from weiss_rl.tensorboard_logger import TensorBoardLogger, tensorboard_unavailable_reason
-from weiss_rl.toy_public_demo import (
+from weiss_rl.experiments.toy_public_demo import (
     PUBLIC_DEMO_DEFAULT_BOOTSTRAP_SAMPLES,
     PUBLIC_DEMO_DEFAULT_PAIRED_SEEDS,
     public_demo_spec_bundle,
@@ -39,6 +40,8 @@ from weiss_rl.toy_public_demo import (
     public_demo_stop_rules,
     run_public_demo_final_eval,
 )
+from weiss_rl.metagame import build_sensitivity_report
+from weiss_rl.plotting.paper_figures import render_paper_figures
 
 _SHA256_HEX_LENGTH = 64
 _GIT_COMMIT_HEX_LENGTH = 40
@@ -104,6 +107,108 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _load_run_summary_or_default(layout: ArtifactLayout) -> dict[str, Any]:
+    if layout.run_summary_path.is_file():
+        return _load_json_object(layout.run_summary_path, label="run summary")
+    manifest = _load_json_object(layout.manifest_path, label="run manifest")
+    return {
+        "kind": "run_summary_v1",
+        "artifact_schema_version": "run_artifacts_v2",
+        "run_id256": str(manifest.get("run_id256", "")),
+        "run_id64": str(manifest.get("run_id64", "")),
+        "run_dir": layout.run_dir.as_posix(),
+        "artifact_roots": {
+            "training": layout.relative(layout.training_dir),
+            "eval": layout.relative(layout.eval_dir),
+            "replays": layout.relative(layout.replays_dir),
+            "tensorboard": layout.relative(layout.tensorboard_dir),
+            "figures": layout.relative(layout.figures_dir),
+        },
+        "manifest_path": layout.relative(layout.manifest_path),
+        "environment_path": layout.relative(layout.environment_path),
+        "determinism_report_path": layout.relative(layout.determinism_report_path),
+        "paper_readiness_summary_path": layout.relative(layout.paper_readiness_summary_path),
+        "seed_derivation": manifest.get("seed_derivation", {}),
+        "runtime_mode": "interpolated_checkpoint",
+        "paper_grade": False,
+    }
+
+
+def _load_determinism_report_or_default(layout: ArtifactLayout) -> dict[str, Any]:
+    if layout.determinism_report_path.is_file():
+        return _load_json_object(layout.determinism_report_path, label="determinism report")
+    manifest = _load_json_object(layout.manifest_path, label="run manifest")
+    evaluation_pinning = manifest.get("evaluation_pinning", {})
+    if not isinstance(evaluation_pinning, dict):
+        evaluation_pinning = {}
+    seed_derivation = manifest.get("seed_derivation", {})
+    if not isinstance(seed_derivation, dict):
+        seed_derivation = {}
+    seed_files = manifest.get("seed_files", {})
+    if not isinstance(seed_files, dict):
+        seed_files = {}
+    return {
+        "kind": "determinism_report_v1",
+        "artifact_schema_version": "run_artifacts_v2",
+        "run_id256": str(manifest.get("run_id256", "")),
+        "run_id64": str(manifest.get("run_id64", "")),
+        "policy_selection_mode": "unresolved",
+        "evaluation_pinning": evaluation_pinning,
+        "seed_derivation": seed_derivation,
+        "seed_files": seed_files,
+        "device_policy": {
+            "learner": "interpolated_checkpoint",
+            "evaluation": evaluation_pinning.get("eval_device", "cpu"),
+        },
+        "replay_verification": {
+            "path": layout.relative(layout.replay_verification_json()),
+            "status": "pending",
+        },
+        "canonical_artifact_hashes": {},
+    }
+
+
+def _load_environment_or_default(layout: ArtifactLayout) -> dict[str, Any]:
+    if layout.environment_path.is_file():
+        return _load_json_object(layout.environment_path, label="environment manifest")
+    manifest = _load_json_object(layout.manifest_path, label="run manifest")
+    package_names = ("weiss-rl", "weiss-sim", "torch", "numpy", "scipy", "matplotlib")
+    return {
+        "kind": "environment_manifest_v1",
+        "artifact_schema_version": "run_artifacts_v2",
+        "run_id256": str(manifest.get("run_id256", "")),
+        "run_id64": str(manifest.get("run_id64", "")),
+        "python": {
+            "version": sys.version.split()[0],
+            "implementation": platform.python_implementation(),
+            "executable": sys.executable,
+        },
+        "platform": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+            "platform": platform.platform(),
+        },
+        "packages": {name: _safe_package_version(name) for name in package_names},
+    }
+
+
+def _safe_package_version(name: str) -> str | None:
+    try:
+        return package_version(name)
+    except PackageNotFoundError:
+        return None
+
+
+def _ensure_run_level_report_scaffolding(layout: ArtifactLayout) -> None:
+    if not layout.environment_path.is_file():
+        _write_json(layout.environment_path, _load_environment_or_default(layout))
+    if not layout.run_summary_path.is_file():
+        _write_json(layout.run_summary_path, _load_run_summary_or_default(layout))
+    if not layout.determinism_report_path.is_file():
+        _write_json(layout.determinism_report_path, _load_determinism_report_or_default(layout))
 
 
 def _effective_manifest_git_commit(
@@ -337,7 +442,7 @@ def _update_run_level_reports(
     figure_paths: tuple[Path, ...],
     readiness_payload: dict[str, Any] | None,
 ) -> None:
-    run_summary = _load_json_object(layout.run_summary_path, label="run summary")
+    run_summary = _load_run_summary_or_default(layout)
     run_summary.update(
         {
             "final_eval_dir": layout.relative(layout.final_eval_dir),
@@ -352,7 +457,7 @@ def _update_run_level_reports(
     )
     _write_json(layout.run_summary_path, run_summary)
 
-    determinism_report = _load_json_object(layout.determinism_report_path, label="determinism report")
+    determinism_report = _load_determinism_report_or_default(layout)
     replay_verification = _load_json_object(layout.replay_verification_json(), label="replay verification summary")
     artifact_hashes = _load_json_object(layout.final_eval_aggregate_hashes_json(), label="final eval artifact hashes")
     determinism_report.update(
@@ -565,6 +670,8 @@ def _run_canonical_eval_pipeline(
         figure_paths: tuple[Path, ...] = ()
         if not skip_figures:
             figure_paths = render_paper_figures(run_dir)
+
+        _ensure_run_level_report_scaffolding(layout)
 
         readiness_payload: dict[str, Any] | None = None
         if not skip_readiness:
@@ -780,6 +887,8 @@ def main() -> None:
             parser.error("--public-demo requires --run-dir")
         if args.episodes_jsonl is not None:
             parser.error("--public-demo cannot be combined with --episodes-jsonl")
+    elif not args.skip_readiness and (args.skip_metagame or args.skip_figures):
+        parser.error("--skip-metagame or --skip-figures requires --skip-readiness")
     elif args.run_dir is not None and args.episodes_jsonl is not None:
         parser.error("--run-dir cannot be combined with --episodes-jsonl outside --public-demo mode")
     elif args.episodes_jsonl is None and (

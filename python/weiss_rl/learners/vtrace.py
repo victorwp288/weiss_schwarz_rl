@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.masking import (
+from weiss_rl.core.masking import (
     assert_strictly_increasing_legal_ids,
     masked_log_softmax,
     masked_logp_from_legal_ids,

@@ -1,0 +1,9 @@
+schema_version: 2
+description: "Minimal-flip pair205 opponent-conditioned action-bias probe. This keeps the adapter-only/base-frozen setup but uses much lower action-bias pressure than the strong mechanistic probe, aiming to cross zero on the B2/policy0004 104/124 pair205 margins without imposing a large global per-opponent action-ID preference."
+extends: main_league_champion_hardneg_a075_context_actionbias_pair205_adapteronly_strong_probe.yaml
+model:
+  opponent_context_adapter_lr_multiplier: 2000.0
+training:
+  structured_aux:
+    paired_swing_aux_updates: 8
+    paired_swing_coef: 0.20

@@ -1,0 +1,32 @@
+schema_version: 2
+description: "Low-pressure pair205 action-bias adapter-only probe. This keeps the direct per-opponent action-bias mechanism but asks only for a small positive 104/124 margin before sentinel eval, to test whether the strong branch's learned collapse was caused by overlarge global action-ID bias."
+extends: main_league_champion_hardneg_a075_context_actionbias_pair205_adapteronly_probe.yaml
+model:
+  opponent_context_adapter_lr_multiplier: 1000.0
+training:
+  optimizer:
+    learning_rate: 0.000001
+  structured_aux:
+    policy_anchor_coef: 0.0
+    policy_anchor_top_action_coef: 0.0
+    trajectory_retention_coef: 0.0
+    paired_swing_aux_updates: 8
+    paired_swing_coef: 0.08
+    paired_swing_margin: 0.05
+    paired_swing_focus_groups:
+      - name: pair205_b2_fixed_preserve
+        source_labels:
+          - a075_loss_preserve_B2 HeuristicPublic
+        fraction: 0.25
+      - name: pair205_policy0004_fixed_preserve
+        source_labels:
+          - a075_loss_preserve_seed_c3aac2f9dc_policy_000004
+        fraction: 0.25
+      - name: pair205_learned_repair
+        source_labels:
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.50

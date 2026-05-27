@@ -1,0 +1,7 @@
+schema_version: 2
+description: "Main league probe: p2 B1-only deterministic-opponent best response with the p2 KL anchor disabled, guarded by B2/B3/B4 floors."
+extends: main_b1only_p2_trust_region_argmax_opp_probe.yaml
+training:
+  structured_aux:
+    policy_anchor_coef: 0.0
+    policy_anchor_top_action_coef: 0.0

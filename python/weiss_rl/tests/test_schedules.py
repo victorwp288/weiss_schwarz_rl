@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from weiss_rl.schedules import linear_anneal_value
+from weiss_rl.core.schedules import linear_anneal_value
 
 
 def test_linear_anneal_value_respects_delayed_window() -> None:

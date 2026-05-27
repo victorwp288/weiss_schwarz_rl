@@ -1,0 +1,18 @@
+schema_version: 2
+description: "One-update a075 paired-outcome preference micro-probe. Uses explicit preferred/rejected trajectory pairs: a075 learned wins over selected losses, plus selected B2/policy0004 wins over a075 losses as fixed/learned anti-regression. Must pass offline preference margin diagnostics before sentinel eval."
+extends: main_league_champion_hardneg_interp_a050_p1p2_a025_b2pair70_nowarm_continue_probe.yaml
+training:
+  optimizer:
+    learning_rate: 0.0000005
+  structured_aux:
+    paired_swing_dataset_path: ""
+    paired_swing_every_updates: 0
+    paired_swing_coef: 0.0
+    paired_outcome_preference_dataset_path: runs/paired_outcome_preference_a075_balanced_micro_20260520/paired_outcome_preference_a075_balanced_micro.npz
+    paired_outcome_preference_every_updates: 1
+    paired_outcome_preference_aux_updates: 1
+    paired_outcome_preference_batch_episodes: 22
+    paired_outcome_preference_seed: 20260520
+    paired_outcome_preference_coef: 0.08
+    paired_outcome_preference_beta: 0.20
+    paired_outcome_preference_aggregation: mean

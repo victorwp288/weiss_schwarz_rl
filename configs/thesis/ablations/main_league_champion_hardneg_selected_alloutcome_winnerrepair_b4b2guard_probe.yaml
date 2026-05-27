@@ -1,0 +1,21 @@
+schema_version: 2
+description: "Selected-a015 champion/hard-negative continuation with disjoint winner replay repair. This keeps the focused old-hard-negative plus B2/B4 retention ecology, but replaces the extension-seed replay data with a thesis-defensible disjoint train-seed mixture: selected-a015 hard-negative preservation wins plus extension-repair p5 hard-negative wins that represent real learned-opponent gains. Confirm/eval seeds remain held out."
+extends: main_league_champion_hardneg_selected_alloutcome_focusoldhn_b2retention_b4b2guard_probe.yaml
+reproducibility:
+  seed_files:
+    hardneg_repair_train: configs/seeds/hardneg_repair_train_seeds_20260518.txt
+training:
+  optimizer:
+    learning_rate: 0.0000045
+  exploration:
+    entropy_coef: 0.0009
+    actor_sampling_temperature: 0.82
+  structured_aux:
+    policy_anchor_coef: 0.54
+    policy_anchor_top_action_coef: 0.13
+    policy_anchor_temperature: 0.64
+    trajectory_bc_dataset_path: runs/trajectory_bc_selected_a015_disjoint4x_plus_extensionp5win2x_20260518/trajectory_bc_selected_a015_disjoint4x_plus_extensionp5win2x.npz
+    trajectory_bc_batch_episodes: 14
+    trajectory_bc_teacher_action_coef: 0.16
+    trajectory_bc_teacher_same_family_action_coef: 0.66
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.08

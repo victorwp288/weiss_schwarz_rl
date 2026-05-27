@@ -9,15 +9,20 @@ This repo now treats the run tree as a contract, not an implementation accident.
 - `run_summary.json`
 - `paper_readiness_summary.json`
 - `determinism_report.json` when the pinned thesis pipeline is used
+- `config_canonical.json`
+- `spec_bundle.json`
+- `spec_hash256.txt`
 
 ## Canonical tree
 
 - `training/`
 - `eval/final_eval/`
 - `eval/diagnostics/`
+- `eval/b2_disagreement/`
 - `eval/metagame/`
 - `replays/`
 - `figures/paper/`
+- `figures/data/`
 
 ## What belongs where
 

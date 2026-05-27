@@ -1,0 +1,16 @@
+schema_version: 2
+description: "B1 guided ablation: low-entropy light anti-pass run with exact same-family pressure on B2 choice-select decisions."
+extends: public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
+training:
+  structured_aux:
+    teacher_exact_action_families:
+      - attack
+      - main_move
+      - encore_pay
+      - encore_decline
+      - mulligan_confirm
+      - pass
+      - choice_select
+      - climax_play
+    teacher_same_family_action_margin_coef: 0.04
+    teacher_same_family_action_margin: 0.50

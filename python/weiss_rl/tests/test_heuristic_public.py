@@ -10,9 +10,10 @@ import numpy.testing as npt
 import pytest
 import torch
 
-from weiss_rl.action_catalog import ActionCatalog as SharedActionCatalog
 from weiss_rl.config import StackConfig, canonical_config_dict, load_stack_config
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
+from weiss_rl.core.action_catalog import ActionCatalog as SharedActionCatalog
+from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.envs.decision_env import DecisionBoundaryEnv
 from weiss_rl.eval import simulator_runner as simulator_runner_module
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
@@ -29,7 +30,6 @@ from weiss_rl.eval.simulator_runner import (
     resolve_eval_policies,
 )
 from weiss_rl.league.registry import SnapshotRegistry
-from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.model import (
     PolicyValueModel,
     StructuredLegalPolicyValueModel,
@@ -297,7 +297,7 @@ def test_structured_model_public_heuristic_scores_match_b2_batch_meta_choices() 
             typed_feature_width=32,
         ),
         action_dim=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
-        observation_spec=spec_bundle["observation"],  # type: ignore[index]
+        observation_spec=cast(dict[str, Any], spec_bundle["observation"]),
         spec_bundle=spec_bundle,
     )
     assert isinstance(model, StructuredLegalPolicyValueModel)
@@ -368,7 +368,7 @@ def test_structured_model_public_bias_guides_live_packed_scores_toward_b2_choice
             public_heuristic_actor_logit_bias_scale=100.0,
         ),
         action_dim=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
-        observation_spec=spec_bundle["observation"],  # type: ignore[index]
+        observation_spec=cast(dict[str, Any], spec_bundle["observation"]),
         spec_bundle=spec_bundle,
     )
     assert isinstance(model, StructuredLegalPolicyValueModel)
@@ -447,7 +447,7 @@ def test_structured_model_public_bias_family_gate_only_affects_selected_families
             public_heuristic_actor_logit_bias_scale=0.0,
         ),
         action_dim=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
-        observation_spec=spec_bundle["observation"],  # type: ignore[index]
+        observation_spec=cast(dict[str, Any], spec_bundle["observation"]),
         spec_bundle=spec_bundle,
     )
     torch.manual_seed(0)
@@ -466,7 +466,7 @@ def test_structured_model_public_bias_family_gate_only_affects_selected_families
             public_heuristic_logit_bias_families=("attack",),
         ),
         action_dim=int(spec_bundle["action"]["action_space_size"]),  # type: ignore[index]
-        observation_spec=spec_bundle["observation"],  # type: ignore[index]
+        observation_spec=cast(dict[str, Any], spec_bundle["observation"]),
         spec_bundle=spec_bundle,
     )
     assert isinstance(baseline_model, StructuredLegalPolicyValueModel)
@@ -571,12 +571,12 @@ def test_simulator_native_heuristic_pool_matches_python_oracle_across_live_steps
         seed=321,
     )
     try:
-        policy = HeuristicPublicPolicy.from_spec_bundle(weiss_sim.spec_bundle())
         batch = env.reset()
         for _ in range(24):
             assert batch.ids_offsets is not None
             assert batch.legal_action_meta is not None
             legal_ids, legal_offsets = batch.ids_offsets
+            policy = HeuristicPublicPolicy.from_spec_bundle(weiss_sim.spec_bundle())
             native_actions = np.zeros((env.num_envs,), dtype=np.uint16)
             env.pool.choose_heuristic_public_actions_into(
                 np.arange(env.num_envs, dtype=np.uint32),
@@ -656,7 +656,13 @@ def test_resolve_eval_policies_loads_snapshots_from_registry_run_root(tmp_path: 
         action_dim=9,
         observation_spec=_heuristic_spec_bundle()["observation"],  # type: ignore[arg-type]
     )
-    torch.save({"model_state_dict": model.state_dict()}, weights_path)
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "structured_policy_contract": stack.config.model.structured_policy_contract,
+        },
+        weights_path,
+    )
 
     registry = SnapshotRegistry()
     registry.add_snapshot(
@@ -708,6 +714,7 @@ def _write_eval_snapshot(
         {
             "model_state_dict": model.state_dict(),
             "policy_id": policy_id,
+            "structured_policy_contract": model_config.structured_policy_contract,
             "update": int(update),
         },
         weights_path,
@@ -767,6 +774,40 @@ def test_resolve_eval_policies_loads_snapshots_from_copied_registry_json(tmp_pat
     assert resolved["policy_000100"].source_run_dir == source_run_dir.resolve().as_posix()
     assert resolved["policy_000100"].snapshot_path == "training/snapshots/policy_000100/weights.pt"
     assert resolved["policy_000100"].model is not None
+
+
+def test_resolve_eval_policies_accepts_unique_imported_seed_suffix(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    run_dir = tmp_path / "runs" / "seeded_consumer"
+    registry_path = run_dir / "training" / "snapshots" / "registry.json"
+    actual_policy_id = "seed_newrun_seed_oldrun_policy_000005"
+    requested_policy_id = "seed_oldrun_policy_000005"
+    snapshot_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=run_dir,
+        policy_id=actual_policy_id,
+        update=0,
+    )
+    _write_snapshot_registry(
+        registry_path=registry_path,
+        snapshots=[(actual_policy_id, 0, snapshot_weights)],
+    )
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=[requested_policy_id],
+        run_dir=run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        snapshot_registry_path=registry_path,
+    )
+
+    assert resolved[requested_policy_id].policy_id == requested_policy_id
+    assert resolved[requested_policy_id].source_run_dir == run_dir.resolve().as_posix()
+    assert resolved[requested_policy_id].snapshot_path == f"training/snapshots/{actual_policy_id}/weights.pt"
+    assert resolved[requested_policy_id].model is not None
 
 
 def test_resolve_eval_policies_prefers_explicit_run_dir_for_ambiguous_copied_registry(tmp_path: Path) -> None:
@@ -954,6 +995,47 @@ def test_resolve_eval_policies_loads_b1_from_registry_source_run(tmp_path: Path)
     assert resolved[NO_LEAGUE_POLICY_ID].model is not None
 
 
+def test_resolve_eval_policies_preserves_b1_display_id_preference_when_both_aliases_exist(tmp_path: Path) -> None:
+    stack = load_stack_config(canonical_stack_config_path())
+
+    b1_run_dir = tmp_path / "baselines" / "b1_run_with_aliases"
+    display_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=b1_run_dir,
+        policy_id=NO_LEAGUE_POLICY_ID,
+        update=1,
+    )
+    canonical_weights = _write_eval_snapshot(
+        stack=stack,
+        run_dir=b1_run_dir,
+        policy_id="b1_noleague_baseline",
+        update=5,
+    )
+    _write_snapshot_registry(
+        registry_path=b1_run_dir / "training" / "snapshots" / "registry.json",
+        snapshots=[
+            (NO_LEAGUE_POLICY_ID, 1, display_weights),
+            ("b1_noleague_baseline", 5, canonical_weights),
+        ],
+    )
+
+    consumer_run_dir = tmp_path / "runs" / "consumer_run_b1_alias_preference"
+    (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
+
+    resolved = resolve_eval_policies(
+        stack=stack,
+        policy_ids=[NO_LEAGUE_POLICY_ID],
+        run_dir=consumer_run_dir,
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle=_heuristic_spec_bundle(),
+        b1_baseline_run_dir=b1_run_dir,
+    )
+
+    assert resolved[NO_LEAGUE_POLICY_ID].snapshot_path == "training/snapshots/B1 NoLeague baseline/weights.pt"
+
+
 def test_resolve_eval_policies_requires_b1_snapshot_for_mixed_copied_registry_requests(tmp_path: Path) -> None:
     stack = load_stack_config(canonical_stack_config_path())
 
@@ -1068,7 +1150,7 @@ def test_resolve_eval_policies_skips_registry_resolution_for_explicit_b1_baselin
     assert resolved[NO_LEAGUE_POLICY_ID].source_run_dir == b1_run_dir.resolve().as_posix()
 
 
-def test_resolve_eval_policies_uses_nested_manifest_role_for_latest_b1_snapshot(tmp_path: Path) -> None:
+def test_resolve_eval_policies_refuses_nested_manifest_latest_only_b1_snapshot(tmp_path: Path) -> None:
     stack = load_stack_config(canonical_stack_config_path())
 
     b1_run_dir = tmp_path / "baselines" / "b1_run"
@@ -1096,22 +1178,19 @@ def test_resolve_eval_policies_uses_nested_manifest_role_for_latest_b1_snapshot(
     (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
     (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
 
-    resolved = resolve_eval_policies(
-        stack=stack,
-        policy_ids=[NO_LEAGUE_POLICY_ID],
-        run_dir=consumer_run_dir,
-        observation_dim=512,
-        action_dim=9,
-        spec_bundle=_heuristic_spec_bundle(),
-        b1_baseline_run_dir=b1_run_dir,
-    )
-
-    assert resolved[NO_LEAGUE_POLICY_ID].kind == "baseline_noleague"
-    assert resolved[NO_LEAGUE_POLICY_ID].source_run_dir == b1_run_dir.resolve().as_posix()
-    assert resolved[NO_LEAGUE_POLICY_ID].snapshot_path == "training/snapshots/policy_000005/weights.pt"
+    with pytest.raises(FileNotFoundError, match="mandatory B1 NoLeague baseline"):
+        resolve_eval_policies(
+            stack=stack,
+            policy_ids=[NO_LEAGUE_POLICY_ID],
+            run_dir=consumer_run_dir,
+            observation_dim=512,
+            action_dim=9,
+            spec_bundle=_heuristic_spec_bundle(),
+            b1_baseline_run_dir=b1_run_dir,
+        )
 
 
-def test_resolve_eval_policies_uses_legacy_manifest_training_mode_for_latest_b1_snapshot(tmp_path: Path) -> None:
+def test_resolve_eval_policies_refuses_legacy_manifest_latest_only_b1_snapshot(tmp_path: Path) -> None:
     stack = load_stack_config(canonical_stack_config_path())
 
     b1_run_dir = tmp_path / "baselines" / "b1_run_legacy"
@@ -1137,19 +1216,16 @@ def test_resolve_eval_policies_uses_legacy_manifest_training_mode_for_latest_b1_
     (consumer_run_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
     (consumer_run_dir / "manifest.json").write_text(json.dumps({"run_id256": "ab" * 32}), encoding="utf-8")
 
-    resolved = resolve_eval_policies(
-        stack=stack,
-        policy_ids=[NO_LEAGUE_POLICY_ID],
-        run_dir=consumer_run_dir,
-        observation_dim=512,
-        action_dim=9,
-        spec_bundle=_heuristic_spec_bundle(),
-        b1_baseline_run_dir=b1_run_dir,
-    )
-
-    assert resolved[NO_LEAGUE_POLICY_ID].kind == "baseline_noleague"
-    assert resolved[NO_LEAGUE_POLICY_ID].source_run_dir == b1_run_dir.resolve().as_posix()
-    assert resolved[NO_LEAGUE_POLICY_ID].snapshot_path == "training/snapshots/policy_000005/weights.pt"
+    with pytest.raises(FileNotFoundError, match="mandatory B1 NoLeague baseline"):
+        resolve_eval_policies(
+            stack=stack,
+            policy_ids=[NO_LEAGUE_POLICY_ID],
+            run_dir=consumer_run_dir,
+            observation_dim=512,
+            action_dim=9,
+            spec_bundle=_heuristic_spec_bundle(),
+            b1_baseline_run_dir=b1_run_dir,
+        )
 
 
 def test_recursive_registry_search_root_rejects_filesystem_anchor() -> None:

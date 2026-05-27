@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -172,6 +173,69 @@ def test_train_entrypoint_applies_profile_flags_before_hashing() -> None:
     assert updated.config.training.profile_timers is True
     assert updated.config.training.torch_profiler is True
     assert module.compute_config_hash256(updated) != base_hash
+
+
+def test_train_metadata_helpers_preserve_manifest_shapes(tmp_path: Path) -> None:
+    module = _load_script_module("train.py")
+    stack = module.load_stack_config(REPO_ROOT / "configs" / "presets" / "typed_thesis_locked.yaml")
+
+    relative = module._manifest_source_path(
+        REPO_ROOT / "configs" / "presets" / "typed_thesis_locked.yaml", root=REPO_ROOT
+    )
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text('{"ok": true}\n', encoding="utf-8")
+
+    assert relative == "configs/presets/typed_thesis_locked.yaml"
+    assert module._load_json_object(payload_path, label="metadata") == {"ok": True}
+    assert module._evaluation_pinning(stack)["seat_swap"] is True
+    assert (
+        module._hardware_summary(
+            "cuda:0",
+            actor_device="cuda:1",
+            actor_device_layout=("cuda:1", "cuda:2", "cuda:1"),
+        )["actor_device_unique_count"]
+        == 2
+    )
+
+
+def test_train_noleague_import_contract_helpers_preserve_role_rules() -> None:
+    module = _load_script_module("train.py")
+
+    modern = {"config": {"experiment": {"role": "baseline_noleague"}}}
+    legacy = {"training_family_a": {"mode": "b1_no_league"}}
+    bad_role = {"config": {"experiment": {"role": "league_training"}}}
+
+    assert module._config_marks_noleague_baseline(modern) is True
+    assert module._config_marks_noleague_baseline(legacy) is True
+    assert module._config_marks_noleague_baseline(bad_role) is False
+    module._assert_noleague_baseline_config(modern)
+    module._assert_noleague_baseline_config(legacy)
+    with pytest.raises(RuntimeError, match="baseline_noleague"):
+        module._assert_noleague_baseline_config(bad_role)
+
+
+def test_train_cli_parser_preserves_public_defaults_and_aliases() -> None:
+    from weiss_rl.training.cli import build_train_parser
+
+    parser = build_train_parser()
+    args = parser.parse_args(
+        [
+            "--stack-config",
+            "configs/stack_smoke.yaml",
+            "--run-id",
+            "legacy_alias",
+            "--config-override",
+            "training.optimizer.learning_rate=0.0001",
+        ]
+    )
+
+    assert args.stack_config == Path("configs/stack_smoke.yaml")
+    assert args.run_id_alias == "legacy_alias"
+    assert args.config_override == ["training.optimizer.learning_rate=0.0001"]
+    assert args.num_envs is None
+    assert args.unroll_length is None
+    assert args.max_updates == 1
+    assert args.runtime_mode is None
 
 
 def test_train_entrypoint_resolves_cuda_auto_to_first_visible_gpu(monkeypatch) -> None:
@@ -528,7 +592,7 @@ def test_launch_experiments_entrypoint_dry_run_plumbs_devices(monkeypatch, tmp_p
     }
     assert observed["execute_launch_plan"] == {
         "repo_root": WORKSPACE_ROOT,
-        "plan": observed["execute_launch_plan"]["plan"],
+        "plan": cast(dict[str, Any], observed["execute_launch_plan"])["plan"],
         "dry_run": True,
     }
 
@@ -607,7 +671,7 @@ def test_sweep_experiments_entrypoint_writes_plan_and_summary(monkeypatch, tmp_p
     }
     assert observed["execute_launch_plan"] == {
         "repo_root": WORKSPACE_ROOT,
-        "plan": observed["execute_launch_plan"]["plan"],
+        "plan": cast(dict[str, Any], observed["execute_launch_plan"])["plan"],
         "dry_run": True,
     }
     import shutil

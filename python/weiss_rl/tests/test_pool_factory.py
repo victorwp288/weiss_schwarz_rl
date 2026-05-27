@@ -85,6 +85,8 @@ def test_build_env_config_from_stack_zeroes_shaping_for_terminal_only_objective(
             + "    level_reward: 0.02\n"
             + "    board_reward: 0.01\n"
             + "    no_progress_penalty: 0.03\n"
+            + "    pass_with_nonpass_penalty: 0.04\n"
+            + "    mulligan_select_with_confirm_penalty: 0.05\n"
         ),
         encoding="utf-8",
     )
@@ -98,6 +100,8 @@ def test_build_env_config_from_stack_zeroes_shaping_for_terminal_only_objective(
     assert reward_payload["level_reward"] == 0.0
     assert reward_payload["board_reward"] == 0.0
     assert reward_payload["no_progress_penalty"] == 0.0
+    assert "pass_with_nonpass_penalty" not in reward_payload
+    assert "mulligan_select_with_confirm_penalty" not in reward_payload
 
 
 def test_build_env_config_from_stack_cycles_deck_pools_by_actor(tmp_path: Path) -> None:
@@ -115,11 +119,11 @@ def test_build_env_config_from_stack_cycles_deck_pools_by_actor(tmp_path: Path) 
             (repo_root / "configs/presets/typed_local.yaml").read_text(encoding="utf-8")
             + "\nenvironment:\n"
             + "  deck_pool:\n"
-            + "    - preset:quints_balanced_v2\n"
-            + "    - preset:quints_ichika_focus_v1\n"
+            + "    - preset:main_deck_5hy_yotsuba_v1\n"
+            + "    - preset:aggro_deck_5hy_nino_v1\n"
             + "  opponent_deck_pool:\n"
-            + "    - preset:quints_support_mix_v1\n"
-            + "    - preset:quints_yotsuba_focus_v1\n"
+            + "    - preset:control_deck_jj_s66_v1\n"
+            + "    - preset:starter_deck_ws02_v1\n"
         ),
         encoding="utf-8",
     )
@@ -132,18 +136,18 @@ def test_build_env_config_from_stack_cycles_deck_pools_by_actor(tmp_path: Path) 
         stack,
         seed=101,
         actor_id=1,
-        deck="preset:starter_v1",
-        opponent_deck="preset:quints_balanced_v2",
+        deck="preset:starter_deck_ws02_v1",
+        opponent_deck="preset:main_deck_5hy_yotsuba_v1",
     )
 
-    assert env0["deck"] == "preset:quints_balanced_v2"
-    assert env0["opponent_deck"] == "preset:quints_support_mix_v1"
-    assert env1["deck"] == "preset:quints_ichika_focus_v1"
-    assert env1["opponent_deck"] == "preset:quints_yotsuba_focus_v1"
-    assert env2["deck"] == "preset:quints_balanced_v2"
-    assert env2["opponent_deck"] == "preset:quints_support_mix_v1"
-    assert explicit["deck"] == "preset:starter_v1"
-    assert explicit["opponent_deck"] == "preset:quints_balanced_v2"
+    assert env0["deck"] == "preset:main_deck_5hy_yotsuba_v1"
+    assert env0["opponent_deck"] == "preset:control_deck_jj_s66_v1"
+    assert env1["deck"] == "preset:aggro_deck_5hy_nino_v1"
+    assert env1["opponent_deck"] == "preset:starter_deck_ws02_v1"
+    assert env2["deck"] == "preset:main_deck_5hy_yotsuba_v1"
+    assert env2["opponent_deck"] == "preset:control_deck_jj_s66_v1"
+    assert explicit["deck"] == "preset:starter_deck_ws02_v1"
+    assert explicit["opponent_deck"] == "preset:main_deck_5hy_yotsuba_v1"
 
 
 def test_make_env_pool_from_config_adapts_curriculum_for_high_level_api(monkeypatch) -> None:

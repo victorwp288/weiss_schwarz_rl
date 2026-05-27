@@ -143,4 +143,4 @@ def test_actor_worker_tracks_outcomes_by_initial_and_reset_done_opponent_ids() -
     assert worker.outcomes.counts("opp_a") == (1, 0, 0, 0)
     assert worker.outcomes.counts("opp_b") == (0, 1, 0, 0)
     assert worker.outcomes.counts("opp_c") == (0, 0, 1, 0)
-    assert "unknown" not in worker.outcomes.by_opponent
+    assert all(opponent_id != "unknown" for _epoch, opponent_id in worker.outcomes.by_opponent)

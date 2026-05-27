@@ -1,0 +1,11 @@
+schema_version: 2
+description: "B1 guided ablation: factorized_v1 play-strong setup with mixed base/aggressive/control public-teacher soft targets while keeping exact teacher labels on base."
+extends: public_teacher_b2exact_margin_multianchor_hold75_playstrong_factorized_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
+training:
+  structured_aux:
+    teacher_public_heuristic_profiles:
+      - base
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: mixture
+    teacher_public_heuristic_profiles_end_updates: 150

@@ -1,0 +1,26 @@
+schema_version: 2
+description: "Selected guided-bootstrap continuation from the balanced direct B2/B3/B4 trajectory-BC policy with live public/supervised teacher pressure disabled and a strong frozen policy anchor. This tests whether the improved broad direct-win seed can continue without reintroducing the earlier B4/control collapse."
+extends: main_league_guided_bootstrap_selected_trajbc_b4win_anchor_nopublic.yaml
+league:
+  pool:
+    seed_snapshot_import_filter: pinned
+  promotion:
+    anchor_set_v1:
+      required:
+        - B0 RandomLegal
+        - B1 NoLeague baseline
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+      optional_if_available:
+        - Previous champion snapshot
+        - Previous recent snapshot
+  sampling:
+    noleague_baseline_reserved_envs_per_actor: 1
+    noleague_baseline_mix_fraction: 0.15
+    noleague_baseline_mix_end_updates: -1
+training:
+  checkpointing:
+    actor_reload_interval_updates: 1
+  structured_aux:
+    trajectory_bc_dataset_path: runs/trajectory_bc_direct_b2_b3_b4_win_64_20260516/trajectory_bc_direct_b2_b3_b4_win_64.npz

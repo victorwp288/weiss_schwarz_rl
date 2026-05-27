@@ -103,6 +103,7 @@ def test_build_matchup_export_and_write_outputs(tmp_path: Path) -> None:
 
     assert payload["focal_policy_id"] == "champion"
     assert payload["opponent_policy_id"] == "baseline"
+    assert payload["deck_context"] == {"focal_deck": None, "opponent_deck": None}
     assert payload["summary"] == {
         "games": 4,
         "wins": 4,
@@ -142,6 +143,8 @@ def test_build_matchup_export_and_write_outputs(tmp_path: Path) -> None:
         {
             "focal_policy_id": "champion",
             "opponent_policy_id": "baseline",
+            "focal_deck": "",
+            "opponent_deck": "",
             "scheme": "S0",
             "paired_seeds": "2",
             "max_paired_seeds": "8",

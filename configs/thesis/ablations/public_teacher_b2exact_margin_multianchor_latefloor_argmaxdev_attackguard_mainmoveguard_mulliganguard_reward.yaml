@@ -1,0 +1,10 @@
+schema_version: 2
+description: "B1 guided ablation: multi-anchor B2-exact margin run with a late nonzero supervised-teacher floor to prevent RL-only collapse."
+extends: public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
+training:
+  structured_aux:
+    teacher_supervised_start_updates: 50
+    teacher_supervised_end_updates: 100
+    teacher_supervised_final_scale: 0.50
+    teacher_public_heuristic_end_updates: 100
+    teacher_public_heuristic_final_coef: 0.02

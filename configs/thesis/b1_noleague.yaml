@@ -1,0 +1,52 @@
+schema_version: 2
+description: "B1 NoLeague baseline. Model-actor fixed-deck training with league and heuristic-opponent pressure disabled."
+extends: main_league.yaml
+experiment:
+  role: baseline_noleague
+training:
+  exploration:
+    entropy_coef: 0.01
+  action_surface:
+    mulligan_force_confirm_after_select: true
+    force_pass_over_main_move_only: true
+    force_attack_over_pass_when_attack_legal: true
+evaluation:
+  periodic_dev_eval_interval_updates: 25
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+league:
+  enabled: false
+  promotion:
+    anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+  sampling:
+    heuristic_public_mix_fraction: 0.0
+    heuristic_public_variant_mix_fraction: 0.0
+    noleague_baseline_mix_fraction: 0.0
+    noleague_baseline_mix_end_updates: -1
+rewards:
+  objective: terminal_pm1
+  discount:
+    gamma: 0.99
+  shaping:
+    enable_damage_shaping: true
+    damage_reward: 0.05
+    level_reward: 0.05
+    board_reward: 0.02
+    no_progress_penalty: 0.005
+    pass_with_nonpass_penalty: 0.02
+  truncation:
+    reward: -0.1
+    bootstrap_value: false
+    bootstrap_rule: "if truncated and not terminated, bootstrap from V(next_state); if terminated, no bootstrap"

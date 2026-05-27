@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from weiss_rl.masking import assert_strictly_increasing_legal_ids
+from weiss_rl.core.masking import assert_strictly_increasing_legal_ids
 from weiss_rl.trajectory.schema import LegalRepr, TrajectoryChunkMeta
 
 

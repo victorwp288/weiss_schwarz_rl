@@ -8,11 +8,11 @@ from typing import Literal
 
 import pytest
 
+from weiss_rl.artifacts.reproducibility import hash_seed_file
 from weiss_rl.config import load_stack_config
 from weiss_rl.eval.harness import GameResult, MatchupSummary, ScheduledGame
 from weiss_rl.league import PromotionGateAnchorResult, PromotionGatePosterior, PromotionGateRate, run_promotion_gate
 from weiss_rl.league.promotion_gate import _decision_reasons
-from weiss_rl.repro import hash_seed_file
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 _RUN_ID256 = "ab" * 32

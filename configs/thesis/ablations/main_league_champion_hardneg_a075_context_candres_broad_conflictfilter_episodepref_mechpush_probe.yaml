@@ -1,0 +1,9 @@
+schema_version: 2
+description: "Mechanistic-only stronger push for the base-frozen opponent-context candidate-residual broad episode preference probe. This is not a publishable training schedule; it exists to test whether the adapter can cleanly move the filtered local margin surface before any sentinel eval."
+extends: main_league_champion_hardneg_a075_context_candres_broad_conflictfilter_episodepref_probe.yaml
+model:
+  opponent_context_adapter_lr_multiplier: 5000.0
+training:
+  structured_aux:
+    paired_swing_aux_updates: 16
+    paired_swing_coef: 0.25

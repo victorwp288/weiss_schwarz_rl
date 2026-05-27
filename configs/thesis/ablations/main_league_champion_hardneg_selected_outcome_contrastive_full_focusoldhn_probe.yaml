@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Full-source version of the selected-a015 paired-outcome contrastive u2 probe. Uses the uncapped grouped128 paired-flip contrastive dataset (184 distinct pairs across 98 replay bundles) while keeping the same conservative fixed floors and old-hard-negative ecology focus. This is still a short filter only; do not continue unless paired confirm shows fixed >= 0 and learned > 0."
+extends: main_league_champion_hardneg_selected_outcome_contrastive_focusoldhn_probe.yaml
+training:
+  structured_aux:
+    paired_swing_dataset_path: runs/paired_outcome_contrastive_grouped128_fixed_learned_full_20260519/paired_outcome_contrastive_grouped128_fixed_learned_full.npz

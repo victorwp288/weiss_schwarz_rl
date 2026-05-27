@@ -1,0 +1,6 @@
+schema_version: 2
+description: "B1 NoLeague probe: full canonical shaping/guards with tighter actor reloads to reduce learner-to-actor lag."
+extends: ../b1_noleague.yaml
+training:
+  checkpointing:
+    actor_reload_interval_updates: 20

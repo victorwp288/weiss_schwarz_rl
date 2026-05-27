@@ -5,8 +5,8 @@ import pytest
 import torch
 from torch import nn
 
+from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.learners.ppo_lite_learner import PpoLiteLearner
-from weiss_rl.legal_actions import LegalActionBatch
 
 
 class TinyPolicyValueModel(nn.Module):

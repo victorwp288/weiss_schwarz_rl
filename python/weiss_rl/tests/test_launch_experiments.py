@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from weiss_rl.experiment_launcher import build_launch_plan, execute_launch_plan, resolve_devices
+from weiss_rl.experiments.experiment_launcher import build_launch_plan, execute_launch_plan, resolve_devices
 
 
 def test_resolve_devices_falls_back_cleanly() -> None:

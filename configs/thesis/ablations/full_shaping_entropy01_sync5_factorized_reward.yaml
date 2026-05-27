@@ -1,0 +1,5 @@
+schema_version: 2
+description: "B1 reward ablation: full shaping, sync5 actor reloads, and factorized_v1 family-first structured policy."
+extends: full_shaping_entropy01_sync5_reward.yaml
+model:
+  structured_policy_contract: factorized_v1

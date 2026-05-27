@@ -6,9 +6,9 @@ import time
 
 import numpy as np
 import torch
-from weiss_rl.action_catalog import ActionCatalog
+from weiss_rl.core.action_catalog import ActionCatalog
+from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
-from weiss_rl.legal_actions import LegalActionBatch
 from weiss_rl.model import StructuredLegalPolicyValueModel, build_policy_value_model
 from weiss_rl.tests.test_contracts import _structured_model_config, _structured_spec_bundle, _typed_observation_spec
 from weiss_rl.tests.test_heuristic_public import _empty_obs, _heuristic_spec_bundle, _packed_meta, _set_stage

@@ -5,9 +5,10 @@ from typing import Any, Literal
 import numpy as np
 import pytest
 
+from weiss_rl.core.masking import assert_strictly_increasing_legal_ids
 from weiss_rl.envs.decision_env import DecisionBoundaryEnv
-from weiss_rl.masking import assert_strictly_increasing_legal_ids
 
+MIN_WEISS_SIM_VERSION = (1, 2, 0)
 weiss_sim: Any | None = None
 
 
@@ -25,13 +26,21 @@ def _sim() -> Any:
     return weiss_sim
 
 
-Layout = Literal["mask", "nomask", "i16_legal_ids"]
-_LAYOUTS: tuple[Layout, ...] = ("mask", "nomask", "i16_legal_ids")
+Layout = Literal["mask", "nomask", "i16_legal_ids", "i16_legal_ids_nometa"]
+_LAYOUTS: tuple[Layout, ...] = ("mask", "nomask", "i16_legal_ids", "i16_legal_ids_nometa")
 _LEGAL_DECK = (list(range(1, 14)) * 4)[:50]
 
 
+def _version_tuple(version: str) -> tuple[int, int, int]:
+    release = version.strip().split("+", 1)[0].split("-", 1)[0]
+    parts = [int(part) for part in release.split(".")]
+    while len(parts) < 3:
+        parts.append(0)
+    return (parts[0], parts[1], parts[2])
+
+
 def _make_pool(layout: Layout):
-    kwargs = {"output_masks": False} if layout == "i16_legal_ids" else {}
+    kwargs = {"output_masks": False} if layout in {"i16_legal_ids", "i16_legal_ids_nometa"} else {}
     return _sim().make_pool(
         mode="train",
         num_envs=2,
@@ -123,6 +132,8 @@ def _assert_layout_contract(step, *, layout: Layout, buffers, action_space: int)
 
     assert step.legal_ids is not None
     assert step.legal_offsets is not None
+    if layout == "i16_legal_ids_nometa":
+        assert getattr(step, "legal_action_meta", None) is None
     return _actions_from_packed_legal_ids(
         np.asarray(step.legal_ids),
         np.asarray(step.legal_offsets),
@@ -148,6 +159,68 @@ def test_rl_step_contract_smoke_covers_supported_layouts(layout: Layout) -> None
     step_step = sim.rl.step_rl(pool, actions, layout=layout)
     next_actions = _assert_layout_contract(step_step, layout=layout, buffers=buffers, action_space=action_space)
     assert next_actions.shape == (num_envs,)
+
+
+def test_weiss_sim_12_contract_surface_is_available() -> None:
+    sim = _sim()
+    version = getattr(sim, "__version__", "")
+
+    assert _version_tuple(version) >= MIN_WEISS_SIM_VERSION
+    assert int(sim.OBS_LEN) == 378
+    assert int(sim.ACTION_SPACE_SIZE) == 527
+    assert int(sim.SPEC_HASH) == 8590000130
+    assert hasattr(sim, "make_pool")
+    assert hasattr(sim, "EnvPoolBuffers")
+    assert hasattr(sim, "export_spec_bundle")
+    assert hasattr(sim.EnvPoolBuffers, "step_sample_from_logits_with_logp")
+    assert hasattr(sim.EnvPoolBuffers, "legal_action_context_v1")
+
+    bundle = sim.export_spec_bundle()
+    assert int(bundle["observation"]["obs_len"]) == int(sim.OBS_LEN)
+    assert int(bundle["action"]["action_space_size"]) == int(sim.ACTION_SPACE_SIZE)
+    assert int(bundle["spec_hash"]) == int(sim.SPEC_HASH)
+
+
+def test_env_pool_buffers_nometa_exposes_context_and_sampled_logp() -> None:
+    sim = _sim()
+    pool, buffers = sim.make_pool(
+        mode="train",
+        num_envs=2,
+        db_path=None,
+        deck_lists=[_LEGAL_DECK, _LEGAL_DECK],
+        deck_ids=[101, 102],
+        max_decisions=200,
+        max_ticks=10_000,
+        seed=456,
+        profile="fast",
+        layout="i16_legal_ids_nometa",
+    )
+    assert buffers.layout == "i16_legal_ids_nometa"
+
+    reset_step = buffers.reset()
+    assert reset_step.legal_ids is not None
+    assert reset_step.legal_offsets is not None
+    assert getattr(reset_step, "legal_action_meta", None) is None
+
+    context, context_offsets = buffers.legal_action_context_v1()
+    assert context.dtype == np.int32
+    assert context_offsets.shape == reset_step.legal_offsets.shape
+    assert int(context_offsets[0]) == 0
+    assert int(context_offsets[-1]) == int(reset_step.legal_offsets[-1])
+    assert context.shape[0] == int(context_offsets[-1])
+
+    logits = np.zeros((int(pool.envs_len), int(sim.ACTION_SPACE_SIZE)), dtype=np.float32)
+    seeds = np.array([11, 12], dtype=np.uint64)
+    step, actions, action_logp = buffers.step_sample_from_logits_with_logp(logits, seeds)
+
+    assert step.obs.shape == (int(pool.envs_len), int(sim.OBS_LEN))
+    assert actions.shape == (int(pool.envs_len),)
+    assert action_logp.shape == (int(pool.envs_len),)
+    assert np.all(np.isfinite(action_logp))
+    for env_index, action in enumerate(actions):
+        start = int(reset_step.legal_offsets[env_index])
+        end = int(reset_step.legal_offsets[env_index + 1])
+        assert int(action) in set(int(value) for value in reset_step.legal_ids[start:end])
 
 
 def test_decision_boundary_env_mask_and_ids_offsets_stay_step_equivalent() -> None:
@@ -192,6 +265,8 @@ def test_decision_boundary_env_mask_and_ids_offsets_stay_step_equivalent() -> No
             assert np.array_equal(mask_batch.engine_status, ids_batch.engine_status)
             assert np.array_equal(mask_batch.episode_seed, ids_batch.episode_seed)
             assert np.array_equal(mask_batch.episode_key, ids_batch.episode_key)
+            assert np.array_equal(mask_batch.main_move_action, ids_batch.main_move_action)
+            assert np.array_equal(mask_batch.main_pass_action, ids_batch.main_pass_action)
 
             mask_actions = _actions_from_mask(
                 np.asarray(mask_batch.mask),

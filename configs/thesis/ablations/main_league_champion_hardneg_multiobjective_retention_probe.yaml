@@ -1,0 +1,19 @@
+schema_version: 2
+description: "Champion/hard-negative continuation from the selected frontier with online trajectory retention on learned-opponent rows and no fixed-anchor replay BC. Tests whether short-segment drift is caused by the old B2/B3/B4 trajectory dataset pulling away from the champion panel."
+extends: main_league_champion_hardneg_multiobjective_guard_probe.yaml
+league:
+  sampling:
+    champion_mix_fraction: 0.28
+    hard_negative_mix_fraction: 0.20
+    hard_negative_min_samples: 2
+    hard_negative_max_win_rate: 0.60
+training:
+  structured_aux:
+    policy_anchor_coef: 0.30
+    policy_anchor_top_action_coef: 0.05
+    trajectory_retention_coef: 0.08
+    trajectory_retention_sources:
+      - champions
+      - hard_negatives
+      - warmup_snapshots
+    trajectory_bc_dataset_path: ""

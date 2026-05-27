@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import operator
 
-from weiss_rl.repro import stable_hash64
+from weiss_rl.artifacts.reproducibility import stable_hash64
 
 PCG32_XSH_RR_V1 = "pcg32_xsh_rr_v1"
 NEXT_U64_ORDER = "hi_then_lo"

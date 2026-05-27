@@ -1,0 +1,22 @@
+schema_version: 2
+description: "Thesis final evaluation policy set for the selected factorized main/B1-seeded league surface and fixed decks."
+extends: main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml
+league:
+  promotion:
+    anchor_set_v1:
+      optional_if_available:
+        - Previous champion snapshot
+        - Previous recent snapshot
+evaluation:
+  final_policy_set_selection:
+    include_heuristic_public_anchors_b2_b3_b4: true
+    fixed_anchor_set_v1:
+      required:
+        - B0 RandomLegal
+        - B1 NoLeague baseline
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+      optional_if_available:
+        - Previous champion snapshot
+        - Previous recent snapshot

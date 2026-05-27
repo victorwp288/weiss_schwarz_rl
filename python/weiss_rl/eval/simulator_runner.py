@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,16 +12,19 @@ from typing import Any
 import numpy as np
 import torch
 
-from weiss_rl.action_diagnostics import (
+from weiss_rl.artifacts import ArtifactLayout
+from weiss_rl.artifacts.reproducibility import canonical_json_bytes, stable_hash64
+from weiss_rl.config import StackConfig
+from weiss_rl.core.masking import assert_strictly_increasing_legal_ids
+from weiss_rl.diagnostics.action_diagnostics import (
     ActionSummaryCounters,
     make_action_sequence_state,
     summarize_eval_action_counters,
     update_eval_action_counters,
 )
-from weiss_rl.artifacts import ArtifactLayout
-from weiss_rl.config import StackConfig
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
 from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
+from weiss_rl.eval.god_search import GodSearchConfig, GodSearchStats, top_k_legal_actions
 from weiss_rl.eval.harness import (
     EvalGameRunner,
     GameResult,
@@ -30,17 +33,31 @@ from weiss_rl.eval.harness import (
     abort_on_engine_fault_eval,
     game_result_from_step,
     sample_action_pinned,
+    select_action_argmax_pinned,
 )
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
 from weiss_rl.eval.policy_set import (
     NO_LEAGUE_POLICY_ID,
     RANDOM_LEGAL_POLICY_ID,
     heuristic_public_profile_name_for_policy_id,
 )
 from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
+from weiss_rl.experiments.baselines import (
+    config_marks_noleague_baseline as _shared_config_marks_noleague_baseline,
+)
+from weiss_rl.experiments.baselines import (
+    find_noleague_baseline_snapshot,
+)
 from weiss_rl.league.registry import SnapshotMeta, SnapshotRegistry
-from weiss_rl.masking import assert_strictly_increasing_legal_ids
-from weiss_rl.model import PolicyValueModel, build_policy_value_model
+from weiss_rl.model import PolicyValueModel
+from weiss_rl.models.loading import (
+    load_snapshot_eval_model as _shared_load_snapshot_eval_model,
+)
+from weiss_rl.models.loading import (
+    restore_model_guidance_from_payload as _shared_restore_model_guidance_from_payload,
+)
+from weiss_rl.models.observation_contract import header_field_index
 from weiss_rl.replay.bundles import (
     ReplayRerunContract,
     ReplayStep,
@@ -49,30 +66,23 @@ from weiss_rl.replay.bundles import (
     write_replay_bundle,
 )
 from weiss_rl.replay.runner import verify_replay_bundle
-from weiss_rl.repro import canonical_json_bytes, stable_hash64
+from weiss_rl.runtime_components.action_surface import (
+    filter_batch_main_move_only_rows_to_pass,
+    filter_batch_mulligan_select_after_select,
+    filter_batch_pass_when_attack_available,
+)
+from weiss_rl.runtime_components.legal_meta import action_catalog_indices
+from weiss_rl.runtime_components.opponent_context import (
+    eval_policy_uses_opponent_context,
+    initial_seat_hidden_for_opponents,
+)
 
 _LEGACY_B1_POLICY_ID = "b1_noleague_baseline"
 _U64_DENOMINATOR = float(1 << 64)
 
 
 def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload: Mapping[str, object]) -> None:
-    if model is None:
-        return
-    set_bias_scale = getattr(model, "set_public_heuristic_logit_bias_scale", None)
-    if not callable(set_bias_scale):
-        return
-    learner_scale = payload.get("public_heuristic_logit_bias_scale")
-    actor_scale = payload.get("public_heuristic_actor_logit_bias_scale")
-    if learner_scale is None and actor_scale is None:
-        return
-    resolved_learner_scale = None if learner_scale is None else float(learner_scale)
-    resolved_actor_scale = None if actor_scale is None else float(actor_scale)
-    if resolved_learner_scale is None:
-        get_bias_scale = getattr(model, "get_public_heuristic_logit_bias_scale", None)
-        if not callable(get_bias_scale):
-            return
-        resolved_learner_scale = float(get_bias_scale(scoring_mode="learner"))
-    set_bias_scale(resolved_learner_scale, actor_value=resolved_actor_scale)
+    _shared_restore_model_guidance_from_payload(model, payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +173,11 @@ def resolve_eval_policies(
             )
             continue
 
-        snapshot = snapshots_by_policy_id.get(policy_id)
+        snapshot = _snapshot_by_policy_id_or_imported_seed_suffix(
+            snapshots_by_policy_id=snapshots_by_policy_id,
+            policy_id=policy_id,
+            registry_path=registry_path,
+        )
         if snapshot is None:
             raise FileNotFoundError(f"Could not resolve eval policy {policy_id!r} in snapshot registry {registry_path}")
         snapshot_run_dir = _require_registry_run_dir()
@@ -213,7 +227,7 @@ def _resolve_snapshot_registry_run_dir(
     search_roots = [resolved_run_dir.parent, resolved_registry_path.parent]
     if canonical_search_root is not None:
         search_roots.append(canonical_search_root)
-        canonical_common_search_root = _common_search_root([resolved_run_dir, canonical_candidate])
+        canonical_common_search_root = _common_search_root([resolved_run_dir, canonical_search_root])
         if canonical_common_search_root is not None and _is_recursive_registry_search_root(
             canonical_common_search_root
         ):
@@ -270,7 +284,11 @@ def _snapshot_registry_resolution_snapshots(
     seen_policy_ids: set[str] = set()
 
     def _append_snapshot(policy_id: str) -> None:
-        snapshot = snapshots_by_policy_id.get(policy_id)
+        snapshot = _snapshot_by_policy_id_or_imported_seed_suffix(
+            snapshots_by_policy_id=snapshots_by_policy_id,
+            policy_id=policy_id,
+            registry_path=None,
+        )
         if snapshot is None or snapshot.policy_id in seen_policy_ids:
             return
         requested_snapshots.append(snapshot)
@@ -283,6 +301,33 @@ def _snapshot_registry_resolution_snapshots(
     if requested_snapshots:
         return requested_snapshots
     return _spaced_snapshot_resolution_samples(registry.snapshots)
+
+
+def _snapshot_by_policy_id_or_imported_seed_suffix(
+    *,
+    snapshots_by_policy_id: Mapping[str, SnapshotMeta],
+    policy_id: str,
+    registry_path: Path | None,
+) -> SnapshotMeta | None:
+    snapshot = snapshots_by_policy_id.get(policy_id)
+    if snapshot is not None:
+        return snapshot
+    normalized = str(policy_id).strip()
+    if not normalized.startswith("seed_"):
+        return None
+    suffix = f"_{normalized}"
+    matches = [
+        candidate
+        for candidate_id, candidate in snapshots_by_policy_id.items()
+        if str(candidate_id).startswith("seed_") and str(candidate_id).endswith(suffix)
+    ]
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    registry_hint = "" if registry_path is None else f" in snapshot registry {registry_path}"
+    match_ids = ", ".join(sorted(snapshot.policy_id for snapshot in matches))
+    raise RuntimeError(f"Ambiguous imported seed policy suffix {policy_id!r}{registry_hint}; matches: {match_ids}")
 
 
 def _spaced_snapshot_resolution_samples(snapshots: list[SnapshotMeta]) -> list[SnapshotMeta]:
@@ -405,30 +450,69 @@ class SimulatorEvalRunner(EvalGameRunner):
         require_sorted_legal_ids: bool,
         replay_capture_rate: float,
         regression_capture_count: int,
+        god_search_config: GodSearchConfig | None = None,
     ) -> None:
         self.stack = stack
         self.policies = dict(policies)
         self.artifact_layout = artifact_layout
         self.run_id256_bytes = bytes.fromhex(run_id256)
         self.spec_hash256_bytes = bytes.fromhex(spec_hash256)
+        self.action_dim = int(action_dim)
         self.pass_action_id = int(pass_action_id)
         self.require_sorted_legal_ids = bool(require_sorted_legal_ids)
         self.replay_capture_rate = float(replay_capture_rate)
         self.regression_capture_count = int(regression_capture_count)
         self._capture_count = 0
-        self._device = torch.device("cpu")
-        self._baseline_logits = np.zeros((int(action_dim),), dtype=np.float32)
+        self._god_search_config = god_search_config or GodSearchConfig()
+        self._god_search_stats = GodSearchStats(trace_limit=int(self._god_search_config.trace_limit))
+        evaluation_config = getattr(self.stack.config, "evaluation", None)
+        self._eval_sampling_algorithm = str(
+            getattr(evaluation_config, "eval_sampling_algorithm", "pinned_cdf_pcg_v1") or "pinned_cdf_pcg_v1"
+        ).strip()
+        self._model_sampling_temperature = float(getattr(evaluation_config, "model_sampling_temperature", 1.0) or 1.0)
+        if self._eval_sampling_algorithm not in {"pinned_cdf_pcg_v1", "model_argmax_pinned_v1"}:
+            raise ValueError(
+                "evaluation.eval_sampling_algorithm must be 'pinned_cdf_pcg_v1' or "
+                f"'model_argmax_pinned_v1', got {self._eval_sampling_algorithm!r}"
+            )
+        requested_device = str(getattr(evaluation_config, "eval_device", "cpu") or "cpu").strip().lower()
+        if requested_device in {"", "auto", "cuda:auto"}:
+            requested_device = "cuda" if torch.cuda.is_available() else "cpu"
+        if requested_device.startswith("cuda") and not torch.cuda.is_available():
+            requested_device = "cpu"
+        self._device = torch.device(requested_device)
+        for policy in self.policies.values():
+            if policy.model is not None:
+                if hasattr(policy.model, "to"):
+                    policy.model.to(self._device)
+                if hasattr(policy.model, "eval"):
+                    policy.model.eval()
+        self._baseline_logits = np.zeros((self.action_dim,), dtype=np.float32)
+        training_config = getattr(getattr(self.stack, "config", None), "training", None)
+        self._mulligan_force_confirm_after_select = bool(
+            getattr(training_config, "mulligan_force_confirm_after_select", False)
+        )
+        self._force_pass_over_main_move_only = bool(getattr(training_config, "force_pass_over_main_move_only", False))
+        self._main_move_only_max_consecutive = int(getattr(training_config, "main_move_only_max_consecutive", 0))
+        self._force_attack_over_pass_when_attack_legal = bool(
+            getattr(training_config, "force_attack_over_pass_when_attack_legal", False)
+        )
 
     def run_game(self, scheduled_game: ScheduledGame) -> GameResult:
-        env = self._build_ids_eval_env(seed=scheduled_game.episode_seed)
+        env = self._build_ids_eval_env(seed=scheduled_game.episode_seed, scheduled_game=scheduled_game)
         replay_capture = self._maybe_enable_replay_capture(env=env, scheduled_game=scheduled_game)
         seat_hidden = {
-            seat: self._initial_hidden(scheduled_game.seat0_policy_id if seat == 0 else scheduled_game.seat1_policy_id)
+            seat: self._initial_hidden(
+                scheduled_game.seat0_policy_id if seat == 0 else scheduled_game.seat1_policy_id,
+                opponent_policy_id=scheduled_game.seat1_policy_id if seat == 0 else scheduled_game.seat0_policy_id,
+            )
             for seat in (0, 1)
         }
         seat_rngs = {seat: Pcg32XshRrV1(self._rng_seed(scheduled_game=scheduled_game, seat=seat)) for seat in (0, 1)}
         action_counters = ActionSummaryCounters()
         action_sequence_state = make_action_sequence_state(1)
+        action_history: list[int] = []
+        game_search_state = {"searched": 0}
         last_acting_seat: int | None = None
 
         try:
@@ -447,27 +531,47 @@ class SimulatorEvalRunner(EvalGameRunner):
                         max_ticks=getattr(env, "max_ticks", None),
                         max_no_progress_decisions=getattr(env, "max_no_progress_decisions", None),
                     )
-                    result_payload = {
-                        "episode_seed": result.episode_seed,
-                        "terminated": result.terminated,
-                        "truncated": result.truncated,
-                        "winner_seat": result.winner_seat,
-                        "engine_status": result.engine_status,
-                        "decision_count": result.decision_count,
-                        "tick_count": result.tick_count,
-                        "no_progress_count": result.no_progress_count,
-                        "termination_reason": result.termination_reason,
-                        "simulator_episode_key": result.simulator_episode_key,
-                        **summarize_eval_action_counters(action_counters),
-                    }
+                    action_summary = summarize_eval_action_counters(action_counters)
                     if replay_capture is None:
-                        return GameResult(**result_payload)
+                        return GameResult(
+                            episode_seed=result.episode_seed,
+                            terminated=result.terminated,
+                            truncated=result.truncated,
+                            winner_seat=result.winner_seat,
+                            engine_status=result.engine_status,
+                            decision_count=result.decision_count,
+                            tick_count=result.tick_count,
+                            no_progress_count=result.no_progress_count,
+                            termination_reason=result.termination_reason,
+                            simulator_episode_key=result.simulator_episode_key,
+                            total_actions=action_summary["total_actions"],
+                            pass_actions=action_summary["pass_actions"],
+                            main_move_actions=action_summary["main_move_actions"],
+                            pass_with_nonpass_available=action_summary["pass_with_nonpass_available"],
+                            max_consecutive_main_moves=action_summary["max_consecutive_main_moves"],
+                        )
                     replay_sample = self._finalize_replay_capture(
                         scheduled_game=scheduled_game,
                         replay_capture=replay_capture,
                     )
-                    result_payload["replay_sample"] = replay_sample
-                    return GameResult(**result_payload)
+                    return GameResult(
+                        episode_seed=result.episode_seed,
+                        terminated=result.terminated,
+                        truncated=result.truncated,
+                        winner_seat=result.winner_seat,
+                        engine_status=result.engine_status,
+                        decision_count=result.decision_count,
+                        tick_count=result.tick_count,
+                        no_progress_count=result.no_progress_count,
+                        termination_reason=result.termination_reason,
+                        simulator_episode_key=result.simulator_episode_key,
+                        total_actions=action_summary["total_actions"],
+                        pass_actions=action_summary["pass_actions"],
+                        main_move_actions=action_summary["main_move_actions"],
+                        pass_with_nonpass_available=action_summary["pass_with_nonpass_available"],
+                        max_consecutive_main_moves=action_summary["max_consecutive_main_moves"],
+                        replay_sample=replay_sample,
+                    )
 
                 current_seat = int(batch.actor[0])
                 current_policy_id = (
@@ -478,9 +582,17 @@ class SimulatorEvalRunner(EvalGameRunner):
                     batch=batch,
                     current_seat=current_seat,
                     current_policy_id=current_policy_id,
+                    opponent_policy_id=(
+                        scheduled_game.seat1_policy_id if current_seat == 0 else scheduled_game.seat0_policy_id
+                    ),
                     seat_hidden=seat_hidden[current_seat],
                     rng=seat_rngs[current_seat],
                     legal_ids=legal_ids,
+                    action_sequence_state=action_sequence_state,
+                    scheduled_game=scheduled_game,
+                    action_history=action_history,
+                    seat_hidden_by_seat=seat_hidden,
+                    game_search_state=game_search_state,
                 )
                 update_eval_action_counters(
                     counters=action_counters,
@@ -513,12 +625,18 @@ class SimulatorEvalRunner(EvalGameRunner):
                         )
                     )
                 seat_hidden[current_seat] = next_hidden
+                action_history.append(int(action))
                 batch = next_batch
         finally:
             env.close()
 
-    def _build_ids_eval_env(self, *, seed: int) -> DecisionBoundaryEnv:
-        env_config = build_env_config_from_stack(self.stack, seed=int(seed))
+    def _build_ids_eval_env(self, *, seed: int, scheduled_game: ScheduledGame | None = None) -> DecisionBoundaryEnv:
+        env_config = build_env_config_from_stack(
+            self.stack,
+            seed=int(seed),
+            deck=None if scheduled_game is None else scheduled_game.seat0_deck,
+            opponent_deck=None if scheduled_game is None else scheduled_game.seat1_deck,
+        )
         pool, layout_name = make_env_pool_from_config(
             env_config,
             profile="fast",
@@ -550,9 +668,15 @@ class SimulatorEvalRunner(EvalGameRunner):
         batch: DecisionBoundaryBatch,
         current_seat: int,
         current_policy_id: str,
+        opponent_policy_id: str,
         seat_hidden: torch.Tensor | None,
         rng: Pcg32XshRrV1,
         legal_ids: np.ndarray,
+        action_sequence_state: Any | None = None,
+        scheduled_game: ScheduledGame | None = None,
+        action_history: Sequence[int] = (),
+        seat_hidden_by_seat: Mapping[int, torch.Tensor | None] | None = None,
+        game_search_state: dict[str, int] | None = None,
     ) -> tuple[int, torch.Tensor | None]:
         policy = self.policies.get(current_policy_id)
         if policy is None:
@@ -572,26 +696,599 @@ class SimulatorEvalRunner(EvalGameRunner):
             return action, seat_hidden
         if seat_hidden is None:
             raise RuntimeError(f"Missing hidden state for eval policy {current_policy_id!r}")
-        with torch.inference_mode():
-            logits_tensor, _value_tensor, next_seat_hidden = policy.model.forward_seat_aware(
-                torch.as_tensor(np.asarray(batch.obs, dtype=np.float32), device=self._device),
-                torch.as_tensor([current_seat], device=self._device, dtype=torch.long),
-                seat_hidden,
-                scoring_mode="learner",
-            )
-        logits = logits_tensor[0].detach().cpu().numpy().astype(np.float32, copy=False)
-        action, _logp = sample_action_pinned(
-            logits,
-            legal_ids,
+        logits, next_seat_hidden, legal_ids_for_model = self._model_logits_for_eval(
+            policy=policy,
+            current_policy_id=current_policy_id,
+            opponent_policy_id=opponent_policy_id,
+            batch=batch,
+            current_seat=current_seat,
+            seat_hidden=seat_hidden,
+            legal_ids=legal_ids,
+            action_sequence_state=action_sequence_state,
+        )
+        action, _logp = self._select_model_action_from_logits(
+            logits=logits,
+            legal_ids=legal_ids_for_model,
             rng=rng,
+            sampling_algorithm=self._eval_sampling_algorithm,
+        )
+        if self._should_run_god_search(
+            policy=policy,
+            current_policy_id=current_policy_id,
+            scheduled_game=scheduled_game,
+            legal_ids_for_model=legal_ids_for_model,
+            game_search_state=game_search_state,
+        ):
+            action = self._select_action_with_god_search(
+                scheduled_game=scheduled_game,
+                batch=batch,
+                current_seat=current_seat,
+                current_policy_id=current_policy_id,
+                opponent_policy_id=opponent_policy_id,
+                root_seat_hidden=seat_hidden,
+                root_next_seat_hidden=next_seat_hidden,
+                seat_hidden_by_seat=seat_hidden_by_seat,
+                action_sequence_state=action_sequence_state,
+                action_history=action_history,
+                root_logits=logits,
+                legal_ids=legal_ids,
+                legal_ids_for_model=legal_ids_for_model,
+                base_action=action,
+                game_search_state=game_search_state,
+            )
+        return action, next_seat_hidden
+
+    def _model_logits_for_eval(
+        self,
+        *,
+        policy: ResolvedEvalPolicy,
+        current_policy_id: str,
+        opponent_policy_id: str,
+        batch: DecisionBoundaryBatch,
+        current_seat: int,
+        seat_hidden: torch.Tensor,
+        legal_ids: np.ndarray,
+        action_sequence_state: Any | None = None,
+    ) -> tuple[np.ndarray, torch.Tensor | None, np.ndarray]:
+        batch_for_model, legal_ids_for_model = self._model_action_surface_batch_and_ids(
+            policy=policy,
+            batch=batch,
+            legal_ids=legal_ids,
+            action_sequence_state=action_sequence_state,
+        )
+        if policy.model is None:
+            raise RuntimeError(f"Missing model for eval policy {current_policy_id!r}")
+        with torch.inference_mode():
+            logits, next_seat_hidden = model_eval_logits_for_legal_ids(
+                model=policy.model,
+                batch=batch_for_model,
+                current_seat=int(current_seat),
+                seat_hidden=seat_hidden,
+                legal_ids=legal_ids_for_model,
+                action_dim=int(self.action_dim),
+                device=self._device,
+                opponent_context_index=self._opponent_context_index_for_eval(
+                    policy=policy,
+                    policy_id=current_policy_id,
+                    opponent_policy_id=opponent_policy_id,
+                ),
+            )
+        return logits, next_seat_hidden, legal_ids_for_model
+
+    def _select_model_action_from_logits(
+        self,
+        *,
+        logits: np.ndarray,
+        legal_ids: np.ndarray,
+        rng: Pcg32XshRrV1,
+        sampling_algorithm: str,
+    ) -> tuple[int, np.float32]:
+        if sampling_algorithm == "model_argmax_pinned_v1":
+            return select_action_argmax_pinned(
+                logits,
+                legal_ids,
+                pass_action_id=self.pass_action_id,
+            )
+        if sampling_algorithm == "pinned_cdf_pcg_v1":
+            return sample_action_pinned(
+                logits,
+                legal_ids,
+                rng=rng,
+                pass_action_id=self.pass_action_id,
+                temperature=self._model_sampling_temperature,
+            )
+        raise ValueError(f"unsupported eval sampling algorithm: {sampling_algorithm!r}")
+
+    def _select_action_without_god_search(
+        self,
+        *,
+        batch: DecisionBoundaryBatch,
+        current_seat: int,
+        current_policy_id: str,
+        opponent_policy_id: str,
+        seat_hidden: torch.Tensor | None,
+        rng: Pcg32XshRrV1,
+        legal_ids: np.ndarray,
+        action_sequence_state: Any | None = None,
+        sampling_algorithm: str | None = None,
+    ) -> tuple[int, torch.Tensor | None]:
+        policy = self.policies.get(current_policy_id)
+        if policy is None:
+            raise RuntimeError(f"Missing resolved eval policy for {current_policy_id!r}")
+        if policy.heuristic_policy is not None:
+            action = policy.heuristic_policy.choose_action(
+                np.asarray(batch.obs[0], dtype=np.float32),
+                legal_ids,
+            )
+            return int(action), seat_hidden
+        if policy.model is None:
+            action, _logp = sample_action_pinned(
+                self._baseline_logits,
+                legal_ids,
+                rng=rng,
+            )
+            return action, seat_hidden
+        if seat_hidden is None:
+            raise RuntimeError(f"Missing hidden state for eval policy {current_policy_id!r}")
+        logits, next_seat_hidden, legal_ids_for_model = self._model_logits_for_eval(
+            policy=policy,
+            current_policy_id=current_policy_id,
+            opponent_policy_id=opponent_policy_id,
+            batch=batch,
+            current_seat=current_seat,
+            seat_hidden=seat_hidden,
+            legal_ids=legal_ids,
+            action_sequence_state=action_sequence_state,
+        )
+        action, _logp = self._select_model_action_from_logits(
+            logits=logits,
+            legal_ids=legal_ids_for_model,
+            rng=rng,
+            sampling_algorithm=sampling_algorithm or self._eval_sampling_algorithm,
         )
         return action, next_seat_hidden
 
-    def _initial_hidden(self, policy_id: str) -> torch.Tensor | None:
+    def _model_action_surface_batch_and_ids(
+        self,
+        *,
+        policy: ResolvedEvalPolicy,
+        batch: DecisionBoundaryBatch,
+        legal_ids: np.ndarray,
+        action_sequence_state: Any | None = None,
+    ) -> tuple[DecisionBoundaryBatch, np.ndarray]:
+        if (
+            not self._mulligan_force_confirm_after_select
+            and not self._force_pass_over_main_move_only
+            and not self._force_attack_over_pass_when_attack_legal
+        ) or policy.model is None:
+            return batch, legal_ids
+        action_catalog = getattr(policy.model, "action_catalog", None)
+        if action_catalog is None:
+            return batch, legal_ids
+        filtered_batch = batch
+        contract = getattr(policy.model, "_structured_observation_contract", None)
+        layout = getattr(contract, "layout", None)
+        field_index = None if layout is None else header_field_index(layout, "last_action_arg0")
+        last_action_arg0_index = -1 if field_index is None else int(field_index)
+        family_index, _attack_type_index = action_catalog_indices(action_catalog)
+        if self._mulligan_force_confirm_after_select:
+            filtered_batch, _result = filter_batch_mulligan_select_after_select(
+                filtered_batch,
+                last_action_arg0_index=last_action_arg0_index,
+                mulligan_select_family_id=int(family_index.get("mulligan_select", -1)),
+                mulligan_confirm_family_id=int(family_index.get("mulligan_confirm", -1)),
+            )
+        if self._force_pass_over_main_move_only:
+            allow_main_move_only_rows = None
+            if self._main_move_only_max_consecutive > 0 and action_sequence_state is not None:
+                consecutive = np.asarray(action_sequence_state.consecutive_main_moves_by_env, dtype=np.int32)
+                if consecutive.shape == (1,):
+                    allow_main_move_only_rows = consecutive < self._main_move_only_max_consecutive
+            filtered_batch, _result = filter_batch_main_move_only_rows_to_pass(
+                filtered_batch,
+                pass_action_id=int(self.pass_action_id),
+                main_move_family_id=int(family_index.get("main_move", -1)),
+                allow_main_move_only_rows=allow_main_move_only_rows,
+            )
+        if self._force_attack_over_pass_when_attack_legal:
+            filtered_batch, _result = filter_batch_pass_when_attack_available(
+                filtered_batch,
+                pass_action_id=int(self.pass_action_id),
+                attack_family_id=int(family_index.get("attack", -1)),
+            )
+        if filtered_batch.ids_offsets is None:
+            return batch, legal_ids
+        filtered_ids, filtered_offsets = filtered_batch.ids_offsets
+        return (
+            filtered_batch,
+            np.asarray(filtered_ids[int(filtered_offsets[0]) : int(filtered_offsets[1])], dtype=np.uint32),
+        )
+
+    def _should_run_god_search(
+        self,
+        *,
+        policy: ResolvedEvalPolicy,
+        current_policy_id: str,
+        scheduled_game: ScheduledGame | None,
+        legal_ids_for_model: np.ndarray,
+        game_search_state: dict[str, int] | None,
+    ) -> bool:
+        config = self._god_search_config
+        if not config.enabled:
+            return False
+        if policy.model is None:
+            self._god_search_stats.skipped_no_model += 1
+            return False
+        if scheduled_game is None:
+            return False
+        if config.apply_to_focal_only and current_policy_id != scheduled_game.focal_policy_id:
+            self._god_search_stats.skipped_non_focal += 1
+            return False
+        if np.asarray(legal_ids_for_model).size <= 1:
+            self._god_search_stats.skipped_single_candidate += 1
+            return False
+        if game_search_state is not None and config.max_search_decisions_per_game > 0:
+            if int(game_search_state.get("searched", 0)) >= int(config.max_search_decisions_per_game):
+                return False
+        return True
+
+    def _select_action_with_god_search(
+        self,
+        *,
+        scheduled_game: ScheduledGame | None,
+        batch: DecisionBoundaryBatch,
+        current_seat: int,
+        current_policy_id: str,
+        opponent_policy_id: str,
+        root_seat_hidden: torch.Tensor,
+        root_next_seat_hidden: torch.Tensor | None,
+        seat_hidden_by_seat: Mapping[int, torch.Tensor | None] | None,
+        action_sequence_state: Any | None,
+        action_history: Sequence[int],
+        root_logits: np.ndarray,
+        legal_ids: np.ndarray,
+        legal_ids_for_model: np.ndarray,
+        base_action: int,
+        game_search_state: dict[str, int] | None,
+    ) -> int:
+        if scheduled_game is None or seat_hidden_by_seat is None:
+            return int(base_action)
+        config = self._god_search_config
+        if config.mode != "same_world_prefix_rollout":
+            raise ValueError(f"unsupported god-search mode: {config.mode!r}")
+        candidates = top_k_legal_actions(root_logits, legal_ids_for_model, top_k=int(config.top_k))
+        if len(candidates) <= 1:
+            self._god_search_stats.skipped_single_candidate += 1
+            return int(base_action)
+        if game_search_state is not None:
+            game_search_state["searched"] = int(game_search_state.get("searched", 0)) + 1
+        self._god_search_stats.search_decisions += 1
+
+        root_logit_by_action = {
+            int(action): float(np.asarray(root_logits, dtype=np.float32)[int(action)]) for action in candidates
+        }
+        candidate_scores: dict[int, list[float]] = {int(action): [] for action in candidates}
+        rollout_details: dict[int, list[dict[str, Any]]] = {int(action): [] for action in candidates}
+        decision_id = int(np.asarray(batch.decision_id, dtype=np.int64)[0])
+        for action in candidates:
+            for rollout_index in range(int(config.rollouts_per_action)):
+                score, detail = self._run_same_world_prefix_rollout(
+                    scheduled_game=scheduled_game,
+                    action_history=action_history,
+                    candidate_action=int(action),
+                    current_seat=current_seat,
+                    current_policy_id=current_policy_id,
+                    opponent_policy_id=opponent_policy_id,
+                    root_seat_hidden=root_seat_hidden,
+                    root_next_seat_hidden=root_next_seat_hidden,
+                    seat_hidden_by_seat=seat_hidden_by_seat,
+                    action_sequence_state=action_sequence_state,
+                    root_legal_ids=legal_ids,
+                    root_decision_id=decision_id,
+                    rollout_index=rollout_index,
+                )
+                candidate_scores[int(action)].append(float(score))
+                rollout_details[int(action)].append(detail)
+
+        averaged = {
+            action: (sum(scores) / float(len(scores)) if scores else float("-inf"))
+            for action, scores in candidate_scores.items()
+        }
+        selected_action = max(candidates, key=lambda action: (averaged[int(action)], root_logit_by_action[int(action)]))
+        if int(selected_action) != int(base_action):
+            self._god_search_stats.changed_decisions += 1
+        self._god_search_stats.add_trace(
+            {
+                "pair_index": int(scheduled_game.pair_index),
+                "swap_index": int(scheduled_game.swap_index),
+                "episode_seed": int(scheduled_game.episode_seed),
+                "decision_id": decision_id,
+                "actor_seat": int(current_seat),
+                "current_policy_id": current_policy_id,
+                "opponent_policy_id": opponent_policy_id,
+                "base_action": int(base_action),
+                "selected_action": int(selected_action),
+                "candidates": [
+                    {
+                        "action": int(action),
+                        "mean_score": float(averaged[int(action)]),
+                        "root_logit": float(root_logit_by_action[int(action)]),
+                        "rollouts": rollout_details[int(action)],
+                    }
+                    for action in candidates
+                ],
+            }
+        )
+        return int(selected_action)
+
+    def _run_same_world_prefix_rollout(
+        self,
+        *,
+        scheduled_game: ScheduledGame,
+        action_history: Sequence[int],
+        candidate_action: int,
+        current_seat: int,
+        current_policy_id: str,
+        opponent_policy_id: str,
+        root_seat_hidden: torch.Tensor,
+        root_next_seat_hidden: torch.Tensor | None,
+        seat_hidden_by_seat: Mapping[int, torch.Tensor | None],
+        action_sequence_state: Any | None,
+        root_legal_ids: np.ndarray,
+        root_decision_id: int,
+        rollout_index: int,
+    ) -> tuple[float, dict[str, Any]]:
+        self._god_search_stats.candidate_evaluations += 1
+        self._god_search_stats.rollout_games += 1
+        env = self._build_ids_eval_env(seed=scheduled_game.episode_seed, scheduled_game=scheduled_game)
+        rollout_decisions = 0
+        last_acting_seat: int | None = None
+        try:
+            batch = env.reset(seed=scheduled_game.episode_seed)
+            for prefix_action in action_history:
+                last_acting_seat = int(batch.actor[0])
+                batch = env.step(np.asarray([int(prefix_action)], dtype=np.uint32))
+                if bool(batch.terminated[0]) or bool(batch.truncated[0]):
+                    return self._prefix_replay_failed(
+                        reason="prefix_terminated_before_root",
+                        scheduled_game=scheduled_game,
+                        root_decision_id=root_decision_id,
+                    )
+
+            if self._god_search_config.verify_prefix_replay:
+                observed_decision_id = int(np.asarray(batch.decision_id, dtype=np.int64)[0])
+                observed_legal_ids = self._legal_ids_for_env_row(batch=batch)
+                if observed_decision_id != int(root_decision_id) or not np.array_equal(
+                    np.asarray(observed_legal_ids, dtype=np.uint32),
+                    np.asarray(root_legal_ids, dtype=np.uint32),
+                ):
+                    return self._prefix_replay_failed(
+                        reason="prefix_root_mismatch",
+                        scheduled_game=scheduled_game,
+                        root_decision_id=root_decision_id,
+                        observed_decision_id=observed_decision_id,
+                        expected_legal_count=int(np.asarray(root_legal_ids).size),
+                        observed_legal_count=int(np.asarray(observed_legal_ids).size),
+                    )
+
+            if int(candidate_action) not in set(int(action) for action in np.asarray(root_legal_ids).tolist()):
+                return self._prefix_replay_failed(
+                    reason="candidate_not_legal_at_root",
+                    scheduled_game=scheduled_game,
+                    root_decision_id=root_decision_id,
+                    candidate_action=int(candidate_action),
+                )
+
+            rollout_hidden = {
+                0: _clone_optional_hidden(seat_hidden_by_seat.get(0)),
+                1: _clone_optional_hidden(seat_hidden_by_seat.get(1)),
+            }
+            rollout_hidden[int(current_seat)] = _clone_optional_hidden(root_next_seat_hidden)
+            rollout_sequence_state = _copy_action_sequence_state(action_sequence_state)
+            update_eval_action_counters(
+                counters=ActionSummaryCounters(),
+                state=rollout_sequence_state,
+                action=int(candidate_action),
+                legal_ids=np.asarray(root_legal_ids, dtype=np.uint32),
+                pass_action_id=self.pass_action_id,
+            )
+            last_acting_seat = int(current_seat)
+            batch = env.step(np.asarray([int(candidate_action)], dtype=np.uint32))
+            if bool(batch.terminated[0]) or bool(batch.truncated[0]):
+                return self._score_rollout_terminal(
+                    batch=batch,
+                    scheduled_game=scheduled_game,
+                    last_acting_seat=last_acting_seat,
+                    rollout_decisions=rollout_decisions,
+                    cutoff=False,
+                )
+
+            max_rollout_decisions = int(self._god_search_config.max_rollout_decisions)
+            while True:
+                if max_rollout_decisions > 0 and rollout_decisions >= max_rollout_decisions:
+                    self._god_search_stats.horizon_cutoffs += 1
+                    return 0.0, {
+                        "score": 0.0,
+                        "status": "horizon_cutoff",
+                        "rollout_decisions": int(rollout_decisions),
+                    }
+                rollout_decisions += 1
+                branch_seat = int(batch.actor[0])
+                branch_policy_id = (
+                    scheduled_game.seat0_policy_id if branch_seat == 0 else scheduled_game.seat1_policy_id
+                )
+                branch_opponent_id = (
+                    scheduled_game.seat1_policy_id if branch_seat == 0 else scheduled_game.seat0_policy_id
+                )
+                branch_legal_ids = self._legal_ids_for_env_row(batch=batch)
+                branch_rng = Pcg32XshRrV1(
+                    self._god_search_rollout_rng_seed(
+                        scheduled_game=scheduled_game,
+                        seat=branch_seat,
+                        candidate_action=int(candidate_action),
+                        rollout_index=int(rollout_index),
+                        decision_id=int(np.asarray(batch.decision_id, dtype=np.int64)[0]),
+                    )
+                )
+                branch_action, branch_next_hidden = self._select_action_without_god_search(
+                    batch=batch,
+                    current_seat=branch_seat,
+                    current_policy_id=branch_policy_id,
+                    opponent_policy_id=branch_opponent_id,
+                    seat_hidden=rollout_hidden.get(branch_seat),
+                    rng=branch_rng,
+                    legal_ids=branch_legal_ids,
+                    action_sequence_state=rollout_sequence_state,
+                    sampling_algorithm=self._god_search_rollout_sampling_algorithm(),
+                )
+                update_eval_action_counters(
+                    counters=ActionSummaryCounters(),
+                    state=rollout_sequence_state,
+                    action=int(branch_action),
+                    legal_ids=branch_legal_ids,
+                    pass_action_id=self.pass_action_id,
+                )
+                last_acting_seat = branch_seat
+                batch = env.step(np.asarray([int(branch_action)], dtype=np.uint32))
+                rollout_hidden[branch_seat] = branch_next_hidden
+                if bool(batch.terminated[0]) or bool(batch.truncated[0]):
+                    return self._score_rollout_terminal(
+                        batch=batch,
+                        scheduled_game=scheduled_game,
+                        last_acting_seat=last_acting_seat,
+                        rollout_decisions=rollout_decisions,
+                        cutoff=False,
+                    )
+        finally:
+            env.close()
+
+    def _prefix_replay_failed(
+        self,
+        *,
+        reason: str,
+        scheduled_game: ScheduledGame,
+        root_decision_id: int,
+        **extra: Any,
+    ) -> tuple[float, dict[str, Any]]:
+        self._god_search_stats.prefix_replay_failures += 1
+        detail = {
+            "score": 0.0,
+            "status": "prefix_replay_failed",
+            "reason": reason,
+            "pair_index": int(scheduled_game.pair_index),
+            "swap_index": int(scheduled_game.swap_index),
+            "episode_seed": int(scheduled_game.episode_seed),
+            "root_decision_id": int(root_decision_id),
+            **extra,
+        }
+        if self._god_search_config.fail_on_prefix_mismatch:
+            raise RuntimeError(f"god-search prefix replay failed: {json.dumps(detail, sort_keys=True)}")
+        return 0.0, detail
+
+    def _score_rollout_terminal(
+        self,
+        *,
+        batch: DecisionBoundaryBatch,
+        scheduled_game: ScheduledGame,
+        last_acting_seat: int | None,
+        rollout_decisions: int,
+        cutoff: bool,
+    ) -> tuple[float, dict[str, Any]]:
+        result = game_result_from_step(
+            batch,
+            env_index=0,
+            acting_seat=last_acting_seat,
+            episode_seed=scheduled_game.episode_seed,
+            max_decisions=getattr(batch, "max_decisions", None),
+            max_ticks=getattr(batch, "max_ticks", None),
+            max_no_progress_decisions=None,
+        )
+        if bool(result.truncated) or cutoff:
+            self._god_search_stats.truncated_rollouts += 1
+            return 0.0, {
+                "score": 0.0,
+                "status": "truncated",
+                "winner_seat": result.winner_seat,
+                "rollout_decisions": int(rollout_decisions),
+            }
+        self._god_search_stats.terminal_rollouts += 1
+        if result.winner_seat is None:
+            score = 0.0
+        else:
+            score = 1.0 if int(result.winner_seat) == int(scheduled_game.focal_seat) else -1.0
+        return score, {
+            "score": float(score),
+            "status": "terminal",
+            "winner_seat": result.winner_seat,
+            "rollout_decisions": int(rollout_decisions),
+        }
+
+    def _god_search_rollout_sampling_algorithm(self) -> str:
+        policy = self._god_search_config.rollout_policy
+        if policy == "argmax":
+            return "model_argmax_pinned_v1"
+        if policy == "sample":
+            return "pinned_cdf_pcg_v1"
+        return self._eval_sampling_algorithm
+
+    def _god_search_rollout_rng_seed(
+        self,
+        *,
+        scheduled_game: ScheduledGame,
+        seat: int,
+        candidate_action: int,
+        rollout_index: int,
+        decision_id: int,
+    ) -> int:
+        return stable_hash64(
+            canonical_json_bytes(
+                {
+                    "kind": "god_search_rollout_rng_v1",
+                    "pair_index": int(scheduled_game.pair_index),
+                    "swap_index": int(scheduled_game.swap_index),
+                    "episode_seed": int(scheduled_game.episode_seed),
+                    "seat": int(seat),
+                    "candidate_action": int(candidate_action),
+                    "rollout_index": int(rollout_index),
+                    "decision_id": int(decision_id),
+                }
+            )
+        )
+
+    def god_search_diagnostics(self) -> dict[str, Any] | None:
+        if not self._god_search_config.enabled:
+            return None
+        return self._god_search_stats.to_json_dict(config=self._god_search_config)
+
+    def _initial_hidden(self, policy_id: str, *, opponent_policy_id: str | None = None) -> torch.Tensor | None:
         policy = self.policies.get(policy_id)
         if policy is None or policy.model is None:
             return None
-        return policy.model.initial_seat_hidden(1, device=self._device)
+        if opponent_policy_id is not None and eval_policy_uses_opponent_context(policy.model, policy_id):
+            return initial_seat_hidden_for_opponents(
+                policy.model,
+                1,
+                device=self._device,
+                opponent_policy_ids=[opponent_policy_id],
+            )
+        return initial_seat_hidden_for_opponents(policy.model, 1, device=self._device)
+
+    def _opponent_context_index_for_eval(
+        self,
+        *,
+        policy: ResolvedEvalPolicy,
+        policy_id: str,
+        opponent_policy_id: str,
+    ) -> int | None:
+        if policy.model is None or not eval_policy_uses_opponent_context(policy.model, policy_id):
+            return None
+        index_fn = getattr(policy.model, "opponent_context_indices_for_policy_ids", None)
+        if not callable(index_fn):
+            return None
+        indices = index_fn([opponent_policy_id], batch_size=1)
+        if not indices:
+            return None
+        return int(indices[0])
 
     def _abort_on_fault(self, *, batch: DecisionBoundaryBatch, scheduled_game: ScheduledGame) -> None:
         matchup_dir = (
@@ -645,7 +1342,7 @@ class SimulatorEvalRunner(EvalGameRunner):
         replay_capture: _ReplayCaptureState,
     ) -> ReplaySampleResult:
         raw_replay_path = self._discover_raw_replay_path(replay_capture=replay_capture)
-        rerun_contract = self._replay_rerun_contract()
+        rerun_contract = self._replay_rerun_contract(scheduled_game=scheduled_game)
         meta = make_replay_bundle_meta(
             simulator_episode_key=replay_capture.simulator_episode_key,
             run_id256=self.run_id256_bytes,
@@ -698,10 +1395,15 @@ class SimulatorEvalRunner(EvalGameRunner):
             return sorted(after_paths)[0]
         return None
 
-    def _replay_rerun_contract(self) -> ReplayRerunContract:
+    def _replay_rerun_contract(self, *, scheduled_game: ScheduledGame | None = None) -> ReplayRerunContract:
         if self.stack.config.environment is None:
             raise RuntimeError("stack config is missing environment config")
-        env_config = build_env_config_from_stack(self.stack, seed=0)
+        env_config = build_env_config_from_stack(
+            self.stack,
+            seed=0,
+            deck=None if scheduled_game is None else scheduled_game.seat0_deck,
+            opponent_deck=None if scheduled_game is None else scheduled_game.seat1_deck,
+        )
         return ReplayRerunContract(
             version=2,
             observation_visibility=str(env_config["observation_visibility"]),
@@ -709,6 +1411,8 @@ class SimulatorEvalRunner(EvalGameRunner):
             max_ticks=int(env_config["max_ticks"]),
             reward_json=None if "reward_json" not in env_config else str(env_config["reward_json"]),
             curriculum_json=None if "curriculum_json" not in env_config else str(env_config["curriculum_json"]),
+            deck=None if "deck" not in env_config else str(env_config["deck"]),
+            opponent_deck=None if "opponent_deck" not in env_config else str(env_config["opponent_deck"]),
         )
 
     def _rng_seed(self, *, scheduled_game: ScheduledGame, seat: int) -> int:
@@ -823,45 +1527,14 @@ def _candidate_b1_run_dirs(
 
 
 def _config_marks_noleague_baseline(config_canonical: Mapping[str, Any]) -> bool:
-    config_sections = config_canonical.get("config")
-    if not isinstance(config_sections, Mapping):
-        config_sections = config_canonical
-    experiment = config_sections.get("experiment", {})
-    if isinstance(experiment, Mapping):
-        role = str(experiment.get("role", "")).strip()
-        if role:
-            return role == "baseline_noleague"
-    training_family = config_sections.get("training_family_a", {})
-    if isinstance(training_family, Mapping):
-        mode = str(training_family.get("mode", "")).strip()
-        if mode:
-            return mode == "b1_no_league"
-    return False
+    return _shared_config_marks_noleague_baseline(config_canonical)
 
 
 def _find_b1_snapshot(run_dir: Path) -> SnapshotMeta | None:
-    layout = ArtifactLayout.from_run_dir(run_dir)
-    registry_path = layout.training_snapshots_dir / "registry.json"
-    if not registry_path.is_file():
-        return None
-    registry = SnapshotRegistry.load(registry_path)
-    snapshots_by_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
-    for policy_id in (NO_LEAGUE_POLICY_ID, _LEGACY_B1_POLICY_ID):
-        snapshot = snapshots_by_id.get(policy_id)
-        if snapshot is not None:
-            return snapshot
-
-    manifest_path = layout.manifest_path
-    if manifest_path.is_file():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        config_canonical = manifest.get("config_canonical", {})
-        if isinstance(config_canonical, dict) and _config_marks_noleague_baseline(config_canonical):
-            return max(
-                registry.snapshots,
-                key=lambda snapshot: (int(snapshot.update), str(snapshot.policy_id)),
-                default=None,
-            )
-    return None
+    return find_noleague_baseline_snapshot(
+        run_dir,
+        policy_id_candidates=(NO_LEAGUE_POLICY_ID, _LEGACY_B1_POLICY_ID),
+    )
 
 
 def _load_snapshot_eval_model(
@@ -874,24 +1547,34 @@ def _load_snapshot_eval_model(
     observation_spec: Mapping[str, object] | None = None,
     spec_bundle: Mapping[str, object] | None = None,
 ) -> PolicyValueModel:
-    payload = torch.load(run_dir / snapshot_path, map_location="cpu", weights_only=True)
-    model_state_dict = payload.get("model_state_dict")
-    if not isinstance(model_state_dict, dict):
-        raise RuntimeError(f"Snapshot weights payload missing model_state_dict: {snapshot_path}")
-    model_config = stack.config.model
-    if model_config is None:
-        raise RuntimeError("The locked stack is missing the model config block")
-    eval_model = build_policy_value_model(
+    return _shared_load_snapshot_eval_model(
+        run_dir=run_dir,
+        snapshot_path=snapshot_path,
+        stack=stack,
         observation_dim=observation_dim,
-        config=model_config,
         action_dim=action_dim,
         observation_spec=observation_spec,
         spec_bundle=spec_bundle,
-    ).to(torch.device("cpu"))
-    eval_model.load_state_dict(model_state_dict)
-    _restore_model_guidance_from_payload(eval_model, payload)
-    eval_model.eval()
-    return eval_model
+    )
+
+
+def _clone_optional_hidden(hidden: torch.Tensor | None) -> torch.Tensor | None:
+    if hidden is None:
+        return None
+    return hidden.detach().clone()
+
+
+def _copy_action_sequence_state(state: Any | None) -> Any:
+    copied = make_action_sequence_state(1)
+    if state is None:
+        return copied
+    source = getattr(state, "consecutive_main_moves_by_env", None)
+    if source is None:
+        return copied
+    source_array = np.asarray(source, dtype=np.int32)
+    if source_array.shape == copied.consecutive_main_moves_by_env.shape:
+        copied.consecutive_main_moves_by_env[...] = source_array
+    return copied
 
 
 def _observation_spec_from_bundle(

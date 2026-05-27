@@ -9,13 +9,13 @@ CORE_MODULES = (
     Path("python/weiss_rl/actors/actor_worker.py"),
     Path("python/weiss_rl/envs/learner_turn_env.py"),
     Path("python/weiss_rl/learners/impala_learner.py"),
-    Path("python/weiss_rl/spec.py"),
+    Path("python/weiss_rl/core/spec.py"),
     Path("python/weiss_rl/config/__init__.py"),
     Path("python/weiss_rl/config/models.py"),
     Path("python/weiss_rl/config/parse.py"),
     Path("python/weiss_rl/config/hashing.py"),
-    Path("python/weiss_rl/repro.py"),
-    Path("python/weiss_rl/manifest.py"),
+    Path("python/weiss_rl/artifacts/reproducibility.py"),
+    Path("python/weiss_rl/artifacts/manifest.py"),
 )
 PATTERN = re.compile(r"\b(?:TODO|NotImplemented(?:Error)?)\b")
 

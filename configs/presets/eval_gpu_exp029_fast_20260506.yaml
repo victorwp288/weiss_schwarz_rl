@@ -1,0 +1,7 @@
+schema_version: 2
+description: GPU eval override for fast thesis final matrices
+extends: ablation_exp029_weak_b1_auto_20260506.yaml
+evaluation:
+  eval_device: cuda
+  final_matrix_stage1_paired_seeds: 16
+  final_matrix_stage2_adaptive_max_paired_seeds: 16

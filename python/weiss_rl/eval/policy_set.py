@@ -16,10 +16,24 @@ HEURISTIC_PUBLIC_POLICY_ID = "B2 HeuristicPublic"
 HEURISTIC_PUBLIC_AGGRO_POLICY_ID = "B3 HeuristicPublicAggro"
 HEURISTIC_PUBLIC_CONTROL_POLICY_ID = "B4 HeuristicPublicControl"
 
+MAIN_DECK_ID = "preset:main_deck_5hy_yotsuba_v1"
+STARTER_DECK_ID = "preset:starter_deck_ws02_v1"
+AGGRO_DECK_ID = "preset:aggro_deck_5hy_nino_v1"
+CONTROL_DECK_ID = "preset:control_deck_jj_s66_v1"
+
 _HEURISTIC_PUBLIC_PROFILE_BY_POLICY_ID = {
     HEURISTIC_PUBLIC_POLICY_ID: "base",
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID: "aggressive",
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID: "control",
+}
+
+_EVAL_DECK_BY_POLICY_ID = {
+    RANDOM_LEGAL_POLICY_ID: MAIN_DECK_ID,
+    NO_LEAGUE_POLICY_ID: MAIN_DECK_ID,
+    LEGACY_NO_LEAGUE_POLICY_ID: MAIN_DECK_ID,
+    HEURISTIC_PUBLIC_POLICY_ID: MAIN_DECK_ID,
+    HEURISTIC_PUBLIC_AGGRO_POLICY_ID: AGGRO_DECK_ID,
+    HEURISTIC_PUBLIC_CONTROL_POLICY_ID: CONTROL_DECK_ID,
 }
 
 _TRAINING_POLICY_ID_RE = re.compile(r"^train_u(?P<update>\d+)_p(?P<version>\d+)$")
@@ -35,6 +49,10 @@ def heuristic_public_policy_ids(*, include_base: bool = True) -> tuple[str, ...]
     if include_base:
         return policy_ids
     return tuple(policy_id for policy_id in policy_ids if policy_id != HEURISTIC_PUBLIC_POLICY_ID)
+
+
+def deck_id_for_policy_id(policy_id: str) -> str:
+    return _EVAL_DECK_BY_POLICY_ID.get(str(policy_id), MAIN_DECK_ID)
 
 
 def recommend_focal_policy_id(
@@ -153,6 +171,13 @@ def select_final_policy_set_deterministic_v1(
         _append_unique(selected, NO_LEAGUE_POLICY_ID)
     if config.include_heuristic_public_b2_if_exists and HEURISTIC_PUBLIC_POLICY_ID in normalized_summaries:
         _append_unique(selected, HEURISTIC_PUBLIC_POLICY_ID)
+    if config.include_heuristic_public_anchors_b2_b3_b4:
+        for policy_id in (
+            HEURISTIC_PUBLIC_POLICY_ID,
+            HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
+            HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
+        ):
+            _append_unique(selected, policy_id)
 
     if config.include_final_champion_snapshot:
         latest_champion = _latest_champion_policy(snapshot_registry, snapshot_policies_by_id=snapshot_policies_by_id)
@@ -409,9 +434,11 @@ __all__ = [
     "DevEvalPolicySummary",
     "HEURISTIC_PUBLIC_POLICY_ID",
     "LEGACY_NO_LEAGUE_POLICY_ID",
+    "MAIN_DECK_ID",
     "NO_LEAGUE_POLICY_ID",
     "RANDOM_LEGAL_POLICY_ID",
     "TrainingPolicyId",
+    "deck_id_for_policy_id",
     "parse_training_policy_id",
     "select_final_policy_set_deterministic_v1",
 ]

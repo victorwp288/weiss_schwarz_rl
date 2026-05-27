@@ -66,7 +66,7 @@ What it does today:
 - computes run IDs and writes `manifest.json`, `spec_bundle.json`, `config_canonical.json`, and scaffold directories under `runs/`
 - for locked simulator-backed stacks, it runs the canonical single-node queue runtime and writes training artifacts under `runs/<run>/training/`
 - with `--public-demo`, stages a built-in public-safe toy catalog and deterministic toy policy bundle under `runs/<run>/public_demo/`
-- always writes resumable checkpoint artifacts under `training/checkpoints/`, including `latest.pt`, `best.pt`, and `checkpoint_tracker.json`
+- always writes resumable checkpoint artifacts under `training/checkpoints/`, including `latest.pt`, `best.pt`, `observed_best.pt`, and `checkpoint_tracker.json`
 - writes TensorBoard event files under `runs/<run>/tensorboard/` with run metadata, learner/runtime scalars, checkpoint alias updates, and periodic dev-eval summaries
 
 What it does **not** do today:

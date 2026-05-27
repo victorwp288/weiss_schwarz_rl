@@ -1,0 +1,29 @@
+schema_version: 2
+description: "Main league probe: initialize/import the factorized guided seed pool while temporarily excluding the weak strict B1 anchor."
+extends: ../main_league.yaml
+experiment:
+  role: ablation_guided
+model:
+  structured_policy_contract: factorized_v1
+league:
+  promotion:
+    anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+  sampling:
+    noleague_baseline_mix_fraction: 0.0
+    noleague_baseline_mix_end_updates: -1
+    warmup_snapshot_mix_fraction: 0.15
+evaluation:
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl

@@ -1,0 +1,6 @@
+schema_version: 2
+description: "B1 guided ablation: low-entropy run with colder model-actor sampling to test stochastic rollout collapse."
+extends: public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
+training:
+  exploration:
+    actor_sampling_temperature: 0.25

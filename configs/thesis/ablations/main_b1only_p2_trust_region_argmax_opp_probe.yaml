@@ -1,0 +1,5 @@
+schema_version: 2
+description: "Main league probe: p2 trust-region B1-only continuation with fixed model opponents choosing argmax actions, matching the deterministic model eval surface."
+extends: main_b1only_p2_trust_region_probe.yaml
+training:
+  fixed_model_opponent_action_selection: argmax

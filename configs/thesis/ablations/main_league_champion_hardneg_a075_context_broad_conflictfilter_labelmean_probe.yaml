@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Trainable opponent-context label-balanced paired-outcome probe from a075. This keeps the broad current-state conflict-filtered dataset but uses label_mean paired-swing loss so each preserve/repair source label contributes as a constraint instead of being row-count dominated. Must pass the mechanistic gate before sentinel eval."
+extends: main_league_champion_hardneg_a075_context_broad_conflictfilter_episodepref_probe.yaml
+training:
+  structured_aux:
+    paired_swing_loss_scope: label_mean

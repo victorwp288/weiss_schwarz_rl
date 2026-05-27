@@ -1,0 +1,11 @@
+schema_version: 2
+description: "B1 guided ablation: factorized_v1 play-strong setup with cycled base/aggressive/control public-teacher profiles to test B3/B4 transfer without changing loss weights."
+extends: public_teacher_b2exact_margin_multianchor_hold75_playstrong_factorized_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
+training:
+  structured_aux:
+    teacher_public_heuristic_profiles:
+      - base
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle
+    teacher_public_heuristic_profiles_end_updates: 150

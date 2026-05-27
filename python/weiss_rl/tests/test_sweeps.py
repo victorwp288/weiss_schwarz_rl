@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weiss_rl.sweeps import build_sweep_launch_plan, get_sweep_preset, list_sweep_presets
+from weiss_rl.experiments.sweeps import build_sweep_launch_plan, get_sweep_preset, list_sweep_presets
 
 
 def test_list_sweep_presets_is_stable() -> None:

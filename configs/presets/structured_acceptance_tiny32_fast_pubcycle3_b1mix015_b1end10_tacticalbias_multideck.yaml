@@ -1,16 +1,14 @@
 schema_version: 2
-description: structured_acceptance tiny32 fast tactical-bias frontier with actor-level deck diversity across the bundled Quintuplets presets
+description: structured_acceptance tiny32 fast tactical-bias frontier with actor-level deck diversity across published weiss-sim 1.2 presets
 extends: structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall_noconfirmdrop.yaml
 environment:
   deck_pool:
-    - preset:starter_v1
-    - preset:quints_balanced_v2
-    - preset:quints_ichika_focus_v1
-    - preset:quints_yotsuba_focus_v1
-    - preset:quints_support_mix_v1
+    - preset:starter_deck_ws02_v1
+    - preset:main_deck_5hy_yotsuba_v1
+    - preset:aggro_deck_5hy_nino_v1
+    - preset:control_deck_jj_s66_v1
   opponent_deck_pool:
-    - preset:quints_support_mix_v1
-    - preset:quints_yotsuba_focus_v1
-    - preset:quints_balanced_v2
-    - preset:starter_v1
-    - preset:quints_ichika_focus_v1
+    - preset:control_deck_jj_s66_v1
+    - preset:aggro_deck_5hy_nino_v1
+    - preset:main_deck_5hy_yotsuba_v1
+    - preset:starter_deck_ws02_v1

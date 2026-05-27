@@ -1,0 +1,25 @@
+schema_version: 2
+description: "Selected-a015 conservative online continuation with exact paired-flip trajectory BC. Uses only outcome-flip episodes from the failed paired-swing u1 confirm128 diagnostic: selected-a015 winning B3/B4 flips are fixed-preserve rows, while paired-swing candidate wins against learned/champion hard negatives are learned-repair rows. This is a u1/u2 filter only; continue only if paired confirm shows fixed >= 0 and learned > 0 versus selected-a015."
+extends: main_league_champion_hardneg_selected_conservative_online_guard_probe.yaml
+training:
+  structured_aux:
+    trajectory_bc_dataset_path: runs/paired_flip_bc_balanced_fixed_preserve_learned_repair_20260519/paired_flip_bc_balanced_fixed_preserve_learned_repair.npz
+    trajectory_bc_every_updates: 1
+    trajectory_bc_aux_updates: 1
+    trajectory_bc_batch_episodes: 8
+    trajectory_bc_teacher_action_coef: 0.08
+    trajectory_bc_teacher_same_family_action_coef: 0.35
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.04
+    trajectory_bc_focus_groups:
+      - name: fixed_b3b4_selected_preserve
+        source_labels:
+          - fixed_preserve_B3 HeuristicPublicAggro
+          - fixed_preserve_B4 HeuristicPublicControl
+        fraction: 0.16
+      - name: learned_champion_hardneg_repair
+        source_labels:
+          - learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+          - learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004
+          - learned_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.16

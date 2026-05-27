@@ -1,0 +1,6 @@
+schema_version: 2
+description: "B1 reward ablation: family-level entropy plus small pass-with-nonpass penalty."
+extends: full_shaping_family_entropy_sync5_reward.yaml
+rewards:
+  shaping:
+    pass_with_nonpass_penalty: 0.02

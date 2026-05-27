@@ -1,0 +1,6 @@
+schema_version: 2
+description: "Champion/hard-negative continuation with both online opponent-row retention and offline focal-win replay BC against imported learned opponents. This is a structural rehearsal probe; it must still pass the fixed plus learned multi-objective gate before any promotion."
+extends: main_league_champion_hardneg_multiobjective_retention_probe.yaml
+training:
+  structured_aux:
+    trajectory_bc_dataset_path: runs/trajectory_bc_main_a015_vs_imported_champions_win8_20260518/trajectory_bc_main_a015_vs_imported_champions_win8.npz

@@ -20,7 +20,7 @@ from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 
 from weiss_rl.artifacts import ArtifactLayout
-from weiss_rl.training_logger import TrainingLogger
+from weiss_rl.diagnostics.training_logger import TrainingLogger
 
 __all__ = [
     "PAPER_FIGURE_IDS",
@@ -206,7 +206,12 @@ def _render_seat_bias(run_root: Path) -> Figure:
 
 def _render_learning_curves(run_root: Path) -> Figure:
     layout = ArtifactLayout.from_run_dir(run_root)
-    learning_curves = _load_learning_curves(layout.training_logs_dir / "training_metrics.jsonl")
+    training_metrics_path = layout.training_logs_dir / "training_metrics.jsonl"
+    if not training_metrics_path.is_file():
+        interpolation_summary_path = _interpolation_summary_path(run_root)
+        if interpolation_summary_path.is_file():
+            return _render_interpolation_provenance(run_root, interpolation_summary_path)
+    learning_curves = _load_learning_curves(training_metrics_path)
     return _build_learning_curves_figure(learning_curves)
 
 
@@ -308,6 +313,8 @@ def _validate_required_inputs(run_root: Path, figure_specs: Sequence[PaperFigure
                 continue
             seen.add(artifact_path)
             if not artifact_path.is_file():
+                if spec.fig_id == "learning_curves" and _interpolation_summary_path(run_root).is_file():
+                    continue
                 missing.append(artifact_path)
 
     if not missing:
@@ -431,6 +438,68 @@ def _build_learning_curves_figure(artifact: LearningCurveArtifact) -> Figure:
     figure.suptitle("Training learning curves", fontsize=14)
     figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
     return figure
+
+
+def _interpolation_summary_path(run_root: Path) -> Path:
+    return Path(run_root) / "eval" / "diagnostics" / "checkpoint_interpolation_summary.json"
+
+
+def _render_interpolation_provenance(run_root: Path, summary_path: Path) -> Figure:
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"checkpoint interpolation summary must be a JSON object: {summary_path}")
+    second_weight = _parse_bounded_float(
+        payload.get("second_weight"),
+        path=summary_path,
+        field_name="second_weight",
+        minimum=0.0,
+        maximum=1.0,
+    )
+    first_weight = 1.0 - second_weight
+    first_checkpoint = _require_nonempty_text(
+        payload.get("first_checkpoint"),
+        path=summary_path,
+        field_name="first_checkpoint",
+    )
+    second_checkpoint = _require_nonempty_text(
+        payload.get("second_checkpoint"),
+        path=summary_path,
+        field_name="second_checkpoint",
+    )
+
+    figure, axis = plt.subplots(figsize=(9.5, 4.8))
+    labels = ("First checkpoint", "Second checkpoint")
+    weights = (first_weight, second_weight)
+    bars = axis.barh(labels, weights, color=("tab:blue", "tab:orange"))
+    axis.set_xlim(0.0, 1.0)
+    axis.set_xlabel("Interpolation weight")
+    axis.set_title("Selected checkpoint interpolation provenance")
+    axis.grid(axis="x", alpha=0.25)
+    for bar, weight in zip(bars, weights, strict=True):
+        axis.text(
+            min(float(weight) + 0.02, 0.98),
+            bar.get_y() + bar.get_height() / 2.0,
+            f"{weight:.2f}",
+            va="center",
+            ha="left" if weight < 0.96 else "right",
+        )
+
+    summary_lines = [
+        f"Run: {Path(run_root).name}",
+        f"First: {_short_artifact_path(first_checkpoint)}",
+        f"Second: {_short_artifact_path(second_checkpoint)}",
+        "This run is an interpolated selected checkpoint; no standalone training curve exists.",
+    ]
+    figure.text(0.02, 0.02, "\n".join(summary_lines), ha="left", va="bottom", fontsize=9)
+    figure.tight_layout(rect=(0.0, 0.18, 1.0, 1.0))
+    return figure
+
+
+def _short_artifact_path(path_text: str, *, max_parts: int = 4) -> str:
+    parts = Path(path_text).parts
+    if len(parts) <= max_parts:
+        return path_text
+    return ".../" + "/".join(parts[-max_parts:])
 
 
 def _load_square_matrix_csv(path: Path, *, artifact_name: str, minimum: float, maximum: float) -> MatrixArtifact:

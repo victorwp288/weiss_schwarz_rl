@@ -1,0 +1,15 @@
+schema_version: 2
+description: "Main league probe: continue from the confirmed teacherfade best checkpoint with a small constant teacher floor, testing whether post-50 drift is caused by removing public/supervised guidance entirely."
+extends: main_league_guided_factorized_continuation_no_b1_anchor_probe.yaml
+curriculum:
+  checkpoint_guard:
+    stop_after_rollback: true
+training:
+  structured_aux:
+    teacher_supervised_start_updates: 0
+    teacher_supervised_end_updates: 0
+    teacher_supervised_final_scale: 0.25
+    teacher_public_heuristic_coef: 0.04
+    teacher_public_heuristic_end_updates: -1
+    teacher_public_heuristic_final_coef: 0.04
+    teacher_public_heuristic_profiles_end_updates: -1

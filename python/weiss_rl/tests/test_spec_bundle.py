@@ -4,8 +4,8 @@ from typing import cast
 
 import pytest
 
-from weiss_rl.observation_layout import parse_observation_layout_from_spec_bundle
-from weiss_rl.spec import (
+from weiss_rl.core.observation_layout import parse_observation_layout_from_spec_bundle
+from weiss_rl.core.spec import (
     SpecBundle,
     canonical_spec_bundle_json,
     compute_spec_hash256,

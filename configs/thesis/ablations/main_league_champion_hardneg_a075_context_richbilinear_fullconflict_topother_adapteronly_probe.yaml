@@ -1,0 +1,37 @@
+schema_version: 2
+description: "Mechanistic-only rich-bilinear opponent-context candidate-residual probe on the full a075 confirm256 conflict set. Unlike additive rich residuals, each opponent context weights projected state/candidate features directly; this is intended to test whether B2 pair70/205/229, policy0004 pair205/222, and learned repair rows can move together before any sentinel eval."
+extends: main_league_champion_hardneg_a075_context_candres_broad_conflictfilter_topother_probe.yaml
+model:
+  opponent_context_trainable_action_bias_scale: 0.0
+  opponent_context_trainable_candidate_residual_scale: 1.0
+  opponent_context_candidate_residual_width: 64
+  opponent_context_candidate_residual_mode: rich_bilinear
+  opponent_context_adapter_lr_multiplier: 2500.0
+  opponent_context_adapter_train_only: true
+training:
+  structured_aux:
+    paired_swing_dataset_path: runs/paired_outcome_contrastive_a075_context_conflict_full_20260520/paired_outcome_contrastive_a075_context_conflict_full.npz
+    paired_swing_conflict_filter: none
+    paired_swing_loss_scope: row
+    paired_swing_compare_to: top_other
+    paired_swing_aux_updates: 8
+    paired_swing_batch_episodes: 11
+    paired_swing_coef: 0.08
+    paired_swing_margin: 0.02
+    paired_swing_focus_groups:
+      - name: a075_context_b2_preserve
+        source_labels:
+          - a075_loss_preserve_B2 HeuristicPublic
+        fraction: 0.27
+      - name: a075_context_p4_preserve
+        source_labels:
+          - a075_loss_preserve_seed_c3aac2f9dc_policy_000004
+        fraction: 0.18
+      - name: a075_context_learned_repair
+        source_labels:
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003
+          - a075_gain_repair_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005
+        fraction: 0.55

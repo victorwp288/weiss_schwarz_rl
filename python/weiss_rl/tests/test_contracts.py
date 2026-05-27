@@ -1,23 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any, cast
 
 import numpy as np
 import pytest
 import torch
 
-from weiss_rl.action_catalog import ActionCatalog
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
-from weiss_rl.legal_actions import LegalActionBatch
-from weiss_rl.model import (
-    GLOBAL_ACTION_SPACE_SIZE,
-    SEAT_COUNT,
-    PolicyValueModel,
-    StructuredLegalPolicyValueModel,
-    _negative_logits_fill_value,
-    build_policy_value_model,
-)
-from weiss_rl.spec import (
+from weiss_rl.core.action_catalog import ActionCatalog
+from weiss_rl.core.legal_actions import LegalActionBatch
+from weiss_rl.core.spec import (
     HARD_FAIL_SPEC_MISMATCH_POLICY,
     assert_spec_bundle_contract,
     assert_spec_compatibility,
@@ -27,6 +20,15 @@ from weiss_rl.spec import (
     require_fail_on_spec_mismatch,
     sha256_hex,
     spec_bundle_hash,
+)
+from weiss_rl.learners.action_logp import packed_scores_action_logp_and_entropy
+from weiss_rl.model import (
+    GLOBAL_ACTION_SPACE_SIZE,
+    SEAT_COUNT,
+    PolicyValueModel,
+    StructuredLegalPolicyValueModel,
+    _negative_logits_fill_value,
+    build_policy_value_model,
 )
 
 _VALID_BUNDLE = {
@@ -129,6 +131,13 @@ def _structured_model_config() -> ModelConfig:
         encoder_kind="structured_v2",
         typed_feature_width=64,
     )
+
+
+def _make_structured_joint_scorer_nonuniform(model: StructuredLegalPolicyValueModel) -> None:
+    final_scorer = cast(torch.nn.Linear, model.policy_head.joint_scorer[-1])
+    with torch.no_grad():
+        torch.nn.init.normal_(final_scorer.weight, mean=0.0, std=0.1)
+        torch.nn.init.zeros_(final_scorer.bias)
 
 
 def _typed_observation_spec() -> dict[str, object]:
@@ -567,6 +576,10 @@ def test_structured_legal_policy_value_model_distinguishes_index_and_slot_argume
         spec_bundle=_structured_choice_slot_spec_bundle(),
     )
     assert isinstance(model, StructuredLegalPolicyValueModel)
+    final_scorer = cast(torch.nn.Linear, model.policy_head.joint_scorer[-1])
+    with torch.no_grad():
+        torch.nn.init.normal_(final_scorer.weight, mean=0.0, std=0.1)
+        torch.nn.init.zeros_(final_scorer.bias)
 
     obs = torch.zeros((1, 18), dtype=torch.float32)
     obs[0, 4] = 1.0
@@ -583,6 +596,35 @@ def test_structured_legal_policy_value_model_distinguishes_index_and_slot_argume
 
     assert not torch.isclose(logits[0, 0], logits[0, 1], atol=1e-6, rtol=0.0)
     assert not torch.isclose(logits[0, 2], logits[0, 3], atol=1e-6, rtol=0.0)
+
+
+def test_structured_legal_policy_value_model_starts_uniform_over_packed_legal_candidates() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((2, 18), dtype=torch.float32)
+    seat_hidden = model.initial_seat_hidden(2)
+    packed_ids = np.asarray([0, 3, 5, 1, 4, 8], dtype=np.int32)
+    packed_offsets = np.asarray([0, 3, 6], dtype=np.int32)
+
+    logits, _values, _next_hidden = model.forward_seat_aware(
+        obs,
+        torch.tensor([0, 1]),
+        seat_hidden,
+        legal_actions=LegalActionBatch.from_packed(packed_ids, packed_offsets, action_space=9),
+    )
+
+    torch.testing.assert_close(logits[0, [0, 3, 5]], torch.zeros((3,), dtype=logits.dtype))
+    torch.testing.assert_close(logits[1, [1, 4, 8]], torch.zeros((3,), dtype=logits.dtype))
+    assert torch.all(logits[0, [1, 2, 4, 6, 7, 8]] < -1e8)
+    assert torch.all(logits[1, [0, 2, 3, 5, 6, 7]] < -1e8)
 
 
 def test_structured_legal_policy_value_model_packed_legal_matches_mask() -> None:
@@ -698,6 +740,12 @@ def test_structured_legal_policy_value_model_factorized_packed_sampling_returns_
         sample_seeds=torch.tensor([12345, 67890], dtype=torch.long),
         pass_action_id=4,
     )
+    candidate_logp, _candidate_values, candidate_next_hidden = model.factorized_packed_action_log_probs_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+        legal_actions=legal_actions,
+    )
     factorized_eval = model.evaluate_factorized_sequence_packed_seat_aware(
         obs.unsqueeze(0),
         acting_seat.unsqueeze(0),
@@ -710,15 +758,233 @@ def test_structured_legal_policy_value_model_factorized_packed_sampling_returns_
     assert sampled_logp.shape == (2,)
     assert values.shape == (2,)
     assert next_hidden.shape == (2, 2, 256)
+    assert candidate_logp.shape == (6,)
     assert torch.isfinite(sampled_logp).all()
+    assert torch.isfinite(candidate_logp).all()
     assert int(sampled_actions[0].item()) in set(packed_ids[:4].tolist())
     assert int(sampled_actions[1].item()) in set(packed_ids[3:].tolist())
+    selected_candidate_positions = torch.tensor(
+        [
+            int(np.flatnonzero(packed_ids[:3] == int(sampled_actions[0].item()))[0]),
+            3 + int(np.flatnonzero(packed_ids[3:] == int(sampled_actions[1].item()))[0]),
+        ],
+        dtype=torch.long,
+    )
+    torch.testing.assert_close(candidate_logp.index_select(0, selected_candidate_positions), sampled_logp)
+    torch.testing.assert_close(candidate_next_hidden, next_hidden)
     assert factorized_eval.values.shape == (1, 2)
     assert factorized_eval.action_logp is not None
     assert factorized_eval.entropy is not None
     assert factorized_eval.family_log_probs.shape[:2] == (1, 2)
     assert torch.isfinite(factorized_eval.action_logp).all()
     assert torch.isfinite(factorized_eval.entropy).all()
+    torch.testing.assert_close(factorized_eval.action_logp.squeeze(0), sampled_logp)
+
+
+def test_structured_legal_policy_value_model_factorized_starts_uniform_over_legal_candidates() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=8,
+        config=replace(_structured_model_config(), structured_policy_contract="factorized_v1"),
+        action_dim=5,
+        observation_spec=_structured_hand_observation_spec(),
+        spec_bundle=_structured_hand_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((2, 8), dtype=torch.float32)
+    obs[0, 4] = 11
+    obs[1, 5] = 22
+    acting_seat = torch.tensor([0, 1], dtype=torch.long)
+    seat_hidden = model.initial_seat_hidden(2)
+    packed_ids = np.asarray([0, 1, 4, 2, 3, 4], dtype=np.int32)
+    packed_offsets = np.asarray([0, 3, 6], dtype=np.int32)
+    packed_meta = _packed_meta_from_ids(ActionCatalog.from_spec_bundle(_structured_hand_spec_bundle()), packed_ids)
+    legal_actions = LegalActionBatch.from_packed(
+        packed_ids,
+        packed_offsets,
+        meta=packed_meta,
+        action_space=5,
+    )
+
+    factorized_eval = model.evaluate_factorized_sequence_packed_seat_aware(
+        obs.unsqueeze(0),
+        acting_seat.unsqueeze(0),
+        seat_hidden,
+        legal_actions=legal_actions,
+    )
+    candidate_log_probs, _values, _next_hidden = model.factorized_packed_action_log_probs_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+        legal_actions=legal_actions,
+    )
+
+    expected_play_family_log_prob = torch.full((2,), torch.log(torch.tensor(2.0 / 3.0)))
+    expected_pass_family_log_prob = torch.full((2,), torch.log(torch.tensor(1.0 / 3.0)))
+    expected_candidate_log_probs = torch.full((6,), -torch.log(torch.tensor(3.0)))
+    torch.testing.assert_close(factorized_eval.family_log_probs[0, :, 0], expected_play_family_log_prob)
+    torch.testing.assert_close(factorized_eval.family_log_probs[0, :, 1], expected_pass_family_log_prob)
+    torch.testing.assert_close(candidate_log_probs, expected_candidate_log_probs)
+
+
+def test_structured_legal_policy_value_model_factorized_candidate_log_probs_apply_public_bias() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=8,
+        config=replace(_structured_model_config(), structured_policy_contract="factorized_v1"),
+        action_dim=5,
+        observation_spec=_structured_hand_observation_spec(),
+        spec_bundle=_structured_hand_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((1, 8), dtype=torch.float32)
+    obs[0, 4] = 11
+    obs[0, 5] = 22
+    acting_seat = torch.tensor([0], dtype=torch.long)
+    seat_hidden = model.initial_seat_hidden(1)
+    packed_ids = np.asarray([0, 1, 4], dtype=np.int32)
+    packed_offsets = np.asarray([0, 3], dtype=np.int32)
+    packed_meta = _packed_meta_from_ids(ActionCatalog.from_spec_bundle(_structured_hand_spec_bundle()), packed_ids)
+    legal_actions = LegalActionBatch.from_packed(
+        packed_ids,
+        packed_offsets,
+        meta=packed_meta,
+        action_space=5,
+    )
+
+    unbiased, _values, _next_hidden = model.factorized_packed_action_log_probs_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+        legal_actions=legal_actions,
+        scoring_mode="learner",
+    )
+    model.set_public_heuristic_logit_bias_scale(2.0)
+    biased, _values, _next_hidden = model.factorized_packed_action_log_probs_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+        legal_actions=legal_actions,
+        scoring_mode="learner",
+    )
+
+    assert not torch.allclose(biased, unbiased)
+    torch.testing.assert_close(torch.logsumexp(biased, dim=0), torch.tensor(0.0))
+
+
+def test_structured_legal_policy_value_model_factorized_candidate_log_probs_apply_opponent_context_bias() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=8,
+        config=replace(
+            _structured_model_config(),
+            structured_policy_contract="factorized_v1",
+            opponent_context_policy_ids=("B2 HeuristicPublic",),
+            opponent_context_trainable_action_bias_scale=1.0,
+        ),
+        action_dim=5,
+        observation_spec=_structured_hand_observation_spec(),
+        spec_bundle=_structured_hand_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((1, 8), dtype=torch.float32)
+    obs[0, 4] = 11
+    obs[0, 5] = 22
+    acting_seat = torch.tensor([0], dtype=torch.long)
+    seat_hidden = model.initial_seat_hidden(1)
+    packed_ids = np.asarray([0, 1, 4], dtype=np.int32)
+    packed_offsets = np.asarray([0, 3], dtype=np.int32)
+    packed_meta = _packed_meta_from_ids(ActionCatalog.from_spec_bundle(_structured_hand_spec_bundle()), packed_ids)
+    legal_actions = LegalActionBatch.from_packed(
+        packed_ids,
+        packed_offsets,
+        meta=packed_meta,
+        action_space=5,
+    )
+
+    with torch.no_grad():
+        model.opponent_context_action_bias_adapter[1, 1] = 2.0
+
+    plain, _values, _next_hidden = model.factorized_packed_action_log_probs_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+        legal_actions=legal_actions,
+        opponent_context_index=torch.tensor([0], dtype=torch.long),
+    )
+    contextual, _values, _next_hidden = model.factorized_packed_action_log_probs_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+        legal_actions=legal_actions,
+        opponent_context_index=torch.tensor([1], dtype=torch.long),
+    )
+    contextual_eval = model.evaluate_factorized_sequence_packed_seat_aware(
+        obs.unsqueeze(0),
+        acting_seat.unsqueeze(0),
+        seat_hidden,
+        legal_actions=legal_actions,
+        actions=torch.tensor([[1]], dtype=torch.long),
+        opponent_context_index=torch.tensor([[1]], dtype=torch.long),
+    )
+
+    assert contextual[1] > plain[1]
+    assert contextual[0] < plain[0]
+    assert contextual[2] < plain[2]
+    torch.testing.assert_close(torch.logsumexp(contextual, dim=0), torch.tensor(0.0))
+    assert contextual_eval.action_logp is not None
+    torch.testing.assert_close(contextual_eval.action_logp.squeeze(), contextual[1])
+
+
+def test_structured_legal_policy_value_model_factorized_sampling_uses_opponent_context_bias() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=8,
+        config=replace(
+            _structured_model_config(),
+            structured_policy_contract="factorized_v1",
+            opponent_context_policy_ids=("B2 HeuristicPublic",),
+            opponent_context_trainable_action_bias_scale=1.0,
+        ),
+        action_dim=5,
+        observation_spec=_structured_hand_observation_spec(),
+        spec_bundle=_structured_hand_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((1, 8), dtype=torch.float32)
+    obs[0, 4] = 11
+    obs[0, 5] = 22
+    acting_seat = torch.tensor([0], dtype=torch.long)
+    seat_hidden = model.initial_seat_hidden(1)
+    packed_ids = np.asarray([0, 1, 4], dtype=np.int32)
+    packed_offsets = np.asarray([0, 3], dtype=np.int32)
+    packed_meta = _packed_meta_from_ids(ActionCatalog.from_spec_bundle(_structured_hand_spec_bundle()), packed_ids)
+    legal_actions = LegalActionBatch.from_packed(
+        packed_ids,
+        packed_offsets,
+        meta=packed_meta,
+        action_space=5,
+    )
+
+    with torch.no_grad():
+        model.opponent_context_action_bias_adapter[1, 1] = 50.0
+
+    sampled_actions, sampled_logp, _values, _next_hidden = model.sample_factorized_packed_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+        legal_actions=legal_actions,
+        sample_seeds=torch.tensor([12345], dtype=torch.long),
+        pass_action_id=4,
+        opponent_context_index=torch.tensor([1], dtype=torch.long),
+    )
+
+    assert sampled_actions.tolist() == [1]
+    assert float(sampled_logp.item()) == pytest.approx(0.0, abs=1e-5)
 
 
 def test_structured_legal_policy_value_model_packed_path_uses_hand_position_for_duplicate_cards() -> None:
@@ -731,6 +997,7 @@ def test_structured_legal_policy_value_model_packed_path_uses_hand_position_for_
         spec_bundle=_structured_hand_spec_bundle(),
     )
     assert isinstance(model, StructuredLegalPolicyValueModel)
+    _make_structured_joint_scorer_nonuniform(model)
 
     obs = torch.zeros((1, 8), dtype=torch.float32)
     obs[0, 4] = 11.0
@@ -841,7 +1108,7 @@ def test_structured_legal_policy_value_model_factorized_chunking_matches_unchunk
         legal_actions=legal_actions,
         actions=actions,
     )
-    model.policy_head._factorized_row_chunk_size = lambda _row_states: 1  # type: ignore[method-assign]
+    model.policy_head._factorized_row_chunk_size = cast(Any, lambda _row_states: 1)
     chunked = model.evaluate_factorized_sequence_packed_seat_aware(
         obs.unsqueeze(0),
         acting_seat.unsqueeze(0),
@@ -910,6 +1177,7 @@ def test_structured_legal_policy_value_model_factorized_multi_family_sampling_is
     assert factorized_eval.attack_type_log_probs is not None
     assert torch.isfinite(factorized_eval.action_logp).all()
     assert torch.isfinite(factorized_eval.entropy).all()
+    torch.testing.assert_close(factorized_eval.action_logp.squeeze(0), sampled_logp)
 
 
 def test_structured_legal_policy_value_model_actor_and_learner_packed_scorers_match() -> None:
@@ -961,6 +1229,145 @@ def test_structured_legal_policy_value_model_actor_and_learner_packed_scorers_ma
         )
 
     torch.testing.assert_close(learner_scores, actor_scores)
+
+
+def test_structured_packed_behavior_logp_matches_learner_recomputed_action_logp() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.randn((4, 18), dtype=torch.float32)
+    acting_seat = torch.tensor([0, 1, 0, 1], dtype=torch.long)
+    seat_hidden = model.initial_seat_hidden(4)
+    packed_ids = np.asarray([0, 4, 8, 1, 5, 8, 2, 6, 8, 3, 7, 8], dtype=np.int32)
+    packed_offsets = np.asarray([0, 3, 6, 9, 12], dtype=np.int32)
+    packed_meta = _packed_meta_from_ids(ActionCatalog.from_spec_bundle(_structured_spec_bundle()), packed_ids)
+    legal_actions = LegalActionBatch.from_packed(
+        packed_ids,
+        packed_offsets,
+        meta=packed_meta,
+        action_space=9,
+    )
+    sample_seeds = torch.tensor([1001, 1002, 1003, 1004], dtype=torch.long)
+
+    with torch.inference_mode():
+        sampled_actions, behavior_logp, _value, _next_hidden = model.sample_packed_seat_aware(
+            obs,
+            acting_seat,
+            seat_hidden,
+            legal_actions=legal_actions,
+            sample_seeds=sample_seeds,
+            pass_action_id=8,
+        )
+        learner_scores, _learner_value, _learner_next_hidden = model.forward_packed_seat_aware(
+            obs,
+            acting_seat,
+            seat_hidden,
+            legal_actions=legal_actions,
+            scoring_mode="learner",
+        )
+        recomputed_logp, _entropy = packed_scores_action_logp_and_entropy(
+            learner_scores,
+            torch.as_tensor(packed_ids, dtype=torch.long),
+            torch.as_tensor(packed_offsets, dtype=torch.long),
+            sampled_actions,
+            pass_action_id=8,
+        )
+
+    torch.testing.assert_close(recomputed_logp, behavior_logp)
+
+
+def test_structured_legal_policy_value_model_packed_plan_scorer_matches_dense_scorer() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.zeros((3, 18), dtype=torch.float32)
+    obs[0, 4] = 11.0
+    obs[0, 5] = 22.0
+    obs[1, 2] = 1.0
+    obs[1, 6] = 33.0
+    obs[2, 14] = 1.0
+    acting_seat = torch.tensor([0, 1, 0], dtype=torch.long)
+    seat_hidden = model.initial_seat_hidden(3)
+    packed_ids = np.asarray([0, 1, 4, 6, 8, 2, 5, 7, 8, 3, 4, 6, 8], dtype=np.int32)
+    packed_offsets = np.asarray([0, 5, 9, 13], dtype=np.int32)
+    packed_meta = _packed_meta_from_ids(ActionCatalog.from_spec_bundle(_structured_spec_bundle()), packed_ids)
+
+    recurrent_output, state_repr, observation_context, _value, _next_hidden = model.forward_trunk_packed_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+    )
+    head = cast(Any, model.policy_head)
+    ids = torch.as_tensor(packed_ids, dtype=torch.long)
+    offsets = torch.as_tensor(packed_offsets, dtype=torch.long)
+    row_indices = torch.repeat_interleave(
+        torch.arange(obs.shape[0], dtype=torch.long),
+        offsets[1:] - offsets[:-1],
+    )
+    meta = torch.as_tensor(packed_meta, dtype=torch.long)
+
+    for candidate_meta in (None, meta):
+        for scoring_mode in ("actor", "learner"):
+            dense_scores = head._score_candidates_chunked(
+                state_repr,
+                row_indices,
+                ids,
+                observation_context,
+                candidate_meta=candidate_meta,
+                scoring_mode=scoring_mode,
+            )
+            packed_plan = head._build_packed_scoring_plan(
+                candidate_ids=ids,
+                offsets=offsets,
+                candidate_meta=candidate_meta,
+            )
+            packed_scores = head._score_packed_candidates_chunked(
+                state_repr,
+                packed_plan,
+                observation_context,
+                scoring_mode=scoring_mode,
+            )
+
+            torch.testing.assert_close(packed_scores, dense_scores)
+
+    legal_actions = LegalActionBatch.from_packed(
+        packed_ids,
+        packed_offsets,
+        meta=packed_meta,
+        action_space=9,
+    )
+    public_scores = model.score_packed_legal_candidates(
+        recurrent_output,
+        obs,
+        legal_actions,
+        state_repr=state_repr,
+        observation_context=observation_context,
+        scoring_mode="actor",
+    )
+    dense_meta_scores = head._score_candidates_chunked(
+        state_repr,
+        row_indices,
+        ids,
+        observation_context,
+        candidate_meta=meta,
+        scoring_mode="actor",
+    )
+
+    torch.testing.assert_close(public_scores, dense_meta_scores)
 
 
 def test_structured_legal_policy_value_model_can_split_actor_and_learner_public_bias() -> None:
@@ -1121,6 +1528,64 @@ def test_structured_legal_policy_value_model_sequence_forward_matches_stepwise_p
     torch.testing.assert_close(next_hidden_sequence, step_hidden)
 
 
+def test_structured_sequence_forward_resets_hidden_on_episode_boundary() -> None:
+    torch.manual_seed(0)
+    model = build_policy_value_model(
+        observation_dim=18,
+        config=_structured_model_config(),
+        action_dim=9,
+        observation_spec=_typed_observation_spec(),
+        spec_bundle=_structured_spec_bundle(),
+    )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+
+    obs = torch.randn((2, 2, 18), dtype=torch.float32)
+    acting_seat = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+    reset_before_step = torch.tensor([[False, False], [True, False]])
+    seat_hidden = model.initial_seat_hidden(2)
+    packed_ids = np.asarray([0, 3, 1, 4, 2, 5, 6, 8], dtype=np.int32)
+    packed_offsets = np.asarray([0, 2, 4, 6, 8], dtype=np.int32)
+    legal_actions = LegalActionBatch.from_packed(packed_ids, packed_offsets, action_space=9)
+
+    logits_sequence, values_sequence, next_hidden_sequence = model.forward_sequence_seat_aware(
+        obs,
+        acting_seat,
+        seat_hidden,
+        legal_actions=legal_actions,
+        reset_before_step=reset_before_step,
+    )
+
+    step_hidden = seat_hidden.clone()
+    logits_steps: list[torch.Tensor] = []
+    value_steps: list[torch.Tensor] = []
+    row_cursor = 0
+    for step_index in range(obs.shape[0]):
+        step_reset = reset_before_step[step_index]
+        if bool(step_reset.any().item()):
+            step_hidden = step_hidden.clone()
+            step_hidden[step_reset] = model.initial_seat_hidden(int(step_reset.sum().item()))
+        step_offsets = packed_offsets[row_cursor : row_cursor + obs.shape[1] + 1]
+        step_ids = packed_ids[int(step_offsets[0]) : int(step_offsets[-1])]
+        step_legal_actions = LegalActionBatch.from_packed(
+            step_ids,
+            step_offsets - int(step_offsets[0]),
+            action_space=9,
+        )
+        step_logits, step_values, step_hidden = model.forward_seat_aware(
+            obs[step_index],
+            acting_seat[step_index],
+            step_hidden,
+            legal_actions=step_legal_actions,
+        )
+        logits_steps.append(step_logits)
+        value_steps.append(step_values)
+        row_cursor += int(obs.shape[1])
+
+    torch.testing.assert_close(logits_sequence, torch.stack(logits_steps, dim=0))
+    torch.testing.assert_close(values_sequence, torch.stack(value_steps, dim=0))
+    torch.testing.assert_close(next_hidden_sequence, step_hidden)
+
+
 def test_structured_legal_policy_value_model_accepts_card_table_features() -> None:
     model = build_policy_value_model(
         observation_dim=8,
@@ -1157,6 +1622,8 @@ def test_structured_v2_uses_hand_position_when_scoring_matching_cards() -> None:
         observation_spec=_structured_hand_observation_spec(),
         spec_bundle=spec_bundle,
     )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+    _make_structured_joint_scorer_nonuniform(model)
 
     obs_a = torch.zeros((1, 8), dtype=torch.float32)
     obs_a[0, 4] = 11
@@ -1180,6 +1647,8 @@ def test_structured_v2_uses_target_slot_context_when_scoring_play_actions() -> N
         observation_spec=_structured_hand_observation_spec(),
         spec_bundle=spec_bundle,
     )
+    assert isinstance(model, StructuredLegalPolicyValueModel)
+    _make_structured_joint_scorer_nonuniform(model)
 
     obs_open = torch.zeros((1, 8), dtype=torch.float32)
     obs_open[0, 4] = 11

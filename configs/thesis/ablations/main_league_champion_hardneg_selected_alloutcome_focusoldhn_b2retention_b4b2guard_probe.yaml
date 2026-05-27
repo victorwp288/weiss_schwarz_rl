@@ -1,0 +1,30 @@
+schema_version: 2
+description: "Selected-a015 all-outcome champion/hard-negative continuation with focused old-hard-negative pressure plus a stronger B2/public retention floor. The previous focus-old-HN runs produced real confirm64 learned gains but lost B2/extension-seed ground by confirm128; this probe keeps the hard-negative focus while raising public-anchor exposure, public-teacher pressure, and selected-policy anchoring so longer league play must preserve fixed baselines while improving against champions and hard negatives."
+extends: main_league_champion_hardneg_selected_alloutcome_focusoldhn_strong_b4b2guard_probe.yaml
+league:
+  sampling:
+    noleague_baseline_mix_fraction: 0.30
+    noleague_baseline_mix_end_updates: -1
+    heuristic_public_mix_fraction: 0.10
+    heuristic_public_final_mix_fraction: 0.10
+    heuristic_public_variant_mix_fraction: 0.16
+    heuristic_public_variant_final_mix_fraction: 0.16
+    champion_mix_fraction: 0.24
+    hard_negative_mix_fraction: 0.20
+    hard_negative_focus_weight_multiplier: 6.0
+training:
+  optimizer:
+    learning_rate: 0.0000048
+  exploration:
+    entropy_coef: 0.0010
+    actor_sampling_temperature: 0.84
+  structured_aux:
+    teacher_public_heuristic_coef: 0.026
+    teacher_public_heuristic_final_coef: 0.026
+    policy_anchor_coef: 0.52
+    policy_anchor_top_action_coef: 0.12
+    policy_anchor_temperature: 0.65
+    trajectory_bc_batch_episodes: 12
+    trajectory_bc_teacher_action_coef: 0.15
+    trajectory_bc_teacher_same_family_action_coef: 0.62
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.08

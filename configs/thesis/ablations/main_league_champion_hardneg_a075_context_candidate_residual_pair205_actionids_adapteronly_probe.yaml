@@ -1,0 +1,17 @@
+schema_version: 2
+description: "Mechanistic-only pair205 opponent-context candidate-residual probe with the residual masked to the disputed action ids 104/124. This keeps the fixed-balanced B2/policy0004 versus learned-repair replay grouping, but prevents the residual from perturbing unrelated legal candidates before the pair205 margin gate and sentinel screen."
+extends: main_league_champion_hardneg_a075_context_candidate_residual_pair205_fixedbalanced_adapteronly_probe.yaml
+model:
+  opponent_context_trainable_action_bias_scale: 0.0
+  opponent_context_trainable_candidate_residual_scale: 1.0
+  opponent_context_candidate_residual_width: 32
+  opponent_context_candidate_residual_mode: rich
+  opponent_context_candidate_residual_action_ids:
+    - 104
+    - 124
+  opponent_context_adapter_lr_multiplier: 2000.0
+training:
+  structured_aux:
+    paired_swing_aux_updates: 16
+    paired_swing_coef: 0.12
+    paired_swing_margin: 0.05

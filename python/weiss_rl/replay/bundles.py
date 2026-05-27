@@ -21,7 +21,7 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.repro import (
+from weiss_rl.artifacts.reproducibility import (
     derive_replay_key256,
     key256_to_hex,
     key256_to_short64,
@@ -57,6 +57,8 @@ class ReplayRerunContract:
     max_ticks: int
     reward_json: str | None = None
     curriculum_json: str | None = None
+    deck: str | None = None
+    opponent_deck: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

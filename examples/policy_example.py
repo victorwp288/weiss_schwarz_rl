@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from weiss_rl.masking import MaskingAnomalyCounters, apply_empty_legal_action_fallback
+from weiss_rl.core.masking import MaskingAnomalyCounters, apply_empty_legal_action_fallback
 
 
 def sample_actions_for_policy(

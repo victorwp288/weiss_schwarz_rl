@@ -8,15 +8,16 @@ import numpy as np
 import pytest
 
 from weiss_rl.actors.actor_worker import ActorWorker
-from weiss_rl.envs.decision_env import DecisionBoundaryEnv
-from weiss_rl.league.opponent_pool import OpponentPoolSampler, sample_opponent_snapshot_ids
-from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
-from weiss_rl.masking import (
+from weiss_rl.core.masking import (
     masked_logp_from_legal_ids,
     masked_logp_from_mask,
     resolve_pass_action_id,
     sample_actions_from_mask,
 )
+from weiss_rl.diagnostics.action_diagnostics import MAIN_MOVE_BASE
+from weiss_rl.envs.decision_env import DecisionBoundaryEnv
+from weiss_rl.league.opponent_pool import OpponentPoolSampler, sample_opponent_snapshot_ids
+from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
 from weiss_rl.replay.bundles import load_replay_bundle
 
 OBS_LEN = 6
@@ -81,6 +82,7 @@ class IdsBatch:
         self.actor = self.to_play
         self.episode_seed = np.zeros((num_envs,), dtype=np.uint64)
         self.episode_key = np.zeros((num_envs,), dtype=np.uint64)
+        self.main_move_action = np.zeros((num_envs,), dtype=np.bool_)
         self.ids_offsets: tuple[np.ndarray, np.ndarray] | None = None
 
 
@@ -157,6 +159,75 @@ class PaddedIdsEnv(FakeIdsEnv):
         return np.concatenate((legal_ids, padding), axis=0), legal_offsets
 
 
+class ReusingIdsEnv:
+    def __init__(self) -> None:
+        self.num_envs = 2
+        self.step_index = 0
+        self.batch = IdsBatch(self.num_envs)
+        self.legal_ids = np.zeros((4,), dtype=np.int32)
+        self.legal_offsets = np.array([0, 2, 4], dtype=np.uint32)
+        self.batch.ids_offsets = (self.legal_ids, self.legal_offsets)
+
+    def reset(self) -> IdsBatch:
+        self.step_index = 0
+        self._fill_batch()
+        return self.batch
+
+    def step(self, actions: np.ndarray) -> IdsBatch:
+        assert actions.shape == (self.num_envs,)
+        self.step_index += 1
+        self._fill_batch()
+        return self.batch
+
+    def _fill_batch(self) -> None:
+        env_ids_i32 = np.arange(self.num_envs, dtype=np.int32)
+        env_ids_u64 = np.arange(self.num_envs, dtype=np.uint64)
+        self.batch.obs[:] = np.int16(10 + self.step_index * 7) + env_ids_i32[:, None].astype(np.int16)
+        self.batch.to_play[:] = ((env_ids_i32 + self.step_index) % 2).astype(np.int8)
+        self.batch.decision_id[:] = np.int32(100 + self.step_index)
+        self.batch.reward[:] = np.float32(self.step_index)
+        self.batch.terminated[:] = False
+        self.batch.truncated[:] = False
+        self.batch.engine_status[:] = 0
+        self.batch.episode_seed[:] = np.uint64(30_000 + self.step_index * 10) + env_ids_u64
+        self.batch.episode_key[:] = np.uint64(40_000 + self.step_index * 10) + env_ids_u64
+        self.legal_ids[:] = np.array(
+            [
+                (self.step_index * 4) % ACTION_SPACE,
+                (self.step_index * 4 + 1) % ACTION_SPACE,
+                (self.step_index * 4 + 2) % ACTION_SPACE,
+                (self.step_index * 4 + 3) % ACTION_SPACE,
+            ],
+            dtype=np.int32,
+        )
+
+
+class MainMoveIdWithFalseFlagEnv:
+    def __init__(self) -> None:
+        self.step_index = 0
+
+    def reset(self) -> IdsBatch:
+        self.step_index = 0
+        return self._batch()
+
+    def step(self, actions: np.ndarray) -> IdsBatch:
+        assert np.array_equal(actions, np.array([MAIN_MOVE_BASE], dtype=np.uint32))
+        self.step_index += 1
+        batch = self._batch()
+        batch.main_move_action[:] = False
+        return batch
+
+    def _batch(self) -> IdsBatch:
+        batch = IdsBatch(1)
+        batch.obs[:] = self.step_index
+        batch.decision_id[:] = self.step_index
+        batch.ids_offsets = (
+            np.array([MAIN_MOVE_BASE], dtype=np.int32),
+            np.array([0, 1], dtype=np.uint32),
+        )
+        return batch
+
+
 class MaskBatch:
     def __init__(self, num_envs: int) -> None:
         self.obs = np.zeros((num_envs, OBS_LEN), dtype=np.int16)
@@ -168,6 +239,7 @@ class MaskBatch:
         self.actor = np.zeros((num_envs,), dtype=np.int8)
         self.episode_seed = np.zeros((num_envs,), dtype=np.uint64)
         self.episode_key = np.zeros((num_envs,), dtype=np.uint64)
+        self.main_move_action = np.zeros((num_envs,), dtype=np.bool_)
         self.masks = np.zeros((num_envs, ACTION_SPACE), dtype=np.uint8)
 
 
@@ -695,6 +767,63 @@ def test_actor_worker_ids_offsets_discards_raw_capacity_tail_between_steps() -> 
         assert np.array_equal(recomputed, batch.behavior_logp[t])
 
 
+def test_actor_worker_ids_offsets_snapshots_reused_batch_before_step() -> None:
+    worker = ActorWorker(
+        actor_id=17,
+        unroll_length=2,
+        num_envs=2,
+        action_space=ACTION_SPACE,
+        layout_name="i16_legal_ids",
+        seed=31,
+    )
+
+    batch = worker.run_once(env=ReusingIdsEnv(), policy_logits_fn=_uniform_policy_logits)
+
+    assert np.array_equal(
+        batch.obs[0],
+        np.repeat(np.array([[10], [11]], dtype=np.int16), OBS_LEN, axis=1),
+    )
+    assert np.array_equal(
+        batch.obs[1],
+        np.repeat(np.array([[17], [18]], dtype=np.int16), OBS_LEN, axis=1),
+    )
+    assert np.array_equal(batch.to_play_seat[0], np.array([0, 1], dtype=np.int8))
+    assert np.array_equal(batch.to_play_seat[1], np.array([1, 0], dtype=np.int8))
+    assert np.array_equal(batch.decision_id[0], np.array([100, 100], dtype=np.int32))
+    assert np.array_equal(batch.decision_id[1], np.array([101, 101], dtype=np.int32))
+    assert np.array_equal(batch.episode_seed[0], np.array([30_000, 30_001], dtype=np.uint64))
+    assert np.array_equal(batch.episode_seed[1], np.array([30_010, 30_011], dtype=np.uint64))
+    assert np.array_equal(batch.episode_key[0], np.array([40_000, 40_001], dtype=np.uint64))
+    assert np.array_equal(batch.episode_key[1], np.array([40_010, 40_011], dtype=np.uint64))
+    assert batch.legal_ids is not None
+    assert batch.legal_offsets is not None
+    assert np.array_equal(batch.legal_ids, np.array([0, 1, 2, 3, 4, 5, 6, 7], dtype=np.int32))
+    assert np.array_equal(batch.legal_offsets, np.array([0, 2, 4, 6, 8], dtype=np.uint32))
+
+
+def test_actor_worker_action_counters_prefer_simulator_main_move_flag() -> None:
+    action_space = MAIN_MOVE_BASE + 1
+    worker = ActorWorker(
+        actor_id=12,
+        unroll_length=1,
+        num_envs=1,
+        action_space=action_space,
+        layout_name="i16_legal_ids",
+        seed=37,
+    )
+
+    def logits(obs: np.ndarray, to_play: np.ndarray) -> np.ndarray:
+        _ = (obs, to_play)
+        return np.zeros((1, action_space), dtype=np.float32)
+
+    batch = worker.run_once(env=MainMoveIdWithFalseFlagEnv(), policy_logits_fn=logits)
+
+    assert int(batch.action[0, 0]) == MAIN_MOVE_BASE
+    assert batch.counters is not None
+    assert batch.counters["main_move_actions"] == 0
+    assert batch.counters["max_consecutive_main_moves"] == 0
+
+
 def test_actor_worker_real_env_ids_offsets_propagates_episode_identity_and_trimmed_legality() -> None:
     worker = ActorWorker(
         actor_id=10,
@@ -774,6 +903,7 @@ def test_actor_worker_mask_layout_returns_entropy_and_pass_fallback() -> None:
     assert np.allclose(recomputed.reshape(T, N), batch.behavior_logp, atol=0.0, rtol=0.0)
     assert np.all(batch.action[:, 1] == pass_action_id)
     assert np.all(batch.behavior_logp[:, 1] == 0.0)
+    assert batch.counters is not None
     assert batch.counters["empty_legal"] == batch.T
     assert batch.counters["engine_fault_done_rows"] == 4
     assert batch.counters["natural_timeout_rows"] == 0

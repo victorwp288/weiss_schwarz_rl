@@ -1,0 +1,7 @@
+schema_version: 2
+description: "Main league thesis model with automatic multi-GPU actor sharding."
+extends: main_league.yaml
+system:
+  learner_device: cuda:auto
+  actor_device: cuda:auto
+  collection_backend: process

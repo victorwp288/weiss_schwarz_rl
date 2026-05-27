@@ -1,0 +1,9 @@
+schema_version: 2
+description: "Selected guided-bootstrap continuation with control-profile guidance plus trajectory-retention imitation on retained seed/champion opponent rows. Tests whether post-selection collapse is trajectory/state-distribution drift rather than same-state action disagreement."
+extends: main_league_guided_bootstrap_selected_control_profile.yaml
+training:
+  structured_aux:
+    trajectory_retention_coef: 0.06
+    trajectory_retention_sources:
+      - champions
+      - warmup_snapshots

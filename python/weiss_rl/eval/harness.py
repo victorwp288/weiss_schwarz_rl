@@ -10,9 +10,20 @@ from typing import Any, Literal, Protocol, cast
 
 import numpy as np
 
-from weiss_rl.masking import assert_strictly_increasing_legal_ids, masked_logp_from_legal_ids, masked_logp_from_mask
-from weiss_rl.repro import canonical_json_bytes, key256_to_hex, key256_to_short64, resolve_episode_key256, stable_hash64
-from weiss_rl.termination_reason import classify_episode_end_reason
+from weiss_rl.artifacts.reproducibility import (
+    canonical_json_bytes,
+    key256_to_hex,
+    key256_to_short64,
+    resolve_episode_key256,
+    stable_hash64,
+)
+from weiss_rl.core.masking import (
+    assert_strictly_increasing_legal_ids,
+    masked_logp_from_legal_ids,
+    masked_logp_from_mask,
+)
+from weiss_rl.core.termination_reason import classify_episode_end_reason
+from weiss_rl.eval.policy_set import deck_id_for_policy_id
 
 _CDF_RENORMALIZE_TOL = 1e-6
 _U32_MASK = (1 << 32) - 1
@@ -45,6 +56,8 @@ class ScheduledGame:
     seat0_policy_id: str
     seat1_policy_id: str
     focal_seat: int
+    seat0_deck: str | None = None
+    seat1_deck: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +115,8 @@ class EvalGameRecord:
     terminated: bool
     truncated: bool
     engine_status: int
+    seat0_deck: str | None = None
+    seat1_deck: str | None = None
     decision_count: int = 0
     tick_count: int = 0
     no_progress_count: int = 0
@@ -142,6 +157,10 @@ class EvalGameRecord:
             "pass_with_nonpass_available": self.pass_with_nonpass_available,
             "max_consecutive_main_moves": self.max_consecutive_main_moves,
         }
+        if self.seat0_deck is not None:
+            payload["seat0_deck"] = self.seat0_deck
+        if self.seat1_deck is not None:
+            payload["seat1_deck"] = self.seat1_deck
         if self.run_id256 is not None:
             payload["run_id256"] = self.run_id256
         return payload
@@ -208,9 +227,13 @@ def sample_action_pinned(
     rng: _FloatRng,
     pass_action_id: int | None = None,
     anomalies: EvalSamplerAnomalies | None = None,
+    temperature: float = 1.0,
 ) -> tuple[int, np.float32]:
     """Sample one action from a single packed legal-id row with pinned CPU CDF math."""
     logits_array = _coerce_eval_logits(logits)
+    temperature_value = _coerce_sampling_temperature(temperature)
+    if temperature_value != 1.0:
+        logits_array = logits_array / np.float32(temperature_value)
     legal_ids_array = _coerce_eval_legal_ids(legal_ids, action_space=logits_array.shape[0])
 
     if legal_ids_array.size == 0:
@@ -221,6 +244,32 @@ def sample_action_pinned(
     assert_strictly_increasing_legal_ids(legal_ids_array)
     probs64 = _legal_probs_for_cdf(logits_array, legal_ids_array, anomalies=anomalies)
     action_index = _sample_cdf_index(probs64, rng=rng)
+    action = int(legal_ids_array[action_index])
+    logp = _selected_logp(logits_array, legal_ids_array, action, pass_action_id=pass_action_id)
+    return action, logp
+
+
+def select_action_argmax_pinned(
+    logits: np.ndarray,
+    legal_ids: np.ndarray,
+    *,
+    pass_action_id: int | None = None,
+) -> tuple[int, np.float32]:
+    """Select the highest-logit legal action with the same logp math as pinned eval."""
+
+    logits_array = _coerce_eval_logits(logits)
+    legal_ids_array = _coerce_eval_legal_ids(legal_ids, action_space=logits_array.shape[0])
+
+    if legal_ids_array.size == 0:
+        action = _require_pass_action(pass_action_id, action_space=logits_array.shape[0])
+        logp = _selected_logp(logits_array, legal_ids_array, action, pass_action_id=action)
+        return action, logp
+
+    assert_strictly_increasing_legal_ids(legal_ids_array)
+    legal_logits = logits_array[legal_ids_array]
+    if not np.all(np.isfinite(legal_logits)):
+        raise ValueError("legal logits must be finite")
+    action_index = int(np.argmax(legal_logits))
     action = int(legal_ids_array[action_index])
     logp = _selected_logp(logits_array, legal_ids_array, action, pass_action_id=pass_action_id)
     return action, logp
@@ -246,6 +295,8 @@ def build_seat_swapped_schedule(
                 seat0_policy_id=focal_policy_id,
                 seat1_policy_id=opponent_policy_id,
                 focal_seat=0,
+                seat0_deck=deck_id_for_policy_id(focal_policy_id),
+                seat1_deck=deck_id_for_policy_id(opponent_policy_id),
             )
         )
         schedule.append(
@@ -259,6 +310,8 @@ def build_seat_swapped_schedule(
                 seat0_policy_id=opponent_policy_id,
                 seat1_policy_id=focal_policy_id,
                 focal_seat=1,
+                seat0_deck=deck_id_for_policy_id(opponent_policy_id),
+                seat1_deck=deck_id_for_policy_id(focal_policy_id),
             )
         )
     return schedule
@@ -331,6 +384,8 @@ def record_completed_game(
         terminated=bool(result.terminated),
         truncated=bool(result.truncated),
         engine_status=int(result.engine_status),
+        seat0_deck=scheduled_game.seat0_deck,
+        seat1_deck=scheduled_game.seat1_deck,
         decision_count=int(result.decision_count),
         tick_count=int(result.tick_count),
         no_progress_count=int(result.no_progress_count),
@@ -609,7 +664,10 @@ def resolve_eval_episode_key256(
     result: GameResult,
     run_id256: str | bytes,
 ) -> bytes:
-    matchup_id = f"{scheduled_game.focal_policy_id}\0{scheduled_game.opponent_policy_id}"
+    matchup_parts = [scheduled_game.focal_policy_id, scheduled_game.opponent_policy_id]
+    if scheduled_game.seat0_deck is not None or scheduled_game.seat1_deck is not None:
+        matchup_parts.extend([scheduled_game.seat0_deck or "", scheduled_game.seat1_deck or ""])
+    matchup_id = "\0".join(matchup_parts)
     return resolve_episode_key256(
         simulator_episode_key=result.simulator_episode_key,
         run_id256=_coerce_run_id256(run_id256),
@@ -761,6 +819,13 @@ def _coerce_eval_logits(logits: np.ndarray) -> np.ndarray:
     if logits_array.ndim != 1:
         raise ValueError("logits must be a 1D array")
     return logits_array
+
+
+def _coerce_sampling_temperature(temperature: float) -> float:
+    value = float(temperature)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"temperature must be finite and > 0, got {temperature!r}")
+    return value
 
 
 def _coerce_eval_legal_ids(legal_ids: np.ndarray, *, action_space: int) -> np.ndarray:

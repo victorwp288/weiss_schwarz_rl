@@ -2,70 +2,63 @@
 
 This is the current ship-ready training and evaluation surface for the thesis run.
 
-## Canonical presets
+## Canonical Thesis Configs
 
-- `configs/presets/structured_acceptance_standard.yaml`
-  - current default training recipe
-  - best local learning recipe so far
-- `configs/presets/structured_acceptance_standard_auto_gpu.yaml`
-  - same recipe, but automatically shards process-collector actor inference across visible CUDA devices while reserving one learner GPU
-- `configs/presets/structured_acceptance_standard_thesis_eval.yaml`
-  - same training recipe, plus the richer thesis anchor set for final evaluation
-- `configs/presets/structured_acceptance_standard_multideck.yaml`
-  - same recipe, but with actor-cycled bundled Quintuplets deck diversity
+- `configs/thesis/b1_noleague.yaml`
+  - B1 NoLeague baseline on the fixed main deck.
+- `configs/thesis/main_league.yaml`
+  - main IMPALA/V-trace league thesis lane.
+- `configs/thesis/main_league_auto_gpu.yaml`
+  - server-oriented main lane with process collectors.
+- `configs/thesis/final_eval.yaml`
+  - final evaluation companion with B0-B4 anchors.
+- `configs/thesis/multideck_exploratory.yaml`
+  - exploratory deck-diversity/generalization variant.
+
+The `configs/presets/structured_acceptance_standard*` files are the
+compatibility preset layer underneath these names.
+
+## Deck scoping
+
+The primary Phase 1 lane is same-deck:
+
+- focal model policies: `preset:main_deck_5hy_yotsuba_v1`
+- `B0 RandomLegal`: `preset:main_deck_5hy_yotsuba_v1`
+- `B1 NoLeague baseline`: `preset:main_deck_5hy_yotsuba_v1`
+- `B2 HeuristicPublic`: `preset:main_deck_5hy_yotsuba_v1`
+
+The themed public heuristics are separate robustness anchors:
+
+- `B3 HeuristicPublicAggro`: `preset:aggro_deck_5hy_nino_v1`
+- `B4 HeuristicPublicControl`: `preset:control_deck_jj_s66_v1`
+
+Final-eval schedules write `seat0_deck` and `seat1_deck` into episode records and matchup summaries, so themed rows remain visible in artifacts instead of being folded into an anonymous aggregate.
 
 ## Baseline prerequisite
 
-`standard`, `standard-auto-gpu`, `standard-multideck`, and the named ablations all require a completed dedicated `baseline_noleague` run so the canonical `B1 NoLeague baseline` anchor can be imported into the training league.
+The main league command requires a completed dedicated B1 run so the canonical
+`B1 NoLeague baseline` anchor can be imported into the training league.
 
 Bootstrap that baseline once with the matching model/environment surface:
 
 ```bash
-uv run python python/scripts/train.py \
-  --stack-config configs/presets/baselines/structured_acceptance_tiny32_fast_noleague.yaml \
-  --run-label b1_anchor_seed1 \
-  --device cuda \
-  --num-envs 4096 \
-  --unroll-length 64 \
-  --runtime-mode train_async_fast \
-  --max-updates 200
+uv run --extra dev --extra sim python -m weiss_rl.cli train-b1 --run-label b1_anchor_seed1 --profile thesis-local
 ```
 
 ## Fastest commands
 
-List the named presets exposed by the wrapper:
-
-```bash
-uv run python python/scripts/thesis_run.py --list-presets
-```
-
 Launch the canonical training recipe:
 
 ```bash
-uv run python python/scripts/thesis_run.py \
-  --preset standard \
-  --run-label thesis_seed1 \
-  --b1-baseline-run-dir runs/b1_anchor_seed1 \
-  --device cuda \
-  --num-envs 4096 \
-  --unroll-length 64 \
-  --runtime-mode train_async_fast \
-  --max-updates 200
+uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label thesis_seed1 --b1-run runs/b1_anchor_seed1 --profile thesis-local
 ```
 
-That wrapper call trains with `standard` and, by default, evaluates with `standard-thesis-eval`.
+That command trains with `configs/thesis/main_league.yaml`.
 
 Launch the recommended Linux server variant on a multi-GPU node:
 
 ```bash
-uv run python python/scripts/thesis_run.py \
-  --preset standard-auto-gpu \
-  --run-label thesis_server_seed1 \
-  --b1-baseline-run-dir runs/b1_anchor_seed1 \
-  --num-envs 4096 \
-  --unroll-length 64 \
-  --runtime-mode train_async_fast \
-  --max-updates 200
+uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label thesis_server_seed1 --b1-run runs/b1_anchor_seed1 --profile thesis-server
 ```
 
 `standard-auto-gpu` uses `learner_device: cuda:auto`, `actor_device: cuda:auto`, and `collection_backend: process`. On a 2+ GPU node that means the learner takes one GPU and the process collectors round-robin actor inference across the remaining visible GPUs.
@@ -73,9 +66,7 @@ uv run python python/scripts/thesis_run.py \
 Run the richer final thesis evaluation on an existing run:
 
 ```bash
-uv run python python/scripts/eval.py \
-  --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml \
-  --run-dir runs/<run_dir>
+uv run --extra dev --extra sim python -m weiss_rl.cli eval-final --run-dir runs/<run_dir> --b1-run runs/b1_anchor_seed1
 ```
 
 Play against the finalized focal model from a completed run:
@@ -88,18 +79,10 @@ uv run python python/scripts/play_vs_model.py \
 Try the multideck generalization variant:
 
 ```bash
-uv run python python/scripts/thesis_run.py \
-  --preset standard-multideck \
-  --run-label thesis_multideck_seed1 \
-  --b1-baseline-run-dir runs/b1_anchor_seed1 \
-  --device cuda \
-  --num-envs 4096 \
-  --unroll-length 64 \
-  --runtime-mode train_async_fast \
-  --max-updates 200
+uv run python python/scripts/train.py --stack-config configs/thesis/multideck_exploratory.yaml --run-label thesis_multideck_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1
 ```
 
-`standard-multideck` defaults its companion eval stack to `structured_acceptance_standard_multideck.yaml`, not `standard-thesis-eval`, so the wrapper keeps the multideck surface aligned unless you override it explicitly.
+Keep multideck artifacts labeled as exploratory/generalization results.
 
 ## Thesis ablations
 
@@ -118,17 +101,16 @@ These are the most defensible next ablations around the current best recipe.
    - introduces actor-level deck diversity.
    - answers whether the standard recipe is over-specializing to a single deck and whether diversity helps robustness enough to justify any throughput loss.
 
-Suggested wrapper invocations:
+Suggested direct invocations:
 
 ```bash
-uv run python python/scripts/thesis_run.py --preset ablate-no-tactical-bias --run-label ablate_no_tactical_bias_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset ablate-teacher-fade-auto-gpu --run-label ablate_teacher_fade_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset ablate-no-b1-cutoff --run-label ablate_no_b1_cutoff_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset standard-multideck --run-label ablate_multideck_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python python/scripts/train.py --stack-config configs/thesis/ablations/norecurrence_impala.yaml --run-label ablate_norecurrence_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1
+uv run python python/scripts/train.py --stack-config configs/thesis/ablations/ppo_lite.yaml --run-label ablate_ppo_lite_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1
+uv run python python/scripts/train.py --stack-config configs/thesis/multideck_exploratory.yaml --run-label ablate_multideck_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1
 ```
 
 ## What Still Matters
 
 - Run at least `2-3` seeded confirmations on the university server.
-- Use `structured_acceptance_standard_thesis_eval.yaml` for the final reported evaluation bundle.
+- Use `configs/thesis/final_eval.yaml` through `python -m weiss_rl.cli eval-final` for the final reported evaluation bundle.
 - Keep one multideck/generalization run in the final study, even if the main reported frontier stays single-deck, because it makes the thesis story much stronger on robustness.

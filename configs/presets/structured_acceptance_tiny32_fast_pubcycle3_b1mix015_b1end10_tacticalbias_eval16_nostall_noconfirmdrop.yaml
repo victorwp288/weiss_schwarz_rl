@@ -1,6 +1,11 @@
 schema_version: 2
 description: structured_acceptance tiny32 fast tactical-bias WSL frontier with denser periodic eval, no stall-monitor confirmatory re-eval, and a tighter rollback score margin to avoid end-of-run score-drop confirmatory eval
 extends: structured_acceptance_tiny32_fast_pubcycle3_b1mix015_b1end10_tacticalbias_eval16_nostall.yaml
+environment:
+  deck_pool:
+    - preset:main_deck_5hy_yotsuba_v1
+  opponent_deck_pool:
+    - preset:main_deck_5hy_yotsuba_v1
 curriculum:
   checkpoint_guard:
     rollback_score_margin: 0.01

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-from weiss_rl.tensorboard_logger import TensorBoardLogger
+from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger
 
 
 def _load_accumulator(log_dir: Path) -> EventAccumulator:

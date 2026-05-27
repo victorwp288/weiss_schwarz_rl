@@ -1,0 +1,15 @@
+schema_version: 2
+description: "Action-id-constrained rich-bilinear full-conflict probe. This keeps the deployable context/state/candidate interaction but only allows residual movement on the ten legal action ids that appear in the 11 B2/policy0004/learned conflict edges, reducing broad same-family churn before sentinel."
+extends: main_league_champion_hardneg_a075_context_richbilinear_fullconflict_topother_adapteronly_probe.yaml
+model:
+  opponent_context_candidate_residual_action_ids:
+    - 104
+    - 113
+    - 123
+    - 124
+    - 472
+    - 480
+    - 483
+    - 485
+    - 494
+    - 495

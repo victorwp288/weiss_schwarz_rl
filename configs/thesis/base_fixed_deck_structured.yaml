@@ -1,0 +1,8 @@
+schema_version: 2
+description: "Thesis fixed-deck structured base alias. Focal, B0, B1, and B2 use preset:main_deck_5hy_yotsuba_v1."
+extends: ../presets/typed_thesis_locked.yaml
+environment:
+  deck_pool:
+    - preset:main_deck_5hy_yotsuba_v1
+  opponent_deck_pool:
+    - preset:main_deck_5hy_yotsuba_v1

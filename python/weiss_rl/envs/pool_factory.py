@@ -17,7 +17,7 @@ PROFILE_ORDER = ("debug", "balanced", "fast")
 
 @dataclass(frozen=True)
 class _ProfileSettings:
-    entrypoint: str
+    entrypoint: Literal["fast", "inspect"]
     legal_repr: str
     obs_dtype: str
     layout_name: LayoutName
