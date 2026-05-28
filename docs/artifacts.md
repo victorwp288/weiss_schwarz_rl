@@ -4,6 +4,10 @@ Generated training and evaluation outputs belong under `runs/`, which is kept
 out of public source history except for a small placeholder file. Compact,
 release-ready figure exports may live under `thesis_figures_final/` when they
 are useful for reading the thesis workflow without rerunning experiments.
+When a thesis figure set depends on large private or archived runs, the figure
+directory should also include a compact trace file with the reported rows,
+diagnostics, and source artifact paths. For the final May 21 thesis surface, see
+`thesis_figures_final/main_search_20260521/RESULTS_TRACE.json`.
 
 Canonical new run outputs live under `runs/<run_label>/` and include:
 
