@@ -1,0 +1,6 @@
+schema_version: 2
+description: "One-update a075 continuation using the broad grouped128/rawext/b2pair70 paired-outcome dataset with current-state conflict rows masked in training. This tests whether broad noncontradictory paired-swing pressure can repair learned/champion rows without replaying the pair205-style impossible labels. Mechanistic filtered-margin diagnostics must pass before sentinel eval; do not escalate on scalar loss."
+extends: ../hardneg_interp_a050/main_league_champion_hardneg_interp_a050_p1p2_a025_b2pair70_nowarm_continue_probe.yaml
+training:
+  structured_aux:
+    paired_swing_conflict_filter: current_state

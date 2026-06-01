@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from inspect import Parameter, signature
 from typing import Any
 
@@ -22,7 +22,7 @@ def _call_accepts_keyword(callable_obj: Any, keyword: str) -> bool:
 
 def opponent_context_indices_for_model(
     model: Any,
-    opponent_policy_ids: Sequence[object],
+    opponent_policy_ids: Iterable[object],
     *,
     batch_size: int | None = None,
 ) -> np.ndarray:
@@ -44,7 +44,7 @@ def initial_seat_hidden_for_opponents(
     batch_size: int,
     *,
     device: torch.device,
-    opponent_policy_ids: Sequence[object] | None = None,
+    opponent_policy_ids: Iterable[object] | None = None,
     opponent_context_indices: Sequence[int] | np.ndarray | torch.Tensor | None = None,
 ) -> torch.Tensor:
     initial_hidden = model.initial_seat_hidden

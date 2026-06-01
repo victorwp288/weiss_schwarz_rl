@@ -86,26 +86,21 @@ Keep multideck artifacts labeled as exploratory/generalization results.
 
 ## Thesis ablations
 
-These are the most defensible next ablations around the current best recipe.
+These are the canonical small ablation surfaces around the main thesis recipe.
+They use the lower-level compatibility training script because the package CLI
+intentionally keeps the B1/main workflow narrow.
 
-1. `ablate-no-tactical-bias`
-   - removes the tactical public-bias shaping while keeping the rest of the curriculum close.
-   - answers whether the tactical bias is genuinely responsible for the stronger B1/B2 learning curve.
-2. `ablate-teacher-fade`
-   - keeps the current guided recipe early, then fades the public teacher loss, heuristic actor fraction, and tactical learner-side public bias later in training.
-   - answers whether persistent heuristic guidance is helping asymptotically or holding the policy too close to the teacher.
-3. `ablate-no-b1-cutoff`
-   - keeps persistent B1 exposure instead of annealing it away after update 10.
-   - answers whether the early-B1 curriculum matters more than persistent baseline pressure.
-4. `standard-multideck`
-   - introduces actor-level deck diversity.
-   - answers whether the standard recipe is over-specializing to a single deck and whether diversity helps robustness enough to justify any throughput loss.
+- `configs/thesis/ablations/no_gru.yaml`: no recurrent core.
+- `configs/thesis/ablations/ppo_lite.yaml`: PPO-lite learner route.
+- `configs/thesis/ablations/terminal_only_reward.yaml`: terminal-only reward variant.
+- `configs/thesis/multideck_exploratory.yaml`: exploratory multideck generalization lane.
 
 Suggested direct invocations:
 
 ```bash
-uv run python python/scripts/train.py --stack-config configs/thesis/ablations/norecurrence_impala.yaml --run-label ablate_norecurrence_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1
+uv run python python/scripts/train.py --stack-config configs/thesis/ablations/no_gru.yaml --run-label ablate_no_gru_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1
 uv run python python/scripts/train.py --stack-config configs/thesis/ablations/ppo_lite.yaml --run-label ablate_ppo_lite_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1
+uv run python python/scripts/train.py --stack-config configs/thesis/ablations/terminal_only_reward.yaml --run-label ablate_terminal_only_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1
 uv run python python/scripts/train.py --stack-config configs/thesis/multideck_exploratory.yaml --run-label ablate_multideck_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1
 ```
 

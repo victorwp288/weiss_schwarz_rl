@@ -429,9 +429,9 @@ def configured_row_deficit_policy_weights(*, league_config: Any | None) -> tuple
     sampling_cfg = getattr(league_config, "sampling", league_config)
     raw_weights = getattr(sampling_cfg, "row_deficit_policy_weights", ())
     if isinstance(raw_weights, Mapping):
-        items = raw_weights.items()
+        items = tuple(raw_weights.items())
     else:
-        items = raw_weights
+        items = tuple(raw_weights)
     parsed: dict[str, float] = {}
     for raw_policy_id, raw_weight in items:
         policy_id = str(raw_policy_id).strip()

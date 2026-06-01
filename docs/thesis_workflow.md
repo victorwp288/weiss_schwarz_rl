@@ -42,17 +42,19 @@ Main league smoke:
 uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label main_smoke --b1-run runs/b1_smoke --profile smoke
 ```
 
-When using the locked thesis B1 artifact, `train-main --b1-run` resolves the
-best-confirmed `selected_candidate` alias automatically and initializes from
-that checkpoint. It does not use chronological `latest` as a substitute for
-best-confirmed selection.
+`train-main --b1-run` resolves the canonical `b1_noleague_baseline` alias and
+initializes from that checkpoint. It does not use chronological `latest` as a
+substitute for an explicit B1 baseline alias.
 
-Locked B1 seed smoke:
+Locked selected-seed smoke:
 
 ```powershell
-uv run --extra dev --extra sim python -m weiss_rl.cli train-main `
-  --run-label main_from_locked_b1_smoke `
-  --b1-run runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01 `
+uv run --extra dev --extra sim python -m weiss_rl.cli train-main-guided-bootstrap `
+  --run-label main_from_locked_seed_smoke `
+  --init-from-run-dir runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01 `
+  --init-policy-id selected_candidate `
+  --seed-run runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01 `
+  --selected-seed-champion `
   --profile smoke
 ```
 
@@ -62,15 +64,12 @@ Main league thesis launch:
 uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label main_thesis_seed1 --b1-run runs/b1_thesis_seed1 --profile thesis-local
 ```
 
-The current main league stack is
-`configs/thesis/main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml`.
-It uses the factorized selected-B1 model surface, imports the explicit B1
-baseline anchor, and filters seeded snapshot imports to pinned seed snapshots
-so a locked selected seed does not accidentally drag an entire bootstrap lineage
-into the new league pool. Its promotion/eval anchor set includes B0, B1, B2,
-B3, and B4; the B1 anchor remains resident through reserved B1 exposure; and
-actor checkpoint reloads are short enough that a selected continuation is not
-hidden behind stale actor weights during segmented diagnostics.
+The public main league stack is `configs/thesis/main_league.yaml`. It uses the
+same packed medium64 model surface as B1, imports the explicit B1 baseline
+anchor, and keeps the fixed-deck thesis policy visible. Guided selected-seed
+continuations remain available through `train-main-guided-bootstrap` and the
+guarded bootstrap controller, where the factorized selected-B1 contract is
+explicit.
 
 Guarded selected main-league segment:
 
@@ -142,6 +141,10 @@ Smoke eval:
 uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/main_smoke --b1-run runs/b1_smoke
 ```
 
+Smoke eval uses the packed `main_league.yaml` contract. Final eval uses the
+selected factorized `final_eval.yaml` contract and should be paired with a
+compatible selected-main run.
+
 Thesis final eval:
 
 ```powershell
@@ -192,14 +195,14 @@ Reward-component probe:
 
 ```powershell
 uv run --extra dev python python/scripts/reward_component_probe.py `
-  --stack-config configs/thesis/ablations/full_shaping_reward.yaml `
+  --stack-config configs/thesis/b1_noleague.yaml `
   --num-envs 64 `
   --steps 256 `
-  --output-json runs/diagnostics/reward_components/full_shaping_reward.json
+  --output-json runs/diagnostics/reward_components/b1_noleague.json
 ```
 
-Use this before launching reward-shaping runs. It uses the simulator debug
-output path to report the fixed reward components
+Use this before launching or comparing B1 reward variants. It uses the simulator
+debug output path to report the fixed reward components
 `terminal, damage, level, board, no_progress`; the high-throughput training path
 only carries scalar rewards.
 
@@ -280,7 +283,7 @@ Locked B1 NoLeague seed:
 - source policy id: `policy_000003`
 - update: `15`
 - weights hash: `66767c1e70c70d1706c058bfd38a7b20cb902c9740d96b6fb1ba664a2b65a685`
-- report: `docs/b1_learning_rebuild_report_20260517.md`
+- report: `docs/archive/reports/202605/b1_learning_rebuild_report_20260517.md`
 
 Selected main fixed-deck model:
 
@@ -289,7 +292,7 @@ Selected main fixed-deck model:
 - source policy id: `main_interp_repair_a015`
 - update: `5`
 - weights hash: `1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26`
-- report: `docs/main_league_rebuild_report_20260518.md`
+- report: `docs/archive/reports/202605/main_league_rebuild_report_20260518.md`
 
 Targeted confirm256 evidence for the selected main source checkpoint:
 

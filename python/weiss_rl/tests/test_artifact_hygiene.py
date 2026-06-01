@@ -112,6 +112,20 @@ def test_scan_tracked_repo_tree_skips_out_of_scope_doc_assets_but_scans_tracked_
     assert "docs/logo.png" not in finding_paths
 
 
+def test_scan_tracked_repo_tree_skips_missing_tracked_paths_in_dirty_worktree(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    tracked_path = tmp_path / "bundles" / "catalog.json"
+    tracked_path.parent.mkdir()
+    tracked_path.write_text(json.dumps({"series": "Weiss Schwarz"}) + "\n", encoding="utf-8")
+    subprocess.run(["git", "add", "bundles/catalog.json"], cwd=tmp_path, check=True, capture_output=True)
+    tracked_path.unlink()
+
+    findings, stats = scan_tracked_repo_tree(tmp_path)
+
+    assert findings == ()
+    assert stats.file_count == 0
+
+
 def test_artifact_scan_entrypoint_returns_nonzero_on_findings(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
     (tmp_path / "README.md").write_text("scratch repo\n", encoding="utf-8")

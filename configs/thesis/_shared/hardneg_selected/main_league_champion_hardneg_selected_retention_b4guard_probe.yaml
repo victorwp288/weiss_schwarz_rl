@@ -1,0 +1,16 @@
+schema_version: 2
+description: "Segmented retention-only continuation from the selected a015 frontier. Keeps champion and hard-negative pressure active, but raises fixed public-anchor exposure so a stricter selected-a015 reference gate can require B4/control preservation while testing whether longer online play beats the current champion panel."
+extends: ../hardneg_retention/main_league_champion_hardneg_multiobjective_retention_probe.yaml
+league:
+  sampling:
+    noleague_baseline_reserved_envs_per_actor: 4
+    noleague_baseline_mix_fraction: 0.32
+    noleague_baseline_mix_end_updates: -1
+    heuristic_public_mix_fraction: 0.06
+    heuristic_public_final_mix_fraction: 0.06
+    heuristic_public_variant_mix_fraction: 0.16
+    heuristic_public_variant_final_mix_fraction: 0.16
+    champion_mix_fraction: 0.24
+    hard_negative_mix_fraction: 0.18
+    hard_negative_min_samples: 2
+    hard_negative_max_win_rate: 0.60

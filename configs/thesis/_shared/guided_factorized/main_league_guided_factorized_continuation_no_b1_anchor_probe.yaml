@@ -1,0 +1,34 @@
+schema_version: 2
+description: "Main league probe: continue the successful guided factorized seed policy under league routing while temporarily excluding the weak strict B1 anchor."
+extends: ../guided_teacher/public_teacher_b2exact_margin_multianchor_hold75_playstrong_factorized_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
+experiment:
+  role: ablation_guided
+training:
+  diverse_opponent_actor_count: 999
+  diverse_model_actor_count: 999
+  diverse_opponent_batch_fraction: 1.0
+league:
+  enabled: true
+  promotion:
+    anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl
+  sampling:
+    heuristic_public_mix_fraction: 0.2
+    heuristic_public_variant_mix_fraction: 0.0
+    noleague_baseline_mix_fraction: 0.0
+    noleague_baseline_mix_end_updates: -1
+    warmup_snapshot_mix_fraction: 0.15
+evaluation:
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available:
+        - B2 HeuristicPublic
+        - B3 HeuristicPublicAggro
+        - B4 HeuristicPublicControl

@@ -193,6 +193,7 @@ def run_minimal_training(
 ) -> dict[str, float]:
     _configure_torch_threads = hooks.configure_torch_threads
     _spec_dimensions = hooks.spec_dimensions
+    _experiment_role = hooks.experiment_role
     _training_paths = hooks.training_paths
     _validate_algorithm_model_contract = hooks.validate_algorithm_model_contract
     build_policy_value_model = hooks.build_policy_value_model
@@ -219,6 +220,7 @@ def run_minimal_training(
     _publish_checkpoint_aliases = hooks.publish_checkpoint_aliases
     _maybe_log_structured_mainmove_guard = hooks.maybe_log_structured_mainmove_guard
     _persist_snapshot_registry_entry = hooks.persist_snapshot_registry_entry
+    _is_noleague_baseline_role = hooks.is_noleague_baseline_role
     _run_snapshot_promotion_gate = hooks.run_snapshot_promotion_gate
     _should_run_periodic_dev_eval = hooks.should_run_periodic_dev_eval
     _run_periodic_dev_eval = hooks.run_periodic_dev_eval
@@ -549,6 +551,19 @@ def run_minimal_training(
                         policy_version=int(learner.get_policy_version()),
                         model=learner.model,
                     )
+                    if _is_noleague_baseline_role(_experiment_role(stack)):
+                        _ensure_noleague_baseline_anchor(
+                            stack=stack,
+                            training_paths=training_paths,
+                            run_dir=artifacts.run_dir,
+                            learner=learner,
+                            device=device,
+                            config_hash256=config_hash256,
+                            spec_hash256=spec_hash256,
+                            permit_current_run_alias=True,
+                            source_checkpoint_path=ckpt_path,
+                            update=int(learner.update_count),
+                        )
                     runtime.refresh_opponent_pool()
                     promotion_passed = _run_snapshot_promotion_gate(
                         stack=stack,

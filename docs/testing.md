@@ -6,15 +6,18 @@ The main local validation entrypoint is:
 uv run python python/scripts/verify_repo.py
 ```
 
-It runs placeholder checks, ruff, format check, mypy on selected scripts, vulture, the full test suite, and wrapper dry-runs.
+It runs placeholder checks, ruff, format check, mypy on selected scripts and package CLI workflow modules, vulture, the full test suite, and package CLI dry-runs for train/eval/figure commands.
 
-`verify_repo.py` does not currently enforce full-package mypy. The current full-package probe is:
+`verify_repo.py` does not currently enforce full-package mypy. The broad full-package probe is:
 
 ```powershell
-uv run mypy python/weiss_rl --show-error-codes --no-error-summary
+uv run --extra dev --extra sim python -m mypy python
 ```
 
-As of the 2026-05-11 refactor log and the latest local baseline, this command is clean. Treat selected-script mypy as the CI-enforced gate and full-package mypy as a recommended local hardening check before broad refactor PRs.
+As of the 2026-05-28 refactor pass, this broad command is not clean: it
+exposes legacy typing debt across scripts, experiments, tests, and some helper
+modules. Treat selected-script mypy from `verify_repo.py` as the current
+configured gate, and use focused mypy on edited files before broad refactor PRs.
 
 ## Focused Commands
 
@@ -22,8 +25,8 @@ As of the 2026-05-11 refactor log and the latest local baseline, this command is
 uv run python -m pytest -q python/weiss_rl/tests
 uv run python -m ruff check python tests examples python/scripts
 uv run python -m ruff format --check python tests examples python/scripts
-uv run python -m mypy python/scripts/thesis_run.py python/scripts/eval.py python/scripts/play_vs_model.py
-uv run mypy python/weiss_rl
+uv run python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows python/scripts/thesis_run.py python/scripts/eval.py python/scripts/play_vs_model.py
+uv run --extra dev --extra sim python -m mypy <edited package files>
 ```
 
 ## Simulator Contract
@@ -48,10 +51,29 @@ Do not use `runs/toy_public_demo_ci` as a paper-readiness fixture.
 
 ## Smoke And Determinism Probes
 
-Scaffold-only training smoke:
+Canonical simulator-backed smoke:
 
 ```powershell
-uv run python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_smoke_local
+uv run --extra dev --extra sim python -m weiss_rl.cli train-b1 --run-label b1_smoke --profile smoke
+uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label main_smoke --b1-run runs/b1_smoke --profile smoke
+uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/main_smoke --b1-run runs/b1_smoke
+uv run --extra dev python -m weiss_rl.cli figures --run-dir runs/main_smoke --format png
+```
+
+GNU Make wrappers, when available:
+
+```powershell
+make train-b1-smoke
+make train-main-smoke
+make eval-smoke
+make figures-smoke
+make thesis-smoke
+```
+
+Scaffold-only manifest smoke:
+
+```powershell
+uv run python python/scripts/train.py --stack-config configs/stack_smoke.yaml --run-label refactor_scaffold_local
 ```
 
 Evaluation contract smoke without rollouts:

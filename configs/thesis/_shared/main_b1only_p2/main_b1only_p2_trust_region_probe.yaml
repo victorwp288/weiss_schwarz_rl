@@ -1,0 +1,35 @@
+schema_version: 2
+description: "Main league probe: continue from the confirmed p2 frontier against the locked B1 baseline with lower update pressure and a frozen p2 KL anchor. This tests whether the B1 plateau is caused by unconstrained post-p2 drift rather than lack of B1 exposure."
+extends: ../../main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml
+league:
+  sampling:
+    champion_mix_fraction: 0.0
+    hard_negative_mix_fraction: 0.0
+    heuristic_public_mix_fraction: 0.0
+    heuristic_public_final_mix_fraction: 0.0
+    heuristic_public_variant_mix_fraction: 0.0
+    heuristic_public_variant_final_mix_fraction: 0.0
+    mirror_mix_fraction: 0.0
+    mirror_final_mix_fraction: 0.0
+    noleague_baseline_reserved_envs_per_actor: 8
+    noleague_baseline_mix_fraction: 1.0
+    noleague_baseline_mix_end_updates: -1
+training:
+  optimizer:
+    learning_rate: 0.00005
+  exploration:
+    entropy_coef: 0.003
+    actor_sampling_temperature: 1.0
+  fixed_model_opponent_action_selection: sample
+  structured_aux:
+    teacher_supervised_start_updates: 0
+    teacher_supervised_end_updates: 0
+    teacher_supervised_final_scale: 0.0
+    teacher_public_heuristic_coef: 0.0
+    teacher_public_heuristic_end_updates: 0
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_heuristic_profiles_end_updates: 0
+    policy_anchor_coef: 0.15
+    policy_anchor_top_action_coef: 0.0
+    policy_anchor_temperature: 0.75
+    trajectory_bc_every_updates: 0

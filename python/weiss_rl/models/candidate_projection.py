@@ -55,7 +55,7 @@ def project_candidate_sections(
             actor_projected = actor_projected + linear.weight.index_select(1, constant_columns).sum(dim=1).to(
                 dtype=actor_projected.dtype
             )
-        for module in candidate_projection[1:]:
+        for module in list(candidate_projection.children())[1:]:
             actor_projected = module(actor_projected)
         return actor_projected
 
@@ -90,7 +90,7 @@ def project_candidate_sections(
             dtype=torch.long,
         )
         projected = projected + linear.weight.index_select(1, constant_columns).sum(dim=1).to(dtype=projected.dtype)
-    for module in candidate_projection[1:]:
+    for module in list(candidate_projection.children())[1:]:
         projected = module(projected)
     return projected
 
@@ -124,7 +124,7 @@ def score_candidate_group(
     state_width = row_states.shape[1]
     joint_hidden = F.linear(row_states, joint_linear.weight[:, :state_width], joint_linear.bias)
     joint_hidden = joint_hidden + F.linear(candidate_repr, joint_linear.weight[:, state_width:], None)
-    for module in joint_scorer[1:]:
+    for module in list(joint_scorer.children())[1:]:
         joint_hidden = module(joint_hidden)
     return joint_hidden.squeeze(-1).to(dtype=row_states.dtype)
 

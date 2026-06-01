@@ -4,8 +4,8 @@ This repository is a behavior-sensitive thesis RL pipeline for Weiss Schwarz. Th
 
 ## Top-Level Flow
 
-1. A stack config is loaded from `configs/` through `weiss_rl.config`.
-2. `python/scripts/train.py` creates a run manifest, verifies simulator/config hashes, builds the model and learner, and drives `QueueRuntime`.
+1. The package CLI (`python -m weiss_rl.cli`) selects a standard thesis workflow and stack config.
+2. The compatibility training entrypoint creates a run manifest, verifies simulator/config hashes, builds the model and learner, and drives `QueueRuntime`.
 3. `QueueRuntime` collects decision-boundary rollouts from simulator-backed environments and packages learner batches.
 4. Learners update policy/value models and write checkpoints, metrics, snapshots, and TensorBoard logs.
 5. `python/scripts/eval.py` resolves deterministic policy sets, runs pinned final evaluation, writes summaries, and optionally drives metagame/readiness reporting.
@@ -46,7 +46,8 @@ This repository is a behavior-sensitive thesis RL pipeline for Weiss Schwarz. Th
 - `weiss_rl.eval`: deterministic evaluation, policy resolution, payoff folding, uncertainty, diagnostics, and paper readiness.
 - `weiss_rl.league`: snapshot registry, PFSP sampling, promotion gates, and opponent outcomes.
 - `weiss_rl.training`: reusable training orchestration helpers extracted from public scripts, including CLI parsing, startup checks, paths, input validation, checkpoint/snapshot helpers, guidance schedules, environment builders, and minimal-batch utilities.
-- `weiss_rl.training.manifest_layout`: training manifest actor-device layout helpers used by `python/scripts/train.py`.
+- `weiss_rl.training.manifest_layout`: training manifest actor-device layout helpers used by the package and compatibility training entrypoints.
+- `weiss_rl.workflows`: package-CLI parser construction, workflow profiles, small command router, training/eval/bootstrap workflow handlers, dry-run plans, snapshot resolution, and deterministic command builders for the standard thesis train/eval/figure/guard surfaces.
 - `python/scripts`: path-based public CLI entrypoints. These paths are compatibility surfaces.
 
 ## Behavior-Sensitive Boundaries

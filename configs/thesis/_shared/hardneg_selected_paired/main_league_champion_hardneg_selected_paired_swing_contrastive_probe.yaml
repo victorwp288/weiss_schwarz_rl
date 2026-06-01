@@ -1,0 +1,29 @@
+schema_version: 2
+description: "Selected-a015 conservative online continuation with paired-swing contrastive replay. Uses the existing loss-state override dataset as action pairs: teacher_action is the repair/preserve action, recorded actions are the paired losing actions. This is a u1/u2 structural probe; continue only if paired confirm shows fixed >= 0 and learned > 0 versus selected-a015."
+extends: ../hardneg_selected/main_league_champion_hardneg_selected_conservative_online_guard_probe.yaml
+training:
+  structured_aux:
+    trajectory_bc_every_updates: 0
+    trajectory_bc_dataset_path: ""
+    paired_swing_dataset_path: runs/trajectory_bc_grouped_b1hn_b1b3_b2loss_plus_fixedwins_20260519/trajectory_bc_grouped_b1hn_b1b3_b2loss_plus_fixedwins.npz
+    paired_swing_every_updates: 1
+    paired_swing_aux_updates: 1
+    paired_swing_batch_episodes: 16
+    paired_swing_margin: 0.25
+    paired_swing_coef: 0.05
+    paired_swing_positive_action_source: teacher_action
+    paired_swing_negative_action_source: actions
+    paired_swing_focus_groups:
+      - name: fixed_b1b2b3_lossstate_contrast
+        source_labels:
+          - b1_lossstate_confirm128_policyb_topaction
+          - b2_lossstate_grouped_u2_topaction
+          - b3_lossstate_confirm128_policyb_topaction
+        fraction: 0.18
+      - name: hard_negative_lossstate_contrast
+        source_labels:
+          - hn_lossstate_policy000002_topaction
+          - hn_lossstate_checkpoint000025_topaction
+          - hn_lossstate_bestresponse_topaction
+          - hn_lossstate_mainleague_topaction
+        fraction: 0.06

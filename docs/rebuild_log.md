@@ -17337,3 +17337,981 @@ Copy-Item -Path '..\Kandidatspeciale\Figures\new results\*' -Destination thesis_
 
 - Force-add the curated artifacts, commit them on `final/progress`, push the
   private backup, then create a separate polished `main` tree.
+
+## 2026-05-28 - Public Smoke Workflow Repaired During Refactor
+
+### What Changed
+
+- Repaired the public B1-to-main smoke workflow while preserving strict
+  checkpoint/config contracts.
+- `train-main` now uses the packed `configs/thesis/main_league.yaml` public
+  path that is compatible with `train-b1`.
+- Selected/factorized guided continuations remain explicit guided-bootstrap
+  workflows.
+- `smoke-eval` now uses the packed smoke contract; `eval-final` keeps the
+  selected factorized final-eval contract.
+- Baseline no-league training now publishes the explicit
+  `b1_noleague_baseline` alias during checkpointing.
+- Top-level dated progress notes were archived under
+  `docs/archive/top_level_notes/`.
+
+### Commands Run
+
+```powershell
+uv sync --extra dev --extra sim
+uv run --extra dev --extra sim python python/scripts/verify_repo.py
+uv run --extra dev --extra sim python -m pytest -q
+uv run --extra dev --extra sim python -m ruff check .
+uv run --extra dev --extra sim python -m ruff format --check .
+uv run --extra dev --extra sim python -m mypy python
+uv run --extra dev --extra sim python -m weiss_rl.cli train-b1 --run-label refactor_b1_smoke_alias2_20260528 --profile smoke
+uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label refactor_main_smoke_plain_20260528 --b1-run runs/refactor_b1_smoke_alias2_20260528 --profile smoke
+uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/refactor_main_smoke_plain_20260528 --b1-run runs/refactor_b1_smoke_alias2_20260528
+uv run --extra dev python -m weiss_rl.cli figures --run-dir runs/refactor_main_smoke_plain_20260528 --format png
+make verify
+make artifact-hygiene
+```
+
+### Results
+
+- `uv sync`, verifier, full pytest, Ruff check, Ruff format check, B1 smoke,
+  main smoke, smoke eval, and figure export passed.
+- Full pytest result: 1890 passed, 2 skipped, 14 warnings.
+- Verifier passed and ran its curated placeholder, Ruff, format, scoped mypy,
+  vulture, pytest, and wrapper dry-run checks.
+- `python -m mypy python` failed before type checking because
+  `python/scripts/eval.py` is discovered as both `eval` and `scripts.eval`.
+- `make verify` and `make artifact-hygiene` did not run because `make` is not
+  installed in this Windows shell.
+
+### Tests Added
+
+- CLI tests now pin the packed public `train-main` config selection and smoke
+  eval stack selection.
+- Config-loader tests now cover the public no-GRU thesis ablation alias.
+
+### Failures Found
+
+- Pytest default discovery could collect incomplete local scratch bundles under
+  `temp/`.
+- The previous `train-main` public wrapper mixed a packed B1 smoke checkpoint
+  with a factorized selected-main config.
+- `smoke-eval` had the same packed/factorized mismatch when loading B1.
+- B1 smoke training did not always publish the explicit no-league alias needed
+  by the strict main import path.
+
+### Fixes Applied
+
+- Added pytest discovery guards in `pyproject.toml`.
+- Repaired public smoke train/eval wrapper config selection without weakening
+  model-contract validation.
+- Added explicit B1 alias publication in baseline_noleague training.
+- Updated README/docs and `docs/refactor_log.md`.
+
+### Behavior Changes
+
+- No simulator contract, legal-action, reward, rollout, learner, evaluation
+  aggregation, artifact schema, seed pairing, or final selected-eval semantics
+  were intentionally changed.
+- The public package CLI smoke workflow is now aligned with the public packed
+  B1/main route.
+
+### Performance Numbers
+
+- Smoke validation only; no throughput benchmark or thesis-grade training was
+  run.
+
+### Remaining Risks
+
+- Top-level `python -m mypy python` still needs a duplicate-module fix.
+- The archive moves were done with filesystem moves because a pre-existing
+  Git index lock blocked `git mv`; staging should be reviewed once the index
+  lock is gone.
+
+### Next Action
+
+- Fix the top-level mypy invocation/package layout.
+- Continue archiving dated docs/configs after reference audits, keeping
+  historical thesis artifacts untouched.
+
+## 2026-05-28 - Docs Root Calming and Narrow Type Hygiene
+
+### What Changed
+
+- Moved dated May 2026 report/lock/inventory docs from `docs/` into
+  `docs/archive/reports/202605/`.
+- Updated the archive README and live thesis workflow references for the moved
+  report paths.
+- Applied focused production type-narrowing fixes in model, learner, runtime,
+  checkpoint, human-play, and policy-alignment helpers.
+
+### Commands Run
+
+```powershell
+uv run --extra dev --extra sim python -m ruff check <edited type-cleanup files>
+uv run --extra dev --extra sim python -m mypy <edited type-cleanup files> --show-error-codes --no-error-summary
+uv run --extra dev --extra sim python -m ruff format --check <edited type-cleanup files>
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_policy_alignment.py python/weiss_rl/tests/test_model_candidate_projection.py python/weiss_rl/tests/test_model_typed_encoder.py python/weiss_rl/tests/test_model_opponent_context.py python/weiss_rl/tests/test_training_checkpoint_writers.py python/weiss_rl/tests/test_impala_learner.py -k "forward_time_major or opponent_context or checkpoint_payload or restore_minimal or policy_alignment or candidate_projection or typed_encoder"
+rg <dated-report references> <live docs>
+```
+
+### Results
+
+- Focused Ruff passed.
+- Focused mypy on the edited files passed.
+- Focused format check passed.
+- Focused pytest passed: 30 passed, 63 deselected.
+- Live-doc reference search found no stale references to the moved dated report
+  paths.
+
+### Tests Added
+
+- No new tests; existing focused tests covered the type-hygiene edits.
+
+### Failures Found
+
+- `python -m mypy python` remains broader than a quick cleanup: after discovery
+  workarounds, it exposes legacy typing debt across experiments, tests, and
+  production helpers.
+- The older docs link-checker command is not configured in this checkout.
+
+### Fixes Applied
+
+- Archived dated report docs rather than leaving them beside the canonical docs.
+- Kept type cleanup small and behavior-preserving.
+
+### Behavior Changes
+
+- No intended RL semantics changes.
+- The learner fallback forward paths now fail clearly if required hidden state is
+  absent.
+
+### Performance Numbers
+
+- None; this was not a runtime benchmark pass.
+
+### Remaining Risks
+
+- Broad mypy remains future work.
+- Archived docs preserve some historical path text from the time they were
+  written.
+
+### Next Action
+
+- Continue reducing live docs/config clutter and keep validating public smoke
+  workflows after each behavior-adjacent cleanup.
+
+## 2026-05-28 - Dated Preset Config Archive
+
+### What Changed
+
+- Moved 26 unreferenced May 2026 dated/probe preset configs from
+  `configs/presets/` into `configs/archive/presets_20260506/`.
+- Added `configs/archive/README.md` and updated `configs/README.md` so the
+  canonical config surface is easier to distinguish from historical probes.
+- Rewrote archived `extends:` paths so the moved configs still load from their
+  archive location.
+- Updated `python/scripts/heuristic_sanity_scan.py` to use the archived copy of
+  the same dated eval config it previously referenced.
+
+### Commands Run
+
+```powershell
+rg <moved dated preset names> README.md docs python configs pyproject.toml Makefile
+uv run --extra dev --extra sim python -c "<load every configs/archive/presets_20260506/*.yaml>"
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_baselines_and_ablations python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_b1_dry_run_uses_thesis_config python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_requires_b1_and_uses_main_config
+uv run --extra dev --extra sim python -m ruff check python/scripts/heuristic_sanity_scan.py
+```
+
+### Results
+
+- Reference audit passed: remaining old preset-path mentions are historical
+  text inside archived notes only.
+- Archived config load audit passed: loaded 26 archived configs.
+- Focused CLI/config pytest passed: 3 passed.
+- Ruff passed for the touched script.
+
+### Tests Added
+
+- None; existing config and CLI workflow tests covered the public surfaces.
+
+### Failures Found
+
+- The heuristic sanity scan script was the only live code reference to one of
+  the moved dated preset configs.
+
+### Fixes Applied
+
+- Pointed the script at
+  `configs/archive/presets_20260506/eval_gpu_exp031_fast_20260506.yaml` to
+  preserve the diagnostic's historical behavior.
+
+### Behavior Changes
+
+- None intended. Historical configs remain loadable from the archive, and no
+  simulator, training, evaluation, checkpoint, or artifact semantics changed.
+
+### Performance Numbers
+
+- None; this was a repository-surface cleanup.
+
+### Remaining Risks
+
+- Some dated thesis configs remain outside the archive until they can be
+  audited individually.
+- Archived notes intentionally retain old paths in provenance text.
+
+### Next Action
+
+- Continue simplifying source/package structure in small, behavior-preserving
+  slices with focused tests after each move.
+
+## 2026-05-28 - Live Docs Canonical Surface Cleanup
+
+### What Changed
+
+- Updated live README/configuration/testing/training/architecture/standard-recipe
+  docs to present `python -m weiss_rl.cli` and `configs/thesis/` as the
+  canonical thesis surface.
+- Reworded compatibility preset descriptions so old
+  `structured_acceptance_standard*` presets are no longer described as the
+  public canonical recipe.
+- Corrected testing docs: broad `python -m mypy python` is known debt in this
+  checkout, not a currently passing top-level gate.
+- Archived the stale May 11 refactor completion audit under
+  `docs/archive/reports/202605/refactor_completion_audit_20260511.md`.
+
+### Commands Run
+
+```powershell
+rg <stale canonical/mypy/audit phrases> README.md docs configs python/scripts/README.md
+rg refactor_completion_audit.md <live docs>
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_baselines_and_ablations
+```
+
+### Results
+
+- Stale phrase scan passed; remaining old mypy text is historical provenance in
+  `docs/refactor_log.md`.
+- Live-doc audit-link scan passed.
+- Focused CLI/config pytest passed: 20 passed.
+
+### Tests Added
+
+- None.
+
+### Failures Found
+
+- README and config/testing docs still contained pre-cleanup canonical preset
+  and full-package mypy wording.
+- The docs hub still linked to an old completion audit that said the refactor was
+  complete.
+
+### Fixes Applied
+
+- Updated live docs to match the current canonical package CLI and thesis config
+  surface.
+- Moved the stale completion audit into the dated archive.
+
+### Behavior Changes
+
+- None. Documentation-only change plus archive move.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `python/scripts/README.md` remains a lower-level compatibility guide and
+  should be reviewed in a separate pass.
+- Historical logs preserve old command/output wording by design.
+
+### Next Action
+
+- Continue tightening the script/doc boundary and then return to package-source
+  cleanup where compatibility tests make the behavior surface clear.
+
+## 2026-05-28 - Makefile and Script Entry-Point Surface Cleanup
+
+### What Changed
+
+- Added Make targets for the package-CLI smoke route:
+  `train-b1-smoke`, `train-main-smoke`, `eval-smoke`, `figures-smoke`, and
+  `thesis-smoke`.
+- Rewrote `python/scripts/README.md` as a concise compatibility guide instead
+  of a first-choice thesis workflow guide.
+- Updated README/testing docs to point at the new Make smoke wrappers.
+- Added a Makefile characterization test that ensures the new smoke targets use
+  `python -m weiss_rl.cli`.
+
+### Commands Run
+
+```powershell
+rg train-inline-smoke README.md docs python/scripts configs Makefile
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_cli_workflow.py
+uv run --extra dev --extra sim python -m ruff check python/weiss_rl/tests/test_makefile_figures.py
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/tests/test_makefile_figures.py
+```
+
+### Results
+
+- Live docs no longer route users through `make train-inline-smoke`.
+- Focused pytest passed after formatting: 20 passed, 2 skipped.
+- Ruff check passed.
+- Ruff format check passed after formatting the edited test file.
+
+### Tests Added
+
+- `test_makefile_thesis_smoke_targets_use_package_cli`.
+
+### Failures Found
+
+- `ruff format --check` initially reported the edited Makefile test needed
+  formatting.
+
+### Fixes Applied
+
+- Formatted the edited test file with Ruff.
+
+### Behavior Changes
+
+- None to RL semantics. Make now offers canonical package-CLI smoke wrappers
+  while the old lower-level inline target remains available.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `make` itself is not installed in this Windows shell, so live Make execution
+  remains unverified here.
+- Direct script wrappers are still present for compatibility; future cleanup
+  should keep moving new-user docs toward the package CLI.
+
+### Next Action
+
+- Audit remaining direct `python/scripts/train.py` and `thesis_run.py`
+  references in live docs and keep only the ones that are explicitly lower-level
+  compatibility, demo, or ablation routes.
+
+## 2026-05-28 - Direct Script Reference Triage
+
+### What Changed
+
+- Reworded live docs that still described `python/scripts/train.py` as owning
+  public CLI behavior.
+- Updated checkpoint, league, evaluation, and architecture docs to describe
+  package helpers plus explicit compatibility-hook wiring.
+- Updated `configs/README.md` so direct `train.py --override` examples are
+  clearly lower-level and use a thesis config rather than a legacy typed preset.
+
+### Commands Run
+
+```powershell
+rg python/scripts/train.py README.md docs configs python/scripts/README.md Makefile python/weiss_rl/tests
+rg <stale train.py ownership phrases> README.md docs configs python/scripts/README.md
+```
+
+### Results
+
+- Remaining live direct-script references are scaffold, public-demo,
+  lower-level override, Make compatibility target, tests, or historical logs.
+- Stale ownership phrase scan passed.
+
+### Tests Added
+
+- None.
+
+### Failures Found
+
+- Some live architecture docs still implied `python/scripts/train.py` owned the
+  public CLI path instead of compatibility wiring.
+
+### Fixes Applied
+
+- Reworded those docs to keep package helpers and compatibility hooks distinct.
+
+### Behavior Changes
+
+- None. Documentation-only cleanup.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- Direct script examples remain intentionally for scaffold smoke, public demo,
+  and lower-level debugging.
+- Historical logs preserve old script-first commands.
+
+### Next Action
+
+- Return to source cleanup where safe, starting with compatibility-heavy modules
+  that have focused tests and clear public wrapper contracts.
+
+## 2026-05-28 - Workflow Helper Public Names
+
+### What Changed
+
+- Renamed workflow command-builder helpers in `weiss_rl.workflows.thesis` from
+  underscore-prefixed names to explicit public names.
+- Updated `weiss_rl.cli` to import the public workflow helpers.
+- Added `__all__` to the workflow module to make the package CLI workflow API
+  small and auditable.
+
+### Commands Run
+
+```powershell
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py
+uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py
+uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py --show-error-codes --no-error-summary
+```
+
+### Results
+
+- CLI workflow pytest passed: 19 passed.
+- Ruff check passed.
+- Ruff format check passed.
+- Focused mypy passed.
+
+### Tests Added
+
+- None.
+
+### Failures Found
+
+- None.
+
+### Fixes Applied
+
+- Internal naming/API cleanup only.
+
+### Behavior Changes
+
+- None. Generated commands and CLI semantics are covered by existing workflow
+  tests and were preserved.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `weiss_rl.cli` still has a long dispatch function.
+
+### Next Action
+
+- Split or simplify the package CLI dispatch only where existing workflow tests
+  make the generated-command contract clear.
+
+## 2026-05-29 - Package CLI Dispatch Split
+
+### What Changed
+
+- Moved parsed-argument dispatch out of `weiss_rl.cli` and into
+  `weiss_rl.workflows.cli_dispatch`.
+- Kept `weiss_rl.cli` focused on parser construction plus one dispatch call.
+- Preserved package CLI command generation through existing workflow tests.
+
+### Commands Run
+
+```powershell
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py
+uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py
+uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py --show-error-codes --no-error-summary
+```
+
+### Results
+
+- CLI workflow pytest passed: 19 passed.
+- Ruff check passed.
+- Ruff format check passed.
+- Focused mypy passed.
+- Current line counts: `cli.py` 208, `workflows/cli_dispatch.py` 350,
+  `workflows/thesis.py` 544.
+
+### Tests Added
+
+- None.
+
+### Failures Found
+
+- None.
+
+### Fixes Applied
+
+- Source organization cleanup only.
+
+### Behavior Changes
+
+- None. Generated commands and CLI semantics are preserved by focused tests.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `cli_dispatch.py` is now the dispatch owner and can be split further by command
+  family if needed.
+
+### Next Action
+
+- Continue package readability cleanup around workflow/config modules with
+  behavior-characterization tests close by.
+
+## 2026-05-29 - Workflow Snapshot Resolution Split
+
+### What Changed
+
+- Moved package-workflow snapshot checkpoint resolution helpers into
+  `weiss_rl.workflows.snapshots`.
+- Kept command builders and plan writing in `weiss_rl.workflows.thesis`.
+- Updated CLI dispatch imports to use the new snapshot module.
+
+### Commands Run
+
+```powershell
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py
+uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py
+uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py --show-error-codes --no-error-summary
+```
+
+### Results
+
+- First CLI pytest run failed because `_write_plan()` in `thesis.py` still
+  needed `json.dumps` after the extraction. After restoring the import, rerun
+  passed: 19 passed.
+- Ruff check passed after sorting the new imports.
+- Ruff format check passed.
+- Focused mypy passed.
+- Current line counts: `cli.py` 208, `workflows/cli_dispatch.py` 352,
+  `workflows/thesis.py` 442, `workflows/snapshots.py` 111.
+
+### Tests Added
+
+- None.
+
+### Failures Found
+
+- Missing `json` import in `workflows/thesis.py` after moving JSON registry
+  loading out of the module.
+
+### Fixes Applied
+
+- Restored the needed `json` import for workflow plan writing.
+
+### Behavior Changes
+
+- None. Snapshot policy-id resolution and checkpoint path construction were
+  moved without changing semantics.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `workflows/thesis.py` still owns profiles, plan writing, and command builders.
+
+### Next Action
+
+- Continue splitting workflow helpers only where the existing tests give a tight
+  generated-command or resolution contract.
+
+## 2026-05-29 - Workflow Plan Helper Split
+
+### What Changed
+
+- Moved dry-run plan writing and command execution helpers into
+  `weiss_rl.workflows.plans`.
+- Updated CLI dispatch to import `run_or_write_plan` from the new module.
+- Left `weiss_rl.workflows.thesis` focused on profiles and command builders.
+
+### Commands Run
+
+```powershell
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py
+uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py
+uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py --show-error-codes --no-error-summary
+```
+
+### Results
+
+- CLI workflow pytest passed: 19 passed.
+- Ruff check passed.
+- Ruff format check passed.
+- Focused mypy passed.
+- Current line counts: `cli.py` 208, `workflows/cli_dispatch.py` 352,
+  `workflows/thesis.py` 407, `workflows/snapshots.py` 111,
+  `workflows/plans.py` 41.
+
+### Tests Added
+
+- None.
+
+### Failures Found
+
+- None.
+
+### Fixes Applied
+
+- Source organization cleanup only.
+
+### Behavior Changes
+
+- None. Dry-run plan payload shape, command display, subprocess return handling,
+  and generated commands are preserved by focused CLI tests.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `workflows/cli_dispatch.py` remains the largest workflow module.
+
+### Next Action
+
+- Run a broader validation checkpoint for the accumulated workflow changes, then
+  choose the next cleanup surface.
+
+## 2026-05-29 - Workflow Split Focused Checkpoint
+
+### What Changed
+
+- Updated architecture docs to reflect the cleaned `weiss_rl.workflows` package
+  roles: profiles, dispatch, dry-run plans, snapshot resolution, and command
+  builders.
+
+### Commands Run
+
+```powershell
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_script_entrypoint_smokes.py
+```
+
+### Results
+
+- Passed: 35 passed, 2 skipped, 14 warnings.
+
+### Tests Added
+
+- None.
+
+### Failures Found
+
+- None.
+
+### Fixes Applied
+
+- Documentation update only.
+
+### Behavior Changes
+
+- None.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- Warnings are third-party matplotlib/pyparsing deprecations from the
+  script-entrypoint smoke cluster.
+- Full-suite validation has not been rerun after the workflow split series.
+
+### Next Action
+
+- Select the next cleanup surface or run a wider validation checkpoint before
+  touching behavior-sensitive runtime/model code.
+
+## 2026-05-29 - CLI Parser Module Split
+
+### What Changed
+
+- Extracted package CLI parser construction into
+  `weiss_rl.workflows.cli_parser`.
+- Left `weiss_rl.cli` as a small canonical package entrypoint that parses
+  arguments and delegates to workflow dispatch.
+- Updated architecture docs to name parser construction as part of the
+  `weiss_rl.workflows` surface.
+
+### Commands Run
+
+```powershell
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py
+uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/cli_parser.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/cli_parser.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py
+uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/cli_parser.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py --show-error-codes --no-error-summary
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_script_entrypoint_smokes.py
+```
+
+### Results
+
+- Passed: CLI workflow tests, 19 passed.
+- Passed: Ruff check on touched CLI/workflow modules.
+- Passed: Ruff format check, 6 files already formatted.
+- Passed: focused mypy on touched CLI/workflow modules.
+- Passed: adjacent CLI/wrapper smoke sweep, 35 passed, 2 skipped, 14 warnings.
+
+### Tests Added
+
+- None. Existing package CLI workflow tests and script-entrypoint smoke tests
+  cover the parser split.
+
+### Failures Found
+
+- None.
+
+### Fixes Applied
+
+- Source organization cleanup only.
+
+### Behavior Changes
+
+- None. Subcommands, flags, aliases, defaults, help text, dry-run plan handling,
+  and dispatch behavior are preserved.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `weiss_rl.workflows.cli_dispatch` remains the largest workflow module.
+- The adjacent smoke sweep still reports third-party matplotlib/pyparsing
+  deprecation warnings.
+
+### Next Action
+
+- Continue with a larger visible public-surface cleanup slice or run a full
+  validation checkpoint before runtime/model refactors.
+
+## 2026-05-29 - Workflow Dispatch Family Split
+
+### What Changed
+
+- Split the remaining large package workflow dispatch module by command family.
+- Added `weiss_rl.workflows.dispatch_training` for B1/main training workflows.
+- Added `weiss_rl.workflows.dispatch_evaluation` for eval, figures, B2 audit,
+  and guard-run workflows.
+- Added `weiss_rl.workflows.dispatch_bootstrap` for guided-bootstrap controller
+  workflows.
+- Reduced `weiss_rl.workflows.cli_dispatch` to a small router.
+- Updated architecture docs to describe parser, router, handlers, plans,
+  snapshots, and builders as the workflow package roles.
+
+### Commands Run
+
+```powershell
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py
+uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows
+uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows --show-error-codes --no-error-summary
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_script_entrypoint_smokes.py
+```
+
+### Results
+
+- Passed: CLI workflow tests, 19 passed.
+- Passed: Ruff check on `python/weiss_rl/cli.py` and `python/weiss_rl/workflows`.
+- Passed: Ruff format check, 10 files already formatted.
+- Passed: focused mypy on `python/weiss_rl/cli.py` and `python/weiss_rl/workflows`.
+- Passed: adjacent CLI/wrapper smoke sweep, 35 passed, 2 skipped, 14 warnings.
+
+### Tests Added
+
+- None. Existing package CLI workflow tests and script-entrypoint smoke tests
+  cover the handler split.
+
+### Failures Found
+
+- None.
+
+### Fixes Applied
+
+- Source organization cleanup only.
+
+### Behavior Changes
+
+- None. Generated commands, validation errors, dry-run payloads, and plan names
+  are preserved.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `weiss_rl.workflows.thesis` still contains all workflow command builders.
+- The adjacent smoke sweep still reports third-party matplotlib/pyparsing
+  deprecation warnings.
+
+### Next Action
+
+- Continue public-surface cleanup by splitting workflow command builders or run a
+  wider validation checkpoint before runtime/model refactors.
+
+## 2026-05-29 - Workflow Profiles and Command Builder Split
+
+### What Changed
+
+- Replaced the mixed `weiss_rl.workflows.thesis` module with focused modules:
+  `weiss_rl.workflows.profiles` and `weiss_rl.workflows.command_builders`.
+- Updated parser, router, and handler imports to use the focused modules
+  directly.
+- Deleted `python/weiss_rl/workflows/thesis.py`; no broad re-export shim was
+  kept.
+
+### Commands Run
+
+```powershell
+rg "workflows\.thesis|from weiss_rl\.workflows\.thesis|import weiss_rl\.workflows\.thesis" python README.md docs Makefile
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py
+uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows
+uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows --show-error-codes --no-error-summary
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_script_entrypoint_smokes.py
+```
+
+### Results
+
+- Search found no current code/import references to `weiss_rl.workflows.thesis`;
+  remaining matches are historical log entries only.
+- Passed: CLI workflow tests, 19 passed.
+- Ruff check initially failed on import ordering in
+  `python/weiss_rl/workflows/dispatch_training.py`; Ruff fixed that mechanical
+  import order.
+- Passed: Ruff check on `python/weiss_rl/cli.py` and `python/weiss_rl/workflows`.
+- Passed: Ruff format check, 11 files already formatted.
+- Passed: focused mypy on `python/weiss_rl/cli.py` and `python/weiss_rl/workflows`.
+- Passed: adjacent CLI/wrapper smoke sweep, 35 passed, 2 skipped, 14 warnings.
+
+### Tests Added
+
+- None. Existing package CLI workflow and script-entrypoint smoke tests cover
+  the focused-module imports and deleted mixed module.
+
+### Failures Found
+
+- One import-order lint failure after the split.
+
+### Fixes Applied
+
+- Ran Ruff's mechanical import-order fix for
+  `python/weiss_rl/workflows/dispatch_training.py`.
+
+### Behavior Changes
+
+- None. Profile values, config paths, generated commands, validation errors,
+  dry-run payloads, and plan names are preserved.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `weiss_rl.workflows.command_builders` is now the largest workflow module, but
+  it has one job: deterministic subprocess command construction.
+- The adjacent smoke sweep still reports third-party matplotlib/pyparsing
+  deprecation warnings.
+
+### Next Action
+
+- Run a wider validation checkpoint for the accumulated workflow cleanup, then
+  move to the next thesis-facing public surface.
+
+## 2026-05-29 - Workflow Cleanup Validation Checkpoint
+
+### What Changed
+
+- Ran the wider repository verifier after the workflow package cleanup.
+- Fixed artifact hygiene scanning to skip missing tracked paths in a dirty
+  worktree instead of crashing during archive moves.
+- Restored the learner time-major fallback where omitted `initial_hidden_state`
+  is passed through to models that initialize hidden state from `None`.
+- Added a dirty-worktree artifact hygiene regression test.
+
+### Commands Run
+
+```powershell
+uv run --extra dev --extra sim python python/scripts/verify_repo.py
+uv run --extra dev --extra sim python -m ruff format python/scripts/heuristic_sanity_scan.py
+uv run --extra dev --extra sim python python/scripts/verify_repo.py
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_artifact_hygiene.py
+uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_impala_learner.py python/weiss_rl/tests/test_ppo_lite_learner.py python/weiss_rl/tests/test_vtrace.py
+uv run --extra dev --extra sim python -m ruff check python/weiss_rl/diagnostics/artifact_hygiene.py python/weiss_rl/tests/test_artifact_hygiene.py python/weiss_rl/learners/forward_time_major.py
+uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/diagnostics/artifact_hygiene.py python/weiss_rl/tests/test_artifact_hygiene.py python/weiss_rl/learners/forward_time_major.py
+uv run --extra dev --extra sim python -m ruff format python/weiss_rl/diagnostics/artifact_hygiene.py
+uv run --extra dev --extra sim python python/scripts/verify_repo.py
+uv run --extra dev --extra sim python -m ruff check .
+uv run --extra dev --extra sim python -m ruff format --check .
+```
+
+### Results
+
+- First verifier run failed because `python/scripts/heuristic_sanity_scan.py`
+  needed formatting.
+- Second verifier run failed on two issues exposed by the dirty worktree and
+  full learner test coverage:
+  missing tracked archive-move paths crashed artifact hygiene, and omitted
+  legacy hidden state was rejected in learner time-major fallback.
+- Passed: artifact hygiene tests, 8 passed.
+- Passed: learner/V-trace failing clusters, 76 passed.
+- Passed: targeted Ruff check.
+- Targeted Ruff format check initially found `artifact_hygiene.py` formatting;
+  passed after formatting.
+- Passed: full `verify_repo.py`; pytest reported 1892 passed, 2 skipped, 14
+  warnings, and wrapper dry-runs completed.
+- Passed: repo-wide Ruff check.
+- Passed: repo-wide Ruff format check, 611 files already formatted.
+
+### Tests Added
+
+- Added `test_scan_tracked_repo_tree_skips_missing_tracked_paths_in_dirty_worktree`.
+
+### Failures Found
+
+- Dirty archive moves left tracked paths missing until staged; artifact hygiene
+  tried to open those paths during the repo scan.
+- The learner fallback path required `initial_hidden_state` even though the
+  model forward path supports `None` initialization.
+- Two formatting issues were found and fixed.
+
+### Fixes Applied
+
+- `scan_tracked_repo_tree` now skips tracked paths that no longer exist.
+- Legacy and seat-aware time-major fallback paths no longer reject omitted
+  hidden state before calling the model.
+- Formatted `python/scripts/heuristic_sanity_scan.py` and
+  `python/weiss_rl/diagnostics/artifact_hygiene.py`.
+
+### Behavior Changes
+
+- No intended training/eval/simulator/checkpoint/legal-action behavior changes.
+- Artifact hygiene now tolerates dirty-worktree deleted tracked files.
+- Learner fallback hidden-state behavior is restored to the existing model
+  contract where `None` means initialize hidden state.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- `make verify` and `make artifact-hygiene` were not run here.
+- Verifier output still includes third-party matplotlib/pyparsing deprecation
+  warnings.
+
+### Next Action
+
+- Continue with the next thesis-facing cleanup batch now that the workflow
+  refactor is verifier-clean.

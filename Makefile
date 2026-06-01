@@ -10,16 +10,22 @@ export PYTHONPATH := python
 ifeq ($(UV),)
 PY = $(if $(wildcard $(PY_VENV)),$(PY_VENV),$(PY_SYS))
 PYRUN = $(PY)
+PYSIMRUN = $(PY)
 SYNC_MSG := "[make] uv not found; using venv at $(VENV)"
 else
 PYRUN := uv run --extra dev python
+PYSIMRUN := uv run --extra dev --extra sim python
 SYNC_MSG := "[make] using uv"
 endif
 
-.PHONY: sync sync-sim lint fmt fmt-check type deadcode test verify check check-placeholders standard-wrapper-smoke standard-auto-gpu-wrapper-smoke package-smoke simulator-check train-min train-inline-smoke toy-public-e2e artifact-hygiene artifact-contract eval-dev figures clean
+.PHONY: sync sync-sim lint fmt fmt-check type deadcode test verify check check-placeholders standard-wrapper-smoke standard-auto-gpu-wrapper-smoke package-smoke simulator-check train-min train-b1-smoke train-main-smoke eval-smoke figures-smoke thesis-smoke train-inline-smoke toy-public-e2e artifact-hygiene artifact-contract eval-dev figures clean
 
 FIGURE_FORMAT_ARGS = $(foreach fmt,$(FORMATS),--format $(fmt))
 FIGURE_ID_ARG = $(if $(FIG_ID),--fig-id "$(FIG_ID)")
+B1_LABEL ?= b1_smoke
+MAIN_LABEL ?= main_smoke
+B1_RUN ?= runs/$(B1_LABEL)
+MAIN_RUN ?= runs/$(MAIN_LABEL)
 SIMULATOR_CHECK_TESTS = \
 	python/weiss_rl/tests/test_simulator_contract.py \
 	python/weiss_rl/tests/test_rl_step_layout_contract_smoke.py \
@@ -101,6 +107,20 @@ artifact-contract: sync
 
 train-min:
 	@$(PYRUN) python/scripts/train.py --stack-config configs/stack_smoke.yaml
+
+train-b1-smoke: sync-sim
+	@$(PYSIMRUN) -m weiss_rl.cli train-b1 --run-label "$(B1_LABEL)" --profile smoke
+
+train-main-smoke: sync-sim
+	@$(PYSIMRUN) -m weiss_rl.cli train-main --run-label "$(MAIN_LABEL)" --b1-run "$(B1_RUN)" --profile smoke
+
+eval-smoke: sync-sim
+	@$(PYSIMRUN) -m weiss_rl.cli smoke-eval --run-dir "$(MAIN_RUN)" --b1-run "$(B1_RUN)"
+
+figures-smoke: sync
+	@$(PYRUN) -m weiss_rl.cli figures --run-dir "$(MAIN_RUN)" --format png
+
+thesis-smoke: train-b1-smoke train-main-smoke eval-smoke figures-smoke
 
 train-inline-smoke:
 	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --run-label m3_08_smoke --device cpu

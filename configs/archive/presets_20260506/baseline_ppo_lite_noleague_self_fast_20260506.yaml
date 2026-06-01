@@ -1,0 +1,26 @@
+schema_version: 2
+description: fast PPO-lite no-league self/model baseline; no imported B1/B2 model anchors during training
+extends: ../../presets/baselines/ppo_lite.yaml
+system:
+  collection_backend: auto
+league:
+  enabled: false
+  promotion:
+    anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available: []
+training:
+  fixed_opponent_backend: simulator_native
+  actor_policy_backend: model
+  actor_heuristic_fraction: 0.0
+  actor_heuristic_final_fraction: 0.0
+  train_on_heuristic_actor_rows: false
+evaluation:
+  periodic_dev_eval_interval_updates: 25
+  periodic_dev_eval_paired_seeds: 8
+  final_policy_set_selection:
+    fixed_anchor_set_v1:
+      required:
+        - B0 RandomLegal
+      optional_if_available: []

@@ -106,12 +106,12 @@ class QueueRuntimeEpisodeRolesMixin:
             )
             self._pfsp_last_sampled_policy_envs = dict(heuristic_anchor_counts)
             self._pfsp_last_heuristic_public_policy_envs = dict(heuristic_anchor_counts)
-            self._pfsp_last_heuristic_public_variant_policy_envs = {}
-            self._pfsp_last_noleague_baseline_policy_envs = {}
-            self._pfsp_last_champion_policy_envs = {}
-            self._pfsp_last_recent_policy_envs = {}
-            self._pfsp_last_hard_negative_policy_envs = {}
-            self._pfsp_last_warmup_snapshot_policy_envs = {}
+            self._pfsp_last_heuristic_public_variant_policy_envs: dict[str, int] = {}
+            self._pfsp_last_noleague_baseline_policy_envs: dict[str, int] = {}
+            self._pfsp_last_champion_policy_envs: dict[str, int] = {}
+            self._pfsp_last_recent_policy_envs: dict[str, int] = {}
+            self._pfsp_last_hard_negative_policy_envs: dict[str, int] = {}
+            self._pfsp_last_warmup_snapshot_policy_envs: dict[str, int] = {}
         if fixed_heuristic_public_count or fixed_noleague_baseline_count:
             self._pfsp_last_sampled_envs += fixed_heuristic_public_count + fixed_noleague_baseline_count
             self._pfsp_last_heuristic_public_envs += fixed_heuristic_public_count

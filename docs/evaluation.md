@@ -10,11 +10,17 @@ Smoke evaluation:
 uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/<run_dir> --b1-run runs/<b1_run>
 ```
 
+The smoke wrapper uses the plain packed `configs/thesis/main_league.yaml`
+contract so it can evaluate the standard B1/main smoke checkpoints.
+
 Thesis final evaluation:
 
 ```powershell
 uv run --extra dev --extra sim python -m weiss_rl.cli eval-final --run-dir runs/<run_dir> --b1-run runs/<b1_run>
 ```
+
+The final wrapper uses `configs/thesis/final_eval.yaml`, the selected
+factorized final-eval contract for thesis reproduction.
 
 Compatibility script path:
 
@@ -41,7 +47,7 @@ Final evaluation uses committed paired seed files, stable policy-set resolution,
 
 ## Periodic Dev Eval
 
-Training presets may run periodic dev eval during training. Pure support helpers for that path live in `weiss_rl.training.dev_eval`: contract validation, seed-file resolution, deterministic RNG/bootstrap seeds, interval checks, log-path helpers, summary persistence, and stall-monitor updates. The simulator-backed runner and promotion-gate execution remain in `python/scripts/train.py` so call order and artifact writes stay explicit.
+Training presets may run periodic dev eval during training. Pure support helpers for that path live in `weiss_rl.training.dev_eval`: contract validation, seed-file resolution, deterministic RNG/bootstrap seeds, interval checks, log-path helpers, summary persistence, and stall-monitor updates. The simulator-backed runner and promotion-gate execution are wired through explicit training compatibility hooks so call order and artifact writes stay auditable.
 
 ## Outputs
 

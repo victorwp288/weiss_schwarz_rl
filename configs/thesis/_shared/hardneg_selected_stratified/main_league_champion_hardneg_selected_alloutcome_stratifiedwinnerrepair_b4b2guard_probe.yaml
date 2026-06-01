@@ -1,0 +1,21 @@
+schema_version: 2
+description: "Selected-a015 champion/hard-negative continuation with stratified winner-repair replay. This keeps the disjoint winner-repair dataset but forces each replay-BC batch to reserve a large fraction for the extension-repair hard-negative win columns, so longer online league play cannot wash out the repair signal in the much larger selected-preservation replay pool."
+extends: ../hardneg_selected_alloutcome/main_league_champion_hardneg_selected_alloutcome_winnerrepair_b4b2guard_probe.yaml
+training:
+  optimizer:
+    learning_rate: 0.0000038
+  exploration:
+    entropy_coef: 0.0008
+    actor_sampling_temperature: 0.80
+  structured_aux:
+    policy_anchor_coef: 0.58
+    policy_anchor_top_action_coef: 0.15
+    trajectory_bc_aux_updates: 2
+    trajectory_bc_batch_episodes: 16
+    trajectory_bc_focus_source_labels:
+      - extensionrepair_p5_hardneg_disjoint_win16x6_a
+      - extensionrepair_p5_hardneg_disjoint_win16x6_b
+    trajectory_bc_focus_fraction: 0.50
+    trajectory_bc_teacher_action_coef: 0.18
+    trajectory_bc_teacher_same_family_action_coef: 0.72
+    trajectory_bc_teacher_same_family_action_margin_coef: 0.10

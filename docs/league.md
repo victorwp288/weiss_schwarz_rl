@@ -10,7 +10,7 @@ League behavior controls opponent exposure, promotion, and snapshot selection. I
 - Baseline anchors: fixed references such as `B0 RandomLegal`, `B1 NoLeague baseline`, and heuristic public policies.
 - Imported snapshots: snapshots copied or resolved from another completed run.
 
-Pure promotion-anchor resolution helpers live in `weiss_rl.training.promotion`. They cover canonical B0/B1 names, legacy B1 alias fallback, B2 heuristic anchors, and symbolic latest/previous champion or recent snapshot labels. The simulator-backed promotion gate runner remains in `python/scripts/train.py`.
+Pure promotion-anchor resolution helpers live in `weiss_rl.training.promotion`. They cover canonical B0/B1 names, legacy B1 alias fallback, B2 heuristic anchors, and symbolic latest/previous champion or recent snapshot labels. The simulator-backed promotion gate runner lives in `weiss_rl.training.promotion_gate_runner` and is wired through the training compatibility hooks.
 
 ## Safety Rules
 

@@ -7405,3 +7405,1925 @@ The refactor added targeted unit tests for decomposed modules rather than only u
 
 - This is a deck-scoping behavior change, not the Phase 1 simulator fast-lane pass.
 - `standard-multideck` remains an exploratory generalization preset, separate from the primary same-main-deck comparison.
+
+## 2026-05-28 - Public Workflow Cleanup and Smoke Contract Repair
+
+### Changes
+
+- Added pytest discovery defaults so `python -m pytest` only collects the repo test suite and ignores local scratch bundles under `temp/`.
+- Archived tracked top-level progress/rescue/status notes under `docs/archive/top_level_notes/` and linked the archive from `docs/archive/README.md`.
+- Added the public thesis ablation alias `configs/thesis/ablations/no_gru.yaml` plus a short ablation README.
+- Split the package CLI workflow plumbing out of `weiss_rl.cli` into `weiss_rl.workflows.thesis`; `weiss_rl.cli` now mostly owns argument parsing and dispatch.
+- Made the public `train-main` wrapper use `configs/thesis/main_league.yaml`, the packed medium64 stack that matches the standard B1 no-league checkpoint contract.
+- Kept the selected factorized continuation behind explicit guided-bootstrap workflows.
+- Made `smoke-eval` use `configs/thesis/main_league.yaml`; `eval-final` still uses `configs/thesis/final_eval.yaml`.
+- Published the `b1_noleague_baseline` alias during baseline_noleague smoke training so the main league import path does not depend on a manual aliasing step.
+- Updated README/docs around canonical surfaces, smoke vs final eval, top-level archive contents, and the public CLI commands.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv sync --extra dev --extra sim` | Passed. |
+| `uv run --extra dev --extra sim python python/scripts/verify_repo.py` | Passed: placeholder gate, Ruff, format check, configured mypy/vulture, 1890 tests, wrapper dry-runs. |
+| `uv run --extra dev --extra sim python -m pytest -q` | Passed: 1890 passed, 2 skipped, 14 warnings. |
+| `uv run --extra dev --extra sim python -m ruff check .` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check .` | Initially flagged `python/weiss_rl/workflows/thesis.py`; after `ruff format`, passed: 603 files already formatted. |
+| `uv run --extra dev --extra sim python -m mypy python` | Failed before type checking with pre-existing duplicate module discovery: `python/scripts/eval.py` is seen as both `eval` and `scripts.eval`. |
+| `make verify` | Not run: `make` is not installed in this Windows shell. |
+| `make artifact-hygiene` | Not run: `make` is not installed in this Windows shell. |
+| `uv run --extra dev --extra sim python -m weiss_rl.cli train-b1 --run-label refactor_b1_smoke_alias2_20260528 --profile smoke` | Passed; wrote a one-update B1 smoke run and persisted `b1_noleague_baseline`. |
+| `uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label refactor_main_smoke_plain_20260528 --b1-run runs/refactor_b1_smoke_alias2_20260528 --profile smoke` | Passed; initialized from the B1 checkpoint and imported the explicit B1 anchor. |
+| `uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/refactor_main_smoke_plain_20260528 --b1-run runs/refactor_b1_smoke_alias2_20260528` | Passed; wrote the tiny B0-B4 smoke summary under `eval/final_eval/`. |
+| `uv run --extra dev python -m weiss_rl.cli figures --run-dir runs/refactor_main_smoke_plain_20260528 --format png` | Passed; wrote four paper figure PNGs. |
+| `git diff --check` | Passed with expected CRLF normalization warnings only. |
+
+### Tests Added
+
+- Added CLI coverage for the public `train-main` packed-main config selection.
+- Added CLI coverage for smoke-profile fallback to a single unaliased snapshot.
+- Added config-loader coverage for the public `configs/thesis/ablations/no_gru.yaml` alias.
+
+### Failures Found
+
+- Full pytest initially collected an incomplete local bundle under `temp/pro_context_bundle_20260521_074609`; pytest discovery now excludes scratch/artifact folders.
+- The documented B1-to-main smoke chain was broken because `train-main` pointed at a factorized selected-bootstrap config while `train-b1` produces packed checkpoints.
+- After that fix, `smoke-eval` still used factorized `final_eval.yaml` and could not load the packed B1 smoke checkpoint.
+- Early B1 smoke runs did not publish the explicit `b1_noleague_baseline` alias; the main import path correctly refused to guess from `latest`.
+
+### Fixes Applied
+
+- Added focused pytest collection settings in `pyproject.toml`.
+- Repointed public smoke train/eval wrappers to the packed canonical main stack.
+- Preserved strict model/config contract checks rather than allowing packed/factorized checkpoint mixing.
+- Published the explicit B1 alias from baseline_noleague training checkpoints.
+- Updated tests and docs to make the smoke/final-eval contract split visible.
+
+### Behavior Changes
+
+- No simulator, reward, legal-action, rollout, learner, V-trace, checkpoint format, seed pairing, metric aggregation, or final-eval semantics were intentionally changed.
+- Public `python -m weiss_rl.cli train-main` now maps to the plain packed `configs/thesis/main_league.yaml` workflow so it matches `train-b1`.
+- Public `python -m weiss_rl.cli smoke-eval` now uses the packed smoke contract; `eval-final` remains the selected factorized final-eval contract.
+
+### Files Moved or Added
+
+- Moved top-level dated/progress notes into `docs/archive/top_level_notes/`.
+- Added `configs/thesis/ablations/no_gru.yaml`.
+- Added `configs/thesis/ablations/README.md`.
+- Added `python/weiss_rl/workflows/__init__.py`.
+- Added `python/weiss_rl/workflows/thesis.py`.
+
+### Remaining Risks
+
+- `python -m mypy python` still needs a package-layout fix for duplicate script module discovery.
+- `make verify` and `make artifact-hygiene` were not executable on this machine because `make` is unavailable.
+- Historical selected/factorized docs and rebuild reports remain as historical records; the current docs now label the public packed smoke path separately from selected factorized final reproduction.
+- The archive moves are unstaged as deletes plus untracked archive files until Git can update the index; a pre-existing `.git/index.lock` blocked `git mv` during this pass.
+
+### Next Action
+
+- Fix the mypy duplicate-module invocation or package layout so `uv run --extra dev --extra sim python -m mypy python` can be used as a top-level validation command.
+- Continue reducing docs/config surface area by moving dated result reports into archive/history once their references are audited.
+
+## 2026-05-28 - Dated Report Archive and Focused Type Cleanup
+
+### Changes
+
+- Moved dated May 2026 report/lock/inventory docs out of the live docs root and into `docs/archive/reports/202605/`.
+- Updated `docs/archive/README.md` so the archive structure explains both top-level notes and dated reports.
+- Updated live thesis workflow references to point at the archived B1/main report paths.
+- Made a small set of production-package type-narrowing fixes without changing runtime contracts:
+  - explicit float accumulator for policy-alignment family mass totals
+  - iterable-friendly opponent-context helper signatures
+  - typed PFSP policy-env counters
+  - registered-buffer casts for model typing
+  - candidate-projection module iteration via `children()`
+  - explicit hidden-state validation in the fallback time-major learner paths
+  - narrow checkpoint restore typing for `init_schedule_offset_updates`
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv run --extra dev --extra sim python -m ruff check <edited type-cleanup files>` | Passed. |
+| `uv run --extra dev --extra sim python -m mypy <edited type-cleanup files> --show-error-codes --no-error-summary` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check <edited type-cleanup files>` | Passed: 11 files already formatted. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_policy_alignment.py python/weiss_rl/tests/test_model_candidate_projection.py python/weiss_rl/tests/test_model_typed_encoder.py python/weiss_rl/tests/test_model_opponent_context.py python/weiss_rl/tests/test_training_checkpoint_writers.py python/weiss_rl/tests/test_impala_learner.py -k "forward_time_major or opponent_context or checkpoint_payload or restore_minimal or policy_alignment or candidate_projection or typed_encoder"` | Passed: 30 passed, 63 deselected. |
+| `python scripts/check_docs_links.py` | Not configured in this checkout; no `scripts/check_docs_links.py` exists. |
+| `python python/scripts/check_docs_links.py` | Not configured in this checkout; no `python/scripts/check_docs_links.py` exists. |
+| `rg <dated-report references> README.md docs/README.md docs/getting_started.md docs/thesis_workflow.md docs/architecture.md docs/configuration.md docs/training.md docs/evaluation.md docs/artifact_contract.md docs/reproducibility.md docs/testing.md docs/troubleshooting.md docs/experiments.md docs/standard_recipe.md` | Passed: no stale live-doc references to the moved report paths. |
+
+### Tests Added
+
+- None. This was an archive move plus narrow type-cleanup pass covered by existing characterization tests.
+
+### Failures Found
+
+- The broad `python -m mypy python` path is not just a discovery problem. After excluding script collisions, it exposes substantial legacy typing debt across experiments, tests, and some production helper modules.
+- There is no docs-link checker script in this checkout despite older command references.
+
+### Fixes Applied
+
+- Kept the broad mypy debt documented instead of hiding it behind a misleading passing command.
+- Archived historical dated reports so the live docs root now contains only canonical docs plus logs.
+- Applied focused type fixes only where they were local, readable, and behavior-preserving.
+
+### Behavior Changes
+
+- No intended simulator, legal-action, reward, training, evaluation, checkpoint-format, or artifact-schema changes.
+- The fallback learner forward paths now raise a clear `ValueError` when required hidden state is absent, matching the existing helper contract that hidden state must be present for those paths.
+
+### Remaining Risks
+
+- Broad package/test/experiment mypy remains future work.
+- Archived report files still contain some historical references to their original `docs/<file>` paths; these are provenance text inside archived docs, not current workflow links.
+
+### Next Action
+
+- Continue shrinking the live docs/config surface while leaving thesis artifacts and historical evidence untouched.
+
+## 2026-05-28 - Dated Preset Config Archive
+
+### Changes
+
+- Moved 26 unreferenced May 2026 dated/probe preset configs from `configs/presets/` into `configs/archive/presets_20260506/`.
+- Added `configs/archive/README.md` to explain that archived configs are historical and not part of the canonical thesis surface.
+- Updated `configs/README.md` so current configs point readers toward `configs/thesis/` and historical dated probes toward `configs/archive/`.
+- Rewrote archived config `extends:` paths so the moved configs still load from their new location.
+- Updated `python/scripts/heuristic_sanity_scan.py` to point at the archived copy of `eval_gpu_exp031_fast_20260506.yaml`.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg <moved dated preset names> README.md docs python configs pyproject.toml Makefile` | Passed: no live references remain outside archived historical notes. |
+| `uv run --extra dev --extra sim python -c "<load every configs/archive/presets_20260506/*.yaml>"` | Passed: loaded 26 archived configs. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_baselines_and_ablations python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_b1_dry_run_uses_thesis_config python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_requires_b1_and_uses_main_config` | Passed: 3 passed. |
+| `uv run --extra dev --extra sim python -m ruff check python/scripts/heuristic_sanity_scan.py` | Passed. |
+
+### Tests Added
+
+- None. This was an archive/reference cleanup covered by config-loading and existing CLI/config workflow tests.
+
+### Files Moved or Deleted
+
+- Moved dated/probe preset configs into `configs/archive/presets_20260506/`.
+- No thesis artifacts, runs, checkpoints, logs, figures, or simulator files were modified.
+
+### Behavior Changes
+
+- None intended. The archived configs continue to parse, and the one live diagnostic script that referenced a moved config now points at the archived copy of the same file.
+
+### Remaining Risks
+
+- Archived historical notes still mention the old `configs/presets/...` paths as provenance text.
+- Additional dated configs under `configs/thesis/` may still be candidates for archive, but they were left in place until each can be audited against docs, tests, and workflows.
+
+### Next Action
+
+- Continue with package/source simplification in small slices, keeping characterization tests close to every behavior-sensitive move.
+
+## 2026-05-28 - Live Docs Canonical Surface Cleanup
+
+### Changes
+
+- Updated `README.md`, `docs/configuration.md`, `docs/testing.md`, `docs/training.md`, `docs/architecture.md`, and `docs/standard_recipe.md` so the live docs consistently present `python -m weiss_rl.cli` and `configs/thesis/` as the canonical thesis surface.
+- Reworded compatibility preset descriptions so `configs/presets/structured_acceptance_standard*.yaml` are no longer described as the public canonical recipe.
+- Replaced stale full-package mypy guidance in `docs/testing.md` with the current status: selected-script mypy is the configured gate, while broad mypy is known debt for this checkout.
+- Moved the stale May 11 completion audit from `docs/refactor_completion_audit.md` to `docs/archive/reports/202605/refactor_completion_audit_20260511.md`.
+- Removed the completion-audit link from the live docs hub and recorded the archived audit in `docs/archive/README.md`.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg <stale canonical/mypy/audit phrases> README.md docs configs python/scripts/README.md` | Passed: only historical refactor-log provenance remains. |
+| `rg refactor_completion_audit.md <live docs>` | Passed: no live docs link to the moved audit path. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_baselines_and_ablations` | Passed: 20 passed. |
+
+### Tests Added
+
+- None. This was documentation cleanup with existing CLI/config tests as a behavior guard.
+
+### Files Moved or Deleted
+
+- Moved `docs/refactor_completion_audit.md` to `docs/archive/reports/202605/refactor_completion_audit_20260511.md`.
+
+### Behavior Changes
+
+- None. Documentation now matches the already-tested public CLI/config behavior.
+
+### Remaining Risks
+
+- `python/scripts/README.md` still documents lower-level script workflows and compatibility presets. It should be reviewed separately before deciding whether to archive or shorten it.
+- Historical logs intentionally retain old wording and command records.
+
+### Next Action
+
+- Continue simplifying the public script/doc boundary, prioritizing live docs and thin wrappers before risky runtime/train internals.
+
+## 2026-05-28 - Makefile and Script Entry-Point Surface Cleanup
+
+### Changes
+
+- Added package-CLI Make targets for the canonical smoke route:
+  - `train-b1-smoke`
+  - `train-main-smoke`
+  - `eval-smoke`
+  - `figures-smoke`
+  - `thesis-smoke`
+- Left `train-inline-smoke` as a lower-level compatibility target rather than removing it.
+- Rewrote `python/scripts/README.md` into a short compatibility guide that points new users to `python -m weiss_rl.cli` first.
+- Updated README and testing docs to mention the new Make smoke targets.
+- Added a lightweight Makefile characterization test that locks the new smoke targets to the package CLI.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg train-inline-smoke README.md docs python/scripts configs Makefile` | Passed: live docs no longer route users through the old inline script target. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_cli_workflow.py` | Passed after formatting: 20 passed, 2 skipped. |
+| `uv run --extra dev --extra sim python -m ruff check python/weiss_rl/tests/test_makefile_figures.py` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/tests/test_makefile_figures.py` | Passed after formatting the file. |
+
+### Tests Added
+
+- `test_makefile_thesis_smoke_targets_use_package_cli` in `python/weiss_rl/tests/test_makefile_figures.py`.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- No RL/training/evaluation semantics changed.
+- Make now exposes canonical package-CLI smoke wrappers; existing script targets remain available.
+
+### Remaining Risks
+
+- The old `train-inline-smoke` target still exists for compatibility and should stay clearly documented as lower-level if referenced again.
+- `make` is unavailable in this Windows shell, so Make target execution itself remains covered by text characterization and existing skip-on-missing-make tests rather than a live Make invocation here.
+
+### Next Action
+
+- Continue reducing lower-level script prominence by auditing docs and wrappers that still present `thesis_run.py` or direct stack-config commands as first-choice workflows.
+
+## 2026-05-28 - Direct Script Reference Triage
+
+### Changes
+
+- Reworded docs that still described `python/scripts/train.py` as owning public CLI behavior.
+- Updated checkpoint, league, evaluation, and architecture docs to describe package helpers plus explicit compatibility-hook wiring.
+- Updated `configs/README.md` so direct `train.py --override` examples are clearly lower-level and use a thesis config rather than a legacy typed preset.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg python/scripts/train.py README.md docs configs python/scripts/README.md Makefile python/weiss_rl/tests` | Audited. Remaining live references are scaffold, public-demo, lower-level override, Make compatibility target, tests, or historical logs. |
+| `rg <stale train.py ownership phrases> README.md docs configs python/scripts/README.md` | Passed: no stale live-doc wording remains. |
+
+### Tests Added
+
+- None.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None. Documentation-only cleanup.
+
+### Remaining Risks
+
+- Direct script examples intentionally remain for scaffold smoke, public demo, and lower-level stack-config debugging.
+- Historical rebuild/refactor logs still contain old script-first command records.
+
+### Next Action
+
+- Move back into source cleanup where safe: identify one compatibility-heavy module with a small removable duplication or wrapper cluster and cover it with focused tests.
+
+## 2026-05-28 - Workflow Helper Public Names
+
+### Changes
+
+- Renamed the package workflow command builders in `weiss_rl.workflows.thesis` from underscore-prefixed helper names to explicit public names.
+- Updated `weiss_rl.cli` to import those public workflow helpers.
+- Added `__all__` to `weiss_rl.workflows.thesis` so the workflow module exposes a clear small API surface.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 19 passed. |
+| `uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py` | Passed: 2 files already formatted. |
+| `uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py --show-error-codes --no-error-summary` | Passed. |
+
+### Tests Added
+
+- None; existing package CLI workflow tests cover the command-building behavior.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None. This is a naming/API clarity cleanup inside the package CLI workflow layer.
+
+### Remaining Risks
+
+- `weiss_rl.cli` still has a long dispatch function. A future pass can split subcommand handlers once tests cover each branch well enough.
+
+### Next Action
+
+- Continue source cleanup by extracting or simplifying the next small CLI/script dispatch cluster without changing generated commands.
+
+## 2026-05-29 - Package CLI Dispatch Split
+
+### Changes
+
+- Moved the long parsed-argument dispatch body out of `weiss_rl.cli` and into `weiss_rl.workflows.cli_dispatch`.
+- Kept `weiss_rl.cli` focused on parser construction and a single dispatch call.
+- Preserved generated command behavior through the existing package CLI workflow tests.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 19 passed. |
+| `uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py` | Passed: 3 files already formatted. |
+| `uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py --show-error-codes --no-error-summary` | Passed. |
+| `Get-ChildItem python/weiss_rl/cli.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/thesis.py <line count>` | `cli.py`: 208 lines; `cli_dispatch.py`: 350 lines; `thesis.py`: 544 lines. |
+
+### Tests Added
+
+- None. Existing CLI workflow tests cover the generated-command contract.
+
+### Files Moved or Deleted
+
+- Added `python/weiss_rl/workflows/cli_dispatch.py`.
+
+### Behavior Changes
+
+- None intended. This is a source-organization change; CLI generated commands and validation semantics are preserved by focused tests.
+
+### Remaining Risks
+
+- `cli_dispatch.py` is still a substantial dispatch module. It is clearer than embedding this logic in the parser, but future work can split command families further if the public workflow surface grows.
+
+### Next Action
+
+- Continue improving package readability in small slices, preferably around configs or workflow command builders where tests already characterize behavior.
+
+## 2026-05-29 - Workflow Snapshot Resolution Split
+
+### Changes
+
+- Extracted package-workflow snapshot checkpoint resolution helpers into `weiss_rl.workflows.snapshots`.
+- Kept command builders and plan writing in `weiss_rl.workflows.thesis`.
+- Updated CLI dispatch to import snapshot resolution from the new focused module.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | First run failed because `thesis.py` still needed `json` for `_write_plan()` after the extraction; rerun passed: 19 passed. |
+| `uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py` | Passed after Ruff sorted the new dispatch imports. |
+| `uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py` | Passed: 4 files already formatted. |
+| `uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py --show-error-codes --no-error-summary` | Passed. |
+| `Get-ChildItem python/weiss_rl/cli.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/snapshots.py <line count>` | `cli.py`: 208; `cli_dispatch.py`: 352; `thesis.py`: 442; `snapshots.py`: 111. |
+
+### Tests Added
+
+- None. Existing CLI workflow tests cover B1 alias, single-snapshot smoke fallback, and guided seed checkpoint resolution.
+
+### Files Moved or Deleted
+
+- Added `python/weiss_rl/workflows/snapshots.py`.
+
+### Behavior Changes
+
+- None intended. Snapshot policy-id resolution, error messages, and checkpoint path construction were moved without semantic changes.
+
+### Remaining Risks
+
+- `weiss_rl.workflows.thesis` still combines profiles, plan writing, and command builders. It is smaller now, and future splits can target plan writing or command families.
+
+### Next Action
+
+- Continue workflow cleanup by separating plan writing or command builder families if tests remain focused and cheap.
+
+## 2026-05-29 - Workflow Plan Helper Split
+
+### Changes
+
+- Extracted dry-run plan writing and command execution from `weiss_rl.workflows.thesis` into `weiss_rl.workflows.plans`.
+- Updated `weiss_rl.workflows.cli_dispatch` to import `run_or_write_plan` from the new focused module.
+- Left `weiss_rl.workflows.thesis` focused on profiles and command builders.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 19 passed. |
+| `uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py` | Passed: 5 files already formatted. |
+| `uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py --show-error-codes --no-error-summary` | Passed. |
+| `Get-ChildItem python/weiss_rl/cli.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py <line count>` | `cli.py`: 208; `cli_dispatch.py`: 352; `thesis.py`: 407; `snapshots.py`: 111; `plans.py`: 41. |
+
+### Tests Added
+
+- None. Existing CLI dry-run tests cover workflow plan payloads.
+
+### Files Moved or Deleted
+
+- Added `python/weiss_rl/workflows/plans.py`.
+
+### Behavior Changes
+
+- None intended. Dry-run output, saved plan shape, subprocess return handling, and generated commands are preserved.
+
+### Remaining Risks
+
+- `cli_dispatch.py` remains the largest workflow module and can be split by command family later.
+
+### Next Action
+
+- Shift to another small package cleanup surface, or run a broader validation checkpoint after the workflow-module series.
+
+## 2026-05-29 - Workflow Split Focused Checkpoint
+
+### Changes
+
+- Updated `docs/architecture.md` to describe the cleaned `weiss_rl.workflows` package roles: profiles, dispatch, dry-run plans, snapshot resolution, and command builders.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_script_entrypoint_smokes.py` | Passed: 35 passed, 2 skipped, 14 warnings. |
+
+### Tests Added
+
+- None.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None. This checkpoint validated the accumulated CLI/workflow split against package CLI, Makefile target, and script entrypoint smoke tests.
+
+### Remaining Risks
+
+- Warnings are from third-party matplotlib/pyparsing deprecations in the script-entrypoint smoke cluster.
+- Broader full-suite validation has not been rerun after this workflow series.
+
+### Next Action
+
+- Choose the next cleanup surface or run a wider repo validation checkpoint before moving into behavior-sensitive runtime/model code.
+
+## 2026-05-29 - CLI Parser Module Split
+
+### Changes
+
+- Extracted package CLI parser construction from `weiss_rl.cli` into `weiss_rl.workflows.cli_parser`.
+- Added explicit `build_workflow_parser()` and `parse_workflow_args()` helpers so parser tests can target the workflow layer without making the public entrypoint grow again.
+- Reduced `weiss_rl.cli` to the canonical front door: parse package CLI arguments, then dispatch them.
+- Updated `docs/architecture.md` to include parser construction in the `weiss_rl.workflows` package role.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 19 passed. |
+| `uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows/cli_parser.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows/cli_parser.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py` | Passed: 6 files already formatted. |
+| `uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows/cli_parser.py python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/workflows/thesis.py python/weiss_rl/workflows/snapshots.py python/weiss_rl/workflows/plans.py --show-error-codes --no-error-summary` | Passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_script_entrypoint_smokes.py` | Passed: 35 passed, 2 skipped, 14 warnings. |
+| `Get-Content <workflow files> <line count>` | `cli.py`: 12; `cli_parser.py`: 208; `cli_dispatch.py`: 352; `thesis.py`: 407; `snapshots.py`: 111; `plans.py`: 41. |
+
+### Tests Added
+
+- None. Existing package CLI workflow and script-entrypoint smoke tests cover this split.
+
+### Files Moved or Deleted
+
+- Added `python/weiss_rl/workflows/cli_parser.py`.
+- Replaced `python/weiss_rl/cli.py` with a small parse-and-dispatch entrypoint.
+
+### Behavior Changes
+
+- None intended. Subcommands, flags, defaults, aliases, help strings, dry-run behavior, and dispatch behavior are preserved.
+
+### Remaining Risks
+
+- `weiss_rl.workflows.cli_dispatch` is still the largest workflow module.
+- Third-party matplotlib/pyparsing warnings remain in the script-entrypoint smoke cluster.
+
+### Next Action
+
+- Continue with another visible public-surface cleanup slice, or run a wider validation checkpoint before touching runtime/model internals.
+
+## 2026-05-29 - Workflow Dispatch Family Split
+
+### Changes
+
+- Split workflow command handlers out of the remaining large `weiss_rl.workflows.cli_dispatch` module.
+- Added `weiss_rl.workflows.dispatch_training` for B1, guided B1 seed, main league, and guided-bootstrap training workflows.
+- Added `weiss_rl.workflows.dispatch_evaluation` for smoke/final eval, figures, B2 audit, and guard-run workflows.
+- Added `weiss_rl.workflows.dispatch_bootstrap` for segmented guided-bootstrap and guarded league bootstrap controllers.
+- Reduced `cli_dispatch.py` to a small command router that resolves the repo root and Python executable, then delegates to the relevant command family.
+- Updated `docs/architecture.md` to describe the workflow package as parser, router, handlers, plans, snapshots, and builders.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 19 passed. |
+| `uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed: 10 files already formatted. |
+| `uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows --show-error-codes --no-error-summary` | Passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_script_entrypoint_smokes.py` | Passed: 35 passed, 2 skipped, 14 warnings. |
+| `Get-Content <workflow files> <line count>` | `cli.py`: 12; `cli_parser.py`: 208; `cli_dispatch.py`: 64; `dispatch_training.py`: 145; `dispatch_evaluation.py`: 105; `dispatch_bootstrap.py`: 99; `thesis.py`: 407; `snapshots.py`: 111; `plans.py`: 41. |
+
+### Tests Added
+
+- None. Existing package CLI workflow and script-entrypoint smoke tests cover the dispatch split.
+
+### Files Moved or Deleted
+
+- Added `python/weiss_rl/workflows/dispatch_training.py`.
+- Added `python/weiss_rl/workflows/dispatch_evaluation.py`.
+- Added `python/weiss_rl/workflows/dispatch_bootstrap.py`.
+- Replaced `python/weiss_rl/workflows/cli_dispatch.py` with a small router.
+
+### Behavior Changes
+
+- None intended. Generated commands, validation errors, dry-run payloads, and plan names are preserved.
+
+### Remaining Risks
+
+- `weiss_rl.workflows.thesis` still holds all command builders. It is readable, but a future split by builder family may make it calmer.
+- Third-party matplotlib/pyparsing warnings remain in the script-entrypoint smoke cluster.
+
+### Next Action
+
+- Continue the public-surface cleanup by splitting workflow command builders or run a wider validation checkpoint before runtime/model internals.
+
+## 2026-05-29 - Workflow Profiles and Command Builder Split
+
+### Changes
+
+- Split the remaining mixed `weiss_rl.workflows.thesis` module into focused modules.
+- Added `weiss_rl.workflows.profiles` for standard train profiles, thesis config paths, repo-root resolution, and guided-bootstrap stack selection.
+- Added `weiss_rl.workflows.command_builders` for deterministic subprocess command construction.
+- Updated parser, router, and handler modules to import from the focused modules directly.
+- Deleted `python/weiss_rl/workflows/thesis.py` instead of keeping a broad re-export shim.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg "workflows\\.thesis|from weiss_rl\\.workflows\\.thesis|import weiss_rl\\.workflows\\.thesis" python README.md docs Makefile` | No current code/import references; matches are historical log entries only. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 19 passed. |
+| `uv run --extra dev --extra sim python -m ruff check python/weiss_rl/cli.py python/weiss_rl/workflows` | Initially failed on import ordering in `dispatch_training.py`; passed after Ruff fixed the import order. |
+| `uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed: 11 files already formatted. |
+| `uv run --extra dev --extra sim python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows --show-error-codes --no-error-summary` | Passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_makefile_figures.py python/weiss_rl/tests/test_script_entrypoint_smokes.py` | Passed: 35 passed, 2 skipped, 14 warnings. |
+| `Get-Content <workflow files> <line count>` | `cli.py`: 12; `cli_parser.py`: 208; `cli_dispatch.py`: 64; `profiles.py`: 121; `command_builders.py`: 298; `dispatch_training.py`: 145; `dispatch_evaluation.py`: 105; `dispatch_bootstrap.py`: 99; `snapshots.py`: 111; `plans.py`: 41. |
+
+### Tests Added
+
+- None. Existing package CLI workflow and script-entrypoint smoke tests cover the import move and deleted module.
+
+### Files Moved or Deleted
+
+- Added `python/weiss_rl/workflows/profiles.py`.
+- Added `python/weiss_rl/workflows/command_builders.py`.
+- Deleted `python/weiss_rl/workflows/thesis.py`.
+
+### Behavior Changes
+
+- None intended. Profile values, config paths, generated commands, dry-run payloads, validation errors, and plan names are preserved.
+
+### Remaining Risks
+
+- `command_builders.py` is now the largest workflow module, but it is a single-purpose list of deterministic command builders rather than a mixed parser/dispatch/profile module.
+- Third-party matplotlib/pyparsing warnings remain in the script-entrypoint smoke cluster.
+
+### Next Action
+
+- Run a wider validation checkpoint for the accumulated workflow cleanup, then move to the next thesis-facing public surface.
+
+## 2026-05-29 - Workflow Cleanup Validation Checkpoint
+
+### Changes
+
+- Ran a wider verifier after the workflow package cleanup.
+- Fixed artifact hygiene scanning so missing tracked paths in a dirty worktree are skipped instead of crashing. This matters while archived files are moved but not yet staged.
+- Restored legacy and seat-aware learner time-major behavior where omitted `initial_hidden_state` lets the model initialize hidden state, matching existing model forward semantics.
+- Added a regression test for dirty-worktree artifact hygiene scanning.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `uv run --extra dev --extra sim python python/scripts/verify_repo.py` | Initially failed: `heuristic_sanity_scan.py` needed formatting. |
+| `uv run --extra dev --extra sim python -m ruff format python/scripts/heuristic_sanity_scan.py` | Reformatted 1 file. |
+| `uv run --extra dev --extra sim python python/scripts/verify_repo.py` | Initially failed on missing tracked archive-move paths in artifact hygiene and optional hidden-state learner tests. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_artifact_hygiene.py` | Passed: 8 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_impala_learner.py python/weiss_rl/tests/test_ppo_lite_learner.py python/weiss_rl/tests/test_vtrace.py` | Passed: 76 passed. |
+| `uv run --extra dev --extra sim python -m ruff check python/weiss_rl/diagnostics/artifact_hygiene.py python/weiss_rl/tests/test_artifact_hygiene.py python/weiss_rl/learners/forward_time_major.py` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check python/weiss_rl/diagnostics/artifact_hygiene.py python/weiss_rl/tests/test_artifact_hygiene.py python/weiss_rl/learners/forward_time_major.py` | Initially failed on `artifact_hygiene.py`; passed after formatting. |
+| `uv run --extra dev --extra sim python python/scripts/verify_repo.py` | Passed: local verification completed; pytest 1892 passed, 2 skipped, 14 warnings. |
+| `uv run --extra dev --extra sim python -m ruff check .` | Passed. |
+| `uv run --extra dev --extra sim python -m ruff format --check .` | Passed: 611 files already formatted. |
+
+### Tests Added
+
+- Added `test_scan_tracked_repo_tree_skips_missing_tracked_paths_in_dirty_worktree`.
+
+### Files Moved or Deleted
+
+- None in this checkpoint.
+
+### Behavior Changes
+
+- No intended RL, training, evaluation, checkpoint, artifact-format, legal-action, or simulator-contract behavior changes.
+- Artifact hygiene now skips missing tracked files during repo scans rather than raising `FileNotFoundError`.
+- The learner time-major fallback again allows omitted hidden state when the model supports initialization from `None`.
+
+### Remaining Risks
+
+- `make verify` and `make artifact-hygiene` remain untested in this Windows shell if `make` is unavailable.
+- The full verifier still reports third-party matplotlib/pyparsing deprecation warnings.
+
+### Next Action
+
+- Move to the next thesis-facing cleanup surface with the workflow package now verifier-clean.
+
+## 2026-05-29 - Public Config Surface Docs Guard
+
+### Changes
+
+- Updated the reward-component probe in `docs/thesis_workflow.md` to use the canonical `configs/thesis/b1_noleague.yaml` stack instead of advertising the historical `configs/thesis/ablations/full_shaping_reward.yaml` probe config.
+- Added a regression test that keeps the public README/docs surface limited to the canonical thesis ablation configs:
+  - `configs/thesis/ablations/no_gru.yaml`
+  - `configs/thesis/ablations/ppo_lite.yaml`
+  - `configs/thesis/ablations/terminal_only_reward.yaml`
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `python scripts/check_docs_links.py` | Failed: script is not present at that path in this checkout. |
+| `python -m pytest -q python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 1 passed. |
+| `python -m ruff check python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `python -m ruff format --check python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 1 file already formatted. |
+
+### Tests Added
+
+- Added `test_public_docs_only_advertise_canonical_thesis_ablations`.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. This is docs/test-only and does not alter training, evaluation, simulator contract, config parsing, artifacts, or checkpoint behavior.
+
+### Remaining Risks
+
+- Many historical probe configs still physically live in `configs/thesis/ablations/` for compatibility with existing characterization tests and historical command records. The public docs now guard against presenting those probe files as the standard thesis surface.
+- The old `python scripts/check_docs_links.py` command referenced by prior memory/docs is absent in this checkout.
+
+### Next Action
+
+- Continue shrinking the thesis-facing config surface by moving or reclassifying historical ablation/probe configs once their characterization tests are either redirected to an archive path or replaced with narrower contract fixtures.
+
+## 2026-05-29 - Reward Probe Config Archive
+
+### Changes
+
+- Moved the noncanonical May 13 reward-shaping probe configs out of `configs/thesis/ablations/` and into `configs/archive/thesis_reward_ablations_20260513/`.
+- Kept `configs/thesis/ablations/terminal_only_reward.yaml` as the public terminal-only thesis ablation.
+- Kept `configs/thesis/ablations/reward_ablation_base.yaml` in place for now because the canonical terminal-only config still extends it.
+- Rewrote archived reward-probe `extends:` paths that depend on the shared reward base.
+- Updated `public_teacher_tactical_mulliganguard_reward.yaml` so its historical guided-teacher config still loads through the archived full-shaping probe stack.
+- Redirected characterization tests that intentionally cover the old reward probes to the archive path.
+- Documented the archive bucket in `configs/archive/README.md`, `configs/archive/thesis_reward_ablations_20260513/README.md`, and `configs/thesis/ablations/README.md`.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg <moved reward-probe paths> README.md docs configs python/weiss_rl/tests python/scripts Makefile pyproject.toml` | Live references reduced to historical log entries and archive documentation. |
+| `python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_thesis_reward_ablations_are_isolated_b1_routes python/weiss_rl/tests/test_public_config_surface_docs.py python/weiss_rl/tests/test_runtime.py::test_central_structured_unroll_snapshots_replay_behavior_logp` | Failed: plain Python cannot import `torch`, so `test_runtime.py` could not collect. |
+| `python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_thesis_reward_ablations_are_isolated_b1_routes python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_runtime.py::test_central_structured_unroll_snapshots_replay_behavior_logp` | Passed: 1 passed. |
+| `python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_guided_b1_ablation` | Passed: 1 passed. |
+| `python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 3 files already formatted. |
+
+### Tests Added
+
+- None. Existing config characterization tests now verify the archived reward probes, while the public-doc guard still verifies only canonical public ablations are advertised.
+
+### Files Moved or Deleted
+
+- Moved 19 historical reward-probe YAML files from `configs/thesis/ablations/` to `configs/archive/thesis_reward_ablations_20260513/`.
+- Added `configs/archive/thesis_reward_ablations_20260513/README.md`.
+
+### Behavior Changes
+
+- None intended. The moved configs still load with the same effective settings through their archive paths.
+- No simulator contract, observation/action interpretation, legal-action ordering, reward semantics for live configs, training loop, evaluation, checkpoint format, or artifact format was changed.
+
+### Remaining Risks
+
+- Historical rebuild-log commands still mention the old `configs/thesis/ablations/...` paths as provenance text.
+- `reward_ablation_base.yaml` remains in `configs/thesis/ablations/` as an internal shared config for the canonical terminal-only reward ablation. A later slice can move it into a shared thesis support location after updating `terminal_only_reward.yaml`.
+- Other noncanonical guided-teacher and main-league probe configs still live in `configs/thesis/ablations/` and should be archived in smaller dependency-aware clusters.
+
+### Next Action
+
+- Move the `reward_ablation_base.yaml` support file out of the public ablation directory, or archive the guided-teacher reward probe cluster that now depends on the archived reward stack.
+
+## 2026-05-29 - Internal Reward Base Config
+
+### Changes
+
+- Moved `reward_ablation_base.yaml` out of the public `configs/thesis/ablations/` directory and into `configs/thesis/_shared/reward_ablation_base.yaml`.
+- Added `configs/thesis/_shared/README.md` to make clear that shared thesis fragments are not launch targets.
+- Updated `configs/thesis/ablations/terminal_only_reward.yaml` to extend the internal shared reward base.
+- Updated the archived May 13 reward probes to extend the internal shared reward base.
+- Updated `configs/README.md` to distinguish public thesis configs from internal shared fragments.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_thesis_reward_ablations_are_isolated_b1_routes python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_guided_b1_ablation python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 3 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_runtime.py::test_central_structured_unroll_snapshots_replay_behavior_logp` | Passed: 1 passed. |
+| `python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_runtime.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 3 files already formatted. |
+| `python -c "<load archived reward probes plus terminal_only_reward>"` | Failed: plain Python could not import `weiss_rl` in this checkout. |
+| `uv run --extra dev --extra sim python -c "<load archived reward probes plus terminal_only_reward>"` | Passed: loaded 20 reward configs. |
+
+### Tests Added
+
+- None. Existing config and runtime characterization tests cover the moved base through the canonical terminal-only config, archived reward probes, and guided-teacher config that extends an archived reward probe.
+
+### Files Moved or Deleted
+
+- Moved `configs/thesis/ablations/reward_ablation_base.yaml` to `configs/thesis/_shared/reward_ablation_base.yaml`.
+- Added `configs/thesis/_shared/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config values are preserved; only config file organization and `extends:` paths changed.
+- No simulator contract, legal-action semantics, reward values, training loop, evaluation flow, checkpoint compatibility, or artifact format changed.
+
+### Remaining Risks
+
+- Historical rebuild/refactor log entries still mention the old support-file location as provenance text.
+- Other noncanonical guided-teacher and main-league probe configs still live under `configs/thesis/ablations/` and should be archived in dependency-aware groups.
+
+### Next Action
+
+- Archive the guided-teacher reward probe cluster or split broader main-league probe configs out of the public ablation directory, preserving characterization tests for each moved cluster.
+
+## 2026-05-29 - Internal Guided-Teacher Config Stack
+
+### Changes
+
+- Moved the `public_teacher_*reward.yaml` guided-teacher config stack out of `configs/thesis/ablations/` and into `configs/thesis/_shared/guided_teacher/`.
+- Added `configs/thesis/_shared/guided_teacher/README.md` to mark the stack as internal support, not a public launch surface.
+- Updated `configs/thesis/b1_guided_seed.yaml` to extend the internal guided-teacher stack.
+- Updated `configs/thesis/ablations/main_league_guided_factorized_continuation_no_b1_anchor_probe.yaml` to extend the internal guided-teacher stack.
+- Updated config characterization tests and stall-monitor tests to load guided-teacher configs from the internal shared path.
+- Left historical rebuild-log command records unchanged as provenance text.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg <public-teacher references> configs README.md docs python/weiss_rl/tests python/scripts Makefile pyproject.toml` | Audited: current functional references were in config tests, stall-monitor tests, `b1_guided_seed.yaml`, and one main-league probe. |
+| `rg 'configs/thesis/ablations/public_teacher' configs/thesis python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_train_stall_monitor.py` | Passed: no stale public-teacher ablation paths remain in live configs/tests. |
+| `Get-ChildItem -Name configs/thesis/ablations | Where-Object { $_ -like 'public_teacher*reward.yaml' }` | Passed: no public-teacher reward files remain in the public ablation directory. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_train_stall_monitor.py::test_dev_eval_ineligibility_reasons_apply_checkpoint_confidence_when_stall_monitor_disabled python/weiss_rl/tests/test_train_stall_monitor.py::test_confirmatory_dev_eval_request_targets_multianchor_near_miss_candidate python/weiss_rl/tests/test_train_stall_monitor.py::test_confirmatory_dev_eval_request_rejects_multianchor_clear_anchor_failure python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_b1_guided_seed_uses_guided_seed_config python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 209 passed, 14 third-party warnings. |
+| `uv run --extra dev --extra sim python -c "<load all configs/thesis/_shared/guided_teacher/*.yaml plus b1_guided_seed and dependent main probe>"` | Passed: loaded 32 guided-teacher configs. |
+| `python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_train_stall_monitor.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed after formatting two touched test files. |
+
+### Tests Added
+
+- None. Existing characterization tests now point at the internal guided-teacher path.
+
+### Files Moved or Deleted
+
+- Moved 30 `public_teacher_*reward.yaml` files from `configs/thesis/ablations/` to `configs/thesis/_shared/guided_teacher/`.
+- Added `configs/thesis/_shared/guided_teacher/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, observation/action interpretation, legal-action ordering, reward values, training runtime, evaluation flow, checkpoint compatibility, artifact format, or metric semantics changed.
+
+### Remaining Risks
+
+- Historical rebuild-log commands still mention old `configs/thesis/ablations/public_teacher_...` paths as provenance.
+- Several noncanonical main-league probe configs still live in `configs/thesis/ablations/`; those should move in dependency-aware batches.
+
+### Next Action
+
+- Archive or internalize the next coherent probe cluster under `configs/thesis/ablations/`, likely the guided-factorized main-league continuation probes that now depend on the internal guided-teacher stack.
+
+## 2026-05-29 - Internal Guided-Factorized Main Stack
+
+### Changes
+
+- Moved the `main_league_guided_factorized*.yaml` main-league continuation/probe stack out of `configs/thesis/ablations/` and into `configs/thesis/_shared/guided_factorized/`.
+- Added `configs/thesis/_shared/guided_factorized/README.md`.
+- Updated `configs/thesis/main_league_guided_bootstrap.yaml` to extend the internal guided-factorized stack.
+- Updated the moved stack's cross-folder `extends:` paths for `main_league.yaml` and the internal guided-teacher stack.
+- Updated `test_config_loader.py` characterization paths to the internal guided-factorized location.
+- Updated `configs/thesis/_shared/README.md` to list the guided-teacher and guided-factorized internal stacks.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg main_league_guided_factorized configs README.md docs python/weiss_rl/tests python/scripts Makefile pyproject.toml` | Audited: current functional references were `main_league_guided_bootstrap.yaml` and config-loader characterization tests; historical rebuild-log command records remain unchanged. |
+| `Get-ChildItem -Name configs/thesis/ablations | Where-Object { $_ -like 'main_league_guided_factorized*.yaml' }` | Passed: no guided-factorized files remain in the public ablation directory. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_uses_seed_and_warmstart_without_strict_b1 python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_vtrace_uses_clamped_stack python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_seed_champions_uses_seedchampion_stack python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_selected_resolves_init_policy_id python/weiss_rl/tests/test_public_config_surface_docs.py` | Initially failed on one moved `extends: ../main_league.yaml`; passed after updating it to `../../main_league.yaml`: 209 passed. |
+| `uv run --extra dev --extra sim python -c "<load all configs/thesis/_shared/guided_factorized/*.yaml plus main_league_guided_bootstrap>"` | Initially failed on the same moved `extends:` path; passed after the fix: loaded 21 guided-factorized configs. |
+| `python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed after formatting `test_config_loader.py`. |
+
+### Tests Added
+
+- None. Existing config and CLI workflow characterization tests now point at the internal guided-factorized path.
+
+### Files Moved or Deleted
+
+- Moved 20 `main_league_guided_factorized*.yaml` files from `configs/thesis/ablations/` to `configs/thesis/_shared/guided_factorized/`.
+- Added `configs/thesis/_shared/guided_factorized/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, observation/action interpretation, legal-action ordering, reward values, training runtime, evaluation flow, checkpoint compatibility, artifact format, or metric semantics changed.
+
+### Remaining Risks
+
+- Historical rebuild-log commands still mention the old `configs/thesis/ablations/main_league_guided_factorized...` paths as provenance.
+- Other noncanonical main-league probe configs still live under `configs/thesis/ablations/`; they should move in similarly bounded clusters.
+
+### Next Action
+
+- Continue reducing `configs/thesis/ablations/` by moving the next coherent main-league probe family, likely the `main_b1only_p2_*` or `main_league_champion_hardneg_*` cluster depending on dependency size.
+
+## 2026-05-29 - Internal B1-Only P2 Probe Stack
+
+### Changes
+
+- Moved the four `main_b1only_p2*.yaml` trust-region probe configs out of `configs/thesis/ablations/` and into `configs/thesis/_shared/main_b1only_p2/`.
+- Added `configs/thesis/_shared/main_b1only_p2/README.md`.
+- Updated the moved base config to extend `../../main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml` from its new location.
+- Updated `configs/thesis/ablations/main_league_champion_hardneg_long_probe.yaml`, the one live config that extends the p2 base, to point at the internal shared stack.
+- Updated config-loader characterization tests to load the p2 probes from the internal shared path.
+- Updated `configs/thesis/_shared/README.md` to list the p2 probe stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg main_b1only_p2 configs README.md docs python/weiss_rl/tests python/scripts Makefile pyproject.toml` | Audited: current functional references were config-loader tests and `main_league_champion_hardneg_long_probe.yaml`; historical report/log references remain as provenance. |
+| `Get-ChildItem -Name configs/thesis/ablations | Where-Object { $_ -like 'main_b1only_p2*.yaml' }` | Passed: no p2 probe configs remain in the public ablation directory. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_b1only_p2_trust_region_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_b1only_p2_trust_region_no_warmup_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_b1only_p2_trust_region_argmax_opp_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_b1only_p2_free_argmax_opp_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_long_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 6 passed. |
+| `uv run --extra dev --extra sim python -c "<load all configs/thesis/_shared/main_b1only_p2/*.yaml plus main_league_champion_hardneg_long_probe>"` | Passed: loaded 5 main-b1only-p2 configs. |
+| `python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed after formatting `test_config_loader.py`. |
+
+### Tests Added
+
+- None. Existing config-loader characterization tests now target the internal shared path.
+
+### Files Moved or Deleted
+
+- Moved 4 `main_b1only_p2*.yaml` files from `configs/thesis/ablations/` to `configs/thesis/_shared/main_b1only_p2/`.
+- Added `configs/thesis/_shared/main_b1only_p2/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, training runtime, evaluation flow, checkpoint compatibility, artifact format, or metric semantics changed.
+
+### Remaining Risks
+
+- Historical rebuild/report docs still mention old `configs/thesis/ablations/main_b1only_p2...` paths as provenance.
+- `configs/thesis/ablations/` still contains many `main_league_champion_hardneg_*` investigation configs.
+
+### Next Action
+
+- Move the first coherent `main_league_champion_hardneg_*` probe family out of the public ablation directory, starting with the early long/rehearsal/consolidation/stable/polish variants that build on the internal p2 stack.
+
+## 2026-05-29 - Internal Hard-Negative Core Probe Stack
+
+### Changes
+
+- Moved the early hard-negative main-league core probes out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_core/`.
+- Added `configs/thesis/_shared/hardneg_core/README.md`.
+- Kept `configs/thesis/ablations/main_league_champion_hardneg_multiobjective_guard_probe.yaml` public for characterization, but updated it to extend the internal shared core.
+- Updated config-loader characterization tests to load the moved long/rehearsal/consolidation/stable/polish configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the hard-negative core stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg*.yaml'` | Audited the remaining hard-negative public probe surface. |
+| `rg -n "main_league_champion_hardneg_(long|rehearsal|consolidation|stable_long|polish|multiobjective_guard)_probe" configs python docs` | Audited current references; functional references now point at `_shared/hardneg_core/`, while historical rebuild/report docs remain as provenance. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_long_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_rehearsal_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_consolidation_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_stable_long_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_polish_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_multiobjective_guard_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 7 passed. |
+| `uv run --extra dev --extra sim python -c "<load all configs/thesis/_shared/hardneg_core/*.yaml plus main_league_champion_hardneg_multiobjective_guard_probe>"` | Passed: loaded 6 hardneg-core configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Initially found formatting drift in `test_config_loader.py`; passed after running `uv run --extra dev python -m ruff format python/weiss_rl/tests/test_config_loader.py`. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared hard-negative core path.
+
+### Files Moved or Deleted
+
+- Moved 5 `main_league_champion_hardneg_{long,rehearsal,consolidation,stable_long,polish}_probe.yaml` configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_core/`.
+- Added `configs/thesis/_shared/hardneg_core/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild/report docs still mention the old hard-negative core paths as provenance.
+- `configs/thesis/ablations/` still contains many later hard-negative investigation configs that should be archived or moved in smaller dependency-aware clusters.
+
+### Next Action
+
+- Continue shrinking the public ablation directory by moving the next hard-negative branch that depends on `main_league_champion_hardneg_multiobjective_guard_probe.yaml`, likely the multiobjective retention/replay-BC retention group.
+
+## 2026-05-29 - Internal Hard-Negative Retention Probe Stack
+
+### Changes
+
+- Moved the hard-negative multiobjective retention base and replay-BC retention variants out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_retention/`.
+- Added `configs/thesis/_shared/hardneg_retention/README.md`.
+- Kept `configs/thesis/ablations/main_league_champion_hardneg_selected_retention_b4guard_probe.yaml` public for the later selected/all-outcome branch, but updated it to extend the internal retention base.
+- Updated config-loader characterization tests to load the moved retention configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the hard-negative retention stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg*retention*.yaml'` | Audited the remaining hard-negative retention public surface before the move. |
+| `rg -n "main_league_champion_hardneg_(multiobjective_retention|replaybc_retention|balanced_replaybc_retention|weighted_replaybc_win32_retention)_probe" configs python docs README.md` | Audited references after the move; current configs and tests now point at `_shared/hardneg_retention/`, while historical rebuild-log commands remain as provenance. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_multiobjective_retention_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_replaybc_retention_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_balanced_replaybc_retention_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_weighted_replaybc_win32_retention_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_retention_b4guard_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 6 passed. |
+| `uv run --extra dev --extra sim python -c "<load all configs/thesis/_shared/hardneg_retention/*.yaml plus main_league_champion_hardneg_selected_retention_b4guard_probe>"` | Passed: loaded 5 hardneg-retention configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared hard-negative retention path.
+
+### Files Moved or Deleted
+
+- Moved 4 `main_league_champion_hardneg_{multiobjective_retention,replaybc_retention,balanced_replaybc_retention,weighted_replaybc_win32_retention}_probe.yaml` configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_retention/`.
+- Added `configs/thesis/_shared/hardneg_retention/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, replay dataset paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild-log commands still mention the old retention config paths as provenance.
+- The selected/all-outcome hard-negative branch still lives under `configs/thesis/ablations/`; it now depends on the shared retention stack and should be moved in a separate dependency-aware pass.
+
+### Next Action
+
+- Move the next selected hard-negative branch that depends on `main_league_champion_hardneg_selected_retention_b4guard_probe.yaml`, starting with the selected replay-BC and conservative online guard configs if their downstream references are clean.
+
+## 2026-05-29 - Internal Hard-Negative Selected Base Stack
+
+### Changes
+
+- Moved the selected-checkpoint hard-negative base configs out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_selected/`.
+- Added `configs/thesis/_shared/hardneg_selected/README.md`.
+- Updated public selected all-outcome and conservative follow-up configs to extend the moved shared base configs.
+- Updated config-loader characterization tests to load the moved selected-retention, selected all-outcome replay-BC, and selected conservative online guard configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the selected hard-negative stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_selected*.yaml'` | Audited the remaining selected hard-negative public config surface before the move. |
+| `rg -n "extends:.*main_league_champion_hardneg_selected|main_league_champion_hardneg_selected_(retention_b4guard|alloutcome_replaybc_b4guard|conservative_online_guard)_probe" configs python docs README.md` | Audited references and direct dependents before and after the move; current configs and tests now point at `_shared/hardneg_selected/`, while historical logs remain as provenance. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_retention_b4guard_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_replaybc_b4guard_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_selected_conservative_online_guard_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_b2repair_b4guard_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_lowpressure_pairloss_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_paired_swing_contrastive_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_paired_flipbc_conservative_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 8 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_selected/*.yaml plus all configs/thesis/ablations/main_league_champion_hardneg_selected*.yaml>"` | Passed: loaded 36 selected hardneg configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared selected hard-negative base path.
+
+### Files Moved or Deleted
+
+- Moved 3 `main_league_champion_hardneg_selected_{retention_b4guard,alloutcome_replaybc_b4guard,conservative_online_guard}_probe.yaml` configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_selected/`.
+- Added `configs/thesis/_shared/hardneg_selected/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, replay dataset paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild/refactor log entries still mention the old selected config paths as provenance.
+- The larger selected all-outcome, paired, and outcome-contrastive hard-negative investigation branches still live under `configs/thesis/ablations/`.
+
+### Next Action
+
+- Move the next selected all-outcome branch rooted at `main_league_champion_hardneg_selected_alloutcome_b2repair_b4guard_probe.yaml`, updating public descendants to extend an internal shared selected-alloutcome stack.
+
+## 2026-05-29 - Internal Hard-Negative Selected All-Outcome Stack
+
+### Changes
+
+- Moved the selected-checkpoint all-outcome repair lineage out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_selected_alloutcome/`.
+- Added `configs/thesis/_shared/hardneg_selected_alloutcome/README.md`.
+- Updated the moved B2-repair root to extend the internal selected all-outcome replay-BC base.
+- Kept the later stratified winner-repair branch public, but updated it to extend the moved shared winner-repair config.
+- Updated config-loader characterization tests to load the moved all-outcome repair configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the selected all-outcome stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_selected_alloutcome*.yaml'` | Audited the remaining selected all-outcome public config surface before the move. |
+| `rg -n "extends:.*main_league_champion_hardneg_selected_alloutcome|main_league_champion_hardneg_selected_alloutcome_(b2repair_b4guard|learnedfloor_b4b2guard|learnedpush_b4b2guard|focusoldhn_b4b2guard|focusoldhn_strong_b4b2guard|focusoldhn_b2retention_b4b2guard|winnerrepair_b4b2guard|swingrepair_b4b2guard|disjointrepair_b4b2guard)_probe" configs python docs README.md` | Audited dependencies and references; current configs and tests now point at `_shared/hardneg_selected_alloutcome/`, while historical logs and archive reports remain as provenance. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_b2repair_b4guard_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_learnedfloor_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_learnedpush_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_swingrepair_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_disjointrepair_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_focusoldhn_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_focusoldhn_strong_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_focusoldhn_b2retention_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_extensionrepair_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_selected_alloutcome_winnerrepair_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_stratifiedwinnerrepair_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 12 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_selected/*.yaml, configs/thesis/_shared/hardneg_selected_alloutcome/*.yaml, and all remaining configs/thesis/ablations/main_league_champion_hardneg_selected*.yaml>"` | Passed: loaded 36 selected hardneg configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared selected all-outcome path.
+
+### Files Moved or Deleted
+
+- Moved 10 selected all-outcome repair configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_selected_alloutcome/`: B2 repair, learned floor, learned push, focus-old-hard-negative, focus-old-hard-negative strong, B2-retention focus-old-hard-negative, extension repair, swing repair, disjoint repair, and winner repair.
+- Added `configs/thesis/_shared/hardneg_selected_alloutcome/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, replay dataset paths, seed-set paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild/refactor logs and archived reports still mention the old selected all-outcome config paths as provenance.
+- The stratified all-outcome and overlap repair branch still lives under `configs/thesis/ablations/` and should move as the next dependency-aware cluster.
+
+### Next Action
+
+- Move the stratified selected all-outcome branch rooted at `main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_b4b2guard_probe.yaml`, updating overlap descendants to extend an internal shared selected-stratified stack.
+
+## 2026-05-29 - Internal Hard-Negative Selected Stratified Stack
+
+### Changes
+
+- Moved the selected-checkpoint stratified all-outcome repair branch out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_selected_stratified/`.
+- Added `configs/thesis/_shared/hardneg_selected_stratified/README.md`.
+- Updated the moved stratified root to extend the internal selected all-outcome winner-repair base.
+- Updated config-loader characterization tests to load the moved stratified and overlap repair configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the selected stratified stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_selected_alloutcome_stratified*.yaml'` | Audited the remaining stratified selected all-outcome public config surface before the move. |
+| `rg -n "extends:.*main_league_champion_hardneg_selected_alloutcome_stratified|main_league_champion_hardneg_selected_alloutcome_stratified" configs python docs README.md` | Audited dependencies and references; current configs and tests now point at `_shared/hardneg_selected_stratified/`, while historical logs and archive reports remain as provenance. |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_selected_alloutcome*.yaml'` | Passed: no selected all-outcome configs remain in public ablations. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_stratifiedwinnerrepair_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_overlap_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_b1_loss_topaction_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_b1_hardneg_loss_topaction_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_b1_hardneg_preserved_winner_focus_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_b1_hardneg_preserved_winner_b1b3repair_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_grouped_b1b3_hardneg_repair_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_grouped_fixedwin_repair_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_grouped_b2split_fixedwin_repair_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_grouped_b2loss_fixedwin_repair_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 11 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_selected*.yaml plus all remaining configs/thesis/ablations/main_league_champion_hardneg_selected*.yaml>"` | Passed: loaded 36 selected hardneg configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared selected stratified path.
+
+### Files Moved or Deleted
+
+- Moved 10 selected stratified all-outcome repair configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_selected_stratified/`.
+- Added `configs/thesis/_shared/hardneg_selected_stratified/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, replay dataset paths, seed-set paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild/refactor logs and archived reports still mention the old selected stratified config paths as provenance.
+- Other selected hard-negative investigation branches remain in public ablations, especially paired flip-BC and outcome-contrastive probes.
+
+### Next Action
+
+- Move the next selected hard-negative branch under `configs/thesis/ablations/`, likely the paired flip-BC / paired swing branch that depends on the shared selected conservative base.
+
+## 2026-05-29 - Internal Hard-Negative Selected Paired Stack
+
+### Changes
+
+- Moved the selected-checkpoint paired replay and low-pressure repair branch out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_selected_paired/`.
+- Added `configs/thesis/_shared/hardneg_selected_paired/README.md`.
+- Updated moved configs that directly extend the selected conservative base to use the internal shared path.
+- Kept the outcome-contrastive branch public for the next slice, but updated its root to extend the moved paired focus-old-hard-negative config.
+- Updated config-loader characterization tests to load the moved paired configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the selected paired stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_selected*.yaml'` | Audited the remaining selected hard-negative public config surface before the move. |
+| `rg -n "extends:.*main_league_champion_hardneg_selected_(paired|grouped128|lowpressure)|main_league_champion_hardneg_selected_(paired_flipbc_conservative|paired_flipbc_focusoldhn_conservative|paired_swing_contrastive|grouped128_paired_flipbc_focusoldhn|lowpressure_pairloss)_probe" configs python docs README.md` | Audited dependencies and references; current configs and tests now point at `_shared/hardneg_selected_paired/`, while historical rebuild logs remain as provenance. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_lowpressure_pairloss_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_paired_swing_contrastive_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_paired_flipbc_conservative_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_paired_flipbc_focusoldhn_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_grouped128_paired_flipbc_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_outcome_contrastive_focusoldhn_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 7 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_selected*.yaml plus all remaining configs/thesis/ablations/main_league_champion_hardneg_selected*.yaml>"` | Passed: loaded 36 selected hardneg configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared selected paired path.
+
+### Files Moved or Deleted
+
+- Moved 5 selected paired/low-pressure repair configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_selected_paired/`.
+- Added `configs/thesis/_shared/hardneg_selected_paired/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, replay dataset paths, paired-swing settings, seed-set paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild logs still mention the old selected paired config paths as provenance.
+- The remaining selected hard-negative public surface is now the outcome-contrastive branch under `configs/thesis/ablations/`.
+
+### Next Action
+
+- Move the remaining selected outcome-contrastive branch into an internal shared stack, updating any interpolation continuation configs that extend it.
+
+## 2026-05-29 - Internal Hard-Negative Selected Outcome-Contrastive Stack
+
+### Changes
+
+- Moved the remaining selected-checkpoint outcome-contrastive branch out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_selected_outcome_contrastive/`.
+- Added `configs/thesis/_shared/hardneg_selected_outcome_contrastive/README.md`.
+- Updated the moved outcome-contrastive root to extend the internal selected paired stack.
+- Updated the public interpolation continuation root to extend the moved shared `rawext256_b2_oldhn` outcome-contrastive leaf.
+- Updated config-loader characterization tests to load the moved outcome-contrastive configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the selected outcome-contrastive stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_selected*.yaml'` | Audited the remaining selected hard-negative public config surface before and after the move. |
+| `rg -n "extends:.*main_league_champion_hardneg_selected_outcome_contrastive|main_league_champion_hardneg_selected_outcome_contrastive" configs python docs README.md` | Audited dependencies and references; current configs and tests now point at `_shared/hardneg_selected_outcome_contrastive/`, while historical rebuild logs remain as provenance. |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_selected*.yaml'` | Passed after the move: no selected hard-negative configs remain in public ablations. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_outcome_contrastive_focusoldhn_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_outcome_contrastive_full_focusoldhn_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_outcome_contrastive_edgehn_focus_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_outcome_contrastive_edgehn_b1b2focus_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_outcome_contrastive_extpreserve_a0375_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_outcome_contrastive_rawext256_allpreserve_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_outcome_contrastive_rawext256_b2_policy1_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_outcome_contrastive_rawext256_b2_oldhn_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_interp_a050_continue_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 10 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_selected*.yaml plus configs/thesis/ablations/main_league_champion_hardneg_interp_a050*.yaml>"` | Passed: loaded 42 selected/interp-a050 configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared selected outcome-contrastive path.
+
+### Files Moved or Deleted
+
+- Moved 8 selected outcome-contrastive configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_selected_outcome_contrastive/`.
+- Added `configs/thesis/_shared/hardneg_selected_outcome_contrastive/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, replay dataset paths, paired-swing settings, seed-set paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild logs still mention the old selected outcome-contrastive config paths as provenance.
+- Other non-selected hard-negative and interpolation continuation probes still live under `configs/thesis/ablations/`.
+
+### Next Action
+
+- Continue shrinking `configs/thesis/ablations/` by moving the `main_league_champion_hardneg_interp_a050*.yaml` interpolation continuation branch into `_shared`, now that its selected outcome-contrastive base is internal.
+
+## 2026-05-29 - Internal Hard-Negative Interpolation a050 Stack
+
+### Changes
+
+- Moved the `main_league_champion_hardneg_interp_a050*.yaml` interpolation continuation branch out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_interp_a050/`.
+- Added `configs/thesis/_shared/hardneg_interp_a050/README.md`.
+- Updated the moved root to extend the internal selected outcome-contrastive stack.
+- Updated direct public a050/a075 follow-up configs to extend the moved shared leaves.
+- Updated config-loader characterization tests to load the moved interp-a050 configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the interp-a050 stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_interp_a050*.yaml'` | Audited the interp-a050 public config surface before and after the move. |
+| `rg -n "extends:.*main_league_champion_hardneg_interp_a050|main_league_champion_hardneg_interp_a050" configs python docs README.md` | Audited dependencies and references; current configs and tests now point at `_shared/hardneg_interp_a050/`, while historical rebuild/refactor logs remain as provenance. |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_interp_a050*.yaml'` | Passed after the move: no interp-a050 configs remain in public ablations. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_interp_a050_continue_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_interp_a050_u1_nowarm_b2guard_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_interp_a050_u1_nowarm_balanced_b2guard_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_interp_a050_p1p2_a025_b2exact_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_interp_a050_p1p2_a025_b2exact_learnedp16_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_interp_a050_p1p2_a025_b2pair70_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a075_nonconflict_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 8 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_interp_a050/*.yaml plus direct a050/a075 public dependents>"` | Passed: loaded 10 interp-a050 configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared interp-a050 path.
+
+### Files Moved or Deleted
+
+- Moved 6 interp-a050 continuation configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_interp_a050/`.
+- Added `configs/thesis/_shared/hardneg_interp_a050/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, replay dataset paths, paired-swing settings, seed-set paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild/refactor logs still mention the old interp-a050 config paths as provenance.
+- Later a050/a075 hard-negative follow-up probes still live under `configs/thesis/ablations/`.
+
+### Next Action
+
+- Continue shrinking `configs/thesis/ablations/` by moving the direct a050/a075 follow-up branch rooted at `main_league_champion_hardneg_a050balanced_live_rowgate_probe.yaml` and `main_league_champion_hardneg_interp_a075_nonconflict_continue_probe.yaml`.
+
+## 2026-05-29 - Internal Hard-Negative a050/a075 Follow-Up Stack
+
+### Changes
+
+- Moved the direct a050/a075 hard-negative follow-up layer out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_a050_a075_followup/`.
+- Added `configs/thesis/_shared/hardneg_a050_a075_followup/README.md`.
+- Updated moved configs that directly extend the interp-a050 stack to use internal shared paths.
+- Updated public p2-live and a075-context roots to extend the moved shared follow-up configs.
+- Updated config-loader characterization tests to load the moved a050/a075 follow-up configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the a050/a075 follow-up stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_a0*.yaml'` | Audited the a050/a075 public config surface before the move. |
+| `rg -n "extends:.*(main_league_champion_hardneg_a050balanced|main_league_champion_hardneg_a075_preference|main_league_champion_hardneg_interp_a075)|main_league_champion_hardneg_(a050balanced|a075_preference|interp_a075)" configs python docs README.md` | Audited dependencies and references; current configs and tests now point at `_shared/hardneg_a050_a075_followup/`, while historical rebuild/refactor logs remain as provenance. |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_interp_a075*.yaml'` | Passed after the move: no interp-a075 configs remain in public ablations. |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_a075_preference*.yaml'` | Passed after the move: no a075 preference follow-up configs remain in public ablations. |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_a050balanced*.yaml'` | Passed after the move: no a050balanced configs remain in public ablations. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a075_nonconflict_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a075_broad_conflictfilter_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a075_episodepref_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a075_preference_balanced_micro_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a075_preference_groupbalanced_micro_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a050balanced_live_rowgate_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a075_context_episodepref_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 8 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_a050_a075_followup/*.yaml plus representative p2/context public dependents>"` | Passed: loaded 11 a050-a075 follow-up configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared a050/a075 follow-up path.
+
+### Files Moved or Deleted
+
+- Moved 7 a050/a075 follow-up configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_a050_a075_followup/`.
+- Added `configs/thesis/_shared/hardneg_a050_a075_followup/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, replay dataset paths, paired-swing/preference settings, seed-set paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild/refactor logs still mention the old a050/a075 follow-up config paths as provenance.
+- Later a050p2 and a075 context hard-negative probe branches still live under `configs/thesis/ablations/`.
+
+### Next Action
+
+- Continue shrinking `configs/thesis/ablations/` by moving either the a050p2 live branch or the a075 context branch into internal shared config stacks.
+
+## 2026-05-29 - Internal Hard-Negative a050p2 Live Stack
+
+### Changes
+
+- Moved the a050p2 live hard-negative probe branch out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_a050p2_live/`.
+- Added `configs/thesis/_shared/hardneg_a050p2_live/README.md`.
+- Updated the moved a050p2 root to extend the internal a050/a075 follow-up stack.
+- Updated config-loader characterization tests to load the moved a050p2 live configs from the shared path.
+- Updated `configs/thesis/_shared/README.md` to list the a050p2 live stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg -n "configs/thesis/ablations/main_league_champion_hardneg_a050p2|extends: main_league_champion_hardneg_a050p2|main_league_champion_hardneg_a050p2" configs python README.md docs` | Audited dependencies and references; current configs and tests now point at `_shared/hardneg_a050p2_live/`, while historical rebuild logs remain as provenance. |
+| `Get-ChildItem -Path configs/thesis/_shared/hardneg_a050p2_live` | Passed after the move: the shared stack contains the four a050p2 live configs plus its README. |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_a050p2*.yaml'` | Passed after the move: no a050p2 live configs remain in public ablations. |
+| `Get-Content -Path configs/thesis/_shared/hardneg_a050p2_live/main_league_champion_hardneg_a050p2_live_learnedpush_rowgate_probe.yaml -TotalCount 8` | Confirmed the moved root now extends `../hardneg_a050_a075_followup/main_league_champion_hardneg_a050balanced_live_rowgate_probe.yaml`. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a050p2_live_learnedpush_rowgate_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a050p2_live_rowdeficit_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a050p2_live_unlocked_rowdeficit_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_a050p2_live_unlocked_learned_recovery_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 5 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_a050p2_live/*.yaml>"` | Passed: loaded 4 a050p2-live configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared a050p2 live path.
+
+### Files Moved or Deleted
+
+- Moved 4 a050p2 live configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_a050p2_live/`.
+- Added `configs/thesis/_shared/hardneg_a050p2_live/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, reward values, replay dataset paths, paired-swing/preference settings, seed-set paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild logs still mention the old a050p2 live config paths as provenance.
+- The later a075 context hard-negative probe branch still lives under `configs/thesis/ablations/`.
+
+### Next Action
+
+- Continue shrinking `configs/thesis/ablations/` by moving the a075 context branch into an internal shared config stack.
+
+## 2026-05-29 - Internal Hard-Negative a075 Context Stack
+
+### Changes
+
+- Moved the a075 opponent-context hard-negative probe branch out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_a075_context/`.
+- Added `configs/thesis/_shared/hardneg_a075_context/README.md`.
+- Updated the moved a075 context root to extend the internal a050/a075 follow-up stack.
+- Updated the public a050 context preference root to extend the moved shared a075 context leaf.
+- Added a small config-loader test helper for the moved a075 context stack and retargeted the a075 context characterization tests.
+- Updated `configs/thesis/_shared/README.md` to list the a075 context stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter '*a075*context*.yaml'` | Audited the a075 context public config surface before the move. |
+| `rg -n -F "configs/thesis/ablations/main_league_champion_hardneg_a075_context" configs python README.md docs` | Audited stale public paths after the move; only historical rebuild-log provenance still references the old public paths. |
+| `Get-ChildItem -Path configs/thesis/_shared/hardneg_a075_context -Filter '*.yaml'` | Passed after the move: the shared stack contains 28 a075 context configs. |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_a075_context*.yaml'` | Passed after the move: no a075 context configs remain in public ablations. |
+| `Get-Content -Path configs/thesis/_shared/hardneg_a075_context/main_league_champion_hardneg_a075_context_probe.yaml -TotalCount 6` | Confirmed the moved root now extends `../hardneg_a050_a075_followup/main_league_champion_hardneg_interp_a075_nonconflict_continue_probe.yaml`. |
+| `Get-Content -Path configs/thesis/ablations/main_league_champion_hardneg_a050_context_preference_width128_probe.yaml -TotalCount 8` | Confirmed the public a050 context root now extends `../_shared/hardneg_a075_context/main_league_champion_hardneg_a075_context_preference_groupbalanced_micro_probe.yaml`. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py -k "a075_context or a050_width128"` | Passed: 24 passed, 180 deselected. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 1 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_a075_context/*.yaml>"` | Passed: loaded 28 a075-context configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the internal shared a075 context path.
+
+### Files Moved or Deleted
+
+- Moved 28 a075 context configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_a075_context/`.
+- Added `configs/thesis/_shared/hardneg_a075_context/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, observation/action interpretation, reward values, replay dataset paths, paired-swing/preference settings, seed-set paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild logs still mention the old a075 context config paths as provenance.
+- The a050 context preference width128 branch still lives under `configs/thesis/ablations/`, now extending this internal shared stack.
+
+### Next Action
+
+- Continue shrinking `configs/thesis/ablations/` by moving the a050 context preference width128 branch into an internal shared config stack.
+
+## 2026-05-29 - Internal Hard-Negative a050 Context Width128 Stack
+
+### Changes
+
+- Moved the a050 opponent-context width128 preference branch out of `configs/thesis/ablations/` and into `configs/thesis/_shared/hardneg_a050_context_width128/`.
+- Added `configs/thesis/_shared/hardneg_a050_context_width128/README.md`.
+- Updated the moved a050 width128 root to extend the internal a075 context stack.
+- Added a small config-loader test helper for the moved a050 width128 stack and retargeted the existing a050 width128 characterization tests.
+- Added direct characterization for the `rich_exactaliases` leaf, which was previously covered only by historical commands and broad config loading.
+- Updated `configs/thesis/_shared/README.md` to list the a050 context width128 stack.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter 'main_league_champion_hardneg_a050_context_preference_width128*.yaml'` | Audited the a050 context width128 public config surface before and after the move. |
+| `rg -n -F "configs/thesis/ablations/main_league_champion_hardneg_a050_context_preference_width128" configs python README.md docs` | Audited stale public paths after the move; only historical rebuild/refactor-log provenance still references the old public paths. |
+| `Get-ChildItem -Path configs/thesis/_shared/hardneg_a050_context_width128 -Filter '*.yaml'` | Passed after the move: the shared stack contains 4 a050 context width128 configs. |
+| `Get-Content -Path configs/thesis/_shared/hardneg_a050_context_width128/main_league_champion_hardneg_a050_context_preference_width128_rich_exactaliases_probe.yaml -TotalCount 40` | Inspected the exactaliases leaf before adding direct characterization. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py -k "a050_width128"` | Passed: 4 passed, 201 deselected. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 1 passed. |
+| `uv run --extra dev --extra sim python -c "<load configs/thesis/_shared/hardneg_a050_context_width128/*.yaml>"` | Passed: loaded 4 a050-context-width128 configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- Added `test_load_stack_config_supports_main_league_a050_width128_rich_exactaliases_probe` to pin the exact learned-alias context rows on the moved leaf.
+
+### Files Moved or Deleted
+
+- Moved 4 a050 context width128 configs from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_a050_context_width128/`.
+- Added `configs/thesis/_shared/hardneg_a050_context_width128/README.md`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, observation/action interpretation, reward values, replay dataset paths, paired-swing/preference settings, seed-set paths, training runtime, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild/refactor logs still mention the old a050 context width128 config paths as provenance.
+- Other noncanonical historical hard-negative probes may still live under `configs/thesis/ablations/`; continue auditing by remaining public-surface families rather than individual files.
+
+### Next Action
+
+- Audit the now-smaller `configs/thesis/ablations/` surface and move the next coherent historical hard-negative probe family into `_shared` or archive, leaving only public thesis ablation launch targets.
+
+## 2026-05-29 - Internal Hard-Negative Multiobjective Guard Root
+
+### Changes
+
+- Moved `main_league_champion_hardneg_multiobjective_guard_probe.yaml` out of public ablations and into `configs/thesis/_shared/hardneg_core/`.
+- Updated the moved guard root to extend the local hard-negative core stable-long config.
+- Updated the internal retention probe that depended on the guard root so it no longer reaches back into `configs/thesis/ablations/`.
+- Updated the hard-negative core README to explain why the multiobjective guard root lives in the internal core stack.
+- Retargeted the config-loader characterization test to the moved shared path.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-ChildItem -Path configs/thesis/ablations -Filter '*.yaml'` | Audited the remaining public ablation surface before and after the move. |
+| `rg -n "main_league_champion_hardneg_multiobjective_guard_probe|multiobjective_guard" configs python README.md docs` | Audited dependencies and references; current configs/tests now point at `_shared/hardneg_core/`, while historical rebuild/refactor logs remain as provenance. |
+| `Get-Content -Path configs/thesis/_shared/hardneg_core/main_league_champion_hardneg_multiobjective_guard_probe.yaml -TotalCount 8` | Confirmed the moved root now extends `main_league_champion_hardneg_stable_long_probe.yaml`. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_multiobjective_guard_probe python/weiss_rl/tests/test_config_loader.py::test_load_stack_config_supports_main_league_champion_hardneg_multiobjective_retention_probe python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 3 passed. |
+| `uv run --extra dev --extra sim python -c "<load moved guard root plus dependent retention config>"` | Passed: loaded 2 multiobjective guard configs. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed. |
+| `uv run --extra dev python -m ruff format python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Reformatted `test_config_loader.py`. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/tests/test_config_loader.py python/weiss_rl/tests/test_public_config_surface_docs.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing config-loader tests now characterize the moved internal shared path.
+
+### Files Moved or Deleted
+
+- Moved 1 multiobjective guard config from `configs/thesis/ablations/` to `configs/thesis/_shared/hardneg_core/`.
+
+### Behavior Changes
+
+- None intended. Effective config composition is preserved through updated `extends:` paths.
+- No simulator contract, legal-action semantics, observation/action interpretation, reward values, replay dataset paths, seed-set paths, training runtime, guarded-bootstrap logic, evaluation flow, checkpoint compatibility, artifact format, metric aggregation, or league promotion behavior changed.
+
+### Remaining Risks
+
+- Historical rebuild/refactor logs still mention the old public multiobjective guard path as provenance.
+- Public ablations are now limited to baseline/model ablations plus final-eval variants; the next cleanup should move from config gardening into production Python module refactors.
+
+### Next Action
+
+- Start a production-code refactor slice, preferably in the public package CLI/workflow path, with characterization tests around existing commands.
+
+## 2026-05-29 - Package CLI Figures Command Builder Extraction
+
+### Changes
+
+- Extracted figure workflow subprocess construction from `dispatch_figures` into `build_figures_command`.
+- Kept `dispatch_figures` focused on resolving parsed arguments, naming the plan, and dispatching through `run_or_write_plan`.
+- Added a CLI dry-run characterization test that pins the exact generated `python/scripts/make_figures.py` command, including `--fig-id` and repeated `--format` forwarding.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-Content -Path python/weiss_rl/cli.py -TotalCount 260` | Confirmed the public `weiss_rl.cli` module is already a thin parser/dispatcher wrapper. |
+| `Get-Content -Path python/weiss_rl/workflows/command_builders.py` | Inspected deterministic workflow command builders before adding the figures builder. |
+| `Get-Content -Path python/weiss_rl/workflows/dispatch_evaluation.py` | Inspected evaluation workflow dispatch before extracting inline figures command construction. |
+| `rg -n "package_cli|verify_repo|public_workflows|Package CLI" python/weiss_rl/tests/test_script_entrypoint_smokes.py` | Located the existing verify-repo package CLI smoke test after an initial stale pytest target. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_figures_dry_run_forwards_figure_options python/weiss_rl/tests/test_script_entrypoint_smokes.py::test_verify_repo_entrypoint_runs_release_verification_steps` | Passed: 2 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 20 passed. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/workflows/command_builders.py python/weiss_rl/workflows/dispatch_evaluation.py python/weiss_rl/tests/test_cli_workflow.py` | Passed. |
+| `uv run --extra dev python -m ruff format python/weiss_rl/tests/test_cli_workflow.py` | Reformatted the new test after the first format check reported wrapping drift. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/workflows/command_builders.py python/weiss_rl/workflows/dispatch_evaluation.py python/weiss_rl/tests/test_cli_workflow.py` | Passed: 3 files already formatted. |
+
+### Tests Added
+
+- Added `test_package_cli_figures_dry_run_forwards_figure_options`.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. The figure workflow still emits the same subprocess command and dry-run plan shape.
+- No training, evaluation, simulator, config, checkpoint, artifact, figure-rendering, or CLI argument semantics changed.
+
+### Remaining Risks
+
+- Other package CLI dispatch modules still contain some argument normalization and command-building decisions in the same functions; continue extracting only where tests can pin command output.
+
+### Next Action
+
+- Continue production-code refactoring in the package CLI/workflow layer, likely by moving another inline workflow command into `command_builders` or by simplifying dispatch tables while preserving dry-run command output.
+
+## 2026-05-29 - Package CLI Guard-Run Defaults Cleanup
+
+### Changes
+
+- Moved the default guard-run required anchor set from `dispatch_guard_run` into `command_builders.DEFAULT_GUARD_REQUIRED_ANCHORS`.
+- Made `build_guard_run_command` resolve default B2/B3/B4 anchors when no explicit anchors are provided.
+- Kept `dispatch_guard_run` focused on parsed-argument normalization and workflow-plan dispatch.
+- Added CLI dry-run characterization for custom `--required-anchor` values replacing the defaults.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-Content -Path python/weiss_rl/workflows/dispatch_bootstrap.py -TotalCount 280` | Inspected neighboring workflow dispatch style before choosing the guard-run cleanup. |
+| `Get-Content -Path python/weiss_rl/workflows/plans.py -TotalCount 220` | Inspected plan writing helpers to avoid folding unrelated plan behavior into this slice. |
+| `rg -n "B2 HeuristicPublic|guard-required-anchor|required_anchor|build_guard_run_command|dispatch_guard_run" python/weiss_rl docs README.md` | Audited the guard-run default anchor references before moving the defaults. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_guard_run_wraps_learning_progress_league_guard python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_guard_run_custom_required_anchors_replace_defaults python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_guard_run_failure_exits_without_traceback` | Passed: 3 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 21 passed. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/workflows/command_builders.py python/weiss_rl/workflows/dispatch_evaluation.py python/weiss_rl/tests/test_cli_workflow.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/workflows/command_builders.py python/weiss_rl/workflows/dispatch_evaluation.py python/weiss_rl/tests/test_cli_workflow.py` | Passed: 3 files already formatted. |
+
+### Tests Added
+
+- Added `test_package_cli_guard_run_custom_required_anchors_replace_defaults`.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. Default guard-run dry-run commands still include B2/B3/B4 required anchors, and explicit `--required-anchor` values still replace those defaults.
+- No training, evaluation, simulator, config, checkpoint, artifact, figure-rendering, or CLI argument semantics changed.
+
+### Remaining Risks
+
+- Package CLI dispatch still contains some validation and payload-shaping logic; keep extracting only when command output and failure behavior are covered by focused tests.
+
+### Next Action
+
+- Continue production-code refactoring in the package CLI/workflow layer, likely by simplifying workflow dispatch selection or extracting repeated run-plan payload construction where behavior can be pinned.
+
+## 2026-05-29 - Package CLI Dispatch Table
+
+### Changes
+
+- Replaced the long package CLI workflow `if` chain with an explicit typed command-to-handler table.
+- Kept `dispatch_workflow_command` responsible for resolving the repo root and Python executable once, then invoking the selected handler.
+- Added a parser/dispatcher consistency test so every parser subcommand must have a registered dispatch handler.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-Content -Path python/weiss_rl/workflows/cli_dispatch.py -TotalCount 180` | Inspected the existing package CLI dispatch if-chain before replacing it. |
+| `rg -n "dispatch_workflow_command|Unhandled workflow command|weiss_rl.cli" python/weiss_rl/tests python/scripts/verify_repo.py` | Audited existing package CLI dispatch and smoke-test coverage. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_parser_commands_are_all_dispatchable python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_b1_dry_run_uses_thesis_config python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_smoke_eval_uses_tiny_eval_budget python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_guarded_league_bootstrap_wraps_controller` | Passed: 4 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 22 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_script_entrypoint_smokes.py::test_verify_repo_entrypoint_runs_release_verification_steps` | Passed: 1 passed. |
+| `uv run --extra dev python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed: no issues found in 11 source files. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/tests/test_cli_workflow.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/workflows/cli_dispatch.py python/weiss_rl/tests/test_cli_workflow.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- Added `test_package_cli_parser_commands_are_all_dispatchable`.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. Existing package CLI commands still dispatch to the same workflow handlers, and the unhandled-command assertion is preserved.
+- No training, evaluation, simulator, config, checkpoint, artifact, figure-rendering, or CLI argument semantics changed.
+
+### Remaining Risks
+
+- Workflow dispatch handlers still contain some repeated plan-name and payload-shaping patterns; those can be simplified in later production-code slices if tests continue pinning dry-run plans.
+
+### Next Action
+
+- Continue production-code refactoring in the package workflow layer, likely by extracting repeated dry-run plan payload construction or by simplifying training workflow dispatch while preserving command output.
+
+## 2026-05-29 - Package CLI Simple Training Workflow Helper
+
+### Changes
+
+- Extracted the shared `train-b1` / `train-b1-guided-seed` profile, command-building, and dry-run plan flow into `_dispatch_simple_training_workflow`.
+- Kept the public `dispatch_train_b1` and `dispatch_train_b1_guided_seed` functions as small named wrappers with explicit workflow names and stack configs.
+- Preserved the existing generated commands and dry-run plan payloads.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-Content -Path python/weiss_rl/workflows/dispatch_training.py -TotalCount 240` | Inspected the duplicated simple training dispatch flow before extraction. |
+| `rg -n "train_b1|train-b1|guided-seed|train_main" python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_script_entrypoint_smokes.py python/scripts/verify_repo.py` | Located focused B1 and guided-seed workflow coverage. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_b1_dry_run_uses_thesis_config python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_b1_gpu_probe_uses_cuda_probe_shape python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_b1_league_probe_uses_early_guard_shape python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_b1_guided_seed_uses_guided_seed_config` | Passed: 4 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 22 passed. |
+| `uv run --extra dev python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed: no issues found in 11 source files. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/workflows/dispatch_training.py python/weiss_rl/tests/test_cli_workflow.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/workflows/dispatch_training.py python/weiss_rl/tests/test_cli_workflow.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- None. Existing dry-run workflow tests cover both simple training wrappers.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. `train-b1` and `train-b1-guided-seed` still emit the same commands and plan payload shapes.
+- No training, evaluation, simulator, config, checkpoint, artifact, figure-rendering, or CLI argument semantics changed.
+
+### Remaining Risks
+
+- `dispatch_train_main` and `dispatch_train_main_guided_bootstrap` still contain workflow-specific checkpoint resolution and validation. Keep those explicit unless a later extraction can pin both success and error behavior.
+
+### Next Action
+
+- Continue production-code cleanup around workflow modules, likely by extracting a small typed plan-payload helper or by simplifying `dispatch_train_main_guided_bootstrap` validation while preserving error messages.
+
+## 2026-05-29 - Package CLI Workflow Plan Helper
+
+### Changes
+
+- Added `run_or_write_workflow_plan` to centralize workflow dry-run payload construction.
+- Updated training, evaluation, figure, guard, guided-loop, and guarded-league dispatchers to pass the workflow name separately from workflow-specific payload fields.
+- Kept `run_or_write_plan` as the lower-level command execution and plan-writing primitive.
+- Preserved existing dry-run JSON shape: workflow plans still include `workflow`, `command`, `cwd`, and `status` with the same workflow-specific fields.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg -n "workflow|cli_dispatch|dispatch_training|run_or_write_plan|command_builders" C:/Users/Bruger/.codex/memories/MEMORY.md` | Quick memory check found no workflow-specific prior constraints. |
+| `Get-Content -Path python/weiss_rl/workflows/plans.py -TotalCount 220` | Inspected the lower-level plan writer before adding the workflow-specific wrapper. |
+| `Get-Content -Path python/weiss_rl/workflows/dispatch_training.py -TotalCount 260` | Inspected training workflow payload repetition before updating dispatchers. |
+| `Get-Content -Path python/weiss_rl/workflows/dispatch_evaluation.py -TotalCount 180` | Inspected evaluation, figures, B2-audit, and guard-run payload repetition before updating dispatchers. |
+| `Get-Content -Path python/weiss_rl/workflows/dispatch_bootstrap.py -TotalCount 180` | Inspected guided-loop and guarded-league payload repetition before updating dispatchers. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_b1_dry_run_uses_thesis_config python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_requires_b1_and_uses_main_config python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_smoke_eval_uses_tiny_eval_budget python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_figures_dry_run_forwards_figure_options python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_guided_bootstrap_loop_wraps_segmented_controller python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_guarded_league_bootstrap_wraps_controller` | Passed: 6 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 22 passed. |
+| `uv run --extra dev python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed: no issues found in 11 source files. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/workflows/plans.py python/weiss_rl/workflows/dispatch_training.py python/weiss_rl/workflows/dispatch_evaluation.py python/weiss_rl/workflows/dispatch_bootstrap.py python/weiss_rl/tests/test_cli_workflow.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/workflows/plans.py python/weiss_rl/workflows/dispatch_training.py python/weiss_rl/workflows/dispatch_evaluation.py python/weiss_rl/workflows/dispatch_bootstrap.py python/weiss_rl/tests/test_cli_workflow.py` | Passed: 5 files already formatted. |
+
+### Tests Added
+
+- None. Existing dry-run workflow tests cover the preserved plan JSON shape across dispatch modules.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. Workflow dry-run plans preserve the same public JSON fields and generated subprocess commands.
+- No training, evaluation, simulator, config, checkpoint, artifact, figure-rendering, or CLI argument semantics changed.
+
+### Remaining Risks
+
+- `dispatch_train_main_guided_bootstrap` still mixes init-source validation with command dispatch; it should stay explicit until error-message tests cover any extraction.
+
+### Next Action
+
+- Add focused error-behavior coverage for `train-main-guided-bootstrap`, then consider extracting its init-source resolution into a small helper.
+
+## 2026-05-29 - Guided Bootstrap Init Source Helper
+
+### Changes
+
+- Added focused CLI error coverage for `train-main-guided-bootstrap` when no init source is provided.
+- Strengthened the ambiguous-init-source test to assert the CLI exits without a traceback.
+- Extracted `_resolve_guided_bootstrap_init_checkpoint` from `dispatch_train_main_guided_bootstrap`.
+- Kept `dispatch_train_main_guided_bootstrap` focused on profile selection, stack selection, command construction, and workflow plan dispatch.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg -n "train-main-guided-bootstrap|init-from-checkpoint|init-from-run-dir|init_policy_id" C:/Users/Bruger/.codex/memories/MEMORY.md` | Quick memory check found no guided-bootstrap init-source constraints. |
+| `Get-Content -Path python/weiss_rl/workflows/dispatch_training.py -TotalCount 220` | Inspected the existing nested init-source validation and resolution before extraction. |
+| `Get-Content -Path python/weiss_rl/tests/test_cli_workflow.py -Skip 300 -First 280` | Inspected existing guided-bootstrap success and ambiguous-source tests before adding missing-source coverage. |
+| `rg -n "resolve_snapshot_checkpoint_path|resolve_b1_seed_checkpoint_path|resolve_single_snapshot_checkpoint_path" python/weiss_rl/workflows python/weiss_rl/tests` | Audited snapshot resolution helper usage before extracting the guided-bootstrap init helper. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_uses_seed_and_warmstart_without_strict_b1 python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_selected_resolves_init_policy_id python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_rejects_ambiguous_init_sources python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_requires_init_source` | Passed: 4 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 23 passed. |
+| `uv run --extra dev python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed: no issues found in 11 source files. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/workflows/dispatch_training.py python/weiss_rl/tests/test_cli_workflow.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/workflows/dispatch_training.py python/weiss_rl/tests/test_cli_workflow.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- Added `test_package_cli_train_main_guided_bootstrap_requires_init_source`.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. `train-main-guided-bootstrap` keeps the same success commands and the same init-source error messages, now covered by focused tests.
+- No training, evaluation, simulator, config, checkpoint, artifact, figure-rendering, or CLI argument semantics changed.
+
+### Remaining Risks
+
+- `dispatch_train_main` still has B1-specific checkpoint fallback logic for smoke runs. It should remain explicit until both strict and smoke fallback behavior are pinned tightly enough for extraction.
+
+### Next Action
+
+- Add focused coverage around `train-main` B1 checkpoint resolution and smoke fallback, then consider extracting its init checkpoint resolution helper.
+
+## 2026-05-29 - Train-Main Init Checkpoint Helper
+
+### Changes
+
+- Added focused CLI coverage that `train-main --profile thesis-local` rejects a single unaliased B1 snapshot instead of using the smoke fallback.
+- Preserved and reused the existing smoke-profile test that allows a single unaliased B1 snapshot.
+- Extracted `_resolve_train_main_init_checkpoint` from `dispatch_train_main`.
+- Kept `dispatch_train_main` focused on profile selection, command construction, and workflow plan dispatch.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg -n "train-main|b1_noleague_baseline|single_unaliased|resolve_b1_seed_checkpoint|smoke fallback|init_policy_id" C:/Users/Bruger/.codex/memories/MEMORY.md` | Refreshed prior B1 alias context; memory confirmed the canonical `b1_noleague_baseline` alias is important for downstream workflows. |
+| `Get-Content -Path python/weiss_rl/workflows/dispatch_training.py -TotalCount 180` | Inspected train-main B1 init resolution before extracting a helper. |
+| `Get-Content -Path python/weiss_rl/workflows/snapshots.py -TotalCount 150` | Inspected B1 alias and single-snapshot fallback helpers before reusing them from the extracted helper. |
+| `Get-Content -Path python/weiss_rl/tests/test_cli_workflow.py -Skip 180 -First 125` | Inspected existing strict alias, smoke fallback, and seed-run train-main tests before adding strict-profile rejection coverage. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_requires_b1_and_uses_main_config python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_smoke_accepts_single_unaliased_b1_snapshot python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_strict_profile_rejects_unaliased_b1_snapshot python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_accepts_guided_seed_run` | Initial run failed because the new strict test omitted `--profile thesis-local`, revealing that default `train-main` is the smoke profile. After correcting the test to use `--profile thesis-local`, passed: 4 passed. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 24 passed. |
+| `uv run --extra dev python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed: no issues found in 11 source files. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/workflows/dispatch_training.py python/weiss_rl/tests/test_cli_workflow.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/workflows/dispatch_training.py python/weiss_rl/tests/test_cli_workflow.py` | Passed: 2 files already formatted. |
+
+### Tests Added
+
+- Added `test_package_cli_train_main_strict_profile_rejects_unaliased_b1_snapshot`.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. `train-main` still resolves canonical B1 aliases for normal profiles and still allows the single-snapshot fallback only for the smoke profile with automatic init policy selection.
+- No training, evaluation, simulator, config, checkpoint, artifact, figure-rendering, or CLI argument semantics changed.
+
+### Remaining Risks
+
+- Training workflow dispatch is now fairly small, but `snapshots.py` still mixes registry parsing and policy-resolution policy. Future cleanup there should preserve exact error messages.
+
+### Next Action
+
+- Continue production-code cleanup in workflow support modules, likely by adding focused tests around `workflows.snapshots` error behavior before simplifying snapshot registry parsing.
+
+## 2026-05-29 - Workflow Snapshot Registry Helper
+
+### Changes
+
+- Added focused tests for package workflow snapshot resolver failures:
+  - missing registry for explicit `--init-from-run-dir` resolution;
+  - malformed registry payloads without a `snapshots` list;
+  - missing checkpoint files for a matching snapshot;
+  - missing requested policy ids;
+  - smoke fallback missing registry and multi-snapshot rejection.
+- Extracted shared snapshot registry path, registry loading, and policy-id collection helpers in `weiss_rl.workflows.snapshots`.
+- Preserved resolver-specific missing-registry messages so `train-main` and `train-main-guided-bootstrap` keep their existing user-facing failure modes.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `Get-Content -Path python/weiss_rl/workflows/snapshots.py` | Inspected duplicated registry parsing in explicit and single-snapshot resolvers. |
+| `rg -n "resolve_snapshot_checkpoint_path|resolve_single_snapshot_checkpoint_path|resolve_b1_seed_checkpoint_path|snapshot registry" python/weiss_rl/tests python/weiss_rl/workflows` | Confirmed existing coverage only pinned snapshot helper usage indirectly plus one happy-path test in segmented bootstrap coverage. |
+| `Get-Content -Path python/weiss_rl/tests/test_segmented_b1_guided_bootstrap.py` | Inspected the existing snapshot happy-path characterization before adding workflow-focused failure tests. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_workflow_snapshots.py python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_requires_b1_and_uses_main_config python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_smoke_accepts_single_unaliased_b1_snapshot python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_strict_profile_rejects_unaliased_b1_snapshot python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_selected_resolves_init_policy_id` | Passed: 10 passed. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/workflows/snapshots.py python/weiss_rl/tests/test_workflow_snapshots.py python/weiss_rl/tests/test_cli_workflow.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/workflows/snapshots.py python/weiss_rl/tests/test_workflow_snapshots.py python/weiss_rl/tests/test_cli_workflow.py` | Initially reported the new test file would be reformatted; after manual line wrapping, passed: 3 files already formatted. |
+| `uv run --extra dev python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed: no issues found in 11 source files. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 24 passed. |
+
+### Tests Added
+
+- Added `python/weiss_rl/tests/test_workflow_snapshots.py` with six failure-mode tests around workflow snapshot resolution.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. Snapshot checkpoint resolution still uses the same registry locations, policy-id normalization, update/update_count lookup, checkpoint path convention, and resolver-specific error text.
+- No training, evaluation, simulator, observation, action, reward, checkpoint, artifact, figure-rendering, or CLI argument semantics changed.
+
+### Remaining Risks
+
+- `resolve_b1_seed_checkpoint_path` still owns B1 policy-id fallback ordering. That is behavior-sensitive and should only be simplified after adding direct tests for fallback ordering and final aggregate error text.
+
+### Next Action
+
+- Pin B1 seed checkpoint fallback ordering and aggregate error behavior, then simplify `resolve_b1_seed_checkpoint_path` without changing canonical B1 alias preference.
+
+## 2026-05-29 - B1 Seed Checkpoint Resolver Policy
+
+### Changes
+
+- Added direct tests for `resolve_b1_seed_checkpoint_path`:
+  - `auto` prefers the canonical `b1_noleague_baseline` alias even when it appears after other aliases in the registry;
+  - empty init policy uses the same automatic B1 seed policy list and can fall back to the legacy `B1 NoLeague baseline` name;
+  - aggregate auto-resolution errors report the exact policy ids tried in order and the final underlying snapshot error;
+  - explicit init policy ids are stripped and tried alone rather than expanded into B1 fallbacks.
+- Extracted the automatic B1 seed policy-id tuple, policy-id selection helper, and aggregate error formatter in `weiss_rl.workflows.snapshots`.
+- Kept `resolve_b1_seed_checkpoint_path` as the public resolver while making the canonical alias policy visible and test-backed.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `rg -n "b1_noleague_baseline|NOLEAGUE_BASELINE_POLICY_ID|resolve_b1_seed_checkpoint|B1 seed" C:/Users/Bruger/.codex/memories/MEMORY.md` | Quick memory check confirmed prior work treats `b1_noleague_baseline` as the canonical B1 alias that downstream workflows depend on. |
+| `Get-Content -Path python/weiss_rl/workflows/snapshots.py` | Inspected the inline B1 seed fallback policy before extracting named helpers. |
+| `Get-Content -Path python/weiss_rl/tests/test_workflow_snapshots.py` | Inspected the focused snapshot resolver tests before extending them with direct B1 seed resolver coverage. |
+| `rg -n "NOLEAGUE_BASELINE_NAME|NOLEAGUE_BASELINE_POLICY_ID|SELECTED_CANDIDATE_POLICY_ID" python/weiss_rl` | Audited constant usage and confirmed the workflow resolver imports the shared baseline constants. |
+| `Get-Content -Path python/weiss_rl/experiments/baselines.py -TotalCount 40` | Confirmed canonical B1 alias, legacy B1 display name, and selected-candidate policy id constants. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_workflow_snapshots.py python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_requires_b1_and_uses_main_config python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_accepts_guided_seed_run python/weiss_rl/tests/test_cli_workflow.py::test_package_cli_train_main_guided_bootstrap_selected_resolves_init_policy_id` | Passed: 13 passed. |
+| `uv run --extra dev python -m ruff check python/weiss_rl/workflows/snapshots.py python/weiss_rl/tests/test_workflow_snapshots.py python/weiss_rl/tests/test_cli_workflow.py` | Passed. |
+| `uv run --extra dev python -m ruff format --check python/weiss_rl/workflows/snapshots.py python/weiss_rl/tests/test_workflow_snapshots.py python/weiss_rl/tests/test_cli_workflow.py` | Passed: 3 files already formatted. |
+| `uv run --extra dev python -m mypy python/weiss_rl/cli.py python/weiss_rl/workflows` | Passed: no issues found in 11 source files. |
+| `uv run --extra dev --extra sim python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py` | Passed: 24 passed. |
+
+### Tests Added
+
+- Added four B1 seed checkpoint resolver tests to `python/weiss_rl/tests/test_workflow_snapshots.py`.
+
+### Files Moved or Deleted
+
+- None.
+
+### Behavior Changes
+
+- None intended. Automatic B1 seed resolution still tries `b1_noleague_baseline`, `B1 NoLeague baseline`, and `selected_candidate` in that order; explicit policy ids still bypass the automatic fallback list.
+- No training, evaluation, simulator, observation, action, reward, checkpoint, artifact, figure-rendering, or CLI argument semantics changed.
+
+### Remaining Risks
+
+- `resolve_snapshot_checkpoint_path` still performs the snapshot scan inline. A later cleanup can extract a private snapshot lookup helper once update/update_count error behavior is pinned directly.
+
+### Next Action
+
+- Pin snapshot update-field handling, including `update_count` compatibility and missing/non-integer update errors, then extract a small snapshot lookup helper from `resolve_snapshot_checkpoint_path`.

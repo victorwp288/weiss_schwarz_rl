@@ -38,109 +38,110 @@ def test_check_core_placeholders_entrypoint_passes(monkeypatch) -> None:
 
 def test_verify_repo_entrypoint_runs_release_verification_steps(monkeypatch) -> None:
     module = _load_script_module("verify_repo.py")
-    observed: list[tuple[list[str], Path, bool]] = []
+    observed: list[tuple[str, list[str], Path]] = []
 
-    def _fake_run(command: list[str], cwd: Path, check: bool):
-        observed.append((command, cwd, check))
-        return subprocess.CompletedProcess(args=command, returncode=0)
+    def _fake_run_step(*, label: str, command: list[str], cwd: Path) -> None:
+        observed.append((label, command, cwd))
 
-    monkeypatch.setattr(module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(module, "_run_step", _fake_run_step)
     monkeypatch.setattr(module.sys, "executable", "C:/Python/python.exe")
 
     module.main()
 
-    assert observed == [
-        (["C:/Python/python.exe", "python/scripts/check_core_placeholders.py"], REPO_ROOT, True),
-        (
-            ["C:/Python/python.exe", "-m", "ruff", "check", "python", "tests", "examples", "python/scripts"],
-            REPO_ROOT,
-            True,
-        ),
-        (
-            [
-                "C:/Python/python.exe",
-                "-m",
-                "ruff",
-                "format",
-                "--check",
-                "python",
-                "tests",
-                "examples",
-                "python/scripts",
-            ],
-            REPO_ROOT,
-            True,
-        ),
-        (
-            [
-                "C:/Python/python.exe",
-                "-m",
-                "mypy",
-                "python/scripts/thesis_run.py",
-                "python/scripts/eval.py",
-                "python/scripts/play_vs_model.py",
-            ],
-            REPO_ROOT,
-            True,
-        ),
-        (
-            [
-                "C:/Python/python.exe",
-                "-m",
-                "vulture",
-                "python/weiss_rl",
-                "python/scripts",
-                "examples",
-                "--min-confidence",
-                "80",
-            ],
-            REPO_ROOT,
-            True,
-        ),
-        (["C:/Python/python.exe", "-m", "pytest", "-q", "python/weiss_rl/tests"], REPO_ROOT, True),
-        (
-            [
-                "C:/Python/python.exe",
-                "python/scripts/thesis_run.py",
-                "--preset",
-                "standard",
-                "--run-label",
-                "standard_surface_ci",
-                "--dry-run",
-                "--skip-compare",
-            ],
-            REPO_ROOT,
-            True,
-        ),
-        (
-            [
-                "C:/Python/python.exe",
-                "python/scripts/thesis_run.py",
-                "--preset",
-                "standard-auto-gpu",
-                "--run-label",
-                "standard_auto_gpu_surface_ci",
-                "--dry-run",
-                "--skip-compare",
-            ],
-            REPO_ROOT,
-            True,
-        ),
-        (
-            [
-                "C:/Python/python.exe",
-                "python/scripts/thesis_run.py",
-                "--preset",
-                "standard-multideck",
-                "--run-label",
-                "standard_multideck_surface_ci",
-                "--dry-run",
-                "--skip-compare",
-            ],
-            REPO_ROOT,
-            True,
-        ),
+    labels = [label for label, _command, _cwd in observed]
+    assert labels == [
+        "Core placeholder gate",
+        "Ruff check",
+        "Ruff format check",
+        "Mypy",
+        "Vulture",
+        "Pytest",
+        "Package CLI train-b1 dry-run",
+        "Package CLI train-main dry-run",
+        "Package CLI smoke-eval dry-run",
+        "Package CLI eval-final dry-run",
+        "Package CLI figures dry-run",
     ]
+    assert {cwd for _label, _command, cwd in observed} == {REPO_ROOT}
+    assert observed[0][1] == ["C:/Python/python.exe", "python/scripts/check_core_placeholders.py"]
+    assert observed[1][1] == [
+        "C:/Python/python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "python",
+        "tests",
+        "examples",
+        "python/scripts",
+    ]
+    assert observed[2][1] == [
+        "C:/Python/python.exe",
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        "python",
+        "tests",
+        "examples",
+        "python/scripts",
+    ]
+    assert observed[3][1] == [
+        "C:/Python/python.exe",
+        "-m",
+        "mypy",
+        "python/weiss_rl/cli.py",
+        "python/weiss_rl/workflows",
+        "python/scripts/thesis_run.py",
+        "python/scripts/eval.py",
+        "python/scripts/play_vs_model.py",
+    ]
+    assert observed[4][1] == [
+        "C:/Python/python.exe",
+        "-m",
+        "vulture",
+        "python/weiss_rl",
+        "python/scripts",
+        "examples",
+        "--min-confidence",
+        "80",
+    ]
+    assert observed[5][1] == ["C:/Python/python.exe", "-m", "pytest", "-q", "python/weiss_rl/tests"]
+
+    package_commands = {label: command for label, command, _cwd in observed[6:]}
+    for command in package_commands.values():
+        assert "python/scripts/thesis_run.py" not in command
+        assert "-m" in command
+        assert "weiss_rl.cli" in command
+        assert "--repo-root" in command
+        assert "--dry-run" in command
+
+    assert package_commands["Package CLI train-b1 dry-run"][:4] == [
+        "C:/Python/python.exe",
+        "-m",
+        "weiss_rl.cli",
+        "train-b1",
+    ]
+    assert "--repo-root" in package_commands["Package CLI train-b1 dry-run"]
+    assert "--dry-run" in package_commands["Package CLI train-b1 dry-run"]
+    assert "verify_b1_smoke" in package_commands["Package CLI train-b1 dry-run"]
+
+    train_main = package_commands["Package CLI train-main dry-run"]
+    assert train_main[:4] == ["C:/Python/python.exe", "-m", "weiss_rl.cli", "train-main"]
+    assert "--b1-run" in train_main
+    assert any("verify_b1_source" in part for part in train_main)
+
+    smoke_eval = package_commands["Package CLI smoke-eval dry-run"]
+    assert smoke_eval[:4] == ["C:/Python/python.exe", "-m", "weiss_rl.cli", "smoke-eval"]
+    assert "--b1-run" in smoke_eval
+
+    eval_final = package_commands["Package CLI eval-final dry-run"]
+    assert eval_final[:4] == ["C:/Python/python.exe", "-m", "weiss_rl.cli", "eval-final"]
+    assert "--b1-run" in eval_final
+
+    figures = package_commands["Package CLI figures dry-run"]
+    assert figures[:4] == ["C:/Python/python.exe", "-m", "weiss_rl.cli", "figures"]
+    assert "--format" in figures
+    assert "png" in figures
 
 
 def test_train_entrypoint_helper_resolves_central_actor_torch_threads(monkeypatch) -> None:

@@ -1,5 +1,5 @@
 schema_version: 2
 description: "Guided B1-derived league seed. This is not the strict B1 NoLeague baseline; it is a filtered-exact, low-entropy public-teacher seed policy for league bootstrap/ablation runs."
-extends: ablations/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
+extends: _shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
 experiment:
   role: guided_league_seed

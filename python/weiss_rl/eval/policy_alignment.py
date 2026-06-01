@@ -32,7 +32,7 @@ class PolicyAlignmentAccumulator:
         self._reference_top_action_same_family_logit_margin: list[float] = []
         self._reference_top_family_items: defaultdict[str, list[_StepSummary]] = defaultdict(list)
         self._family_confusions: Counter[tuple[str, str]] = Counter()
-        self._model_family_mass_totals: Counter[str] = Counter()
+        self._model_family_mass_totals: defaultdict[str, float] = defaultdict(float)
 
     def add(
         self,

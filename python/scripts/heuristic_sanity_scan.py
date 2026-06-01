@@ -29,7 +29,7 @@ def run(job: tuple[str, str]) -> tuple[str, int]:
         ".venv-exp034/bin/python",
         "python/scripts/targeted_confirm_eval.py",
         "--stack-config",
-        "configs/presets/eval_gpu_exp031_fast_20260506.yaml",
+        "configs/archive/presets_20260506/eval_gpu_exp031_fast_20260506.yaml",
         "--run-dir",
         "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506",
         "--snapshot-registry-json",

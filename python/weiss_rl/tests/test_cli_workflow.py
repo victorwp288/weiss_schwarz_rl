@@ -5,6 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from weiss_rl.workflows.cli_dispatch import _WORKFLOW_HANDLERS
+from weiss_rl.workflows.cli_parser import build_workflow_parser
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -35,6 +38,14 @@ def _write_cli_b1_source_run(run_dir: Path, *, policy_id: str = "selected_candid
         encoding="utf-8",
     )
     return checkpoint_path
+
+
+def test_package_cli_parser_commands_are_all_dispatchable() -> None:
+    parser = build_workflow_parser()
+    command_actions = [action for action in parser._actions if action.dest == "command"]
+
+    assert len(command_actions) == 1
+    assert set(command_actions[0].choices) == set(_WORKFLOW_HANDLERS)
 
 
 def test_package_cli_train_b1_dry_run_uses_thesis_config(tmp_path: Path) -> None:
@@ -182,7 +193,7 @@ def test_package_cli_train_main_requires_b1_and_uses_main_config(tmp_path: Path)
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True, exist_ok=True)
     b1_run = repo_root / "runs" / "b1_smoke"
-    checkpoint_path = _write_cli_b1_source_run(b1_run)
+    checkpoint_path = _write_cli_b1_source_run(b1_run, policy_id="b1_noleague_baseline")
 
     result = subprocess.run(
         [
@@ -207,14 +218,81 @@ def test_package_cli_train_main_requires_b1_and_uses_main_config(tmp_path: Path)
     assert result.returncode == 0, result.stderr
     payload = json.loads((repo_root / "runs" / "_workflow_plans" / "main_smoke.json").read_text(encoding="utf-8"))
     assert payload["workflow"] == "train-main"
-    assert payload["init_policy_id"] == "selected_candidate"
-    assert (
-        "configs/thesis/main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml"
-        in payload["command"]
-    )
+    assert payload["init_policy_id"] == "b1_noleague_baseline"
+    assert "configs/thesis/main_league.yaml" in payload["command"]
     assert b1_run.as_posix() in payload["command"]
     assert "--init-from-checkpoint" in payload["command"]
     assert checkpoint_path.as_posix() in payload["command"]
+
+
+def test_package_cli_train_main_smoke_accepts_single_unaliased_b1_snapshot(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    b1_run = repo_root / "runs" / "b1_smoke"
+    checkpoint_path = _write_cli_b1_source_run(b1_run, policy_id="policy_000001", update=1)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "weiss_rl.cli",
+            "train-main",
+            "--repo-root",
+            str(repo_root),
+            "--run-label",
+            "main_smoke",
+            "--b1-run",
+            str(b1_run),
+            "--profile",
+            "smoke",
+            "--dry-run",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads((repo_root / "runs" / "_workflow_plans" / "main_smoke.json").read_text(encoding="utf-8"))
+    assert payload["workflow"] == "train-main"
+    assert payload["profile"] == "smoke"
+    assert payload["init_policy_id"] == "policy_000001"
+    assert "--init-from-checkpoint" in payload["command"]
+    assert checkpoint_path.as_posix() in payload["command"]
+
+
+def test_package_cli_train_main_strict_profile_rejects_unaliased_b1_snapshot(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    b1_run = repo_root / "runs" / "b1_smoke"
+    _write_cli_b1_source_run(b1_run, policy_id="policy_000001", update=1)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "weiss_rl.cli",
+            "train-main",
+            "--repo-root",
+            str(repo_root),
+            "--run-label",
+            "main_strict",
+            "--b1-run",
+            str(b1_run),
+            "--profile",
+            "thesis-local",
+            "--dry-run",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Could not resolve a B1 seed checkpoint from --b1-run" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_package_cli_train_main_accepts_guided_seed_run(tmp_path: Path) -> None:
@@ -525,6 +603,36 @@ def test_package_cli_train_main_guided_bootstrap_rejects_ambiguous_init_sources(
 
     assert result.returncode == 1
     assert "--init-from-checkpoint cannot be combined" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_package_cli_train_main_guided_bootstrap_requires_init_source(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "weiss_rl.cli",
+            "train-main-guided-bootstrap",
+            "--repo-root",
+            str(repo_root),
+            "--run-label",
+            "missing_init",
+            "--seed-run",
+            str(repo_root / "runs" / "seed"),
+            "--dry-run",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "requires either --init-from-checkpoint or --init-from-run-dir plus --init-policy-id" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_package_cli_smoke_eval_uses_tiny_eval_budget(tmp_path: Path) -> None:
@@ -554,7 +662,7 @@ def test_package_cli_smoke_eval_uses_tiny_eval_budget(tmp_path: Path) -> None:
         (repo_root / "runs" / "_workflow_plans" / "main_smoke_smoke-eval.json").read_text(encoding="utf-8")
     )
     assert payload["workflow"] == "smoke-eval"
-    assert "configs/thesis/final_eval.yaml" in payload["command"]
+    assert "configs/thesis/main_league.yaml" in payload["command"]
     assert payload["command"].count("--policy-id") == 5
     assert "B4 HeuristicPublicControl" in payload["command"]
     assert "--paired-seed-limit" in payload["command"]
@@ -645,6 +753,93 @@ def test_package_cli_guard_run_wraps_learning_progress_league_guard(tmp_path: Pa
     assert "25.0" in payload["command"]
     assert payload["command"].count("--guard-required-anchor") == 3
     assert "B4 HeuristicPublicControl" in payload["command"]
+
+
+def test_package_cli_guard_run_custom_required_anchors_replace_defaults(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    run_dir = repo_root / "runs" / "main_probe"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "weiss_rl.cli",
+            "guard-run",
+            "--repo-root",
+            str(repo_root),
+            "--run-dir",
+            str(run_dir),
+            "--required-anchor",
+            "B2 HeuristicPublic",
+            "--required-anchor",
+            "custom_anchor",
+            "--dry-run",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(
+        (repo_root / "runs" / "_workflow_plans" / "main_probe_guard-run.json").read_text(encoding="utf-8")
+    )
+    assert payload["workflow"] == "guard-run"
+    assert payload["command"].count("--guard-required-anchor") == 2
+    assert "B2 HeuristicPublic" in payload["command"]
+    assert "custom_anchor" in payload["command"]
+    assert "B3 HeuristicPublicAggro" not in payload["command"]
+    assert "B4 HeuristicPublicControl" not in payload["command"]
+
+
+def test_package_cli_figures_dry_run_forwards_figure_options(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    run_dir = repo_root / "runs" / "main_probe"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "weiss_rl.cli",
+            "figures",
+            "--repo-root",
+            str(repo_root),
+            "--run-dir",
+            str(run_dir),
+            "--fig-id",
+            "seat_bias",
+            "--format",
+            "png",
+            "--format",
+            "pdf",
+            "--dry-run",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(
+        (repo_root / "runs" / "_workflow_plans" / "main_probe_figures.json").read_text(encoding="utf-8")
+    )
+    assert payload["workflow"] == "figures"
+    assert payload["command"] == [
+        sys.executable,
+        "python/scripts/make_figures.py",
+        "--run-dir",
+        run_dir.as_posix(),
+        "--fig-id",
+        "seat_bias",
+        "--format",
+        "png",
+        "--format",
+        "pdf",
+    ]
 
 
 def test_package_cli_guided_bootstrap_loop_wraps_segmented_controller(tmp_path: Path) -> None:

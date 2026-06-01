@@ -270,7 +270,7 @@ def forward_time_major(
     if acting_seat is None:
         hidden_state = prepare_legacy_hidden_state(initial_hidden_state, batch_size=batch_size, like=obs)
         for step_index, step_obs in enumerate(obs.unbind(dim=0)):
-            if reset_before_step is not None:
+            if reset_before_step is not None and hidden_state is not None:
                 step_reset = reset_before_step[step_index].to(device=hidden_state.device, dtype=torch.bool)
                 if bool(step_reset.any().item()):
                     hidden_state = hidden_state.clone()
@@ -298,7 +298,7 @@ def forward_time_major(
 
     seat_hidden_state = prepare_seat_hidden_state(initial_hidden_state, batch_size=batch_size, like=obs)
     for step_index, (step_obs, step_seat) in enumerate(zip(obs.unbind(dim=0), acting_seat.unbind(dim=0), strict=True)):
-        if reset_before_step is not None:
+        if reset_before_step is not None and seat_hidden_state is not None:
             step_reset = reset_before_step[step_index].to(device=seat_hidden_state.device, dtype=torch.bool)
             if bool(step_reset.any().item()):
                 seat_hidden_state = seat_hidden_state.clone()

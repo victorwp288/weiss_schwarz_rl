@@ -25,7 +25,12 @@ uv run python python/scripts/train.py --stack-config <config>
 script-oriented callers. `python/scripts/thesis_run.py` is retained only as a
 legacy compatibility wrapper for named presets.
 
-Reusable training helpers live under `weiss_rl.training`. Algorithm/model compatibility validation is in `weiss_rl.training.algorithm_contracts`; promotion-anchor resolution and small promotion support helpers live in `weiss_rl.training.promotion`. The public script still owns model construction, learner wiring, and simulator-backed promotion/eval loops.
+Reusable training helpers live under `weiss_rl.training`. Algorithm/model
+compatibility validation is in `weiss_rl.training.algorithm_contracts`;
+promotion-anchor resolution and small promotion support helpers live in
+`weiss_rl.training.promotion`. The path-based script remains as the historical
+compatibility surface; new thesis workflows should start from
+`python -m weiss_rl.cli`.
 
 ## Safe Smoke
 

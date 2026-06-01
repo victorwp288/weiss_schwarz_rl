@@ -337,6 +337,7 @@ def publish_checkpoint_aliases(
         or float(observed_score) > float(observed_best_value)
     )
     if should_update_observed_best:
+        assert observed_score is not None
         observed_best_path = observed_best_checkpoint_path(training_paths)
         shutil.copy2(checkpoint_path, observed_best_path)
         tracker["observed_best"] = build_checkpoint_record(
@@ -741,7 +742,7 @@ def restore_minimal_train_checkpoint(
         learner.total_samples_processed = int(payload.get("total_samples_processed", 0))
         learner.start_time = time.time()
     init_schedule_offset_updates = int(payload.get("init_schedule_offset_updates", 0))
-    learner.init_schedule_offset_updates = init_schedule_offset_updates
+    cast(Any, learner).init_schedule_offset_updates = init_schedule_offset_updates
     return ResumeCheckpoint(
         checkpoint_path=checkpoint_path.resolve(),
         update_count=learner.update_count,

@@ -105,17 +105,17 @@ class ImpalaSupportMixin:
                 raise ValueError(
                     "opponent_context_adapter_train_only requires at least one trainable opponent-context adapter"
                 )
-            adapter_params: list[Tensor] = []
+            train_only_adapter_params: list[Tensor] = []
             for name, parameter in model.named_parameters():
                 trainable = name in adapter_names
                 parameter.requires_grad_(trainable)
                 if trainable:
-                    adapter_params.append(parameter)
-            if not adapter_params:
+                    train_only_adapter_params.append(parameter)
+            if not train_only_adapter_params:
                 raise ValueError(
                     "opponent_context_adapter_train_only found no trainable opponent-context adapter parameters"
                 )
-            return [{"params": adapter_params, "lr": float(self.learning_rate) * multiplier}]
+            return [{"params": train_only_adapter_params, "lr": float(self.learning_rate) * multiplier}]
         if not adapter_names or multiplier == 1.0:
             return model.parameters()
         adapter_params: list[Tensor] = []

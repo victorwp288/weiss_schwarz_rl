@@ -9,18 +9,31 @@ Use `load_stack_config(path)` from `weiss_rl.config`. The parser rejects unknown
 Common config roots:
 
 - `configs/stack_smoke.yaml`: scaffold-only manifest smoke.
-- `configs/presets/structured_acceptance_standard.yaml`: canonical current training recipe.
-- `configs/presets/structured_acceptance_standard_thesis_eval.yaml`: richer final-eval companion.
-- `configs/presets/baselines/`: comparison baseline surfaces.
+- `configs/thesis/b1_noleague.yaml`: canonical fixed-deck B1 NoLeague training lane.
+- `configs/thesis/main_league.yaml`: canonical fixed-deck main league training lane.
+- `configs/thesis/main_league_auto_gpu.yaml`: server-oriented main league lane with process collectors.
+- `configs/thesis/final_eval.yaml`: canonical fixed-deck final evaluation companion.
+- `configs/thesis/ablations/`: named thesis ablation surfaces.
+- `configs/presets/`: lower-level compatibility and implementation presets.
+- `configs/archive/`: historical dated probes kept for provenance, not current workflow entrypoints.
 - `configs/seeds/`: committed deterministic seed sets.
 
 ## Overrides
 
-CLI overrides use grouped dotted paths:
+The package CLI is the canonical thesis surface and keeps detailed tuning in
+configs:
+
+```powershell
+uv run --extra dev --extra sim python -m weiss_rl.cli train-b1 --run-label b1_smoke --profile smoke
+uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label main_smoke --b1-run runs/b1_smoke --profile smoke
+```
+
+The lower-level compatibility training script still accepts grouped dotted
+overrides for debugging and ablation work:
 
 ```powershell
 uv run python python/scripts/train.py `
-  --stack-config configs/presets/structured_acceptance_standard.yaml `
+  --stack-config configs/thesis/main_league.yaml `
   --override training.optimizer.learning_rate=0.0001
 ```
 

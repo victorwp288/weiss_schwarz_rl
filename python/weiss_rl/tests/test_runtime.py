@@ -1913,7 +1913,11 @@ def test_central_structured_unroll_snapshots_replay_behavior_logp() -> None:
 
     repo_root = Path(__file__).resolve().parents[3]
     stack = load_stack_config(
-        repo_root / "configs" / "thesis" / "ablations" / "full_shaping_entropy01_sync1_reward.yaml"
+        repo_root
+        / "configs"
+        / "archive"
+        / "thesis_reward_ablations_20260513"
+        / "full_shaping_entropy01_sync1_reward.yaml"
     )
     stack = apply_stack_overrides(
         stack,

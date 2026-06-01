@@ -7,8 +7,9 @@ The thesis surface is intentionally small:
 - `configs/thesis/main_league_auto_gpu.yaml`
 - `configs/thesis/final_eval.yaml`
 - `configs/thesis/multideck_exploratory.yaml`
-- `configs/thesis/ablations/norecurrence_impala.yaml`
+- `configs/thesis/ablations/no_gru.yaml`
 - `configs/thesis/ablations/ppo_lite.yaml`
+- `configs/thesis/ablations/terminal_only_reward.yaml`
 
 B1 and main league are the primary training lanes. B0, B2, B3, and B4 are
 evaluation policies. Multideck is exploratory only.

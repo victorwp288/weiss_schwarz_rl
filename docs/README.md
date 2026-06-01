@@ -4,6 +4,14 @@ This is the shortest map from onboarding to the thesis-oriented contracts and re
 
 The canonical simulator-backed path uses the published `weiss-sim` package, the single-node queue runtime, and the `DecisionBoundaryEnv` boundary-step contract. `stack_smoke.yaml` is only the scaffold path.
 
+Canonical public surfaces:
+
+- `python -m weiss_rl.cli`
+- `configs/thesis/`
+- `configs/thesis/ablations/README.md`
+- `docs/thesis_workflow.md`
+- `docs/artifact_contract.md`
+
 ## Start here
 
 - [Getting started](getting_started.md)
@@ -26,7 +34,6 @@ The canonical simulator-backed path uses the published `weiss-sim` package, the 
 - [Performance](performance.md)
 - [Troubleshooting](troubleshooting.md)
 - [Refactor log](refactor_log.md)
-- [Refactor completion audit](refactor_completion_audit.md)
 - [Archive](archive/README.md)
 
 ## Also useful
@@ -45,4 +52,8 @@ The canonical simulator-backed path uses the published `weiss-sim` package, the 
 7. `artifact_contract.md`
 8. `rebuild_log.md`
 
-If you are only trying to verify a local checkout, run `uv run python python/scripts/verify_repo.py`. `make verify` remains a convenience wrapper, and the Bash parity wrapper is still available on Unix-like shells as `bash scripts/run_local_ci_parity.sh`.
+If you are only trying to verify a local checkout, run
+`uv run --extra dev --extra sim python python/scripts/verify_repo.py`.
+`make verify` remains a convenience wrapper when `make` is installed, and the
+Bash parity wrapper is still available on Unix-like shells as
+`bash scripts/run_local_ci_parity.sh`.

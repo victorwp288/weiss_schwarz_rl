@@ -16,6 +16,19 @@ def _require_make() -> str:
     return MAKE_EXE
 
 
+def test_makefile_thesis_smoke_targets_use_package_cli() -> None:
+    makefile = (REPO_ROOT / "Makefile").read_text()
+
+    assert "train-b1-smoke:" in makefile
+    assert "-m weiss_rl.cli train-b1" in makefile
+    assert "train-main-smoke:" in makefile
+    assert "-m weiss_rl.cli train-main" in makefile
+    assert "eval-smoke:" in makefile
+    assert "-m weiss_rl.cli smoke-eval" in makefile
+    assert "figures-smoke:" in makefile
+    assert "-m weiss_rl.cli figures" in makefile
+
+
 def test_make_figures_target_requires_run_dir() -> None:
     make_exe = _require_make()
     result = subprocess.run(

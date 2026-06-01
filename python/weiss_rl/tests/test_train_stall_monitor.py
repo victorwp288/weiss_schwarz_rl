@@ -421,7 +421,7 @@ def test_dev_eval_ineligibility_reasons_identify_borderline_confidence_only() ->
 def test_dev_eval_ineligibility_reasons_apply_checkpoint_confidence_when_stall_monitor_disabled() -> None:
     stack = load_stack_config(
         _repo_root()
-        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_choiceexactmargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_choiceexactmargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
     assert stack.config.curriculum is not None
     assert stack.config.curriculum.stall_monitor.enabled is False
@@ -490,8 +490,11 @@ def test_confirmatory_dev_eval_request_targets_score_improving_borderline_candid
 
 def test_confirmatory_dev_eval_request_targets_multianchor_near_miss_candidate() -> None:
     stack = load_stack_config(
-        _repo_root() / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        _repo_root()
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     request = _confirmatory_dev_eval_request(
@@ -522,8 +525,11 @@ def test_confirmatory_dev_eval_request_targets_multianchor_near_miss_candidate()
 
 def test_confirmatory_dev_eval_request_rejects_multianchor_clear_anchor_failure() -> None:
     stack = load_stack_config(
-        _repo_root() / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        _repo_root()
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     request = _confirmatory_dev_eval_request(

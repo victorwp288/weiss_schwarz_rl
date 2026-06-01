@@ -42,11 +42,11 @@ Checkpoint payload contract validation also lives in `weiss_rl.training.checkpoi
 
 Checkpoint payload construction is centralized in `build_minimal_train_checkpoint_payload()`. Minimal checkpoint file writing, restore mechanics, current-checkpoint path naming, and current-checkpoint ensure logic are also reusable helpers, but the training script still supplies the run-specific config hash, spec hash, device, model-guidance callback, and checkpoint write/restore callbacks used by higher-level orchestration.
 
-Checkpoint alias publication and checkpoint-guard rollback/finalization orchestration live in `weiss_rl.training.checkpoints`. These helpers preserve the same latest/best tracker semantics, keep `observed_best` out of strict rollback/finalization decisions, maintain JSONL guard event payloads, and preserve champion-demotion behavior while leaving public CLI behavior in `python/scripts/train.py`.
+Checkpoint alias publication and checkpoint-guard rollback/finalization orchestration live in `weiss_rl.training.checkpoints`. These helpers preserve the same latest/best tracker semantics, keep `observed_best` out of strict rollback/finalization decisions, maintain JSONL guard event payloads, and preserve champion-demotion behavior while the path-based compatibility entrypoint wires the run-specific callbacks.
 
 Snapshot artifact writing, registry retention, and champion-demotion file helpers live in `weiss_rl.training.snapshots`. The higher-level B1 baseline and seed snapshot import flows remain in the training script until their metadata and failure cases are pinned more tightly.
 
-Imported B1 and seeded snapshot artifact writing share `write_imported_snapshot_artifact()` in `weiss_rl.training.snapshots`; validation and registry orchestration still live in the training script.
+Imported B1 and seeded snapshot artifact writing share `write_imported_snapshot_artifact()` in `weiss_rl.training.snapshots`; validation and registry orchestration remain behind the training compatibility hooks.
 
 ## Refactor Rules
 

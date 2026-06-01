@@ -1,0 +1,39 @@
+schema_version: 2
+description: "B1 guided ablation: full reward shaping, family entropy, pass penalty, mulligan guard, and fading tactical public-teacher auxiliary loss."
+extends: ../../../archive/thesis_reward_ablations_20260513/full_shaping_family_entropy_sync5_passpenalty02_mulliganguard_reward.yaml
+experiment:
+  role: ablation_guided
+model:
+  public_heuristic_logit_bias_scale: 0.0
+  public_heuristic_actor_logit_bias_scale: 0.0
+  public_heuristic_logit_bias_families: []
+training:
+  teacher_aux:
+    mode: "always"
+  structured_aux:
+    enabled: true
+    teacher_family_coef: 0.02
+    teacher_slot_coef: 0.02
+    teacher_move_source_coef: 0.01
+    teacher_attack_type_coef: 0.01
+    teacher_action_coef: 0.0
+    teacher_same_family_action_coef: 0.03
+    teacher_public_heuristic_coef: 0.05
+    teacher_public_heuristic_start_updates: 0
+    teacher_public_heuristic_end_updates: 75
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_heuristic_temperature: 8.0
+    teacher_public_heuristic_families:
+      - main_play_character
+      - attack
+      - main_move
+      - clock_from_hand
+    teacher_public_heuristic_profiles:
+      - base
+      - aggressive
+      - control
+    teacher_public_heuristic_profile_mode: cycle
+    teacher_public_heuristic_profiles_end_updates: 75
+  structured_warmstart:
+    enabled: false
+    updates: 0

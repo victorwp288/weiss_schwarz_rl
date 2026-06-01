@@ -24,13 +24,14 @@ Read these first:
 - [Artifacts](docs/artifacts.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
-## Supported install paths
+## Supported Install Paths
 
 ```bash
 uv sync --extra dev
 ```
 
-On Windows and Linux, the managed `uv` path now resolves `torch` from PyTorch's CUDA 12.4 wheel index by default. On platforms without CUDA wheels, it falls back to the platform-default PyTorch build.
+On Windows and Linux, the managed `uv` path resolves `torch` from PyTorch's
+CUDA 12.8 wheel index by default.
 
 Optional simulator package extra:
 
@@ -44,10 +45,10 @@ If you are not using `uv`, install the editable package with dev extras:
 python -m pip install --extra-index-url https://download.pytorch.org/whl/cu124 -e ".[dev]"
 ```
 
-## Fast verification
+## Fast Verification
 
 ```bash
-uv run python python/scripts/verify_repo.py
+uv run --extra dev --extra sim python python/scripts/verify_repo.py
 # optional convenience wrappers
 make verify
 bash scripts/run_local_ci_parity.sh
@@ -55,13 +56,30 @@ bash scripts/run_local_ci_parity.sh
 
 `python/scripts/verify_repo.py` is the cross-platform verification entrypoint. `make verify` and `scripts/run_local_ci_parity.sh` delegate to the same release-facing checks when those wrappers are available in your shell.
 
-## Repository structure
+## What Is Canonical?
+
+- Public CLI: `python -m weiss_rl.cli`.
+- Thesis configs: `configs/thesis/` plus the small canonical ablation list in
+  `configs/thesis/ablations/README.md`.
+- Simulator boundary: `DecisionBoundaryEnv` and the `weiss-sim>=1.2.0`
+  decision-boundary contract.
+- Smoke outputs prove plumbing only; thesis claims require saved canonical run
+  artifacts.
+- Historical `runs/`, `run_logs/`, `vast_artifacts/`, and
+  `thesis_figures_final/` content is read-only evidence unless explicitly
+  promoted or replaced.
+
+## Repository Structure
 
 - `python/weiss_rl/config/`: strict config models, parser, overrides, and hashes.
+- `python/weiss_rl/core/`: simulator contract, action catalog, legal actions,
+  masks, observation layout, and spec helpers.
 - `python/weiss_rl/envs/`: simulator-backed environment wrappers.
-- `python/weiss_rl/runtime.py`: queue runtime and rollout collection.
+- `python/weiss_rl/runtime_components/`: queue runtime internals and rollout
+  collection helpers behind the `python/weiss_rl/runtime.py` facade.
 - `python/weiss_rl/learners/`: IMPALA/V-trace and PPO-lite learners.
-- `python/weiss_rl/model.py`: policy/value model and structured action scoring.
+- `python/weiss_rl/models/`: policy/value model internals and structured
+  action scoring behind the `python/weiss_rl/model.py` facade.
 - `python/weiss_rl/eval/`: deterministic final eval, policy resolution, uncertainty, diagnostics, and paper readiness.
 - `python/weiss_rl/league/`: snapshot registry, PFSP, promotion gates, and opponent pools.
 - `python/weiss_rl/training/`: reusable training helpers extracted from public scripts.
@@ -76,12 +94,23 @@ The repo keeps three paths separate on purpose: scaffold-only smoke, simulator-b
 
 ```bash
 make train-min
-make train-inline-smoke
+make train-b1-smoke
+make train-main-smoke
+make eval-smoke
+make figures-smoke
+make thesis-smoke
 make toy-public-e2e
 make artifact-hygiene
 ```
 
-`make train-min` is the scaffold-only path. The canonical thesis-oriented run paths are described in `docs/runtime_modes.md` and `docs/artifact_contract.md`, and they use the `DecisionBoundaryEnv` contract on top of `weiss-sim`. By default, the training hot path now runs on the simulator `fast` profile with packed legal IDs, while evaluation keeps the deterministic pinned protocol and only densifies legality where the analysis layer benefits from it.
+`make train-min` is the scaffold-only path. The package-CLI smoke targets run
+the canonical simulator-backed B1/main/eval/figure route with smoke profiles.
+The canonical thesis-oriented run paths are described in
+`docs/runtime_modes.md` and `docs/artifact_contract.md`, and they use the
+`DecisionBoundaryEnv` contract on top of `weiss-sim`. By default, the training
+hot path now runs on the simulator `fast` profile with packed legal IDs, while
+evaluation keeps the deterministic pinned protocol and only densifies legality
+where the analysis layer benefits from it.
 
 The release-facing thesis workflow is:
 
@@ -96,11 +125,15 @@ The public thesis configs live under `configs/thesis/`. The older
 `structured_acceptance_standard` family remains as the compatibility preset
 layer beneath those names:
 
-- `configs/presets/structured_acceptance_standard.yaml` is the canonical current training recipe.
-- `configs/presets/structured_acceptance_standard_auto_gpu.yaml` is the canonical Linux server variant with automatic multi-GPU actor sharding.
-- `configs/presets/structured_acceptance_standard_thesis_eval.yaml` is the canonical richer final-eval companion.
-- `configs/presets/structured_acceptance_standard_multideck.yaml` is the exploratory deck-diversity/generalization variant.
-- `configs/presets/baselines/*.yaml` contains the comparison baselines.
+- `configs/thesis/b1_noleague.yaml` is the canonical fixed-deck B1 training lane.
+- `configs/thesis/main_league.yaml` is the canonical fixed-deck main training lane.
+- `configs/thesis/main_league_auto_gpu.yaml` is the server-oriented main lane with process collectors.
+- `configs/thesis/final_eval.yaml` is the canonical richer final-eval companion.
+- `configs/thesis/multideck_exploratory.yaml` is the exploratory deck-diversity/generalization variant.
+- `configs/thesis/ablations/no_gru.yaml`, `ppo_lite.yaml`, and
+  `terminal_only_reward.yaml` are the small thesis ablation surface.
+- `configs/presets/structured_acceptance_standard*.yaml` are compatibility presets behind the thesis names.
+- `configs/presets/baselines/*.yaml` contains compatibility baseline presets.
 - `configs/study/metagame_sensitivity.yaml` holds the study-only metagame/sensitivity settings.
 
 The canonical `standard` lane uses `preset:main_deck_5hy_yotsuba_v1` for the focal model, B0, B1, and B2. The themed B3/B4 public heuristics keep their aggro/control decks as explicit robustness rows in final eval.

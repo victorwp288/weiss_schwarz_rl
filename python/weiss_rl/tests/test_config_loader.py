@@ -30,6 +30,14 @@ def _require_training_config(training: TrainingConfig | None) -> TrainingConfig:
     return training
 
 
+def _a075_context_config(repo_root: Path, filename: str) -> Path:
+    return repo_root / "configs" / "thesis" / "_shared" / "hardneg_a075_context" / filename
+
+
+def _a050_context_width128_config(repo_root: Path, filename: str) -> Path:
+    return repo_root / "configs" / "thesis" / "_shared" / "hardneg_a050_context_width128" / filename
+
+
 def test_load_stack_config_reads_typed_thesis_preset() -> None:
     repo_root = _repo_root()
     stack = load_stack_config(repo_root / "configs/presets/typed_thesis_locked.yaml")
@@ -136,6 +144,14 @@ def test_load_stack_config_supports_baselines_and_ablations() -> None:
     assert norecurrence.config.training is not None
     assert norecurrence.config.training.algorithm == "impala_vtrace_ff"
 
+    no_gru = load_stack_config(repo_root / "configs/thesis/ablations/no_gru.yaml")
+    assert no_gru.config.experiment is not None
+    assert no_gru.config.experiment.role == "baseline_norecurrence"
+    assert no_gru.config.model is not None
+    assert no_gru.config.model.recurrent_core == "none"
+    assert no_gru.config.training is not None
+    assert no_gru.config.training.algorithm == "impala_vtrace_ff"
+
     ppo = load_stack_config(repo_root / "configs/presets/baselines/ppo_lite.yaml")
     assert ppo.config.experiment is not None
     assert ppo.config.experiment.role == "baseline_ppo_lite"
@@ -161,7 +177,9 @@ def test_load_stack_config_supports_baselines_and_ablations() -> None:
 def test_load_stack_config_supports_guided_b1_ablation() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(repo_root / "configs/thesis/ablations/public_teacher_tactical_mulliganguard_reward.yaml")
+    stack = load_stack_config(
+        repo_root / "configs/thesis/_shared/guided_teacher/public_teacher_tactical_mulliganguard_reward.yaml"
+    )
 
     assert stack.config.experiment is not None
     assert stack.config.experiment.role == "ablation_guided"
@@ -199,7 +217,9 @@ def test_load_stack_config_supports_guided_b1_ablation() -> None:
 def test_load_stack_config_supports_passaware_guided_b1_ablation() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(repo_root / "configs/thesis/ablations/public_teacher_passaware_mulliganguard_reward.yaml")
+    stack = load_stack_config(
+        repo_root / "configs/thesis/_shared/guided_teacher/public_teacher_passaware_mulliganguard_reward.yaml"
+    )
 
     assert stack.config.experiment is not None
     assert stack.config.experiment.role == "ablation_guided"
@@ -222,7 +242,9 @@ def test_load_stack_config_supports_passaware_guided_b1_ablation() -> None:
 def test_load_stack_config_supports_main_b1only_p2_trust_region_probe() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(repo_root / "configs/thesis/ablations/main_b1only_p2_trust_region_probe.yaml")
+    stack = load_stack_config(
+        repo_root / "configs/thesis/_shared/main_b1only_p2/main_b1only_p2_trust_region_probe.yaml"
+    )
 
     assert stack.config.training is not None
     assert stack.config.training.optimizer.learning_rate == pytest.approx(0.00005)
@@ -242,7 +264,9 @@ def test_load_stack_config_supports_main_b1only_p2_trust_region_probe() -> None:
 def test_load_stack_config_supports_main_b1only_p2_trust_region_no_warmup_probe() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(repo_root / "configs/thesis/ablations/main_b1only_p2_trust_region_no_warmup_probe.yaml")
+    stack = load_stack_config(
+        repo_root / "configs/thesis/_shared/main_b1only_p2/main_b1only_p2_trust_region_no_warmup_probe.yaml"
+    )
 
     assert stack.config.league is not None
     assert stack.config.league.sampling.noleague_baseline_mix_fraction == pytest.approx(1.0)
@@ -254,7 +278,9 @@ def test_load_stack_config_supports_main_b1only_p2_trust_region_no_warmup_probe(
 def test_load_stack_config_supports_main_b1only_p2_trust_region_argmax_opp_probe() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(repo_root / "configs/thesis/ablations/main_b1only_p2_trust_region_argmax_opp_probe.yaml")
+    stack = load_stack_config(
+        repo_root / "configs/thesis/_shared/main_b1only_p2/main_b1only_p2_trust_region_argmax_opp_probe.yaml"
+    )
 
     assert stack.config.training is not None
     assert stack.config.training.fixed_model_opponent_action_selection == "argmax"
@@ -266,7 +292,9 @@ def test_load_stack_config_supports_main_b1only_p2_trust_region_argmax_opp_probe
 def test_load_stack_config_supports_main_b1only_p2_free_argmax_opp_probe() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(repo_root / "configs/thesis/ablations/main_b1only_p2_free_argmax_opp_probe.yaml")
+    stack = load_stack_config(
+        repo_root / "configs/thesis/_shared/main_b1only_p2/main_b1only_p2_free_argmax_opp_probe.yaml"
+    )
 
     assert stack.config.training is not None
     assert stack.config.training.fixed_model_opponent_action_selection == "argmax"
@@ -279,7 +307,9 @@ def test_load_stack_config_supports_main_b1only_p2_free_argmax_opp_probe() -> No
 def test_load_stack_config_supports_main_league_champion_hardneg_long_probe() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(repo_root / "configs/thesis/ablations/main_league_champion_hardneg_long_probe.yaml")
+    stack = load_stack_config(
+        repo_root / "configs/thesis/_shared/hardneg_core/main_league_champion_hardneg_long_probe.yaml"
+    )
 
     assert stack.config.training is not None
     assert stack.config.training.optimizer.learning_rate == pytest.approx(0.00004)
@@ -300,7 +330,9 @@ def test_load_stack_config_supports_main_league_champion_hardneg_long_probe() ->
 def test_load_stack_config_supports_main_league_champion_hardneg_rehearsal_probe() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(repo_root / "configs/thesis/ablations/main_league_champion_hardneg_rehearsal_probe.yaml")
+    stack = load_stack_config(
+        repo_root / "configs/thesis/_shared/hardneg_core/main_league_champion_hardneg_rehearsal_probe.yaml"
+    )
 
     assert stack.config.training is not None
     assert stack.config.training.trajectory_bc_enabled is True
@@ -325,7 +357,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_consolidation_p
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_consolidation_probe.yaml"
+        repo_root / "configs/thesis/_shared/hardneg_core/main_league_champion_hardneg_consolidation_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -350,7 +382,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_stable_long_pro
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_stable_long_probe.yaml"
+        repo_root / "configs/thesis/_shared/hardneg_core/main_league_champion_hardneg_stable_long_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -374,7 +406,9 @@ def test_load_stack_config_supports_main_league_champion_hardneg_stable_long_pro
 def test_load_stack_config_supports_main_league_champion_hardneg_polish_probe() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(repo_root / "configs/thesis/ablations/main_league_champion_hardneg_polish_probe.yaml")
+    stack = load_stack_config(
+        repo_root / "configs/thesis/_shared/hardneg_core/main_league_champion_hardneg_polish_probe.yaml"
+    )
 
     assert stack.config.training is not None
     assert stack.config.training.optimizer.learning_rate == pytest.approx(0.00001)
@@ -396,7 +430,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_multiobjective_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_multiobjective_guard_probe.yaml"
+        repo_root / "configs/thesis/_shared/hardneg_core/main_league_champion_hardneg_multiobjective_guard_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -420,7 +454,8 @@ def test_load_stack_config_supports_main_league_champion_hardneg_multiobjective_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_multiobjective_retention_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_retention/main_league_champion_hardneg_multiobjective_retention_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -443,7 +478,8 @@ def test_load_stack_config_supports_main_league_champion_hardneg_replaybc_retent
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_replaybc_retention_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_retention/main_league_champion_hardneg_replaybc_retention_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -461,7 +497,8 @@ def test_load_stack_config_supports_main_league_champion_hardneg_balanced_replay
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_balanced_replaybc_retention_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_retention/main_league_champion_hardneg_balanced_replaybc_retention_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -479,7 +516,8 @@ def test_load_stack_config_supports_main_league_champion_hardneg_weighted_replay
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_weighted_replaybc_win32_retention_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_retention/main_league_champion_hardneg_weighted_replaybc_win32_retention_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -497,7 +535,8 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_retent
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_selected_retention_b4guard_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_selected/main_league_champion_hardneg_selected_retention_b4guard_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -519,7 +558,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/main_league_champion_hardneg_selected_alloutcome_replaybc_b4guard_probe.yaml"
+        / "configs/thesis/_shared/hardneg_selected/main_league_champion_hardneg_selected_alloutcome_replaybc_b4guard_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -540,7 +579,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/main_league_champion_hardneg_selected_alloutcome_b2repair_b4guard_probe.yaml"
+        / "configs/thesis/_shared/hardneg_selected_alloutcome/main_league_champion_hardneg_selected_alloutcome_b2repair_b4guard_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -568,7 +607,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_alloutcome/"
             "main_league_champion_hardneg_selected_alloutcome_learnedfloor_b4b2guard_probe.yaml"
         )
     )
@@ -600,7 +639,10 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_selected_alloutcome_learnedpush_b4b2guard_probe.yaml")
+        / (
+            "configs/thesis/_shared/hardneg_selected_alloutcome/"
+            "main_league_champion_hardneg_selected_alloutcome_learnedpush_b4b2guard_probe.yaml"
+        )
     )
 
     assert stack.config.training is not None
@@ -632,7 +674,10 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_selected_alloutcome_swingrepair_b4b2guard_probe.yaml")
+        / (
+            "configs/thesis/_shared/hardneg_selected_alloutcome/"
+            "main_league_champion_hardneg_selected_alloutcome_swingrepair_b4b2guard_probe.yaml"
+        )
     )
 
     assert stack.config.training is not None
@@ -660,7 +705,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_alloutcome/"
             "main_league_champion_hardneg_selected_alloutcome_disjointrepair_b4b2guard_probe.yaml"
         )
     )
@@ -687,7 +732,10 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_selected_alloutcome_focusoldhn_b4b2guard_probe.yaml")
+        / (
+            "configs/thesis/_shared/hardneg_selected_alloutcome/"
+            "main_league_champion_hardneg_selected_alloutcome_focusoldhn_b4b2guard_probe.yaml"
+        )
     )
 
     assert stack.config.training is not None
@@ -709,7 +757,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_alloutcome/"
             "main_league_champion_hardneg_selected_alloutcome_focusoldhn_strong_b4b2guard_probe.yaml"
         )
     )
@@ -733,7 +781,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_alloutcome/"
             "main_league_champion_hardneg_selected_alloutcome_focusoldhn_b2retention_b4b2guard_probe.yaml"
         )
     )
@@ -763,7 +811,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_alloutcome/"
             "main_league_champion_hardneg_selected_alloutcome_focusoldhn_extensionrepair_b4b2guard_probe.yaml"
         )
     )
@@ -787,7 +835,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_selected_allout
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_alloutcome/"
             "main_league_champion_hardneg_selected_alloutcome_winnerrepair_b4b2guard_probe.yaml"
         )
     )
@@ -822,7 +870,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_stratifiedwinne
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_b4b2guard_probe.yaml"
         )
     )
@@ -848,7 +896,7 @@ def test_load_stack_config_supports_main_league_champion_hardneg_overlap_probe()
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_b4b2guard_probe.yaml"
         )
     )
@@ -865,7 +913,7 @@ def test_load_stack_config_supports_main_league_b1_loss_topaction_probe() -> Non
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_b1losstopaction_b4b2guard_probe.yaml"
         )
     )
@@ -889,7 +937,7 @@ def test_load_stack_config_supports_main_league_b1_hardneg_loss_topaction_probe(
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_"
             "b1hnlosstopaction_b4b2guard_probe.yaml"
         )
@@ -921,7 +969,7 @@ def test_load_stack_config_supports_main_league_b1_hardneg_preserved_winner_focu
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_"
             "b1hnlosstopaction_preservewinnerfocus_b4b2guard_probe.yaml"
         )
@@ -955,7 +1003,7 @@ def test_load_stack_config_supports_main_league_b1_hardneg_preserved_winner_b1b3
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_"
             "b1hnlosstopaction_preservewinnerfocus_b1b3repair_b4b2guard_probe.yaml"
         )
@@ -991,7 +1039,7 @@ def test_load_stack_config_supports_main_league_grouped_b1b3_hardneg_repair_prob
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_"
             "b1hnlosstopaction_preservewinnerfocus_b1b3repair_grouped_b4b2guard_probe.yaml"
         )
@@ -1031,7 +1079,7 @@ def test_load_stack_config_supports_main_league_grouped_fixedwin_repair_probe() 
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_"
             "b1hnlosstopaction_preservewinnerfocus_b1b3repair_grouped_fixedwin_b4b2guard_probe.yaml"
         )
@@ -1073,7 +1121,7 @@ def test_load_stack_config_supports_main_league_grouped_b2split_fixedwin_repair_
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_"
             "b1hnlosstopaction_preservewinnerfocus_b1b3repair_grouped_b2split_fixedwin_b4b2guard_probe.yaml"
         )
@@ -1108,7 +1156,7 @@ def test_load_stack_config_supports_main_league_grouped_b2loss_fixedwin_repair_p
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_stratified/"
             "main_league_champion_hardneg_selected_alloutcome_stratifiedwinnerrepair_overlap_"
             "b1hnlosstopaction_preservewinnerfocus_b1b3repair_grouped_b2loss_fixedwin_b4b2guard_probe.yaml"
         )
@@ -1144,7 +1192,7 @@ def test_load_stack_config_supports_main_league_selected_conservative_online_gua
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/main_league_champion_hardneg_selected_conservative_online_guard_probe.yaml"
+        / "configs/thesis/_shared/hardneg_selected/main_league_champion_hardneg_selected_conservative_online_guard_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -1174,7 +1222,7 @@ def test_load_stack_config_supports_main_league_lowpressure_pairloss_probe() -> 
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/main_league_champion_hardneg_selected_lowpressure_pairloss_b4b2guard_probe.yaml"
+        / "configs/thesis/_shared/hardneg_selected_paired/main_league_champion_hardneg_selected_lowpressure_pairloss_b4b2guard_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -1220,7 +1268,8 @@ def test_load_stack_config_supports_main_league_paired_swing_contrastive_probe()
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_selected_paired_swing_contrastive_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_selected_paired/main_league_champion_hardneg_selected_paired_swing_contrastive_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -1260,7 +1309,7 @@ def test_load_stack_config_supports_main_league_paired_flipbc_conservative_probe
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_selected_paired_flipbc_conservative_probe.yaml")
+        / "configs/thesis/_shared/hardneg_selected_paired/main_league_champion_hardneg_selected_paired_flipbc_conservative_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -1304,7 +1353,7 @@ def test_load_stack_config_supports_main_league_paired_flipbc_focusoldhn_probe()
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_paired/"
             "main_league_champion_hardneg_selected_paired_flipbc_focusoldhn_conservative_probe.yaml"
         )
     )
@@ -1338,7 +1387,7 @@ def test_load_stack_config_supports_main_league_grouped128_paired_flipbc_probe()
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_paired/"
             "main_league_champion_hardneg_selected_grouped128_paired_flipbc_focusoldhn_probe.yaml"
         )
     )
@@ -1378,7 +1427,7 @@ def test_load_stack_config_supports_main_league_outcome_contrastive_focusoldhn_p
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_selected_outcome_contrastive_focusoldhn_probe.yaml")
+        / "configs/thesis/_shared/hardneg_selected_outcome_contrastive/main_league_champion_hardneg_selected_outcome_contrastive_focusoldhn_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -1425,7 +1474,7 @@ def test_load_stack_config_supports_main_league_outcome_contrastive_full_focusol
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_outcome_contrastive/"
             "main_league_champion_hardneg_selected_outcome_contrastive_full_focusoldhn_probe.yaml"
         )
     )
@@ -1448,7 +1497,7 @@ def test_load_stack_config_supports_main_league_outcome_contrastive_edgehn_focus
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_selected_outcome_contrastive_edgehn_focus_probe.yaml")
+        / "configs/thesis/_shared/hardneg_selected_outcome_contrastive/main_league_champion_hardneg_selected_outcome_contrastive_edgehn_focus_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -1492,7 +1541,7 @@ def test_load_stack_config_supports_main_league_outcome_contrastive_edgehn_b1b2f
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_outcome_contrastive/"
             "main_league_champion_hardneg_selected_outcome_contrastive_edgehn_b1b2focus_probe.yaml"
         )
     )
@@ -1528,7 +1577,7 @@ def test_load_stack_config_supports_main_league_outcome_contrastive_extpreserve_
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_outcome_contrastive/"
             "main_league_champion_hardneg_selected_outcome_contrastive_extpreserve_a0375_probe.yaml"
         )
     )
@@ -1562,7 +1611,7 @@ def test_load_stack_config_supports_main_league_outcome_contrastive_rawext256_al
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_outcome_contrastive/"
             "main_league_champion_hardneg_selected_outcome_contrastive_rawext256_allpreserve_repair_probe.yaml"
         )
     )
@@ -1606,7 +1655,7 @@ def test_load_stack_config_supports_main_league_outcome_contrastive_rawext256_b2
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_outcome_contrastive/"
             "main_league_champion_hardneg_selected_outcome_contrastive_rawext256_b2_policy1_repair_probe.yaml"
         )
     )
@@ -1637,7 +1686,7 @@ def test_load_stack_config_supports_main_league_outcome_contrastive_rawext256_b2
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_selected_outcome_contrastive/"
             "main_league_champion_hardneg_selected_outcome_contrastive_rawext256_b2_oldhn_repair_probe.yaml"
         )
     )
@@ -1670,7 +1719,8 @@ def test_load_stack_config_supports_main_league_interp_a050_continue_probe() -> 
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / ("configs/thesis/ablations/main_league_champion_hardneg_interp_a050_b2_oldhn_continue_probe.yaml")
+        repo_root
+        / "configs/thesis/_shared/hardneg_interp_a050/main_league_champion_hardneg_interp_a050_b2_oldhn_continue_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -1693,7 +1743,7 @@ def test_load_stack_config_supports_main_league_interp_a050_u1_nowarm_b2guard_pr
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_interp_a050_u1_nowarm_b2guard_continue_probe.yaml")
+        / "configs/thesis/_shared/hardneg_interp_a050/main_league_champion_hardneg_interp_a050_u1_nowarm_b2guard_continue_probe.yaml"
     )
 
     assert stack.config.league is not None
@@ -1723,7 +1773,7 @@ def test_load_stack_config_supports_main_league_interp_a050_u1_nowarm_balanced_b
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_interp_a050/"
             "main_league_champion_hardneg_interp_a050_u1_nowarm_balanced_b2guard_continue_probe.yaml"
         )
     )
@@ -1753,7 +1803,7 @@ def test_load_stack_config_supports_main_league_interp_a050_p1p2_a025_b2exact_pr
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_interp_a050/"
             "main_league_champion_hardneg_interp_a050_p1p2_a025_b2exact_nowarm_continue_probe.yaml"
         )
     )
@@ -1792,7 +1842,7 @@ def test_load_stack_config_supports_main_league_interp_a050_p1p2_a025_b2exact_le
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_interp_a050/"
             "main_league_champion_hardneg_interp_a050_p1p2_a025_b2exact_learnedp16_nowarm_continue_probe.yaml"
         )
     )
@@ -1832,7 +1882,7 @@ def test_load_stack_config_supports_main_league_interp_a050_p1p2_a025_b2pair70_p
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_interp_a050/"
             "main_league_champion_hardneg_interp_a050_p1p2_a025_b2pair70_nowarm_continue_probe.yaml"
         )
     )
@@ -1871,7 +1921,7 @@ def test_load_stack_config_supports_main_league_a075_nonconflict_probe() -> None
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_interp_a075_nonconflict_continue_probe.yaml")
+        / "configs/thesis/_shared/hardneg_a050_a075_followup/main_league_champion_hardneg_interp_a075_nonconflict_continue_probe.yaml"
     )
 
     assert stack.config.league is not None
@@ -1910,7 +1960,7 @@ def test_load_stack_config_supports_main_league_a075_broad_conflictfilter_probe(
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_interp_a075_broad_conflictfilter_continue_probe.yaml")
+        / "configs/thesis/_shared/hardneg_a050_a075_followup/main_league_champion_hardneg_interp_a075_broad_conflictfilter_continue_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -1930,7 +1980,7 @@ def test_load_stack_config_supports_main_league_a075_episodepref_probe() -> None
     stack = load_stack_config(
         repo_root
         / (
-            "configs/thesis/ablations/"
+            "configs/thesis/_shared/hardneg_a050_a075_followup/"
             "main_league_champion_hardneg_interp_a075_broad_conflictfilter_episodepref_probe.yaml"
         )
     )
@@ -1946,10 +1996,9 @@ def test_load_stack_config_supports_main_league_a075_context_episodepref_probe()
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / (
-            "configs/thesis/ablations/"
-            "main_league_champion_hardneg_a075_context_broad_conflictfilter_episodepref_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_broad_conflictfilter_episodepref_probe.yaml",
         )
     )
 
@@ -1974,10 +2023,9 @@ def test_load_stack_config_supports_main_league_a075_context_labelmean_probe() -
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / (
-            "configs/thesis/ablations/"
-            "main_league_champion_hardneg_a075_context_broad_conflictfilter_labelmean_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_broad_conflictfilter_labelmean_probe.yaml",
         )
     )
 
@@ -1993,10 +2041,9 @@ def test_load_stack_config_supports_main_league_a075_context_hidden_adapteronly_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / (
-            "configs/thesis/ablations/"
-            "main_league_champion_hardneg_a075_context_hidden_adapteronly_broad_labelmean_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_hidden_adapteronly_broad_labelmean_probe.yaml",
         )
     )
 
@@ -2013,7 +2060,8 @@ def test_load_stack_config_supports_main_league_a075_preference_balanced_micro_p
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / ("configs/thesis/ablations/main_league_champion_hardneg_a075_preference_balanced_micro_probe.yaml")
+        repo_root
+        / "configs/thesis/_shared/hardneg_a050_a075_followup/main_league_champion_hardneg_a075_preference_balanced_micro_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -2037,7 +2085,7 @@ def test_load_stack_config_supports_main_league_a075_preference_groupbalanced_mi
 
     stack = load_stack_config(
         repo_root
-        / ("configs/thesis/ablations/main_league_champion_hardneg_a075_preference_groupbalanced_micro_probe.yaml")
+        / "configs/thesis/_shared/hardneg_a050_a075_followup/main_league_champion_hardneg_a075_preference_groupbalanced_micro_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -2051,10 +2099,9 @@ def test_load_stack_config_supports_main_league_a075_context_preference_groupbal
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / (
-            "configs/thesis/ablations/"
-            "main_league_champion_hardneg_a075_context_preference_groupbalanced_micro_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_preference_groupbalanced_micro_probe.yaml",
         )
     )
 
@@ -2074,10 +2121,9 @@ def test_load_stack_config_supports_main_league_a075_context_candres_episodepref
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / (
-            "configs/thesis/ablations/"
-            "main_league_champion_hardneg_a075_context_candres_broad_conflictfilter_episodepref_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_candres_broad_conflictfilter_episodepref_probe.yaml",
         )
     )
 
@@ -2100,10 +2146,9 @@ def test_load_stack_config_supports_main_league_a075_context_candres_mechpush_pr
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / (
-            "configs/thesis/ablations/"
-            "main_league_champion_hardneg_a075_context_candres_broad_conflictfilter_episodepref_mechpush_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_candres_broad_conflictfilter_episodepref_mechpush_probe.yaml",
         )
     )
 
@@ -2121,10 +2166,9 @@ def test_load_stack_config_supports_main_league_a075_context_candres_topother_pr
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / (
-            "configs/thesis/ablations/"
-            "main_league_champion_hardneg_a075_context_candres_broad_conflictfilter_topother_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_candres_broad_conflictfilter_topother_probe.yaml",
         )
     )
 
@@ -2142,9 +2186,7 @@ def test_load_stack_config_supports_main_league_a075_context_candres_topother_pr
 def test_load_stack_config_supports_main_league_a075_context_probe() -> None:
     repo_root = _repo_root()
 
-    stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a075_context_probe.yaml"
-    )
+    stack = load_stack_config(_a075_context_config(repo_root, "main_league_champion_hardneg_a075_context_probe.yaml"))
 
     assert stack.config.model is not None
     assert stack.config.model.opponent_context_hidden_scale == pytest.approx(0.75)
@@ -2159,7 +2201,7 @@ def test_load_stack_config_supports_main_league_a075_context_conflict_probe() ->
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a075_context_conflict_probe.yaml"
+        _a075_context_config(repo_root, "main_league_champion_hardneg_a075_context_conflict_probe.yaml")
     )
 
     assert stack.config.league is not None
@@ -2191,7 +2233,7 @@ def test_load_stack_config_supports_main_league_a075_context_conflict_strong_pro
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a075_context_conflict_strong_probe.yaml"
+        _a075_context_config(repo_root, "main_league_champion_hardneg_a075_context_conflict_strong_probe.yaml")
     )
 
     assert stack.config.model is not None
@@ -2207,7 +2249,7 @@ def test_load_stack_config_supports_main_league_a075_context_trainable_conflict_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a075_context_trainable_conflict_probe.yaml"
+        _a075_context_config(repo_root, "main_league_champion_hardneg_a075_context_trainable_conflict_probe.yaml")
     )
 
     assert stack.config.model is not None
@@ -2223,8 +2265,7 @@ def test_load_stack_config_supports_main_league_a075_context_trainable_conflict_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / "configs/thesis/ablations/main_league_champion_hardneg_a075_context_trainable_conflict_s64_probe.yaml"
+        _a075_context_config(repo_root, "main_league_champion_hardneg_a075_context_trainable_conflict_s64_probe.yaml")
     )
 
     assert stack.config.model is not None
@@ -2236,8 +2277,7 @@ def test_load_stack_config_supports_main_league_a075_context_trainable_lrmul_con
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / "configs/thesis/ablations/main_league_champion_hardneg_a075_context_trainable_lrmul_conflict_probe.yaml"
+        _a075_context_config(repo_root, "main_league_champion_hardneg_a075_context_trainable_lrmul_conflict_probe.yaml")
     )
 
     assert stack.config.model is not None
@@ -2249,7 +2289,7 @@ def test_load_stack_config_supports_main_league_a075_context_actionbias_conflict
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a075_context_actionbias_conflict_probe.yaml"
+        _a075_context_config(repo_root, "main_league_champion_hardneg_a075_context_actionbias_conflict_probe.yaml")
     )
 
     assert stack.config.model is not None
@@ -2262,8 +2302,10 @@ def test_load_stack_config_supports_main_league_a075_context_actionbias_pair205_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_actionbias_pair205_adapteronly_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_actionbias_pair205_adapteronly_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2289,8 +2331,10 @@ def test_load_stack_config_supports_main_league_a075_context_actionbias_pair205_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_actionbias_pair205_adapteronly_strong_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_actionbias_pair205_adapteronly_strong_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2308,8 +2352,10 @@ def test_load_stack_config_supports_main_league_a075_context_actionbias_pair205_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_actionbias_pair205_adapteronly_minflip_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_actionbias_pair205_adapteronly_minflip_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2327,8 +2373,10 @@ def test_load_stack_config_supports_main_league_a075_context_candidate_residual_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_candidate_residual_pair205_adapteronly_minflip_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_candidate_residual_pair205_adapteronly_minflip_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2348,8 +2396,10 @@ def test_load_stack_config_supports_main_league_a075_bilinear_candidate_residual
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_candidate_residual_pair205_bilinear_adapteronly_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_candidate_residual_pair205_bilinear_adapteronly_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2366,8 +2416,10 @@ def test_load_stack_config_supports_main_league_a075_actionid_candidate_residual
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_candidate_residual_pair205_actionids_adapteronly_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_candidate_residual_pair205_actionids_adapteronly_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2391,8 +2443,10 @@ def test_load_stack_config_supports_main_league_a075_rowbalanced_actionid_candid
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_candidate_residual_pair205_actionids_rowbalanced_adapteronly_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_candidate_residual_pair205_actionids_rowbalanced_adapteronly_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2411,8 +2465,10 @@ def test_load_stack_config_supports_main_league_a075_richbilinear_fullconflict_t
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_richbilinear_fullconflict_topother_adapteronly_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_richbilinear_fullconflict_topother_adapteronly_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2439,8 +2495,10 @@ def test_load_stack_config_supports_main_league_a075_actionid_richbilinear_fullc
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_richbilinear_fullconflict_actionids_topother_adapteronly_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_richbilinear_fullconflict_actionids_topother_adapteronly_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2465,7 +2523,10 @@ def test_load_stack_config_supports_main_league_a050_width128_preference_probe()
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a050_context_preference_width128_probe.yaml"
+        _a050_context_width128_config(
+            repo_root,
+            "main_league_champion_hardneg_a050_context_preference_width128_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2483,8 +2544,10 @@ def test_load_stack_config_supports_main_league_a050_width128_additive_preferenc
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / "configs/thesis/ablations/main_league_champion_hardneg_a050_context_preference_width128_additive_probe.yaml"
+        _a050_context_width128_config(
+            repo_root,
+            "main_league_champion_hardneg_a050_context_preference_width128_additive_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2498,8 +2561,10 @@ def test_load_stack_config_supports_main_league_a050_width128_rich_preference_pr
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root
-        / "configs/thesis/ablations/main_league_champion_hardneg_a050_context_preference_width128_rich_probe.yaml"
+        _a050_context_width128_config(
+            repo_root,
+            "main_league_champion_hardneg_a050_context_preference_width128_rich_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2509,11 +2574,29 @@ def test_load_stack_config_supports_main_league_a050_width128_rich_preference_pr
     assert stack.config.model.opponent_context_candidate_residual_width == 128
 
 
+def test_load_stack_config_supports_main_league_a050_width128_rich_exactaliases_probe() -> None:
+    repo_root = _repo_root()
+
+    stack = load_stack_config(
+        _a050_context_width128_config(
+            repo_root,
+            "main_league_champion_hardneg_a050_context_preference_width128_rich_exactaliases_probe.yaml",
+        )
+    )
+
+    assert stack.config.model is not None
+    assert stack.config.model.opponent_context_candidate_residual_mode == "rich"
+    assert stack.config.model.opponent_context_candidate_residual_width == 128
+    assert "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004" in stack.config.model.opponent_context_policy_ids
+    assert "seed_c3aac2f9dc_policy_000004" in stack.config.model.opponent_context_policy_ids
+
+
 def test_load_stack_config_supports_main_league_a050balanced_live_rowgate_probe() -> None:
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a050balanced_live_rowgate_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_a050_a075_followup/main_league_champion_hardneg_a050balanced_live_rowgate_probe.yaml"
     )
 
     assert stack.config.league is not None
@@ -2538,7 +2621,8 @@ def test_load_stack_config_supports_main_league_a050p2_live_learnedpush_rowgate_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a050p2_live_learnedpush_rowgate_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_a050p2_live/main_league_champion_hardneg_a050p2_live_learnedpush_rowgate_probe.yaml"
     )
 
     assert stack.config.league is not None
@@ -2562,7 +2646,8 @@ def test_load_stack_config_supports_main_league_a050p2_live_rowdeficit_probe() -
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a050p2_live_rowdeficit_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_a050p2_live/main_league_champion_hardneg_a050p2_live_rowdeficit_probe.yaml"
     )
 
     assert stack.config.league is not None
@@ -2588,7 +2673,8 @@ def test_load_stack_config_supports_main_league_a050p2_live_unlocked_rowdeficit_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a050p2_live_unlocked_rowdeficit_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/hardneg_a050p2_live/main_league_champion_hardneg_a050p2_live_unlocked_rowdeficit_probe.yaml"
     )
 
     assert stack.config.league is not None
@@ -2617,7 +2703,7 @@ def test_load_stack_config_supports_main_league_a050p2_live_unlocked_learned_rec
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/main_league_champion_hardneg_a050p2_live_unlocked_learned_recovery_probe.yaml"
+        / "configs/thesis/_shared/hardneg_a050p2_live/main_league_champion_hardneg_a050p2_live_unlocked_learned_recovery_probe.yaml"
     )
 
     assert stack.config.league is not None
@@ -2654,7 +2740,7 @@ def test_load_stack_config_supports_main_league_a075_context_recurrent_conflict_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_champion_hardneg_a075_context_recurrent_conflict_probe.yaml"
+        _a075_context_config(repo_root, "main_league_champion_hardneg_a075_context_recurrent_conflict_probe.yaml")
     )
 
     assert stack.config.model is not None
@@ -2667,8 +2753,10 @@ def test_load_stack_config_supports_main_league_a075_context_trainable_selectedp
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_trainable_conflict_selectedpreserve_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_trainable_conflict_selectedpreserve_probe.yaml",
+        )
     )
 
     assert stack.config.training is not None
@@ -2683,8 +2771,10 @@ def test_load_stack_config_supports_main_league_a075_context_u1_nonconflict_b2_l
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "main_league_champion_hardneg_a075_context_u1_nonconflict_b2_learnedpreserve_probe.yaml"
+        _a075_context_config(
+            repo_root,
+            "main_league_champion_hardneg_a075_context_u1_nonconflict_b2_learnedpreserve_probe.yaml",
+        )
     )
 
     assert stack.config.model is not None
@@ -2717,7 +2807,8 @@ def test_load_stack_config_supports_mainmoveguard_guided_b1_ablation() -> None:
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/public_teacher_passaware_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_teacher/public_teacher_passaware_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -2733,7 +2824,8 @@ def test_load_stack_config_supports_b2exact_guided_b1_ablation() -> None:
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/public_teacher_b2exact_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.experiment is not None
@@ -2757,7 +2849,8 @@ def test_load_stack_config_supports_b2exact_lowentropy_guided_b1_ablation() -> N
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/public_teacher_b2exact_lowentropy_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_lowentropy_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -2772,7 +2865,8 @@ def test_load_stack_config_supports_b2exact_argmaxdev_guided_b1_ablation() -> No
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/public_teacher_b2exact_argmaxdev_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_argmaxdev_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -2787,7 +2881,7 @@ def test_load_stack_config_supports_b2exact_lowentropy_argmaxdev_guided_b1_ablat
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_lowentropy_argmaxdev_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_lowentropy_argmaxdev_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -2805,7 +2899,7 @@ def test_load_stack_config_supports_b2exact_attackguard_argmaxdev_guided_b1_abla
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -2822,7 +2916,7 @@ def test_load_stack_config_supports_b2exact_sharp_attackguard_argmaxdev_guided_b
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_sharp_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_sharp_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -2842,7 +2936,7 @@ def test_load_stack_config_supports_b2exact_margin_attackguard_argmaxdev_guided_
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_margin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_margin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -2859,8 +2953,11 @@ def test_load_stack_config_supports_b2exact_margin_multianchor_guided_b1_ablatio
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     assert stack.config.training is not None
@@ -2888,8 +2985,11 @@ def test_load_stack_config_supports_b2exact_margin_multianchor_teacherfade_guide
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_teacherfade_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_teacherfade_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     assert stack.config.training is not None
@@ -2912,8 +3012,11 @@ def test_load_stack_config_supports_b2exact_margin_multianchor_latefloor_guided_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_latefloor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_latefloor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     assert stack.config.training is not None
@@ -2936,8 +3039,11 @@ def test_load_stack_config_supports_b2exact_margin_multianchor_hold75_guided_b1_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_hold75_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_hold75_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     assert stack.config.training is not None
@@ -2960,8 +3066,11 @@ def test_load_stack_config_supports_hold75_mulligan02_samefamilymargin_guided_b1
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_hold75_mulligan02_samefamilymargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_hold75_mulligan02_samefamilymargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     assert stack.config.rewards is not None
@@ -3016,8 +3125,11 @@ def test_load_stack_config_supports_b2exact_margin_multianchor_profiles_guided_b
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_profiles_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_profiles_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     assert stack.config.training is not None
@@ -3038,8 +3150,11 @@ def test_load_stack_config_supports_factorized_profiles_guided_b1_ablation() -> 
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_hold75_playstrong_factorized_profiles_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_hold75_playstrong_factorized_profiles_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     assert stack.config.model is not None
@@ -3059,8 +3174,11 @@ def test_load_stack_config_supports_factorized_publicmix_guided_b1_ablation() ->
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "public_teacher_b2exact_margin_multianchor_hold75_playstrong_factorized_publicmix_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_margin_multianchor_hold75_playstrong_factorized_publicmix_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     assert stack.config.model is not None
@@ -3142,7 +3260,7 @@ def test_load_stack_config_supports_b2exact_noexact_attackguard_argmaxdev_guided
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_noexact_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_noexact_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -3160,7 +3278,7 @@ def test_load_stack_config_supports_b2exact_filteredexact_attackguard_argmaxdev_
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -3184,7 +3302,7 @@ def test_load_stack_config_supports_b2exact_filteredexact_constpublic_guided_b1_
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_constpublic_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -3207,7 +3325,7 @@ def test_load_stack_config_supports_b2exact_filteredexact_constpublic_antipass_g
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_constpublic_antipass_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_antipass_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -3229,7 +3347,7 @@ def test_load_stack_config_supports_b2exact_filteredexact_constpublic_light_anti
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_constpublic_antipass02_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_antipass02_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -3245,7 +3363,7 @@ def test_load_stack_config_supports_b2exact_filteredexact_constpublic_light_anti
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -3259,8 +3377,11 @@ def test_load_stack_config_supports_filteredexact_lowentropy_multianchor_guided_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/"
-        "public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        repo_root
+        / (
+            "configs/thesis/_shared/guided_teacher/"
+            "public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        )
     )
 
     assert stack.config.training is not None
@@ -3290,7 +3411,7 @@ def test_load_stack_config_supports_b2exact_filteredexact_constpublic_light_anti
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_groupstrong_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_groupstrong_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -3308,7 +3429,7 @@ def test_load_stack_config_supports_b2exact_filteredexact_constpublic_light_anti
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_samefamilymargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_samefamilymargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -3332,7 +3453,7 @@ def test_load_stack_config_supports_b2exact_filteredexact_constpublic_light_anti
 
     stack = load_stack_config(
         repo_root
-        / "configs/thesis/ablations/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_choiceexactmargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_choiceexactmargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
     )
 
     assert stack.config.training is not None
@@ -3581,7 +3702,7 @@ def test_load_stack_config_supports_guided_factorized_league_probe_without_b1_an
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_no_b1_anchor_probe.yaml"
+        repo_root / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_no_b1_anchor_probe.yaml"
     )
 
     assert stack.config.experiment is not None
@@ -3617,7 +3738,8 @@ def test_load_stack_config_supports_guided_factorized_league_continuation_probe(
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_continuation_no_b1_anchor_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_continuation_no_b1_anchor_probe.yaml"
     )
 
     assert stack.config.experiment is not None
@@ -3656,7 +3778,8 @@ def test_load_stack_config_supports_guided_factorized_league_continuation_allow_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_continuation_allow_main_move_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_continuation_allow_main_move_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3677,7 +3800,8 @@ def test_load_stack_config_supports_guided_factorized_league_handaux_probe() -> 
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_continuation_handaux_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_continuation_handaux_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3695,7 +3819,8 @@ def test_load_stack_config_supports_guided_factorized_league_teacherfade_probe()
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_continuation_teacherfade_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_continuation_teacherfade_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3717,7 +3842,7 @@ def test_load_stack_config_supports_guided_factorized_liveleague_probe() -> None
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_liveleague_probe.yaml"
+        repo_root / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_liveleague_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3737,7 +3862,8 @@ def test_load_stack_config_supports_guided_factorized_liveleague_mirror_probe() 
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_liveleague_mirror_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_liveleague_mirror_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3885,7 +4011,7 @@ def test_load_stack_config_supports_guided_factorized_postbest_floor_probe() -> 
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_floor_probe.yaml"
+        repo_root / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_floor_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3908,7 +4034,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_stability_probe()
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_stability_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_stability_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3925,7 +4052,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_vtrace_clamp_prob
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_vtrace_clamp_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_vtrace_clamp_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3942,7 +4070,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_vtrace_profile_fl
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_vtrace_profile_floor_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_vtrace_profile_floor_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3962,7 +4091,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_vtrace_variant005
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_vtrace_variant005_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_vtrace_variant005_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -3982,7 +4112,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_vtrace_control_fl
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_vtrace_control_floor_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_vtrace_control_floor_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -4001,7 +4132,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_profile_floor_pro
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_profile_floor_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_profile_floor_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -4020,7 +4152,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_mainmove_once_pro
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_mainmove_once_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_mainmove_once_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -4036,7 +4169,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_b4_exact_probe() 
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_b4_exact_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_b4_exact_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -4063,7 +4197,7 @@ def test_load_stack_config_supports_guided_factorized_postbest_anchor_probe() ->
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_anchor_probe.yaml"
+        repo_root / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_anchor_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -4079,7 +4213,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_anchor_strong_pro
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_anchor_strong_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_anchor_strong_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -4095,7 +4230,8 @@ def test_load_stack_config_supports_guided_factorized_postbest_anchor_topaction_
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_postbest_anchor_topaction_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_postbest_anchor_topaction_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -4111,7 +4247,8 @@ def test_load_stack_config_supports_guided_factorized_league_variant_profiles_pr
     repo_root = _repo_root()
 
     stack = load_stack_config(
-        repo_root / "configs/thesis/ablations/main_league_guided_factorized_continuation_variant_profiles_probe.yaml"
+        repo_root
+        / "configs/thesis/_shared/guided_factorized/main_league_guided_factorized_continuation_variant_profiles_probe.yaml"
     )
 
     assert stack.config.training is not None
@@ -4362,7 +4499,12 @@ def test_thesis_reward_ablations_are_isolated_b1_routes() -> None:
         truncation_reward,
         bootstrap_value,
     ) in expected.items():
-        stack = load_stack_config(repo_root / "configs" / "thesis" / "ablations" / filename)
+        config_dir = (
+            repo_root / "configs" / "thesis" / "ablations"
+            if filename == "terminal_only_reward.yaml"
+            else repo_root / "configs" / "archive" / "thesis_reward_ablations_20260513"
+        )
+        stack = load_stack_config(config_dir / filename)
         assert stack.config.experiment is not None
         assert stack.config.experiment.role == "ablation_reward"
         assert stack.config.training is not None
@@ -4688,7 +4830,8 @@ def test_actor_temperature_ablation_preserves_lowentropy_surface() -> None:
         repo_root
         / "configs"
         / "thesis"
-        / "ablations"
+        / "_shared"
+        / "guided_teacher"
         / (
             "public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_actortemp025_"
             "argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
