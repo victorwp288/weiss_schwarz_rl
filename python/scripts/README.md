@@ -6,6 +6,12 @@ Package modules are the canonical command surface. Files under `python/scripts/`
 remain supported as compatibility shims for older runs, notebooks, and shell
 history.
 
+Do not add implementation logic here. New commands should live under
+`python/weiss_rl/` and expose a small `main()` entrypoint; a file in
+`python/scripts/` may only be a thin compatibility shim. The repository hygiene
+gate enforces that shims stay small and identify themselves as compatibility
+wrappers.
+
 Preferred workflow after setup:
 
 ```bash

@@ -106,4 +106,13 @@ _EVAL_EXPORT_NAMES = (
     "PromotionGateRunner",
 )
 
-EVAL_COMPAT_EXPORTS: Mapping[str, Any] = {name: globals()[name] for name in _EVAL_EXPORT_NAMES}
+EVAL_COMPAT_EXPORTS: Mapping[str, Any] = {
+    **{name: globals()[name] for name in _EVAL_EXPORT_NAMES},
+    "_DecisionBoundaryBatch": _DecisionBoundaryBatch,
+    "_ScheduledGame": _ScheduledGame,
+    "PeriodicDevEvalRunner": PeriodicDevEvalRunner,
+    "resolve_policy_set_selection": resolve_policy_set_selection,
+    "PromotionGateRunner": PromotionGateRunner,
+}
+
+__all__ = ["EVAL_COMPAT_EXPORTS", *_EVAL_EXPORT_NAMES]

@@ -166,7 +166,7 @@ def test_apply_central_snapshot_opponent_policy_runs_model_and_applies_configure
             self.entered += 1
             return self
 
-        def __exit__(self, exc_type, exc, tb):
+        def __exit__(self, exc_type, exc, _tb):
             return False
 
     class _Model:

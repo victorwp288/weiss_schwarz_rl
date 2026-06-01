@@ -9,3 +9,5 @@ from weiss_rl.training.train_entrypoint_namespace import (
 from weiss_rl.training.train_entrypoint_namespace import (
     install_train_entrypoint_compat_exports,
 )
+
+__all__ = ["_EXPORT_FAMILIES", "install_train_entrypoint_compat_exports"]

@@ -15,6 +15,7 @@ Canonical public surfaces:
 ## Start here
 
 - [Getting started](getting_started.md)
+- [Repository map](repo_map.md)
 - [Thesis workflow](thesis_workflow.md)
 - [Architecture](architecture.md)
 - [Configuration](configuration.md)
@@ -44,13 +45,14 @@ Canonical public surfaces:
 ## Suggested reading order
 
 1. `getting_started.md`
-2. `thesis_workflow.md`
-3. `architecture.md`
-4. `configuration.md`
-5. `training.md`
-6. `evaluation.md`
-7. `artifact_contract.md`
-8. `rebuild_log.md`
+2. `repo_map.md`
+3. `thesis_workflow.md`
+4. `architecture.md`
+5. `configuration.md`
+6. `training.md`
+7. `evaluation.md`
+8. `artifact_contract.md`
+9. `rebuild_log.md`
 
 If you are only trying to verify a local checkout, run
 `uv run --extra dev --extra sim python python/scripts/verify_repo.py`.

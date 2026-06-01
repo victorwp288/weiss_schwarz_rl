@@ -228,4 +228,9 @@ _TRAINING_EXPORT_NAMES = (
     "run_structured_warmstart",
 )
 
-TRAINING_COMPAT_EXPORTS: Mapping[str, Any] = {name: globals()[name] for name in _TRAINING_EXPORT_NAMES}
+TRAINING_COMPAT_EXPORTS: Mapping[str, Any] = {
+    **{name: globals()[name] for name in _TRAINING_EXPORT_NAMES},
+    "_checkpoint_guard_helpers": _checkpoint_guard_helpers,
+}
+
+__all__ = ["TRAINING_COMPAT_EXPORTS", *_TRAINING_EXPORT_NAMES]

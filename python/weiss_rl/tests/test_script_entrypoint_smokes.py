@@ -205,6 +205,7 @@ def test_warmstart_script_shims_delegate_to_package_entrypoints(
         ("play_vs_model.py", "weiss_rl.human_play.play_vs_model_entrypoint"),
         ("profile_structured_hotpaths.py", "weiss_rl.diagnostics.profile_structured_hotpaths_entrypoint"),
         ("profile_train_job.py", "weiss_rl.diagnostics.profile_train_job_entrypoint"),
+        ("repo_hygiene_check.py", "weiss_rl.diagnostics.repo_hygiene_check_entrypoint"),
         ("structured_v2_baseline.py", "weiss_rl.experiments.structured_v2_baseline_entrypoint"),
         ("structured_v2_campaign.py", "weiss_rl.experiments.structured_v2_campaign_entrypoint"),
         ("verify_repo.py", "weiss_rl.workflows.verify_repo_entrypoint"),
@@ -279,6 +280,11 @@ def test_verify_repo_entrypoint_runs_release_verification_steps(monkeypatch) -> 
     module.main()
 
     assert observed == [
+        (
+            ["C:/Python/python.exe", "-m", "weiss_rl.diagnostics.repo_hygiene_check_entrypoint"],
+            REPO_ROOT,
+            True,
+        ),
         (
             ["C:/Python/python.exe", "-m", "weiss_rl.diagnostics.core_placeholder_check_entrypoint"],
             REPO_ROOT,
@@ -398,6 +404,7 @@ def test_verify_repo_plan_builder_preserves_release_verification_surface() -> No
     assert steps == legacy_steps
     assert render_verification_plan_for_request(request) == rendered
     assert [label for label, _command in rendered] == [
+        "Repo hygiene gate",
         "Core placeholder gate",
         "Ruff check",
         "Ruff format check",
@@ -408,8 +415,9 @@ def test_verify_repo_plan_builder_preserves_release_verification_surface() -> No
         "Standard auto-gpu wrapper dry-run",
         "Standard multideck wrapper dry-run",
     ]
-    assert rendered[0][1] == ["C:/Python/python.exe", "-m", "weiss_rl.diagnostics.core_placeholder_check_entrypoint"]
-    assert rendered[1][1] == [
+    assert rendered[0][1] == ["C:/Python/python.exe", "-m", "weiss_rl.diagnostics.repo_hygiene_check_entrypoint"]
+    assert rendered[1][1] == ["C:/Python/python.exe", "-m", "weiss_rl.diagnostics.core_placeholder_check_entrypoint"]
+    assert rendered[2][1] == [
         "C:/Python/python.exe",
         "-m",
         "ruff",
@@ -419,7 +427,7 @@ def test_verify_repo_plan_builder_preserves_release_verification_surface() -> No
         "examples",
         "python/scripts",
     ]
-    assert rendered[3][1] == [
+    assert rendered[4][1] == [
         "C:/Python/python.exe",
         "-m",
         "mypy",
@@ -427,7 +435,7 @@ def test_verify_repo_plan_builder_preserves_release_verification_surface() -> No
         "python/weiss_rl/workflows/eval_entrypoint.py",
         "python/weiss_rl/human_play/play_vs_model_entrypoint.py",
     ]
-    assert rendered[6][1] == [
+    assert rendered[7][1] == [
         "C:/Python/python.exe",
         "-m",
         "weiss_rl.workflows.thesis_wrapper",

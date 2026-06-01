@@ -9,6 +9,7 @@ This repository contains the training, evaluation, league, checkpoint, reporting
 Read these first:
 
 - [Docs hub](docs/README.md)
+- [Repository map](docs/repo_map.md)
 - [Thesis workflow](docs/thesis_workflow.md)
 - [Getting started](docs/getting_started.md)
 - [Architecture](docs/architecture.md)
@@ -84,6 +85,7 @@ bash scripts/run_local_ci_parity.sh
 - `python/weiss_rl/league/`: snapshot registry, PFSP, promotion gates, and opponent pools.
 - `python/weiss_rl/training/`: reusable training helpers extracted from public scripts.
 - `python/scripts/`: path-based public CLI entrypoints.
+- `docs/repo_map.md`: source-of-truth layout rules for package modules, compatibility scripts, configs, and artifacts.
 - `configs/`: grouped stack presets and committed seed files.
 - `docs/`: architecture, safety contracts, and contributor documentation.
 - `runs/`, `run_logs/`, `vast_artifacts/`, `thesis_figures_final/`: thesis artifacts. Treat existing historical outputs as read-only.

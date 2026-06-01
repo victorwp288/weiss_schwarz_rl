@@ -3259,9 +3259,9 @@ def test_train_manifest_state_writes_reports_and_logs_tensorboard_context(tmp_pa
         return artifacts
 
     api = SimpleNamespace(
-        _resolve_device=lambda loaded_stack, device_arg: "cuda:0",
-        _resolve_runtime_profile=lambda loaded_stack, profile_arg: "fast",
-        _resolve_seed=lambda loaded_stack, seed_arg: 99,
+        _resolve_device=lambda loaded_stack, _device_arg: "cuda:0",
+        _resolve_runtime_profile=lambda loaded_stack, _profile_arg: "fast",
+        _resolve_seed=lambda loaded_stack, _seed_arg: 99,
         _manifest_actor_device_layout=lambda **kwargs: calls.setdefault("actor_layout", kwargs) or ("cuda:1",),
         _resolve_policy_set_selection=lambda loaded_stack, **kwargs: (
             ["B0 RandomLegal"],

@@ -18526,3 +18526,85 @@ uv run python python/scripts/paper_readiness_check.py --run-dir runs/guarded_rec
 
 - Do a separate config/reference cleanup pass using `rg` reference checks and
   workflow tests.
+
+## 2026-06-01 - Repository hygiene gate and layout map
+
+### What Changed
+
+- Added `docs/repo_map.md` as the source-of-truth layout map for public CLI
+  surfaces, package modules, configs, artifacts, and refactor rules.
+- Added `weiss_rl.diagnostics.repo_hygiene_check_entrypoint` and the
+  `python/scripts/repo_hygiene_check.py` compatibility shim.
+- Added the repo hygiene gate to the release verification plan and `Makefile`
+  as `make repo-hygiene`.
+- Replaced the duplicate legacy `weiss_rl.workflows.cli_parser` implementation
+  with a compatibility facade around `weiss_rl.workflows.parsers`.
+- Made compatibility export maps explicit enough for the release dead-code gate
+  and renamed unused test callback arguments with leading underscores.
+
+### Commands Run
+
+- `uv run python -m weiss_rl.diagnostics.repo_hygiene_check_entrypoint`
+- `uv run python -m pytest -q python/weiss_rl/tests/test_repo_hygiene.py python/weiss_rl/tests/test_script_entrypoint_smokes.py`
+- `uv run ruff check python/weiss_rl/diagnostics/repo_hygiene.py python/weiss_rl/diagnostics/repo_hygiene_check_entrypoint.py python/scripts/repo_hygiene_check.py python/weiss_rl/workflows/cli_parser.py python/weiss_rl/workflows/verify_repo_plan.py python/weiss_rl/tests/test_repo_hygiene.py python/weiss_rl/tests/test_script_entrypoint_smokes.py`
+- `uv run ruff format --check python/weiss_rl/diagnostics/repo_hygiene.py python/weiss_rl/diagnostics/repo_hygiene_check_entrypoint.py python/scripts/repo_hygiene_check.py python/weiss_rl/workflows/cli_parser.py python/weiss_rl/workflows/verify_repo_plan.py python/weiss_rl/tests/test_repo_hygiene.py python/weiss_rl/tests/test_script_entrypoint_smokes.py`
+- `uv run mypy python/weiss_rl/diagnostics/repo_hygiene.py python/weiss_rl/workflows/verify_repo_plan.py python/weiss_rl/workflows/cli_parser.py --show-error-codes --no-error-summary`
+- `uv run python -m vulture python/weiss_rl python/scripts examples --min-confidence 80`
+- `uv run python -m weiss_rl.workflows.verify_repo_entrypoint`
+
+### Results
+
+- The repository now has an executable structural guardrail that checks tracked
+  top-level paths, generated root outputs, and legacy script shim size/markers.
+- Repo hygiene passed before staging with 3,845 tracked files and after staging
+  with 3,850 tracked files, both with 80 legacy script shims.
+- Focused pytest passed: 108 tests, with 14 existing matplotlib/pyparsing
+  deprecation warnings from the figure entrypoint import path.
+- Ruff check, Ruff format check, and the focused mypy command passed.
+- Full release verification passed after the Vulture cleanup: repo hygiene,
+  placeholder gate, Ruff, Ruff format check, configured mypy, Vulture, 2,639
+  tests passed, 2 skipped, 14 dependency warnings, and all three thesis wrapper
+  dry-runs completed.
+
+### Tests Added
+
+- Added `python/weiss_rl/tests/test_repo_hygiene.py`.
+- Extended script entrypoint smoke tests for the new repo hygiene shim and
+  verify-repo command surface.
+
+### Failures Found
+
+- `weiss_rl.workflows.cli_parser` was carrying a second parser implementation
+  even though `weiss_rl.workflows.parsers` is the canonical parser owner.
+- Initial Ruff format check wanted two touched files reformatted.
+- Initial full release verification failed at Vulture because string-based
+  compatibility export maps were opaque to the dead-code gate, and three test
+  callback arguments were intentionally unused.
+
+### Fixes Applied
+
+- Kept the old parser import path alive while removing the duplicate command
+  tree from that module.
+- Ran `uv run ruff format` on the touched verification/test files and reran the
+  focused validation set.
+- Added explicit compatibility export references where Vulture could not infer
+  `globals()[name]` usage, and renamed unused test callback args with leading
+  underscores.
+
+### Behavior Changes
+
+- `python -m weiss_rl.workflows.verify_repo_entrypoint` now runs the repo
+  hygiene gate before the existing placeholder, lint, type, vulture, test, and
+  wrapper dry-run checks.
+
+### Remaining Risks
+
+- This is the first organization pass. The large `training/` and `workflows/`
+  packages still need follow-up consolidation around clear subdomains.
+- The hygiene gate intentionally enforces structural boundaries, not semantic
+  dead-code removal.
+
+### Next Action
+
+- Split the largest training and workflow modules by owner after reference
+  checks identify which entrypoints are still public.

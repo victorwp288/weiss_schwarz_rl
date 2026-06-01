@@ -37,6 +37,10 @@ def _wrapper_dry_run_command(*, python_exe: str, preset: str, run_label: str) ->
 def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationStep, ...]:
     return (
         VerificationStep(
+            "Repo hygiene gate",
+            _module_command(python_exe, "weiss_rl.diagnostics.repo_hygiene_check_entrypoint"),
+        ),
+        VerificationStep(
             "Core placeholder gate",
             _module_command(python_exe, "weiss_rl.diagnostics.core_placeholder_check_entrypoint"),
         ),

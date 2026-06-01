@@ -18,7 +18,7 @@ PYSIMRUN := uv run --extra dev --extra sim python
 SYNC_MSG := "[make] using uv"
 endif
 
-.PHONY: sync sync-sim lint fmt fmt-check type deadcode test verify check check-placeholders standard-wrapper-smoke standard-auto-gpu-wrapper-smoke package-smoke simulator-check train-min train-b1-smoke train-main-smoke eval-smoke figures-smoke thesis-smoke train-inline-smoke toy-public-e2e artifact-hygiene artifact-contract eval-dev figures clean
+.PHONY: sync sync-sim lint fmt fmt-check type deadcode test verify check check-placeholders repo-hygiene standard-wrapper-smoke standard-auto-gpu-wrapper-smoke package-smoke simulator-check train-min train-b1-smoke train-main-smoke eval-smoke figures-smoke thesis-smoke train-inline-smoke toy-public-e2e artifact-hygiene artifact-contract eval-dev figures clean
 
 FIGURE_FORMAT_ARGS = $(foreach fmt,$(FORMATS),--format $(fmt))
 FIGURE_ID_ARG = $(if $(FIG_ID),--fig-id "$(FIG_ID)")
@@ -53,6 +53,9 @@ endif
 
 check-placeholders:
 	@$(PYRUN) -m weiss_rl.diagnostics.core_placeholder_check_entrypoint
+
+repo-hygiene:
+	@$(PYRUN) -m weiss_rl.diagnostics.repo_hygiene_check_entrypoint
 
 lint:
 	@$(PYRUN) -m ruff check python tests examples python/scripts

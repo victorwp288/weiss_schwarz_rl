@@ -32,6 +32,27 @@ from weiss_rl.experiments.structured_v2_campaign_core import (
 
 _build_parser = build_structured_v2_campaign_parser
 
+__all__ = [
+    "_DEFAULT_B2_ANCHOR",
+    "_DEFAULT_SEEDS",
+    "_build_parser",
+    "_command_env",
+    "_find_counter",
+    "_focal_policy_id_from_dev_eval",
+    "_freeze_baseline_contract",
+    "_repo_run_dir",
+    "_run_label",
+    "_run_step",
+    "_summary_path",
+    "_u120_acceptance_payload",
+    "_workspace_root",
+    "_write_summary",
+    "main",
+    "run_structured_v2_audit_step",
+    "run_structured_v2_campaign_from_args",
+    "run_structured_v2_campaign_seed",
+]
+
 
 def main() -> int:
     parser = _build_parser()
