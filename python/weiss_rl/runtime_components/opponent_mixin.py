@@ -19,7 +19,11 @@ import numpy as np
 
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, heuristic_public_policy_ids
 from weiss_rl.experiments.baselines import NOLEAGUE_BASELINE_POLICY_ID
-from weiss_rl.league.opponent_pool import OpponentPoolSampler
+from weiss_rl.league.opponent_pool import (
+    OpponentPoolSampler,
+    compose_runtime_opponent_pool,
+    select_runtime_opponent_snapshots,
+)
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.runtime_components.opponents import (
     active_actor_heuristic_fraction,
@@ -346,13 +350,13 @@ class QueueRuntimeOpponentMixin:
             eps_uniform=float(self._league_config.pfsp_epsilon_uniform),
         )
         self._opponent_sampler = sampler
-        champion_ids = tuple(
-            policy_id for policy_id in admitted_champion_ids if policy_id not in FIXED_OPPONENT_EXCLUSIONS
+        selection = select_runtime_opponent_snapshots(
+            registry,
+            recent_size=recent_size,
+            champion_ids=admitted_champion_ids,
+            excluded_policy_ids=FIXED_OPPONENT_EXCLUSIONS,
         )
-        recent_ids = tuple(
-            policy_id for policy_id in registry.latest_ids(recent_size) if policy_id not in FIXED_OPPONENT_EXCLUSIONS
-        )
-        candidate_ids = tuple(dict.fromkeys([*champion_ids, *recent_ids]))
+        candidate_ids = selection.candidate_ids
         filtered_candidate_ids = self._filter_timeout_heavy_opponents(candidate_ids)
         candidate_ids, quarantined_count = self._apply_opponent_pool_diversity_floor(
             candidate_ids=candidate_ids,
@@ -360,21 +364,18 @@ class QueueRuntimeOpponentMixin:
         )
         self._pfsp_quarantined_opponents = quarantined_count
         hard_negative_ids = self._select_hard_negative_ids(candidate_ids)
-        hard_negative_set = set(hard_negative_ids)
         sampling_cfg = getattr(self._league_config, "sampling", self._league_config)
         hard_negative_overlaps_champions = bool(getattr(sampling_cfg, "hard_negative_overlaps_champions", False))
-        champion_ids = tuple(
-            policy_id
-            for policy_id in champion_ids
-            if policy_id in candidate_ids and (hard_negative_overlaps_champions or policy_id not in hard_negative_set)
+        composition = compose_runtime_opponent_pool(
+            selection=selection,
+            candidate_ids=candidate_ids,
+            hard_negative_ids=hard_negative_ids,
+            hard_negative_overlaps_champions=hard_negative_overlaps_champions,
         )
-        champion_set = set(champion_ids)
-        recent_ids = tuple(
-            policy_id
-            for policy_id in recent_ids
-            if policy_id in candidate_ids and policy_id not in hard_negative_set and policy_id not in champion_set
-        )
-        candidate_ids = tuple(dict.fromkeys([*hard_negative_ids, *champion_ids, *recent_ids]))
+        candidate_ids = composition.candidate_ids
+        champion_ids = composition.champion_ids
+        recent_ids = composition.recent_ids
+        hard_negative_ids = composition.hard_negative_ids
         self._opponent_candidate_ids = candidate_ids
         self._pfsp_pool_size = len(candidate_ids)
         self._opponent_champion_ids = champion_ids

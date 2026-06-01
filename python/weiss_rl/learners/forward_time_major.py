@@ -290,7 +290,8 @@ def forward_time_major(
                 )
             logits_steps.append(torch.as_tensor(step_logits))
             value_steps.append(torch.as_tensor(step_value))
-            hidden_state = torch.as_tensor(hidden_state)
+            if hidden_state is not None:
+                hidden_state = torch.as_tensor(hidden_state)
         return ForwardTimeMajorResult(
             logits=torch.stack(logits_steps, dim=0),
             values=torch.stack(value_steps, dim=0),
@@ -323,7 +324,8 @@ def forward_time_major(
             )
         logits_steps.append(torch.as_tensor(step_logits))
         value_steps.append(torch.as_tensor(step_value))
-        seat_hidden_state = torch.as_tensor(seat_hidden_state)
+        if seat_hidden_state is not None:
+            seat_hidden_state = torch.as_tensor(seat_hidden_state)
     record_timing_ms("learner_forward_time_major", time.perf_counter() - sequence_started)
     return ForwardTimeMajorResult(
         logits=torch.stack(logits_steps, dim=0),

@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from weiss_rl.experiments.paired_outcome_compare import (
     PairedOutcomeCompareConfig,
     compare_paired_targeted_outcomes,
+)
+from weiss_rl.experiments.paired_outcome_compare_reporting import (
+    paired_outcome_compare_output_line,
+    paired_outcome_compare_output_payload,
+)
+from weiss_rl.experiments.paired_outcome_compare_runtime import (
+    paired_outcome_compare_config_from_args,
+    write_paired_outcome_compare_report,
 )
 
 
@@ -62,6 +71,107 @@ def _write_eval_tree(root: Path, label: str, opponent: str, outcomes: list[str])
         encoding="utf-8",
     )
     return targeted_summary
+
+
+def test_paired_outcome_compare_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_outcome_compare,
+        paired_outcome_compare_cli,
+        paired_outcome_compare_entrypoint,
+        paired_outcome_compare_runtime,
+    )
+
+    assert (
+        paired_outcome_compare_entrypoint._build_parser
+        is paired_outcome_compare_cli.build_paired_outcome_compare_parser
+    )
+    assert (
+        paired_outcome_compare_entrypoint.parse_args is not paired_outcome_compare_cli.parse_paired_outcome_compare_args
+    )
+    assert paired_outcome_compare_entrypoint.run_paired_outcome_compare is (
+        paired_outcome_compare_runtime.run_paired_outcome_compare
+    )
+    assert paired_outcome_compare_entrypoint.PairedOutcomeCompareConfig is (
+        paired_outcome_compare.PairedOutcomeCompareConfig
+    )
+    assert paired_outcome_compare_entrypoint.compare_paired_targeted_outcomes is (
+        paired_outcome_compare.compare_paired_targeted_outcomes
+    )
+
+
+def test_paired_outcome_compare_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_outcome_compare_cli import build_paired_outcome_compare_parser
+
+    args = build_paired_outcome_compare_parser().parse_args(
+        [
+            "--baseline-summary-json",
+            str(tmp_path / "baseline.json"),
+            "--candidate-summary-json",
+            str(tmp_path / "candidate.json"),
+            "--output-json",
+            str(tmp_path / "compare.json"),
+        ]
+    )
+
+    assert args.baseline_summary_json == tmp_path / "baseline.json"
+    assert args.candidate_summary_json == tmp_path / "candidate.json"
+    assert args.baseline_label == "baseline"
+    assert args.candidate_label == "candidate"
+    assert args.fixed_opponent is None
+    assert args.learned_opponent == []
+    assert args.max_examples == 50
+    assert args.pair_index_split is None
+    assert args.output_json == tmp_path / "compare.json"
+
+
+def test_paired_outcome_compare_runtime_maps_args_and_writes_sorted_json(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        baseline_summary_json=tmp_path / "baseline.json",
+        candidate_summary_json=tmp_path / "candidate.json",
+        baseline_label="base",
+        candidate_label="cand",
+        fixed_opponent=["B2 HeuristicPublic"],
+        learned_opponent=["seed_a", "seed_b"],
+        max_examples=3,
+        pair_index_split=64,
+    )
+
+    config = paired_outcome_compare_config_from_args(args)
+
+    assert config.baseline_summary_json == (tmp_path / "baseline.json").resolve()
+    assert config.candidate_summary_json == (tmp_path / "candidate.json").resolve()
+    assert config.baseline_label == "base"
+    assert config.candidate_label == "cand"
+    assert config.fixed_opponents == ("B2 HeuristicPublic",)
+    assert config.learned_opponents == ("seed_a", "seed_b")
+    assert config.max_examples == 3
+    assert config.pair_index_split == 64
+
+    output = tmp_path / "reports" / "compare.json"
+    write_paired_outcome_compare_report(output, {"z": 2, "a": 1})
+    assert output.read_text(encoding="utf-8") == '{\n  "a": 1,\n  "z": 2\n}\n'
+
+
+def test_paired_outcome_compare_reporting_preserves_compact_console_json(tmp_path: Path) -> None:
+    report = {
+        "groups": {
+            "all_compared": {"delta_wins": -1},
+            "fixed_baselines": {"delta_wins": 2},
+            "learned_opponents": {"delta_wins": -3},
+        }
+    }
+
+    assert paired_outcome_compare_output_payload(report=report, output_json=tmp_path / "compare.json") == {
+        "output_json": (tmp_path / "compare.json").as_posix(),
+        "all_delta_wins": -1,
+        "fixed_delta_wins": 2,
+        "learned_delta_wins": -3,
+    }
+    assert paired_outcome_compare_output_line(report=report, output_json=tmp_path / "compare.json") == (
+        '{"all_delta_wins": -1, "fixed_delta_wins": 2, '
+        f'"learned_delta_wins": -3, "output_json": "{(tmp_path / "compare.json").as_posix()}"'
+        "}"
+    )
 
 
 def test_paired_outcome_compare_reports_flips_and_group_delta(tmp_path: Path) -> None:

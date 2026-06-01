@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,62 +12,63 @@ from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger
 from weiss_rl.runtime_components.topology import QueueRuntimeMode
 
 
-def run_minimal_training_with_script_hooks(
-    api: Any,
-    *,
-    stack: Any,
-    contract: Any,
-    artifacts: Any,
-    num_envs: int,
-    unroll_length: int,
-    max_updates: int,
-    profile: str,
-    device: torch.device,
-    seed: int,
-    checkpoint_interval_updates: int,
-    run_id256: str,
-    config_hash256: str,
-    spec_hash256: str,
-    runtime_mode: QueueRuntimeMode,
-    b1_baseline_run_dir: Path | None,
-    seed_snapshot_run_dir: Path | None = None,
-    profile_timers: bool = False,
-    torch_profiler: bool = False,
-    resume_checkpoint_path: Path | None = None,
-    init_from_checkpoint_path: Path | None = None,
-    init_schedule_offset_override_updates: int | None = None,
-    tensorboard_logger: TensorBoardLogger | None = None,
-) -> dict[str, float]:
+@dataclass(frozen=True)
+class MinimalTrainingEntryRequest:
+    stack: Any
+    contract: Any
+    artifacts: Any
+    num_envs: int
+    unroll_length: int
+    max_updates: int
+    profile: str
+    device: torch.device
+    seed: int
+    checkpoint_interval_updates: int
+    run_id256: str
+    config_hash256: str
+    spec_hash256: str
+    runtime_mode: QueueRuntimeMode
+    b1_baseline_run_dir: Path | None
+    seed_snapshot_run_dir: Path | None = None
+    profile_timers: bool = False
+    torch_profiler: bool = False
+    resume_checkpoint_path: Path | None = None
+    init_from_checkpoint_path: Path | None = None
+    init_schedule_offset_override_updates: int | None = None
+    tensorboard_logger: TensorBoardLogger | None = None
+
+
+def run_minimal_training_with_script_hooks(api: Any, request: MinimalTrainingEntryRequest) -> dict[str, float]:
     """Run minimal training through script-level hooks.
 
-    The path-based `python/scripts/train.py` module intentionally exposes many
+    The training entrypoint module intentionally exposes many
     private names that tests monkeypatch. Keeping hook assembly here but
     resolving every dependency from `api` preserves that compatibility surface.
     """
 
     return api.run_minimal_training(
-        stack=stack,
-        contract=contract,
-        artifacts=artifacts,
-        num_envs=num_envs,
-        unroll_length=unroll_length,
-        max_updates=max_updates,
-        profile=profile,
-        device=device,
-        seed=seed,
-        checkpoint_interval_updates=checkpoint_interval_updates,
-        run_id256=run_id256,
-        config_hash256=config_hash256,
-        spec_hash256=spec_hash256,
-        runtime_mode=runtime_mode,
-        b1_baseline_run_dir=b1_baseline_run_dir,
-        seed_snapshot_run_dir=seed_snapshot_run_dir,
-        profile_timers=profile_timers,
-        torch_profiler=torch_profiler,
-        resume_checkpoint_path=resume_checkpoint_path,
-        init_from_checkpoint_path=init_from_checkpoint_path,
-        init_schedule_offset_override_updates=init_schedule_offset_override_updates,
-        tensorboard_logger=tensorboard_logger,
+        stack=request.stack,
+        contract=request.contract,
+        artifacts=request.artifacts,
+        num_envs=request.num_envs,
+        unroll_length=request.unroll_length,
+        max_updates=request.max_updates,
+        profile=request.profile,
+        device=request.device,
+        seed=request.seed,
+        checkpoint_interval_updates=request.checkpoint_interval_updates,
+        run_id256=request.run_id256,
+        config_hash256=request.config_hash256,
+        spec_hash256=request.spec_hash256,
+        runtime_mode=request.runtime_mode,
+        b1_baseline_run_dir=request.b1_baseline_run_dir,
+        seed_snapshot_run_dir=request.seed_snapshot_run_dir,
+        profile_timers=request.profile_timers,
+        torch_profiler=request.torch_profiler,
+        resume_checkpoint_path=request.resume_checkpoint_path,
+        init_from_checkpoint_path=request.init_from_checkpoint_path,
+        init_schedule_offset_override_updates=request.init_schedule_offset_override_updates,
+        tensorboard_logger=request.tensorboard_logger,
         hooks=api.MinimalTrainingHooks(
             configure_torch_threads=api._configure_torch_threads,
             spec_dimensions=api._spec_dimensions,

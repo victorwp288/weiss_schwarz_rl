@@ -11,6 +11,14 @@ from weiss_rl.experiments.paired_outcome_preference_edge_margins import (
     edge_margin_rows_from_logps,
     evaluate_edge_margin_rows,
 )
+from weiss_rl.experiments.paired_outcome_preference_edge_margins_reporting import (
+    paired_outcome_preference_edge_margins_output_line,
+    paired_outcome_preference_edge_margins_output_payload,
+)
+from weiss_rl.experiments.paired_outcome_preference_edge_margins_runtime import (
+    PairedOutcomePreferenceEdgeMarginRunResult,
+    paired_outcome_preference_edge_margin_config_from_args,
+)
 
 
 def _coverage(count: int) -> dict[str, object]:
@@ -23,6 +31,154 @@ def _coverage(count: int) -> dict[str, object]:
         "mapped_opponent_policy_ids": ["B2 HeuristicPublic"],
         "opponents": [],
     }
+
+
+def test_paired_outcome_preference_edge_margins_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_outcome_preference_edge_margins,
+        paired_outcome_preference_edge_margins_cli,
+        paired_outcome_preference_edge_margins_entrypoint,
+        paired_outcome_preference_edge_margins_runtime,
+    )
+
+    assert paired_outcome_preference_edge_margins_entrypoint._build_parser is (
+        paired_outcome_preference_edge_margins_cli.build_paired_outcome_preference_edge_margins_parser
+    )
+    assert paired_outcome_preference_edge_margins_entrypoint.run_paired_outcome_preference_edge_margins is (
+        paired_outcome_preference_edge_margins_runtime.run_paired_outcome_preference_edge_margins
+    )
+    assert paired_outcome_preference_edge_margins_entrypoint.PairedOutcomePreferenceEdgeMarginConfig is (
+        paired_outcome_preference_edge_margins.PairedOutcomePreferenceEdgeMarginConfig
+    )
+    assert paired_outcome_preference_edge_margins_entrypoint.build_paired_outcome_preference_edge_margin_report is (
+        paired_outcome_preference_edge_margins.build_paired_outcome_preference_edge_margin_report
+    )
+    assert paired_outcome_preference_edge_margins_entrypoint.write_paired_outcome_preference_edge_margin_report is (
+        paired_outcome_preference_edge_margins.write_paired_outcome_preference_edge_margin_report
+    )
+
+
+def test_paired_outcome_preference_edge_margins_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_outcome_preference_edge_margins_cli import (
+        build_paired_outcome_preference_edge_margins_parser,
+    )
+
+    args = build_paired_outcome_preference_edge_margins_parser().parse_args(
+        [
+            "--dataset",
+            str(tmp_path / "preference.npz"),
+            "--stack-config",
+            str(tmp_path / "stack.yaml"),
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--checkpoint",
+            str(tmp_path / "checkpoint.pt"),
+            "--reference-checkpoint",
+            str(tmp_path / "reference.pt"),
+            "--output-json",
+            str(tmp_path / "edge_margins.json"),
+        ]
+    )
+
+    assert args.dataset == tmp_path / "preference.npz"
+    assert args.stack_config == tmp_path / "stack.yaml"
+    assert args.run_dir == tmp_path / "run"
+    assert args.checkpoint == tmp_path / "checkpoint.pt"
+    assert args.reference_checkpoint == tmp_path / "reference.pt"
+    assert args.spec_bundle_json is None
+    assert args.include_same_action is False
+    assert args.min_mean_delta == 0.0
+    assert args.min_min_delta == 0.0
+    assert args.min_edge_improved_fraction == 1.0
+    assert args.max_edge_worsened_fraction == 0.0
+    assert args.min_same_state_mean_delta == 0.0
+    assert args.min_required_group_mean_delta == 0.0
+    assert args.required_group == []
+    assert args.allow_missing_context is False
+    assert args.output_json == tmp_path / "edge_margins.json"
+
+
+def test_paired_outcome_preference_edge_margins_runtime_maps_args(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        dataset=tmp_path / "preference.npz",
+        stack_config=tmp_path / "stack.yaml",
+        run_dir=tmp_path / "run",
+        checkpoint=tmp_path / "checkpoint.pt",
+        reference_checkpoint=tmp_path / "reference.pt",
+        spec_bundle_json=tmp_path / "spec_bundle.json",
+        include_same_action=True,
+        min_mean_delta=0.1,
+        min_min_delta=-0.2,
+        min_edge_improved_fraction=0.75,
+        max_edge_worsened_fraction=0.05,
+        min_same_state_mean_delta=0.03,
+        min_required_group_mean_delta=0.04,
+        required_group=["fixed_preserve", "learned_repair"],
+        allow_missing_context=True,
+    )
+
+    config = paired_outcome_preference_edge_margin_config_from_args(args)
+
+    assert config == PairedOutcomePreferenceEdgeMarginConfig(
+        dataset_path=tmp_path / "preference.npz",
+        stack_config_path=tmp_path / "stack.yaml",
+        run_dir=tmp_path / "run",
+        checkpoint_path=tmp_path / "checkpoint.pt",
+        reference_checkpoint_path=tmp_path / "reference.pt",
+        spec_bundle_json=tmp_path / "spec_bundle.json",
+        include_same_action=True,
+        min_mean_delta=0.1,
+        min_min_delta=-0.2,
+        min_edge_improved_fraction=0.75,
+        max_edge_worsened_fraction=0.05,
+        min_same_state_mean_delta=0.03,
+        min_required_group_mean_delta=0.04,
+        required_groups=("fixed_preserve", "learned_repair"),
+        require_context=False,
+    )
+
+
+def test_paired_outcome_preference_edge_margins_reporting_preserves_compact_gate_json(tmp_path: Path) -> None:
+    report = {
+        "passed": False,
+        "failures": ["min_delta_below:-0.1<0"],
+        "summary": {"mean_delta": 0.2, "min_delta": -0.1},
+    }
+
+    assert paired_outcome_preference_edge_margins_output_payload(
+        output_json=tmp_path / "edge_margins.json",
+        report=report,
+    ) == {
+        "output_json": (tmp_path / "edge_margins.json").as_posix(),
+        "passed": False,
+        "failures": ["min_delta_below:-0.1<0"],
+        "summary": {"mean_delta": 0.2, "min_delta": -0.1},
+    }
+    assert paired_outcome_preference_edge_margins_output_line(
+        output_json=tmp_path / "edge_margins.json",
+        report=report,
+    ) == (
+        '{"failures": ["min_delta_below:-0.1<0"], '
+        f'"output_json": "{(tmp_path / "edge_margins.json").as_posix()}", '
+        '"passed": false, "summary": {"mean_delta": 0.2, "min_delta": -0.1}}'
+    )
+
+
+def test_paired_outcome_preference_edge_margins_run_result_exit_code_tracks_gate_status(tmp_path: Path) -> None:
+    assert (
+        PairedOutcomePreferenceEdgeMarginRunResult(
+            output_json=tmp_path / "edge_margins.json",
+            report={"passed": True},
+        ).exit_code
+        == 0
+    )
+    assert (
+        PairedOutcomePreferenceEdgeMarginRunResult(
+            output_json=tmp_path / "edge_margins.json",
+            report={"passed": False},
+        ).exit_code
+        == 2
+    )
 
 
 def test_edge_margin_rows_compare_aligned_preferred_and_rejected_actions() -> None:

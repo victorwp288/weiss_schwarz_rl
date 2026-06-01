@@ -13,7 +13,9 @@ from typing import Any
 import numpy as np
 
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset, load_replay_trajectory_bc_dataset
-from weiss_rl.training.paired_swing_replay import _normalize_action_source
+from weiss_rl.training.paired_swing_conflict_filter import (
+    normalize_paired_swing_action_source as _normalize_action_source,
+)
 
 
 @dataclass(frozen=True, slots=True)

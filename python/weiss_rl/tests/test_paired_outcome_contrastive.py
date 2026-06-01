@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -15,8 +16,120 @@ from weiss_rl.experiments.paired_outcome_contrastive import (
     inspect_paired_outcome_sources,
     sources_from_paired_flip_summary,
 )
+from weiss_rl.experiments.paired_outcome_contrastive_reporting import paired_outcome_contrastive_output_line
+from weiss_rl.experiments.paired_outcome_contrastive_runtime import paired_outcome_contrastive_summary
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset, save_replay_trajectory_bc_dataset
 from weiss_rl.training.paired_swing_replay import paired_swing_distinct_train_row_count
+
+
+def test_paired_outcome_contrastive_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_outcome_contrastive,
+        paired_outcome_contrastive_cli,
+        paired_outcome_contrastive_entrypoint,
+    )
+
+    assert paired_outcome_contrastive_entrypoint._build_parser is (
+        paired_outcome_contrastive_cli.build_paired_outcome_contrastive_parser
+    )
+    assert paired_outcome_contrastive_entrypoint.PairedOutcomeInspectionConfig is (
+        paired_outcome_contrastive.PairedOutcomeInspectionConfig
+    )
+    assert paired_outcome_contrastive_entrypoint.build_paired_outcome_contrastive_dataset is (
+        paired_outcome_contrastive.build_paired_outcome_contrastive_dataset
+    )
+    assert paired_outcome_contrastive_entrypoint.inspect_paired_outcome_sources is (
+        paired_outcome_contrastive.inspect_paired_outcome_sources
+    )
+
+
+def test_paired_outcome_contrastive_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_outcome_contrastive_cli import build_paired_outcome_contrastive_parser
+
+    args = build_paired_outcome_contrastive_parser().parse_args(
+        [
+            "--source-summary-json",
+            str(tmp_path / "summary.json"),
+            "--source-role",
+            "fixed_preserve",
+            "--stack-config",
+            str(tmp_path / "stack.yaml"),
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--policy-a",
+            "selected_a015",
+            "--policy-b",
+            "policy_000002",
+            "--output-run-dir",
+            str(tmp_path / "out"),
+            "--output",
+            str(tmp_path / "dataset.npz"),
+        ]
+    )
+
+    assert args.source_summary_json == tmp_path / "summary.json"
+    assert args.source_role == "fixed_preserve"
+    assert args.include_source_label == []
+    assert args.snapshot_registry_json is None
+    assert args.summary_json is None
+    assert args.top_k == 100_000
+    assert args.top_actions == 3
+    assert args.min_total_variation == 0.0
+    assert args.max_rows_per_bundle is None
+    assert args.max_rows is None
+    assert args.max_bundles_per_source is None
+    assert args.accept_snapshot_config_hash == []
+    assert args.no_resume is False
+
+
+def test_paired_outcome_contrastive_runtime_summary_preserves_cli_payload_keys(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        source_summary_json=tmp_path / "source_summary.json",
+        source_role="fixed_preserve",
+        stack_config=tmp_path / "stack.yaml",
+        run_dir=tmp_path / "run",
+        snapshot_registry_json=tmp_path / "registry.json",
+        policy_a="selected_a015",
+        policy_b="policy_000002",
+        output=tmp_path / "dataset.npz",
+    )
+
+    summary = paired_outcome_contrastive_summary(
+        args=args,
+        inspection_summary={"kind": "paired_outcome_policy_inspections_v1"},
+        dataset_summary={"kind": "paired_outcome_contrastive_dataset_v1"},
+    )
+
+    assert summary == {
+        "kind": "paired_outcome_contrastive_dataset_cli_v1",
+        "source_summary_json": (tmp_path / "source_summary.json").as_posix(),
+        "source_role": "fixed_preserve",
+        "stack_config": (tmp_path / "stack.yaml").as_posix(),
+        "run_dir": (tmp_path / "run").as_posix(),
+        "snapshot_registry_json": (tmp_path / "registry.json").as_posix(),
+        "policy_a": "selected_a015",
+        "policy_b": "policy_000002",
+        "output": (tmp_path / "dataset.npz").as_posix(),
+        "inspection_summary": {"kind": "paired_outcome_policy_inspections_v1"},
+        "dataset_summary": {"kind": "paired_outcome_contrastive_dataset_v1"},
+    }
+
+
+def test_paired_outcome_contrastive_reporting_preserves_console_line(tmp_path: Path) -> None:
+    dataset = _contrastive_source_dataset(tmp_path)
+    dataset.metadata["train_rows"] = 7
+    dataset.metadata["bundle_count"] = 3
+    dataset.metadata["paired_outcome_contrastive_generation"] = {"distinct_train_rows": 5}
+
+    assert paired_outcome_contrastive_output_line(
+        output_dataset=tmp_path / "dataset.npz",
+        summary_path=tmp_path / "dataset.summary.json",
+        dataset=dataset,
+    ) == (
+        f"Paired-outcome contrastive dataset written to {tmp_path / 'dataset.npz'} "
+        "with 7 train rows, 3 bundles, and 5 distinct pairs; "
+        f"summary written to {tmp_path / 'dataset.summary.json'}"
+    )
 
 
 def test_apply_policy_b_top_action_overrides_keeps_only_distinct_trainable_pairs(tmp_path: Path) -> None:

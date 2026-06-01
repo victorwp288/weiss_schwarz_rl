@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from weiss_rl.workflows.cli_dispatch import dispatch_workflow_command
-from weiss_rl.workflows.cli_parser import parse_workflow_args
+from weiss_rl.workflows import runner as _runner
 
+for _name in _runner.__all__:
+    globals()[_name] = getattr(_runner, _name)
 
-def main() -> None:
-    dispatch_workflow_command(parse_workflow_args())
+__all__ = list(_runner.__all__)
 
 
 if __name__ == "__main__":
-    main()
+    _runner.main()

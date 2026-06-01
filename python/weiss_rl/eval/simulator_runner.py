@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -35,25 +34,28 @@ from weiss_rl.eval.harness import (
     sample_action_pinned,
     select_action_argmax_pinned,
 )
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
-from weiss_rl.eval.policy_set import (
-    NO_LEAGUE_POLICY_ID,
-    RANDOM_LEGAL_POLICY_ID,
-    heuristic_public_profile_name_for_policy_id,
+from weiss_rl.eval.policy_resolution import (
+    ResolvedEvalPolicy,
+    _candidate_b1_run_dirs,
+    _common_search_root,
+    _config_marks_noleague_baseline,
+    _find_b1_snapshot,
+    _is_recursive_registry_search_root,
+    _load_snapshot_eval_model,
+    _observation_spec_from_bundle,
+    _resolve_b1_policy,
+    _resolve_snapshot_registry_policy,
+    _resolve_snapshot_registry_run_dir,
+    _resolve_static_eval_policy,
+    _sha256_file,
+    _should_include_common_search_root,
+    _snapshot_by_policy_id_or_imported_seed_suffix,
+    _unique_paths,
+    resolve_eval_policies,
 )
 from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
-from weiss_rl.experiments.baselines import (
-    config_marks_noleague_baseline as _shared_config_marks_noleague_baseline,
-)
-from weiss_rl.experiments.baselines import (
-    find_noleague_baseline_snapshot,
-)
-from weiss_rl.league.registry import SnapshotMeta, SnapshotRegistry
 from weiss_rl.model import PolicyValueModel
-from weiss_rl.models.loading import (
-    load_snapshot_eval_model as _shared_load_snapshot_eval_model,
-)
 from weiss_rl.models.loading import (
     restore_model_guidance_from_payload as _shared_restore_model_guidance_from_payload,
 )
@@ -77,30 +79,32 @@ from weiss_rl.runtime_components.opponent_context import (
     initial_seat_hidden_for_opponents,
 )
 
-_LEGACY_B1_POLICY_ID = "b1_noleague_baseline"
 _U64_DENOMINATOR = float(1 << 64)
+
+__all__ = [
+    "ResolvedEvalPolicy",
+    "SimulatorEvalRunner",
+    "_candidate_b1_run_dirs",
+    "_common_search_root",
+    "_config_marks_noleague_baseline",
+    "_find_b1_snapshot",
+    "_is_recursive_registry_search_root",
+    "_load_snapshot_eval_model",
+    "_observation_spec_from_bundle",
+    "_resolve_b1_policy",
+    "_resolve_snapshot_registry_policy",
+    "_resolve_snapshot_registry_run_dir",
+    "_resolve_static_eval_policy",
+    "_sha256_file",
+    "_should_include_common_search_root",
+    "_snapshot_by_policy_id_or_imported_seed_suffix",
+    "_unique_paths",
+    "resolve_eval_policies",
+]
 
 
 def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload: Mapping[str, object]) -> None:
     _shared_restore_model_guidance_from_payload(model, payload)
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedEvalPolicy:
-    policy_id: str
-    kind: str
-    source_run_dir: str | None = None
-    snapshot_path: str | None = None
-    model: PolicyValueModel | None = None
-    heuristic_policy: HeuristicPublicPolicy | None = None
-
-    def to_manifest_dict(self) -> dict[str, Any]:
-        return {
-            "policy_id": self.policy_id,
-            "kind": self.kind,
-            "source_run_dir": self.source_run_dir,
-            "snapshot_path": self.snapshot_path,
-        }
 
 
 @dataclass(slots=True)
@@ -109,331 +113,6 @@ class _ReplayCaptureState:
     before_raw_paths: set[Path]
     simulator_episode_key: int | bytes | None = None
     steps: list[ReplayStep] | None = None
-
-
-def resolve_eval_policies(
-    *,
-    stack: StackConfig,
-    policy_ids: list[str],
-    run_dir: Path,
-    observation_dim: int,
-    action_dim: int,
-    spec_bundle: Mapping[str, object] | None = None,
-    snapshot_registry_path: Path | None = None,
-    b1_baseline_run_dir: Path | None = None,
-) -> dict[str, ResolvedEvalPolicy]:
-    registry_path = snapshot_registry_path or (
-        ArtifactLayout.from_run_dir(run_dir).training_snapshots_dir / "registry.json"
-    )
-    registry = SnapshotRegistry.load(registry_path)
-    registry_run_dir: Path | None = None
-    snapshots_by_policy_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
-    resolved: dict[str, ResolvedEvalPolicy] = {}
-
-    def _require_registry_run_dir() -> Path:
-        nonlocal registry_run_dir
-        if registry_run_dir is None:
-            registry_run_dir = _resolve_snapshot_registry_run_dir(
-                run_dir=run_dir,
-                registry_path=registry_path,
-                registry=registry,
-                policy_ids=policy_ids,
-            )
-        return registry_run_dir
-
-    for policy_id in policy_ids:
-        if policy_id == RANDOM_LEGAL_POLICY_ID:
-            resolved[policy_id] = ResolvedEvalPolicy(policy_id=policy_id, kind="random_legal")
-            continue
-        heuristic_profile = heuristic_public_profile_name_for_policy_id(policy_id)
-        if heuristic_profile is not None:
-            if spec_bundle is None:
-                raise RuntimeError(f"Resolving {policy_id} requires the loaded simulator spec bundle")
-            resolved[policy_id] = ResolvedEvalPolicy(
-                policy_id=policy_id,
-                kind="heuristic_public",
-                heuristic_policy=HeuristicPublicPolicy.from_spec_bundle(
-                    spec_bundle,
-                    scoring_profile=heuristic_profile,
-                ),
-            )
-            continue
-        if policy_id == NO_LEAGUE_POLICY_ID:
-            b1_registry_run_dir = registry_run_dir
-            if b1_registry_run_dir is None and b1_baseline_run_dir is None:
-                b1_registry_run_dir = _require_registry_run_dir()
-            resolved[policy_id] = _resolve_b1_policy(
-                run_dir=run_dir,
-                registry_run_dir=b1_registry_run_dir,
-                b1_baseline_run_dir=b1_baseline_run_dir,
-                stack=stack,
-                observation_dim=observation_dim,
-                action_dim=action_dim,
-                spec_bundle=spec_bundle,
-            )
-            continue
-
-        snapshot = _snapshot_by_policy_id_or_imported_seed_suffix(
-            snapshots_by_policy_id=snapshots_by_policy_id,
-            policy_id=policy_id,
-            registry_path=registry_path,
-        )
-        if snapshot is None:
-            raise FileNotFoundError(f"Could not resolve eval policy {policy_id!r} in snapshot registry {registry_path}")
-        snapshot_run_dir = _require_registry_run_dir()
-        model = _load_snapshot_eval_model(
-            run_dir=snapshot_run_dir,
-            snapshot_path=snapshot.path,
-            stack=stack,
-            observation_dim=observation_dim,
-            action_dim=action_dim,
-            observation_spec=_observation_spec_from_bundle(spec_bundle),
-            spec_bundle=spec_bundle,
-        )
-        resolved[policy_id] = ResolvedEvalPolicy(
-            policy_id=policy_id,
-            kind="snapshot_registry",
-            source_run_dir=snapshot_run_dir.as_posix(),
-            snapshot_path=snapshot.path,
-            model=model,
-        )
-
-    return resolved
-
-
-def _resolve_snapshot_registry_run_dir(
-    *,
-    run_dir: Path,
-    registry_path: Path,
-    registry: SnapshotRegistry,
-    policy_ids: list[str],
-) -> Path:
-    resolved_run_dir = Path(run_dir).resolve()
-    resolved_registry_path = Path(registry_path).resolve()
-    resolution_snapshots = _snapshot_registry_resolution_snapshots(registry=registry, policy_ids=policy_ids)
-    canonical_candidate = _canonical_snapshot_registry_run_dir(resolved_registry_path)
-    canonical_search_root: Path | None = None
-    if canonical_candidate is not None:
-        if not resolution_snapshots or _run_dir_contains_registry_snapshots(canonical_candidate, resolution_snapshots):
-            return canonical_candidate
-        canonical_search_root = canonical_candidate.parent
-    if not resolution_snapshots:
-        return resolved_run_dir
-
-    candidate_run_dirs: list[Path] = []
-    for candidate in [resolved_run_dir, resolved_registry_path.parent, *resolved_registry_path.parents]:
-        if _run_dir_matches_registry_snapshots(candidate, resolution_snapshots):
-            candidate_run_dirs.append(candidate.resolve())
-    search_roots = [resolved_run_dir.parent, resolved_registry_path.parent]
-    if canonical_search_root is not None:
-        search_roots.append(canonical_search_root)
-        canonical_common_search_root = _common_search_root([resolved_run_dir, canonical_search_root])
-        if canonical_common_search_root is not None and _is_recursive_registry_search_root(
-            canonical_common_search_root
-        ):
-            search_roots.append(canonical_common_search_root)
-    common_search_root = _common_search_root([resolved_run_dir, resolved_registry_path])
-    if (
-        common_search_root is not None
-        and _is_recursive_registry_search_root(common_search_root)
-        and _should_include_common_search_root(search_roots=search_roots, common_search_root=common_search_root)
-    ):
-        search_roots.append(common_search_root)
-    for search_root in _unique_paths(
-        [search_root for search_root in search_roots if _is_recursive_registry_search_root(search_root)]
-    ):
-        candidate_run_dirs.extend(
-            _discover_snapshot_registry_run_dirs(
-                search_root=search_root,
-                snapshots=resolution_snapshots,
-            )
-        )
-
-    unique_candidates = _unique_paths(candidate_run_dirs)
-    if len(unique_candidates) == 1:
-        return unique_candidates[0]
-    if len(unique_candidates) > 1:
-        if any(candidate == resolved_run_dir for candidate in unique_candidates):
-            return resolved_run_dir
-        matches = ", ".join(candidate.as_posix() for candidate in unique_candidates)
-        raise RuntimeError(
-            "Could not uniquely resolve the source run for snapshot registry "
-            f"{resolved_registry_path}; matching run directories: {matches}"
-        )
-    raise FileNotFoundError(
-        "Could not resolve the source run for snapshot registry "
-        f"{resolved_registry_path}. Provide the canonical <run>/training/snapshots/registry.json path "
-        "or place the copied registry next to matching snapshot artifacts."
-    )
-
-
-def _canonical_snapshot_registry_run_dir(registry_path: Path) -> Path | None:
-    resolved_registry_path = Path(registry_path).resolve()
-    if resolved_registry_path.parts[-3:] != ("training", "snapshots", "registry.json"):
-        return None
-    return resolved_registry_path.parent.parent.parent
-
-
-def _snapshot_registry_resolution_snapshots(
-    *,
-    registry: SnapshotRegistry,
-    policy_ids: list[str],
-) -> list[SnapshotMeta]:
-    snapshots_by_policy_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
-    requested_snapshots: list[SnapshotMeta] = []
-    seen_policy_ids: set[str] = set()
-
-    def _append_snapshot(policy_id: str) -> None:
-        snapshot = _snapshot_by_policy_id_or_imported_seed_suffix(
-            snapshots_by_policy_id=snapshots_by_policy_id,
-            policy_id=policy_id,
-            registry_path=None,
-        )
-        if snapshot is None or snapshot.policy_id in seen_policy_ids:
-            return
-        requested_snapshots.append(snapshot)
-        seen_policy_ids.add(snapshot.policy_id)
-
-    for policy_id in policy_ids:
-        _append_snapshot(policy_id)
-    if NO_LEAGUE_POLICY_ID in policy_ids:
-        _append_snapshot(_LEGACY_B1_POLICY_ID)
-    if requested_snapshots:
-        return requested_snapshots
-    return _spaced_snapshot_resolution_samples(registry.snapshots)
-
-
-def _snapshot_by_policy_id_or_imported_seed_suffix(
-    *,
-    snapshots_by_policy_id: Mapping[str, SnapshotMeta],
-    policy_id: str,
-    registry_path: Path | None,
-) -> SnapshotMeta | None:
-    snapshot = snapshots_by_policy_id.get(policy_id)
-    if snapshot is not None:
-        return snapshot
-    normalized = str(policy_id).strip()
-    if not normalized.startswith("seed_"):
-        return None
-    suffix = f"_{normalized}"
-    matches = [
-        candidate
-        for candidate_id, candidate in snapshots_by_policy_id.items()
-        if str(candidate_id).startswith("seed_") and str(candidate_id).endswith(suffix)
-    ]
-    if not matches:
-        return None
-    if len(matches) == 1:
-        return matches[0]
-    registry_hint = "" if registry_path is None else f" in snapshot registry {registry_path}"
-    match_ids = ", ".join(sorted(snapshot.policy_id for snapshot in matches))
-    raise RuntimeError(f"Ambiguous imported seed policy suffix {policy_id!r}{registry_hint}; matches: {match_ids}")
-
-
-def _spaced_snapshot_resolution_samples(snapshots: list[SnapshotMeta]) -> list[SnapshotMeta]:
-    if len(snapshots) <= 3:
-        return list(snapshots)
-    middle_index = len(snapshots) // 2
-    return [
-        snapshots[0],
-        snapshots[middle_index],
-        snapshots[-1],
-    ]
-
-
-def _discover_snapshot_registry_run_dirs(
-    *,
-    search_root: Path,
-    snapshots: list[SnapshotMeta],
-) -> list[Path]:
-    resolved_search_root = Path(search_root).resolve()
-    if not resolved_search_root.is_dir() or not snapshots:
-        return []
-    first_snapshot = snapshots[0]
-    pattern = f"**/training/snapshots/{first_snapshot.policy_id}/weights.pt"
-    candidates: list[Path] = []
-    for weights_path in resolved_search_root.glob(pattern):
-        candidate_run_dir = weights_path.parent.parent.parent.parent
-        if _run_dir_matches_registry_snapshots(candidate_run_dir, snapshots):
-            candidates.append(candidate_run_dir.resolve())
-    return _unique_paths(candidates)
-
-
-def _run_dir_matches_registry_snapshots(
-    candidate_run_dir: Path,
-    snapshots: list[SnapshotMeta],
-) -> bool:
-    resolved_candidate = Path(candidate_run_dir).resolve()
-    for snapshot in snapshots:
-        weights_path = resolved_candidate / snapshot.path
-        if not weights_path.is_file():
-            return False
-        expected_sha256 = str(snapshot.weights_sha256).strip().lower()
-        if expected_sha256 and _sha256_file(weights_path) != expected_sha256:
-            return False
-    return True
-
-
-def _run_dir_contains_registry_snapshots(
-    candidate_run_dir: Path,
-    snapshots: list[SnapshotMeta],
-) -> bool:
-    resolved_candidate = Path(candidate_run_dir).resolve()
-    for snapshot in snapshots:
-        if not (resolved_candidate / snapshot.path).is_file():
-            return False
-    return True
-
-
-def _sha256_file(path: Path) -> str:
-    hasher = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def _unique_paths(paths: list[Path]) -> list[Path]:
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for path in paths:
-        resolved = Path(path).resolve()
-        key = resolved.as_posix()
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(resolved)
-    return unique
-
-
-def _common_search_root(paths: list[Path]) -> Path | None:
-    resolved_paths = [Path(path).resolve() for path in paths]
-    if not resolved_paths:
-        return None
-    common_parts = list(resolved_paths[0].parts)
-    for path in resolved_paths[1:]:
-        shared_prefix_len = 0
-        for left, right in zip(common_parts, path.parts, strict=False):
-            if left != right:
-                break
-            shared_prefix_len += 1
-        common_parts = common_parts[:shared_prefix_len]
-        if not common_parts:
-            return None
-    return Path(*common_parts)
-
-
-def _is_recursive_registry_search_root(path: Path) -> bool:
-    resolved_path = Path(path).resolve()
-    anchor = resolved_path.anchor
-    if anchor and resolved_path == Path(anchor):
-        return False
-    return True
-
-
-def _should_include_common_search_root(*, search_roots: list[Path], common_search_root: Path) -> bool:
-    resolved_common_search_root = Path(common_search_root).resolve()
-    return all(Path(search_root).resolve().parent == resolved_common_search_root for search_root in search_roots)
 
 
 class SimulatorEvalRunner(EvalGameRunner):
@@ -1471,93 +1150,6 @@ class SimulatorEvalRunner(EvalGameRunner):
         return int(np.asarray(batch.episode_key, dtype=np.uint64)[0])
 
 
-def _resolve_b1_policy(
-    *,
-    run_dir: Path,
-    registry_run_dir: Path | None,
-    b1_baseline_run_dir: Path | None,
-    stack: StackConfig,
-    observation_dim: int,
-    action_dim: int,
-    spec_bundle: Mapping[str, object] | None,
-) -> ResolvedEvalPolicy:
-    for candidate_run_dir in _candidate_b1_run_dirs(
-        run_dir=run_dir,
-        registry_run_dir=registry_run_dir,
-        b1_baseline_run_dir=b1_baseline_run_dir,
-    ):
-        snapshot = _find_b1_snapshot(candidate_run_dir)
-        if snapshot is None:
-            continue
-        model = _load_snapshot_eval_model(
-            run_dir=candidate_run_dir,
-            snapshot_path=snapshot.path,
-            stack=stack,
-            observation_dim=observation_dim,
-            action_dim=action_dim,
-            observation_spec=_observation_spec_from_bundle(spec_bundle, run_dir=candidate_run_dir),
-            spec_bundle=spec_bundle,
-        )
-        return ResolvedEvalPolicy(
-            policy_id=NO_LEAGUE_POLICY_ID,
-            kind="baseline_noleague",
-            source_run_dir=candidate_run_dir.as_posix(),
-            snapshot_path=snapshot.path,
-            model=model,
-        )
-    raise FileNotFoundError(
-        "Could not resolve the mandatory B1 NoLeague baseline. "
-        "Pass --b1-baseline-run-dir or evaluate from a baseline_noleague run that persisted the canonical baseline snapshot."
-    )
-
-
-def _candidate_b1_run_dirs(
-    *,
-    run_dir: Path,
-    registry_run_dir: Path | None,
-    b1_baseline_run_dir: Path | None,
-) -> list[Path]:
-    candidates: list[Path] = []
-    if b1_baseline_run_dir is not None:
-        candidates.append(Path(b1_baseline_run_dir))
-    if registry_run_dir is not None:
-        candidates.append(Path(registry_run_dir))
-    candidates.append(Path(run_dir))
-    return _unique_paths(candidates)
-
-
-def _config_marks_noleague_baseline(config_canonical: Mapping[str, Any]) -> bool:
-    return _shared_config_marks_noleague_baseline(config_canonical)
-
-
-def _find_b1_snapshot(run_dir: Path) -> SnapshotMeta | None:
-    return find_noleague_baseline_snapshot(
-        run_dir,
-        policy_id_candidates=(NO_LEAGUE_POLICY_ID, _LEGACY_B1_POLICY_ID),
-    )
-
-
-def _load_snapshot_eval_model(
-    *,
-    run_dir: Path,
-    snapshot_path: str,
-    stack: StackConfig,
-    observation_dim: int,
-    action_dim: int,
-    observation_spec: Mapping[str, object] | None = None,
-    spec_bundle: Mapping[str, object] | None = None,
-) -> PolicyValueModel:
-    return _shared_load_snapshot_eval_model(
-        run_dir=run_dir,
-        snapshot_path=snapshot_path,
-        stack=stack,
-        observation_dim=observation_dim,
-        action_dim=action_dim,
-        observation_spec=observation_spec,
-        spec_bundle=spec_bundle,
-    )
-
-
 def _clone_optional_hidden(hidden: torch.Tensor | None) -> torch.Tensor | None:
     if hidden is None:
         return None
@@ -1575,28 +1167,3 @@ def _copy_action_sequence_state(state: Any | None) -> Any:
     if source_array.shape == copied.consecutive_main_moves_by_env.shape:
         copied.consecutive_main_moves_by_env[...] = source_array
     return copied
-
-
-def _observation_spec_from_bundle(
-    spec_bundle: Mapping[str, object] | None,
-    *,
-    run_dir: Path | None = None,
-) -> Mapping[str, object] | None:
-    if spec_bundle is not None:
-        observation = spec_bundle.get("observation")
-        if isinstance(observation, Mapping):
-            return observation
-    if run_dir is None:
-        return None
-    layout = ArtifactLayout.from_run_dir(run_dir)
-    if not layout.spec_bundle_path.is_file():
-        return None
-    payload = json.loads(layout.spec_bundle_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"spec_bundle.json must contain an object: {layout.spec_bundle_path}")
-    observation = payload.get("observation")
-    if observation is None:
-        return None
-    if not isinstance(observation, Mapping):
-        raise RuntimeError(f"spec_bundle.json observation payload must be an object: {layout.spec_bundle_path}")
-    return observation

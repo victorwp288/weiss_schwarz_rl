@@ -1,10 +1,123 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
 import torch
 
-from weiss_rl.experiments.paired_swing_context_margins import paired_swing_margin_rows_from_packed_scores
+from weiss_rl.experiments.paired_swing_context_margins import (
+    PairedSwingContextMarginConfig,
+    paired_swing_margin_rows_from_packed_scores,
+)
+from weiss_rl.experiments.paired_swing_context_margins_reporting import (
+    paired_swing_context_margins_output_payload,
+)
+from weiss_rl.experiments.paired_swing_context_margins_runtime import (
+    paired_swing_context_margins_config_from_args,
+)
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset
+
+
+def test_paired_swing_context_margins_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_swing_context_margins,
+        paired_swing_context_margins_cli,
+        paired_swing_context_margins_entrypoint,
+        paired_swing_context_margins_runtime,
+    )
+
+    assert paired_swing_context_margins_entrypoint._build_parser is (
+        paired_swing_context_margins_cli.build_paired_swing_context_margins_parser
+    )
+    assert paired_swing_context_margins_entrypoint.run_paired_swing_context_margins is (
+        paired_swing_context_margins_runtime.run_paired_swing_context_margins
+    )
+    assert paired_swing_context_margins_entrypoint.PairedSwingContextMarginConfig is (
+        paired_swing_context_margins.PairedSwingContextMarginConfig
+    )
+    assert paired_swing_context_margins_entrypoint.build_paired_swing_context_margin_report is (
+        paired_swing_context_margins.build_paired_swing_context_margin_report
+    )
+    assert paired_swing_context_margins_entrypoint.paired_swing_margin_rows_from_packed_scores is (
+        paired_swing_context_margins.paired_swing_margin_rows_from_packed_scores
+    )
+    assert paired_swing_context_margins_entrypoint.write_paired_swing_context_margin_report is (
+        paired_swing_context_margins.write_paired_swing_context_margin_report
+    )
+
+
+def test_paired_swing_context_margins_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_swing_context_margins_cli import (
+        build_paired_swing_context_margins_parser,
+    )
+
+    args = build_paired_swing_context_margins_parser().parse_args(
+        [
+            "--dataset",
+            str(tmp_path / "dataset.npz"),
+            "--stack-config",
+            str(tmp_path / "stack.yaml"),
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--checkpoint",
+            str(tmp_path / "checkpoint.pt"),
+            "--output-json",
+            str(tmp_path / "margins.json"),
+        ]
+    )
+
+    assert args.dataset == tmp_path / "dataset.npz"
+    assert args.stack_config == tmp_path / "stack.yaml"
+    assert args.run_dir == tmp_path / "run"
+    assert args.checkpoint == tmp_path / "checkpoint.pt"
+    assert args.positive_action_source == "actions"
+    assert args.negative_action_source == "teacher_action"
+    assert args.report_action_id == [104, 124]
+    assert args.output_json == tmp_path / "margins.json"
+
+
+def test_paired_swing_context_margins_runtime_maps_args(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        dataset=tmp_path / "dataset.npz",
+        stack_config=tmp_path / "stack.yaml",
+        run_dir=tmp_path / "run",
+        checkpoint=tmp_path / "checkpoint.pt",
+        positive_action_source="teacher_action",
+        negative_action_source="actions",
+        report_action_id=[104, 124, 257],
+    )
+
+    config = paired_swing_context_margins_config_from_args(args)
+
+    assert config == PairedSwingContextMarginConfig(
+        dataset_path=tmp_path / "dataset.npz",
+        stack_config_path=tmp_path / "stack.yaml",
+        run_dir=tmp_path / "run",
+        checkpoint_path=tmp_path / "checkpoint.pt",
+        positive_action_source="teacher_action",
+        negative_action_source="actions",
+        report_action_ids=(104, 124, 257),
+    )
+
+
+def test_paired_swing_context_margins_reporting_preserves_compact_console_payload(tmp_path: Path) -> None:
+    report = {
+        "row_count": 3,
+        "context_episode_count": 2,
+        "context_coverage": {"missing_context_episode_count": 1},
+        "positive_margin_min": -0.25,
+        "positive_margin_mean": 0.125,
+    }
+
+    assert paired_swing_context_margins_output_payload(output_json=tmp_path / "margins.json", report=report) == {
+        "output_json": (tmp_path / "margins.json").as_posix(),
+        "row_count": 3,
+        "context_episode_count": 2,
+        "missing_context_episode_count": 1,
+        "positive_margin_min": -0.25,
+        "positive_margin_mean": 0.125,
+    }
 
 
 def test_paired_swing_margin_rows_reports_opponent_context_and_action_logps() -> None:

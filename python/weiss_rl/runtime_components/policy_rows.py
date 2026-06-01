@@ -16,14 +16,15 @@ from weiss_rl.core.masking import (
 )
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, _pack_batch
 from weiss_rl.runtime_components import shared as runtime_shared
-from weiss_rl.runtime_components.batching import (
-    slice_packed_rows,
-    structured_legal_batch_from_mask,
-    structured_legal_batch_from_packed,
-)
 from weiss_rl.runtime_components.debug_validation import (
     validate_env_step_packed_actions,
     validate_sampled_packed_actions,
+)
+from weiss_rl.runtime_components.deterministic_logits import write_deterministic_logits_from_packed
+from weiss_rl.runtime_components.legal_batching import (
+    slice_packed_rows,
+    structured_legal_batch_from_mask,
+    structured_legal_batch_from_packed,
 )
 from weiss_rl.runtime_components.legal_meta import ensure_legal_action_meta, legal_action_meta_from_ids
 from weiss_rl.runtime_components.opponent_context import _call_accepts_keyword
@@ -330,7 +331,7 @@ class QueueRuntimePolicyRowsMixin:
                 *slice_packed_rows(legal_ids, legal_offsets, row_indices),
                 pass_action_id=self.config.pass_action_id,
             )
-            self._write_deterministic_logits_from_packed(
+            write_deterministic_logits_from_packed(
                 logits_out=logits_out,
                 row_indices=row_indices,
                 chosen_actions=action_subset,

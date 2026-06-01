@@ -231,3 +231,74 @@ def test_learning_run_compare_includes_learning_progress_metric_ranges(tmp_path:
     assert b4_main_play_range["min_run"] == "postbest"
     assert b4_main_play_range["max_run"] == "teacherfade"
     assert b4_main_play_range["range"] == pytest.approx(0.12)
+
+
+def test_learning_run_compare_entrypoint_reexports_core_helpers() -> None:
+    from weiss_rl.experiments import learning_run_compare_core, learning_run_compare_entrypoint
+
+    assert learning_run_compare_entrypoint.DIAGNOSTIC_METRIC_PATHS is (
+        learning_run_compare_core.DIAGNOSTIC_METRIC_PATHS
+    )
+    assert learning_run_compare_entrypoint.POLICY_ALIGNMENT_ANCHOR_ALIASES is (
+        learning_run_compare_core.POLICY_ALIGNMENT_ANCHOR_ALIASES
+    )
+    assert learning_run_compare_entrypoint.POLICY_ALIGNMENT_FAMILIES is (
+        learning_run_compare_core.POLICY_ALIGNMENT_FAMILIES
+    )
+    assert learning_run_compare_entrypoint._json_or_none is learning_run_compare_core.json_or_none
+    assert learning_run_compare_entrypoint._dev_eval_records_from_training_log is (
+        learning_run_compare_core.dev_eval_records_from_training_log
+    )
+    assert learning_run_compare_entrypoint._dev_eval_records_from_eval_dirs is (
+        learning_run_compare_core.dev_eval_records_from_eval_dirs
+    )
+    assert learning_run_compare_entrypoint._best_and_latest is learning_run_compare_core.best_and_latest
+    assert learning_run_compare_entrypoint._score_range is learning_run_compare_core.score_range
+    assert learning_run_compare_entrypoint._numeric_at_path is learning_run_compare_core.numeric_at_path
+    assert learning_run_compare_entrypoint._family_alignment_by_name is (
+        learning_run_compare_core.family_alignment_by_name
+    )
+    assert learning_run_compare_entrypoint._policy_alignment_metric_prefix is (
+        learning_run_compare_core.policy_alignment_metric_prefix
+    )
+    assert learning_run_compare_entrypoint._named_score_range is learning_run_compare_core.named_score_range
+    assert learning_run_compare_entrypoint.build_run_learning_comparison is (
+        learning_run_compare_core.build_run_learning_comparison
+    )
+    assert learning_run_compare_entrypoint.load_dev_eval_records is learning_run_compare_core.load_dev_eval_records
+    assert learning_run_compare_entrypoint.load_learning_progress_metrics is (
+        learning_run_compare_core.load_learning_progress_metrics
+    )
+    assert learning_run_compare_entrypoint.load_policy_alignment_metrics is (
+        learning_run_compare_core.load_policy_alignment_metrics
+    )
+
+
+def test_learning_run_compare_entrypoint_parser_and_runner_preserve_thresholds(tmp_path: Path) -> None:
+    from weiss_rl.experiments.learning_run_compare_entrypoint import (
+        build_learning_run_compare_parser,
+        run_learning_run_compare_from_args,
+    )
+
+    run_a = tmp_path / "a"
+    run_b = tmp_path / "b"
+    _write_dev_eval_log(run_a, {"a_u10": {"update_count": 10, "aggregate_score": 0.2}})
+    _write_dev_eval_log(run_b, {"b_u10": {"update_count": 10, "aggregate_score": 0.5}})
+    args = build_learning_run_compare_parser().parse_args(
+        [
+            "--run-dir",
+            str(run_a),
+            "--run-dir",
+            str(run_b),
+            "--fragility-threshold",
+            "0.2",
+            "--anchor-fragility-threshold",
+            "0.15",
+        ]
+    )
+
+    summary = run_learning_run_compare_from_args(args)
+
+    assert summary["run_count"] == 2
+    assert summary["thresholds"] == {"aggregate_fragility": 0.2, "anchor_fragility": 0.15}
+    assert any("aggregate seed/run fragility at update 10" in warning for warning in summary["warnings"])

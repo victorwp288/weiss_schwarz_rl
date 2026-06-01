@@ -215,3 +215,52 @@ def apply_mulligan_select_with_confirm_penalty(
     shaped[penalty_mask] -= np.float32(penalty_value)
     total_micros = int(round(float(penalty_value) * 1_000_000.0 * float(count)))
     return shaped, count, total_micros
+
+
+def apply_collector_reward_shaping(
+    rewards: np.ndarray,
+    actions: np.ndarray,
+    *,
+    counters: dict[str, int],
+    pass_action_id: int,
+    pass_with_nonpass_penalty: float,
+    mulligan_select_with_confirm_penalty: float,
+    action_family_index: Mapping[str, int] | None = None,
+    legal_ids: np.ndarray | None = None,
+    legal_offsets: np.ndarray | None = None,
+    legal_action_meta: np.ndarray | None = None,
+    legal_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """Apply collector-side reward shaping and update collector counters."""
+
+    shaped, penalty_count, penalty_total_micros = apply_pass_with_nonpass_penalty(
+        rewards,
+        actions,
+        pass_action_id=int(pass_action_id),
+        penalty=float(pass_with_nonpass_penalty),
+        legal_ids=legal_ids,
+        legal_offsets=legal_offsets,
+        legal_action_meta=legal_action_meta,
+        ignored_alternative_family_ids=pass_penalty_ignored_alternative_family_ids(action_family_index),
+        legal_mask=legal_mask,
+    )
+    counters["pass_with_nonpass_penalty_count"] += penalty_count
+    counters["pass_with_nonpass_penalty_total_micros"] += penalty_total_micros
+
+    if legal_ids is None or legal_offsets is None:
+        return shaped
+
+    family_index = {} if action_family_index is None else action_family_index
+    shaped, penalty_count, penalty_total_micros = apply_mulligan_select_with_confirm_penalty(
+        shaped,
+        actions,
+        penalty=float(mulligan_select_with_confirm_penalty),
+        legal_ids=legal_ids,
+        legal_offsets=legal_offsets,
+        legal_action_meta=legal_action_meta,
+        mulligan_select_family_id=int(family_index.get("mulligan_select", -1)),
+        mulligan_confirm_family_id=int(family_index.get("mulligan_confirm", -1)),
+    )
+    counters["mulligan_select_with_confirm_penalty_count"] += penalty_count
+    counters["mulligan_select_with_confirm_penalty_total_micros"] += penalty_total_micros
+    return shaped

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
@@ -11,6 +12,45 @@ _U64_MASK = (1 << 64) - 1
 CONFIRMATORY_DEV_EVAL_MAX_PROB_SHORTFALL = 0.1
 CONFIRMATORY_DEV_EVAL_MAX_CI_EXCESS = 0.05
 CONFIRMATORY_DEV_EVAL_MIN_WORST_ANCHOR_MEAN = 0.45
+
+
+@dataclass(frozen=True, slots=True)
+class DevEvalConfidenceStats:
+    min_prob_gt_half: float | None
+    max_prob_lt_half: float | None
+    max_ci_half_width: float | None
+
+    def as_dict(self) -> dict[str, float | None]:
+        return {
+            "min_prob_gt_half": self.min_prob_gt_half,
+            "max_prob_lt_half": self.max_prob_lt_half,
+            "max_ci_half_width": self.max_ci_half_width,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DevEvalTimeoutRates:
+    worst_truncation_rate: float | None
+    worst_no_progress_timeout_rate: float | None
+    worst_natural_timeout_rate: float | None
+
+    @property
+    def worst_stall_rate(self) -> float | None:
+        if self.worst_no_progress_timeout_rate is not None:
+            return self.worst_no_progress_timeout_rate
+        return self.worst_truncation_rate
+
+
+@dataclass(frozen=True, slots=True)
+class DevEvalEligibilityAssessment:
+    score: float | None
+    timeout_rates: DevEvalTimeoutRates
+    confidence: DevEvalConfidenceStats
+    reasons: tuple[str, ...]
+
+    @property
+    def eligible(self) -> bool:
+        return not self.reasons
 
 
 def dev_eval_aggregate_score(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
@@ -113,23 +153,31 @@ def dev_eval_worst_natural_timeout_rate(dev_eval_summary: Mapping[str, Any] | No
 
 
 def dev_eval_worst_stall_rate(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
-    no_progress_rate = dev_eval_worst_no_progress_timeout_rate(dev_eval_summary)
-    if no_progress_rate is not None:
-        return no_progress_rate
-    return dev_eval_worst_truncation_rate(dev_eval_summary)
+    return collect_dev_eval_timeout_rates(dev_eval_summary).worst_stall_rate
 
 
-def dev_eval_confidence_stats(dev_eval_summary: Mapping[str, Any] | None) -> dict[str, float | None]:
-    stats: dict[str, float | None] = {
-        "min_prob_gt_half": None,
-        "max_prob_lt_half": None,
-        "max_ci_half_width": None,
-    }
+def collect_dev_eval_timeout_rates(dev_eval_summary: Mapping[str, Any] | None) -> DevEvalTimeoutRates:
+    return DevEvalTimeoutRates(
+        worst_truncation_rate=dev_eval_worst_truncation_rate(dev_eval_summary),
+        worst_no_progress_timeout_rate=dev_eval_worst_no_progress_timeout_rate(dev_eval_summary),
+        worst_natural_timeout_rate=dev_eval_worst_natural_timeout_rate(dev_eval_summary),
+    )
+
+
+def collect_dev_eval_confidence_stats(dev_eval_summary: Mapping[str, Any] | None) -> DevEvalConfidenceStats:
     if dev_eval_summary is None:
-        return stats
+        return DevEvalConfidenceStats(
+            min_prob_gt_half=None,
+            max_prob_lt_half=None,
+            max_ci_half_width=None,
+        )
     anchors = dev_eval_summary.get("anchors")
     if not isinstance(anchors, Mapping):
-        return stats
+        return DevEvalConfidenceStats(
+            min_prob_gt_half=None,
+            max_prob_lt_half=None,
+            max_ci_half_width=None,
+        )
     min_prob_gt_half: float | None = None
     max_prob_lt_half: float | None = None
     max_ci_half_width: float | None = None
@@ -154,10 +202,15 @@ def dev_eval_confidence_stats(dev_eval_summary: Mapping[str, Any] | None) -> dic
             max_ci_half_width = (
                 float(ci_half_width) if max_ci_half_width is None else max(max_ci_half_width, float(ci_half_width))
             )
-    stats["min_prob_gt_half"] = min_prob_gt_half
-    stats["max_prob_lt_half"] = max_prob_lt_half
-    stats["max_ci_half_width"] = max_ci_half_width
-    return stats
+    return DevEvalConfidenceStats(
+        min_prob_gt_half=min_prob_gt_half,
+        max_prob_lt_half=max_prob_lt_half,
+        max_ci_half_width=max_ci_half_width,
+    )
+
+
+def dev_eval_confidence_stats(dev_eval_summary: Mapping[str, Any] | None) -> dict[str, float | None]:
+    return collect_dev_eval_confidence_stats(dev_eval_summary).as_dict()
 
 
 def dev_eval_worst_anchor_mean(dev_eval_summary: Mapping[str, Any] | None) -> float | None:
@@ -185,24 +238,48 @@ def dev_eval_ineligibility_reasons(
     *,
     dev_eval_summary: Mapping[str, Any] | None,
 ) -> tuple[str, ...]:
+    return assess_dev_eval_metric_eligibility(stack, dev_eval_summary=dev_eval_summary).reasons
+
+
+def assess_dev_eval_metric_eligibility(
+    stack: Any,
+    *,
+    dev_eval_summary: Mapping[str, Any] | None,
+) -> DevEvalEligibilityAssessment:
+    timeout_rates = collect_dev_eval_timeout_rates(dev_eval_summary)
+    confidence = collect_dev_eval_confidence_stats(dev_eval_summary)
     if dev_eval_summary is None:
-        return ("missing",)
+        return DevEvalEligibilityAssessment(
+            score=None,
+            timeout_rates=timeout_rates,
+            confidence=confidence,
+            reasons=("missing",),
+        )
     current_score = dev_eval_aggregate_score(dev_eval_summary)
     if current_score is None:
-        return ("missing_score",)
+        return DevEvalEligibilityAssessment(
+            score=None,
+            timeout_rates=timeout_rates,
+            confidence=confidence,
+            reasons=("missing_score",),
+        )
     curriculum = stack.config.curriculum
     if curriculum is None:
-        return ()
+        return DevEvalEligibilityAssessment(
+            score=float(current_score),
+            timeout_rates=timeout_rates,
+            confidence=confidence,
+            reasons=(),
+        )
     reasons: list[str] = []
     if bool(curriculum.stall_monitor.enabled):
-        worst_rate = dev_eval_worst_stall_rate(dev_eval_summary)
+        worst_rate = timeout_rates.worst_stall_rate
         if worst_rate is not None and worst_rate >= float(curriculum.stall_monitor.truncation_rate_threshold):
             reasons.append("truncation")
     checkpoint_guard = curriculum.checkpoint_guard
     if bool(checkpoint_guard.enabled):
-        confidence = dev_eval_confidence_stats(dev_eval_summary)
-        min_prob_gt_half = confidence["min_prob_gt_half"]
-        max_ci_half_width = confidence["max_ci_half_width"]
+        min_prob_gt_half = confidence.min_prob_gt_half
+        max_ci_half_width = confidence.max_ci_half_width
         if min_prob_gt_half is not None and (
             float(min_prob_gt_half) < float(checkpoint_guard.promote_min_prob_gt_half)
         ):
@@ -211,11 +288,16 @@ def dev_eval_ineligibility_reasons(
             float(max_ci_half_width) > float(checkpoint_guard.promote_max_ci_half_width)
         ):
             reasons.append("confidence_ci")
-    return tuple(reasons)
+    return DevEvalEligibilityAssessment(
+        score=float(current_score),
+        timeout_rates=timeout_rates,
+        confidence=confidence,
+        reasons=tuple(reasons),
+    )
 
 
 def dev_eval_metric_eligible(stack: Any, *, dev_eval_summary: Mapping[str, Any] | None) -> bool:
-    return not dev_eval_ineligibility_reasons(stack, dev_eval_summary=dev_eval_summary)
+    return assess_dev_eval_metric_eligibility(stack, dev_eval_summary=dev_eval_summary).eligible
 
 
 def confirmatory_dev_eval_target_pairs(stack: Any) -> int:
@@ -354,10 +436,9 @@ def checkpoint_candidate_metric(
     latest_metrics: Mapping[str, float] | None,
     dev_eval_summary: Mapping[str, Any] | None,
 ) -> tuple[str | None, float | None]:
-    if dev_eval_metric_eligible(stack, dev_eval_summary=dev_eval_summary):
-        aggregate_score = dev_eval_aggregate_score(dev_eval_summary)
-        if aggregate_score is not None:
-            return "dev_eval_mean", aggregate_score
+    assessment = assess_dev_eval_metric_eligibility(stack, dev_eval_summary=dev_eval_summary)
+    if assessment.eligible and assessment.score is not None:
+        return "dev_eval_mean", assessment.score
     evaluation = stack.config.evaluation
     if evaluation is not None and int(evaluation.periodic_dev_eval_interval_updates) > 0:
         return None, None

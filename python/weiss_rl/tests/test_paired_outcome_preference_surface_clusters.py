@@ -1,12 +1,130 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
 
 from weiss_rl.experiments.paired_outcome_preference_surface_clusters import (
     PairedOutcomePreferenceSurfaceClusterConfig,
     build_paired_outcome_preference_surface_cluster_report,
 )
+from weiss_rl.experiments.paired_outcome_preference_surface_clusters_reporting import (
+    paired_outcome_preference_surface_cluster_output_line,
+    paired_outcome_preference_surface_cluster_output_payload,
+)
+from weiss_rl.experiments.paired_outcome_preference_surface_clusters_runtime import (
+    paired_outcome_preference_surface_cluster_config_from_args,
+)
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset, save_replay_trajectory_bc_dataset
+
+
+def test_surface_cluster_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_outcome_preference_surface_clusters,
+        paired_outcome_preference_surface_clusters_cli,
+        paired_outcome_preference_surface_clusters_entrypoint,
+        paired_outcome_preference_surface_clusters_runtime,
+    )
+
+    assert paired_outcome_preference_surface_clusters_entrypoint._build_parser is (
+        paired_outcome_preference_surface_clusters_cli.build_paired_outcome_preference_surface_cluster_parser
+    )
+    assert paired_outcome_preference_surface_clusters_entrypoint.run_paired_outcome_preference_surface_cluster is (
+        paired_outcome_preference_surface_clusters_runtime.run_paired_outcome_preference_surface_cluster
+    )
+    assert paired_outcome_preference_surface_clusters_entrypoint.PairedOutcomePreferenceSurfaceClusterConfig is (
+        paired_outcome_preference_surface_clusters.PairedOutcomePreferenceSurfaceClusterConfig
+    )
+    assert (
+        paired_outcome_preference_surface_clusters_entrypoint.build_paired_outcome_preference_surface_cluster_report
+        is (paired_outcome_preference_surface_clusters.build_paired_outcome_preference_surface_cluster_report)
+    )
+    assert (
+        paired_outcome_preference_surface_clusters_entrypoint.write_paired_outcome_preference_surface_cluster_report
+        is (paired_outcome_preference_surface_clusters.write_paired_outcome_preference_surface_cluster_report)
+    )
+
+
+def test_surface_cluster_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_outcome_preference_surface_clusters_cli import (
+        build_paired_outcome_preference_surface_cluster_parser,
+    )
+
+    args = build_paired_outcome_preference_surface_cluster_parser().parse_args(
+        [
+            "--dataset",
+            str(tmp_path / "preference.npz"),
+            "--output-json",
+            str(tmp_path / "surface_clusters.json"),
+        ]
+    )
+
+    assert args.dataset == tmp_path / "preference.npz"
+    assert args.spec_bundle_json is None
+    assert args.stack_config is None
+    assert args.opponent_context_policy_id == []
+    assert args.max_examples == 25
+    assert args.output_json == tmp_path / "surface_clusters.json"
+
+
+def test_surface_cluster_runtime_maps_args_without_resolving_paths(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        dataset=tmp_path / "preference.npz",
+        spec_bundle_json=tmp_path / "spec_bundle.json",
+        stack_config=tmp_path / "stack.yaml",
+        opponent_context_policy_id=["B2 HeuristicPublic", "policy_000004"],
+        max_examples=7,
+    )
+
+    config = paired_outcome_preference_surface_cluster_config_from_args(args)
+
+    assert config == PairedOutcomePreferenceSurfaceClusterConfig(
+        dataset_path=tmp_path / "preference.npz",
+        spec_bundle_json=tmp_path / "spec_bundle.json",
+        stack_config_path=tmp_path / "stack.yaml",
+        opponent_context_policy_ids=("B2 HeuristicPublic", "policy_000004"),
+        max_examples=7,
+    )
+
+
+def test_surface_cluster_reporting_preserves_compact_console_json(tmp_path: Path) -> None:
+    report = {
+        "aligned_different_action_count": 8,
+        "same_public_surface_different_action_count": 6,
+        "surface_conflict_count": 2,
+        "opponent_context_resolvable_conflict_count": 1,
+        "opponent_context_required_missing_mapping_count": 0,
+        "replay_only_required_conflict_count": 1,
+        "public_surface_separable": False,
+        "unconditioned_replay_safe": False,
+    }
+
+    assert paired_outcome_preference_surface_cluster_output_payload(
+        output_json=tmp_path / "surface_clusters.json",
+        report=report,
+    ) == {
+        "output_json": (tmp_path / "surface_clusters.json").as_posix(),
+        "aligned_different_action_count": 8,
+        "same_public_surface_different_action_count": 6,
+        "surface_conflict_count": 2,
+        "opponent_context_resolvable_conflict_count": 1,
+        "opponent_context_required_missing_mapping_count": 0,
+        "replay_only_required_conflict_count": 1,
+        "public_surface_separable": False,
+        "unconditioned_replay_safe": False,
+    }
+    assert paired_outcome_preference_surface_cluster_output_line(
+        output_json=tmp_path / "surface_clusters.json",
+        report=report,
+    ) == (
+        '{"aligned_different_action_count": 8, "opponent_context_required_missing_mapping_count": 0, '
+        '"opponent_context_resolvable_conflict_count": 1, '
+        f'"output_json": "{(tmp_path / "surface_clusters.json").as_posix()}", '
+        '"public_surface_separable": false, "replay_only_required_conflict_count": 1, '
+        '"same_public_surface_different_action_count": 6, "surface_conflict_count": 2, '
+        '"unconditioned_replay_safe": false}'
+    )
 
 
 def test_surface_cluster_report_classifies_cross_opponent_reverse_as_context_resolvable(tmp_path):

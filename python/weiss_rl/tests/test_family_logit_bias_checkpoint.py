@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 import torch
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = REPO_ROOT / "python" / "scripts" / "bias_checkpoint_family_logits.py"
-spec = importlib.util.spec_from_file_location("bias_checkpoint_family_logits_script", SCRIPT_PATH)
-assert spec is not None and spec.loader is not None
-script = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(script)
+from weiss_rl.training import family_logit_bias_entrypoint as script
 
 
 def test_parse_family_bias_offsets_merges_repeated_families() -> None:

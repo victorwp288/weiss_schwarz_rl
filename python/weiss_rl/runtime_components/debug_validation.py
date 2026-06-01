@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.runtime_components.batching import slice_packed_rows
+from weiss_rl.runtime_components.legal_batching import slice_packed_rows
 
 
 def validate_sampled_packed_actions(

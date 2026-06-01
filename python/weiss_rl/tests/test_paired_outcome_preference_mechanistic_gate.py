@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from weiss_rl.experiments.paired_outcome_preference_mechanistic_gate import (
     PairedOutcomePreferenceMechanisticGateConfig,
     evaluate_paired_outcome_preference_mechanistic_gate,
+)
+from weiss_rl.experiments.paired_outcome_preference_mechanistic_gate_reporting import (
+    paired_outcome_preference_mechanistic_gate_output_line,
+    paired_outcome_preference_mechanistic_gate_output_payload,
+)
+from weiss_rl.experiments.paired_outcome_preference_mechanistic_gate_runtime import (
+    PairedOutcomePreferenceMechanisticGateRunResult,
+    paired_outcome_preference_mechanistic_gate_config_from_args,
 )
 
 
@@ -72,6 +81,134 @@ def _write_report(
         encoding="utf-8",
     )
     return path
+
+
+def test_preference_mechanistic_gate_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_outcome_preference_mechanistic_gate,
+        paired_outcome_preference_mechanistic_gate_cli,
+        paired_outcome_preference_mechanistic_gate_entrypoint,
+        paired_outcome_preference_mechanistic_gate_runtime,
+    )
+
+    assert paired_outcome_preference_mechanistic_gate_entrypoint._build_parser is (
+        paired_outcome_preference_mechanistic_gate_cli.build_paired_outcome_preference_mechanistic_gate_parser
+    )
+    assert paired_outcome_preference_mechanistic_gate_entrypoint.run_paired_outcome_preference_mechanistic_gate is (
+        paired_outcome_preference_mechanistic_gate_runtime.run_paired_outcome_preference_mechanistic_gate
+    )
+    assert paired_outcome_preference_mechanistic_gate_entrypoint.PairedOutcomePreferenceMechanisticGateConfig is (
+        paired_outcome_preference_mechanistic_gate.PairedOutcomePreferenceMechanisticGateConfig
+    )
+    assert (
+        paired_outcome_preference_mechanistic_gate_entrypoint.evaluate_paired_outcome_preference_mechanistic_gate
+        is (paired_outcome_preference_mechanistic_gate.evaluate_paired_outcome_preference_mechanistic_gate)
+    )
+    assert paired_outcome_preference_mechanistic_gate_entrypoint.write_paired_outcome_preference_mechanistic_gate is (
+        paired_outcome_preference_mechanistic_gate.write_paired_outcome_preference_mechanistic_gate
+    )
+
+
+def test_preference_mechanistic_gate_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_outcome_preference_mechanistic_gate_cli import (
+        build_paired_outcome_preference_mechanistic_gate_parser,
+    )
+
+    args = build_paired_outcome_preference_mechanistic_gate_parser().parse_args(
+        [
+            "--pre-report-json",
+            str(tmp_path / "pre.json"),
+            "--post-report-json",
+            str(tmp_path / "post.json"),
+            "--output-json",
+            str(tmp_path / "gate.json"),
+        ]
+    )
+
+    assert args.pre_report_json == tmp_path / "pre.json"
+    assert args.post_report_json == tmp_path / "post.json"
+    assert args.output_json == tmp_path / "gate.json"
+    assert args.min_mean_delta == 0.0
+    assert args.min_min_delta == 0.0
+    assert args.min_pair_improved_fraction == 1.0
+    assert args.max_pair_worsened_fraction == 0.0
+    assert args.min_group_mean_delta == 0.0
+    assert args.min_required_group_mean_delta == 0.0
+    assert args.required_group == []
+    assert args.allow_missing_context is False
+
+
+def test_preference_mechanistic_gate_runtime_maps_args(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        pre_report_json=tmp_path / "pre.json",
+        post_report_json=tmp_path / "post.json",
+        min_mean_delta=0.1,
+        min_min_delta=-0.2,
+        min_pair_improved_fraction=0.75,
+        max_pair_worsened_fraction=0.05,
+        min_group_mean_delta=0.03,
+        min_required_group_mean_delta=0.04,
+        required_group=["fixed_preserve", "learned_repair"],
+        allow_missing_context=True,
+    )
+
+    config = paired_outcome_preference_mechanistic_gate_config_from_args(args)
+
+    assert config == PairedOutcomePreferenceMechanisticGateConfig(
+        pre_report_json=tmp_path / "pre.json",
+        post_report_json=tmp_path / "post.json",
+        min_mean_delta=0.1,
+        min_min_delta=-0.2,
+        min_pair_improved_fraction=0.75,
+        max_pair_worsened_fraction=0.05,
+        min_group_mean_delta=0.03,
+        min_required_group_mean_delta=0.04,
+        required_groups=("fixed_preserve", "learned_repair"),
+        require_context=False,
+    )
+
+
+def test_preference_mechanistic_gate_reporting_preserves_compact_gate_json(tmp_path: Path) -> None:
+    report = {
+        "passed": False,
+        "failures": ["mean_delta_below:-0.1<0"],
+        "summary": {"mean_delta": -0.1, "pair_count": 2},
+    }
+
+    assert paired_outcome_preference_mechanistic_gate_output_payload(
+        output_json=tmp_path / "gate.json",
+        report=report,
+    ) == {
+        "output_json": (tmp_path / "gate.json").as_posix(),
+        "passed": False,
+        "failures": ["mean_delta_below:-0.1<0"],
+        "summary": {"mean_delta": -0.1, "pair_count": 2},
+    }
+    assert paired_outcome_preference_mechanistic_gate_output_line(
+        output_json=tmp_path / "gate.json",
+        report=report,
+    ) == (
+        '{"failures": ["mean_delta_below:-0.1<0"], '
+        f'"output_json": "{(tmp_path / "gate.json").as_posix()}", '
+        '"passed": false, "summary": {"mean_delta": -0.1, "pair_count": 2}}'
+    )
+
+
+def test_preference_mechanistic_gate_run_result_exit_code_tracks_gate_status(tmp_path: Path) -> None:
+    assert (
+        PairedOutcomePreferenceMechanisticGateRunResult(
+            output_json=tmp_path / "gate.json",
+            report={"passed": True},
+        ).exit_code
+        == 0
+    )
+    assert (
+        PairedOutcomePreferenceMechanisticGateRunResult(
+            output_json=tmp_path / "gate.json",
+            report={"passed": False},
+        ).exit_code
+        == 2
+    )
 
 
 def test_preference_mechanistic_gate_passes_when_all_required_groups_improve(tmp_path: Path) -> None:

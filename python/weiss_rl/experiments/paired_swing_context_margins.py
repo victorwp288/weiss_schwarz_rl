@@ -23,7 +23,9 @@ from weiss_rl.replay.trajectory_bc import (
     load_replay_trajectory_bc_dataset,
     replay_trajectory_bc_batch,
 )
-from weiss_rl.training.paired_swing_replay import _normalize_action_source
+from weiss_rl.training.paired_swing_conflict_filter import (
+    normalize_paired_swing_action_source as _normalize_action_source,
+)
 from weiss_rl.training.run_metadata import load_json_object
 
 
@@ -71,11 +73,12 @@ def build_paired_swing_context_margin_report(config: PairedSwingContextMarginCon
         model.opponent_context_indices_for_policy_ids(opponent_ids),
         dtype=np.int64,
     )
-    context_coverage = summarize_opponent_context_coverage(opponent_ids, opponent_context_indices.tolist())
+    opponent_context_indices_list = opponent_context_indices.tolist()
+    context_coverage = summarize_opponent_context_coverage(opponent_ids, opponent_context_indices_list)
     hidden = model.initial_seat_hidden(
         int(dataset.episode_count),
         device=torch.device("cpu"),
-        opponent_context_indices=opponent_context_indices,
+        opponent_context_indices=opponent_context_indices_list,
     )
     batch = replay_trajectory_bc_batch(
         dataset,

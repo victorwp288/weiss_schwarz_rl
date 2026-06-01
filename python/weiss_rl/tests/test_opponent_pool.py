@@ -4,9 +4,13 @@ import numpy as np
 
 from weiss_rl.league.opponent_pool import (
     OpponentPoolSampler,
+    compose_runtime_opponent_pool,
+    opponent_sampling_distribution,
     resolve_opponent_win_rates,
     sample_opponent_snapshot_ids,
     select_opponent_snapshot_ids,
+    select_opponent_snapshots,
+    select_runtime_opponent_snapshots,
 )
 from weiss_rl.league.pfsp import pfsp_probabilities
 from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
@@ -29,9 +33,72 @@ def _build_registry(snapshot_ids: list[str], *, champion_snapshot_ids: list[str]
 def test_select_opponent_snapshot_ids_dedupes_recent_and_champion_overlap() -> None:
     registry = _build_registry(["s1", "s2", "s3", "s4"], champion_snapshot_ids=["s1", "s3"])
 
-    snapshot_ids = select_opponent_snapshot_ids(registry, recent_size=2, champion_size=2)
+    selection = select_opponent_snapshots(registry, recent_size=2, champion_size=2)
 
-    assert snapshot_ids == ("s3", "s4", "s1")
+    assert selection.recent_ids == ("s3", "s4")
+    assert selection.champion_ids == ("s1", "s3")
+    assert selection.candidate_ids == ("s3", "s4", "s1")
+    assert select_opponent_snapshot_ids(registry, recent_size=2, champion_size=2) == selection.candidate_ids
+
+
+def test_select_runtime_opponent_snapshots_preserves_runtime_lane_order_and_exclusions() -> None:
+    registry = _build_registry(
+        ["champion_old", "recent_new", "b1_noleague_baseline"],
+        champion_snapshot_ids=["champion_old", "b1_noleague_baseline"],
+    )
+
+    selection = select_runtime_opponent_snapshots(
+        registry,
+        recent_size=2,
+        champion_ids=("champion_old", "b1_noleague_baseline"),
+        excluded_policy_ids=("b1_noleague_baseline",),
+    )
+
+    assert selection.champion_ids == ("champion_old",)
+    assert selection.recent_ids == ("recent_new",)
+    assert selection.candidate_ids == ("champion_old", "recent_new")
+
+
+def test_compose_runtime_opponent_pool_keeps_hard_negatives_first_and_removes_lane_overlap() -> None:
+    registry = _build_registry(["champion", "recent_a", "recent_b"], champion_snapshot_ids=["champion"])
+    selection = select_runtime_opponent_snapshots(
+        registry,
+        recent_size=2,
+        champion_ids=("champion",),
+    )
+
+    composition = compose_runtime_opponent_pool(
+        selection=selection,
+        candidate_ids=("champion", "recent_a", "recent_b"),
+        hard_negative_ids=("recent_a", "champion"),
+        hard_negative_overlaps_champions=False,
+    )
+
+    assert composition.hard_negative_ids == ("recent_a", "champion")
+    assert composition.champion_ids == ()
+    assert composition.recent_ids == ("recent_b",)
+    assert composition.candidate_ids == ("recent_a", "champion", "recent_b")
+
+
+def test_compose_runtime_opponent_pool_can_account_hard_negative_champions_in_both_lanes() -> None:
+    registry = _build_registry(["champion", "recent"], champion_snapshot_ids=["champion"])
+    selection = select_runtime_opponent_snapshots(
+        registry,
+        recent_size=2,
+        champion_ids=("champion",),
+    )
+
+    composition = compose_runtime_opponent_pool(
+        selection=selection,
+        candidate_ids=("champion", "recent"),
+        hard_negative_ids=("champion",),
+        hard_negative_overlaps_champions=True,
+    )
+
+    assert composition.hard_negative_ids == ("champion",)
+    assert composition.champion_ids == ("champion",)
+    assert composition.recent_ids == ("recent",)
+    assert composition.candidate_ids == ("champion", "recent")
 
 
 def test_select_opponent_snapshot_ids_uses_pruned_registry_state() -> None:
@@ -109,6 +176,27 @@ def test_sample_opponent_snapshot_ids_applies_weight_multipliers_deterministical
     expected = tuple(snapshot_ids[index] for index in expected_indices.tolist())
 
     assert sampled == expected
+
+
+def test_opponent_sampling_distribution_exposes_resolved_win_rates_and_probabilities() -> None:
+    distribution = opponent_sampling_distribution(
+        ("old_hard", "new_hard", "focused_hard"),
+        win_rates_by_snapshot_id={"old_hard": 0.5, "new_hard": 0.5, "focused_hard": 0.5},
+        weight_multipliers_by_snapshot_id={"focused_hard": 5.0},
+        power=2.0,
+        eps_uniform=0.0,
+    )
+
+    expected_probabilities = pfsp_probabilities(
+        np.array([0.5, 0.5, 0.5], dtype=np.float64),
+        power=2.0,
+        eps_uniform=0.0,
+    )
+    expected_probabilities = expected_probabilities * np.array([1.0, 1.0, 5.0], dtype=np.float64)
+    expected_probabilities = expected_probabilities / np.sum(expected_probabilities)
+
+    assert np.array_equal(distribution.win_rates, np.array([0.5, 0.5, 0.5], dtype=np.float64))
+    assert np.array_equal(distribution.probabilities, expected_probabilities)
 
 
 def test_opponent_pool_sampler_samples_from_recent_plus_champion_pool() -> None:

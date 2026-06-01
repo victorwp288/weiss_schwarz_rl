@@ -3,7 +3,65 @@ from __future__ import annotations
 import pytest
 import torch
 
+from weiss_rl.learners.paired_outcome_preference_edge_pairs import edge_mean_preference_pair_components
+from weiss_rl.learners.paired_outcome_preference_inputs import (
+    prepare_paired_outcome_preference_loss_inputs,
+)
 from weiss_rl.learners.paired_outcome_preference_loss import paired_outcome_preference_loss
+from weiss_rl.learners.paired_outcome_preference_metrics import empty_paired_outcome_preference_metrics
+from weiss_rl.learners.paired_outcome_preference_pairs import preference_pair_components
+from weiss_rl.learners.paired_outcome_preference_retention import (
+    preference_top_action_retention_loss_and_metrics,
+)
+from weiss_rl.learners.paired_outcome_preference_span_pairs import span_preference_pair_components
+
+
+def test_empty_paired_outcome_preference_metrics_preserve_aggregation_and_retention_defaults() -> None:
+    metrics = empty_paired_outcome_preference_metrics(metric_prefix="pref", aggregation="edge_mean")
+
+    assert metrics["pref_loss"] == 0.0
+    assert metrics["pref_pair_count"] == 0.0
+    assert metrics["pref_aggregation_sum"] == 0.0
+    assert metrics["pref_aggregation_edge_mean"] == 1.0
+    assert metrics["pref_retention_loss"] == 0.0
+    assert metrics["pref_top_action_retention_loss"] == 0.0
+
+
+def test_prepare_paired_outcome_preference_inputs_normalizes_options_and_ignores_invalid_masked_weights() -> None:
+    current = torch.tensor([[-2.0, -2.0, -5.0]], dtype=torch.float32)
+    reference = torch.zeros_like(current)
+    pair_ids = torch.tensor([[9, 9, 10]])
+    roles = torch.tensor([[1, 0, 1]])
+    mask = torch.tensor([[True, True, False]])
+    weights = torch.tensor([[3.0, 3.0, float("nan")]])
+
+    prepared = prepare_paired_outcome_preference_loss_inputs(
+        current_action_logp=current,
+        reference_action_logp=reference,
+        current_best_non_target_logp=None,
+        reference_best_non_target_logp=None,
+        preference_pair_ids=pair_ids,
+        preference_role=roles,
+        preference_group_ids=None,
+        preference_pair_weights=weights,
+        loss_mask=mask,
+        aggregation=" Edge_Mean ",
+        group_balance=False,
+        retention_coef=0.0,
+        retention_margin=0.0,
+        retention_role=" Preferred ",
+        retention_scope_mask=None,
+        top_action_retention_coef=0.0,
+        top_action_retention_margin=0.0,
+        top_action_retention_role=" ALL ",
+        top_action_retention_scope_mask=None,
+    )
+
+    assert prepared.options.aggregation == "edge_mean"
+    assert prepared.options.retention_role == "preferred"
+    assert prepared.options.top_action_retention_role == "all"
+    assert prepared.valid_row_count == 2
+    assert prepared.unique_pair_ids.tolist() == [9]
 
 
 def test_paired_outcome_preference_loss_pushes_preferred_over_rejected() -> None:
@@ -258,6 +316,149 @@ def test_paired_outcome_preference_loss_can_use_edge_mean_aligned_steps() -> Non
     assert current.grad is not None
     assert current.grad[0, 0].item() < 0.0
     assert current.grad[0, 1].item() > 0.0
+
+
+def test_preference_pair_components_preserves_edge_mean_alignment_contract() -> None:
+    current = torch.tensor([[-2.0, -2.0], [-1.0, -3.0]], dtype=torch.float32)
+    reference = torch.zeros_like(current)
+    pair_ids = torch.tensor([[5, 5], [5, 5]], dtype=torch.long)
+    roles = torch.tensor([[1, 0], [1, 0]], dtype=torch.long)
+    valid = torch.ones_like(current, dtype=torch.bool)
+
+    components = preference_pair_components(
+        current_action_logp=current,
+        reference_action_logp=reference,
+        current=current.reshape(-1),
+        reference=reference.reshape(-1),
+        pair_ids=pair_ids.reshape(-1),
+        roles=roles.reshape(-1),
+        valid=valid.reshape(-1),
+        group_ids=None,
+        pair_weight_rows=None,
+        preference_pair_ids=pair_ids,
+        preference_role=roles,
+        preference_group_ids=None,
+        preference_pair_weights=None,
+        unique_pair_ids=torch.tensor([5], dtype=torch.long),
+        aggregation="edge_mean",
+        beta=1.0,
+        dtype=current.dtype,
+    )
+
+    assert [margin.item() for margin in components.margins] == pytest.approx([0.0, 2.0])
+    assert len(components.pair_losses) == 2
+    assert [weight.item() for weight in components.pair_weights] == pytest.approx([1.0, 1.0])
+    assert components.incomplete_pair_count == 0
+
+
+def test_preference_pair_dispatcher_uses_canonical_span_and_edge_builders() -> None:
+    current = torch.tensor([[-2.0, -2.0], [-1.0, -3.0]], dtype=torch.float32)
+    reference = torch.zeros_like(current)
+    pair_ids = torch.tensor([[5, 5], [5, 5]], dtype=torch.long)
+    roles = torch.tensor([[1, 0], [1, 0]], dtype=torch.long)
+    valid = torch.ones_like(current, dtype=torch.bool)
+    unique_pair_ids = torch.tensor([5], dtype=torch.long)
+
+    span = span_preference_pair_components(
+        current=current.reshape(-1),
+        reference=reference.reshape(-1),
+        pair_ids=pair_ids.reshape(-1),
+        roles=roles.reshape(-1),
+        valid=valid.reshape(-1),
+        group_ids=None,
+        pair_weight_rows=None,
+        unique_pair_ids=unique_pair_ids,
+        aggregation="mean",
+        beta=1.0,
+        dtype=current.dtype,
+    )
+    span_dispatched = preference_pair_components(
+        current_action_logp=current,
+        reference_action_logp=reference,
+        current=current.reshape(-1),
+        reference=reference.reshape(-1),
+        pair_ids=pair_ids.reshape(-1),
+        roles=roles.reshape(-1),
+        valid=valid.reshape(-1),
+        group_ids=None,
+        pair_weight_rows=None,
+        preference_pair_ids=pair_ids,
+        preference_role=roles,
+        preference_group_ids=None,
+        preference_pair_weights=None,
+        unique_pair_ids=unique_pair_ids,
+        aggregation="mean",
+        beta=1.0,
+        dtype=current.dtype,
+    )
+    edge = edge_mean_preference_pair_components(
+        current_action_logp=current,
+        reference_action_logp=reference,
+        pair_ids=pair_ids,
+        roles=roles,
+        valid=valid,
+        group_ids=None,
+        pair_weight_rows=None,
+        unique_pair_ids=unique_pair_ids,
+        beta=1.0,
+        dtype=current.dtype,
+    )
+    edge_dispatched = preference_pair_components(
+        current_action_logp=current,
+        reference_action_logp=reference,
+        current=current.reshape(-1),
+        reference=reference.reshape(-1),
+        pair_ids=pair_ids.reshape(-1),
+        roles=roles.reshape(-1),
+        valid=valid.reshape(-1),
+        group_ids=None,
+        pair_weight_rows=None,
+        preference_pair_ids=pair_ids,
+        preference_role=roles,
+        preference_group_ids=None,
+        preference_pair_weights=None,
+        unique_pair_ids=unique_pair_ids,
+        aggregation="edge_mean",
+        beta=1.0,
+        dtype=current.dtype,
+    )
+
+    assert [margin.item() for margin in span_dispatched.margins] == pytest.approx(
+        [margin.item() for margin in span.margins]
+    )
+    assert [margin.item() for margin in edge_dispatched.margins] == pytest.approx(
+        [margin.item() for margin in edge.margins]
+    )
+
+
+def test_preference_top_action_retention_helper_preserves_reference_top_filter() -> None:
+    current = torch.tensor([-2.0, -2.0], dtype=torch.float32, requires_grad=True)
+    best_non_target = torch.tensor([-1.0, -1.0], dtype=torch.float32)
+    reference = torch.tensor([-2.0, -2.0], dtype=torch.float32)
+    reference_best_non_target = torch.tensor([-3.0, -1.0], dtype=torch.float32)
+
+    loss, metrics, tensors = preference_top_action_retention_loss_and_metrics(
+        current=current,
+        best_non_target=best_non_target,
+        roles=torch.tensor([1, 0], dtype=torch.long),
+        valid=torch.tensor([True, True]),
+        role="all",
+        scope_mask=None,
+        margin=0.0,
+        reference=reference,
+        reference_best_non_target=reference_best_non_target,
+        reference_top_only=True,
+        dtype=current.dtype,
+        metric_prefix="paired_outcome_preference",
+    )
+    loss.backward()
+
+    assert metrics["paired_outcome_preference_top_action_retention_row_count"] == 1.0
+    assert metrics["paired_outcome_preference_top_action_retention_reference_top_only"] == 1.0
+    assert tensors["paired_outcome_preference_top_action_retention_gap"].tolist() == pytest.approx([-1.0])
+    assert current.grad is not None
+    assert current.grad[0].item() < 0.0
+    assert current.grad[1].item() == pytest.approx(0.0)
 
 
 def test_paired_outcome_preference_loss_can_balance_groups() -> None:

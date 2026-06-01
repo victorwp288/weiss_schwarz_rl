@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from weiss_rl.experiments.paired_outcome_preference_dataset import (
     PairedOutcomePreferenceDatasetConfig,
     build_paired_outcome_preference_dataset,
+)
+from weiss_rl.experiments.paired_outcome_preference_dataset_cli import parse_opponent_match_aliases
+from weiss_rl.experiments.paired_outcome_preference_dataset_reporting import (
+    paired_outcome_preference_dataset_output_line,
+    paired_outcome_preference_dataset_output_payload,
+)
+from weiss_rl.experiments.paired_outcome_preference_dataset_runtime import (
+    paired_outcome_preference_dataset_config_from_args,
 )
 from weiss_rl.replay.trajectory_bc import (
     ReplayTrajectoryDataset,
@@ -14,6 +24,112 @@ from weiss_rl.replay.trajectory_bc import (
     save_replay_trajectory_bc_dataset,
 )
 from weiss_rl.training.paired_outcome_preference_replay import paired_outcome_preference_complete_pair_count
+
+
+def test_paired_outcome_preference_dataset_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_outcome_preference_dataset,
+        paired_outcome_preference_dataset_cli,
+        paired_outcome_preference_dataset_entrypoint,
+        paired_outcome_preference_dataset_runtime,
+    )
+
+    assert paired_outcome_preference_dataset_entrypoint._build_parser is (
+        paired_outcome_preference_dataset_cli.build_paired_outcome_preference_dataset_parser
+    )
+    assert paired_outcome_preference_dataset_entrypoint._parse_opponent_match_aliases is (
+        paired_outcome_preference_dataset_cli.parse_opponent_match_aliases
+    )
+    assert paired_outcome_preference_dataset_entrypoint.run_paired_outcome_preference_dataset is (
+        paired_outcome_preference_dataset_runtime.run_paired_outcome_preference_dataset
+    )
+    assert paired_outcome_preference_dataset_entrypoint.PairedOutcomePreferenceDatasetConfig is (
+        paired_outcome_preference_dataset.PairedOutcomePreferenceDatasetConfig
+    )
+    assert paired_outcome_preference_dataset_entrypoint.build_paired_outcome_preference_dataset is (
+        paired_outcome_preference_dataset.build_paired_outcome_preference_dataset
+    )
+
+
+def test_paired_outcome_preference_dataset_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_outcome_preference_dataset_cli import (
+        build_paired_outcome_preference_dataset_parser,
+    )
+
+    args = build_paired_outcome_preference_dataset_parser().parse_args(
+        [
+            "--preferred-dataset",
+            str(tmp_path / "preferred.npz"),
+            "--rejected-dataset",
+            str(tmp_path / "rejected.npz"),
+            "--output",
+            str(tmp_path / "preference.npz"),
+        ]
+    )
+
+    assert args.preferred_dataset == tmp_path / "preferred.npz"
+    assert args.rejected_dataset == tmp_path / "rejected.npz"
+    assert args.output == tmp_path / "preference.npz"
+    assert args.summary_json is None
+    assert args.max_pairs is None
+    assert args.preferred_label == "preferred"
+    assert args.rejected_label == "rejected"
+    assert args.opponent_match_alias == []
+
+
+def test_paired_outcome_preference_dataset_alias_parser_preserves_validation() -> None:
+    assert parse_opponent_match_aliases([" source = target ", "a=b"]) == {"source": "target", "a": "b"}
+    with pytest.raises(SystemExit, match="must be FROM=TO"):
+        parse_opponent_match_aliases(["missing_separator"])
+    with pytest.raises(SystemExit, match="non-empty FROM and TO"):
+        parse_opponent_match_aliases(["source= "])
+
+
+def test_paired_outcome_preference_dataset_runtime_maps_args(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        preferred_dataset=tmp_path / "preferred.npz",
+        rejected_dataset=tmp_path / "rejected.npz",
+        output=tmp_path / "preference.npz",
+        summary_json=tmp_path / "summary.json",
+        max_pairs=7,
+        preferred_label="chosen",
+        rejected_label="not_chosen",
+        opponent_match_alias=["wrapped=plain"],
+    )
+
+    config = paired_outcome_preference_dataset_config_from_args(args)
+
+    assert config.preferred_dataset == (tmp_path / "preferred.npz").resolve()
+    assert config.rejected_dataset == (tmp_path / "rejected.npz").resolve()
+    assert config.output_dataset == tmp_path / "preference.npz"
+    assert config.output_summary_json == tmp_path / "summary.json"
+    assert config.max_pairs == 7
+    assert config.preferred_label == "chosen"
+    assert config.rejected_label == "not_chosen"
+    assert config.opponent_match_aliases == {"wrapped": "plain"}
+
+
+def test_paired_outcome_preference_dataset_reporting_preserves_compact_console_json(tmp_path: Path) -> None:
+    dataset = _dataset([{"source_opponent_policy_id": "policy_000001", "source_pair_index": 8}])
+    summary = {"pair_count": 3}
+
+    assert paired_outcome_preference_dataset_output_payload(
+        output_dataset=tmp_path / "preference.npz",
+        dataset=dataset,
+        summary=summary,
+    ) == {
+        "output": (tmp_path / "preference.npz").as_posix(),
+        "pair_count": 3,
+        "episodes": 1,
+        "train_rows": 1,
+    }
+    assert paired_outcome_preference_dataset_output_line(
+        output_dataset=tmp_path / "preference.npz",
+        dataset=dataset,
+        summary=summary,
+    ) == (
+        f'{{"episodes": 1, "output": "{(tmp_path / "preference.npz").as_posix()}", "pair_count": 3, "train_rows": 1}}'
+    )
 
 
 def test_build_paired_outcome_preference_dataset_matches_pair_metadata(tmp_path: Path) -> None:

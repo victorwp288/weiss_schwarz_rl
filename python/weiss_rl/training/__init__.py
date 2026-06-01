@@ -1,14 +1,17 @@
 """Training orchestration helpers.
 
-The public training CLI remains ``python/scripts/train.py``. Modules in this
-package hold reusable pieces extracted from that script without changing its
-path-based compatibility contract.
+The canonical training CLI is ``python -m weiss_rl.training.train_entrypoint``.
+The legacy ``python/scripts/train.py`` path remains a compatibility shim.
 """
 
 from .algorithm_contracts import validate_algorithm_model_contract
-from .batches import (
+from .algorithm_families import (
     IMPALA_ALGORITHMS,
     PPO_ALGORITHMS,
+    STRUCTURED_VTRACE_ALGORITHMS,
+    training_algorithm_family,
+)
+from .batches import (
     MinimalRollout,
     bootstrap_values,
     build_learner_batch,
@@ -161,6 +164,7 @@ __all__ = [
     "MinimalRollout",
     "PPO_ALGORITHMS",
     "ResumeCheckpoint",
+    "STRUCTURED_VTRACE_ALGORITHMS",
     "TrainingPaths",
     "append_checkpoint_guard_event",
     "best_checkpoint_record",
@@ -265,6 +269,7 @@ __all__ = [
     "sync_snapshot_registry_retention",
     "teacher_public_heuristic_coef_for_next_update",
     "torch_num_threads_scope",
+    "training_algorithm_family",
     "training_paths",
     "update_stall_monitor",
     "validate_checkpoint_payload_contract",

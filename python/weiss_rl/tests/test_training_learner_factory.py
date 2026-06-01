@@ -4,8 +4,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 from torch import nn
 
+from weiss_rl.training.algorithm_families import (
+    IMPALA_ALGORITHMS,
+    PPO_ALGORITHMS,
+    STRUCTURED_VTRACE_ALGORITHMS,
+    training_algorithm_family,
+)
+from weiss_rl.training.batches import IMPALA_ALGORITHMS as BATCH_IMPALA_ALGORITHMS
+from weiss_rl.training.batches import PPO_ALGORITHMS as BATCH_PPO_ALGORITHMS
 from weiss_rl.training.learner_factory import build_training_learner
 
 
@@ -72,10 +81,22 @@ def _training_paths(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(checkpoints_dir=tmp_path / "checkpoints", logs_dir=tmp_path / "logs")
 
 
+def test_training_algorithm_families_are_shared_by_batching_and_learner_dispatch() -> None:
+    assert BATCH_IMPALA_ALGORITHMS is IMPALA_ALGORITHMS
+    assert BATCH_PPO_ALGORITHMS is PPO_ALGORITHMS
+    assert training_algorithm_family("impala_vtrace_structured_v1") == "impala"
+    assert training_algorithm_family("ppo_lite_masked_v1") == "ppo"
+    assert STRUCTURED_VTRACE_ALGORITHMS <= IMPALA_ALGORITHMS
+
+    with pytest.raises(RuntimeError, match="Unsupported training.algorithm: not_real"):
+        training_algorithm_family("not_real")
+
+
 def test_build_training_learner_passes_common_and_impala_specific_kwargs(tmp_path: Path) -> None:
+    model = _TinyModel()
     learner = build_training_learner(
         algorithm="impala_vtrace_structured_v1",
-        model=_TinyModel(),
+        model=model,
         compiled_model=None,
         training_config=_training_config(trajectory_retention_coef=0.12),
         training_paths=_training_paths(tmp_path),
@@ -85,6 +106,8 @@ def test_build_training_learner_passes_common_and_impala_specific_kwargs(tmp_pat
     )
 
     kwargs = cast(Any, learner).kwargs
+    assert kwargs["model"] is model
+    assert kwargs["compiled_model"] is None
     assert kwargs["learning_rate"] == 0.01
     assert kwargs["mixed_precision"] is True
     assert kwargs["checkpoint_dir"] == tmp_path / "checkpoints"
@@ -112,6 +135,38 @@ def test_build_training_learner_passes_common_and_impala_specific_kwargs(tmp_pat
     assert kwargs["vtrace_rho_bar"] == 1.25
     assert kwargs["vtrace_c_bar"] == 0.75
     assert kwargs["entropy_scope"] == "family"
+    assert {
+        "ppo_clip_epsilon",
+        "value_clip_epsilon",
+        "ppo_epochs",
+        "target_kl",
+        "normalize_advantages",
+    }.isdisjoint(kwargs)
+
+
+def test_build_training_learner_preserves_optional_runtime_defaults(tmp_path: Path) -> None:
+    config = _training_config()
+    delattr(config, "entropy_scope")
+    delattr(config, "profile_timers")
+    delattr(config, "structured_metrics_mode")
+    delattr(config, "teacher_aux_mode")
+
+    learner = build_training_learner(
+        algorithm="impala_vtrace_ff",
+        model=_TinyModel(),
+        compiled_model=None,
+        training_config=config,
+        training_paths=_training_paths(tmp_path),
+        pass_action_id=6,
+        checkpoint_interval_updates=2,
+        impala_learner_cls=_CapturedImpalaLearner,
+    )
+
+    kwargs = cast(Any, learner).kwargs
+    assert kwargs["entropy_scope"] == "candidate"
+    assert kwargs["profile_timers"] is False
+    assert kwargs["structured_metrics_mode"] == "full"
+    assert kwargs["teacher_aux_mode"] == "always"
 
 
 def test_build_training_learner_passes_ppo_specific_kwargs(tmp_path: Path) -> None:
@@ -132,6 +187,8 @@ def test_build_training_learner_passes_ppo_specific_kwargs(tmp_path: Path) -> No
     assert kwargs["ppo_epochs"] == 4
     assert kwargs["target_kl"] == 0.33
     assert kwargs["normalize_advantages"] is False
+    assert kwargs["trajectory_retention_coef"] == 0.0
+    assert {"entropy_scope", "vtrace_rho_bar", "vtrace_c_bar"}.isdisjoint(kwargs)
 
 
 def test_build_training_learner_rejects_ppo_trajectory_retention_noop(tmp_path: Path) -> None:

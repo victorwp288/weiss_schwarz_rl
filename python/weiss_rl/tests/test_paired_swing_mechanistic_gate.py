@@ -2,11 +2,123 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from weiss_rl.experiments.paired_swing_mechanistic_gate import (
     PairedSwingMechanisticGateConfig,
     evaluate_paired_swing_mechanistic_gate,
 )
+from weiss_rl.experiments.paired_swing_mechanistic_gate_reporting import (
+    paired_swing_mechanistic_gate_output_payload,
+)
+from weiss_rl.experiments.paired_swing_mechanistic_gate_runtime import (
+    PairedSwingMechanisticGateRunResult,
+    paired_swing_mechanistic_gate_config_from_args,
+)
+
+
+def test_paired_swing_mechanistic_gate_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_swing_mechanistic_gate,
+        paired_swing_mechanistic_gate_cli,
+        paired_swing_mechanistic_gate_entrypoint,
+        paired_swing_mechanistic_gate_runtime,
+    )
+
+    assert paired_swing_mechanistic_gate_entrypoint._build_parser is (
+        paired_swing_mechanistic_gate_cli.build_paired_swing_mechanistic_gate_parser
+    )
+    assert paired_swing_mechanistic_gate_entrypoint.run_paired_swing_mechanistic_gate is (
+        paired_swing_mechanistic_gate_runtime.run_paired_swing_mechanistic_gate
+    )
+    assert paired_swing_mechanistic_gate_entrypoint.PairedSwingMechanisticGateConfig is (
+        paired_swing_mechanistic_gate.PairedSwingMechanisticGateConfig
+    )
+    assert paired_swing_mechanistic_gate_entrypoint.evaluate_paired_swing_mechanistic_gate is (
+        paired_swing_mechanistic_gate.evaluate_paired_swing_mechanistic_gate
+    )
+    assert paired_swing_mechanistic_gate_entrypoint.write_paired_swing_mechanistic_gate is (
+        paired_swing_mechanistic_gate.write_paired_swing_mechanistic_gate
+    )
+
+
+def test_paired_swing_mechanistic_gate_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_swing_mechanistic_gate_cli import (
+        build_paired_swing_mechanistic_gate_parser,
+    )
+
+    args = build_paired_swing_mechanistic_gate_parser().parse_args(
+        [
+            "--pre-report-json",
+            str(tmp_path / "pre.json"),
+            "--post-report-json",
+            str(tmp_path / "post.json"),
+            "--output-json",
+            str(tmp_path / "gate.json"),
+        ]
+    )
+
+    assert args.pre_report_json == tmp_path / "pre.json"
+    assert args.post_report_json == tmp_path / "post.json"
+    assert args.output_json == tmp_path / "gate.json"
+    assert args.min_mean_delta == 0.0
+    assert args.min_min_delta == 0.0
+    assert args.min_row_improved_fraction == 0.60
+    assert args.max_row_worsened_fraction == 0.15
+    assert args.min_top_positive_delta == 0
+    assert args.max_positive_rank_worsened_fraction == 0.05
+    assert args.min_protected_label_mean_delta == 0.0
+    assert args.protected_label_contains == ["preserve"]
+    assert args.allow_missing_context is False
+
+
+def test_paired_swing_mechanistic_gate_runtime_maps_args_and_exit_codes(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        pre_report_json=tmp_path / "pre.json",
+        post_report_json=tmp_path / "post.json",
+        min_mean_delta=0.1,
+        min_min_delta=0.2,
+        min_row_improved_fraction=0.7,
+        max_row_worsened_fraction=0.1,
+        min_top_positive_delta=2,
+        max_positive_rank_worsened_fraction=0.03,
+        min_protected_label_mean_delta=0.4,
+        protected_label_contains=["preserve", "fixed"],
+        allow_missing_context=True,
+    )
+
+    config = paired_swing_mechanistic_gate_config_from_args(args)
+
+    assert config == PairedSwingMechanisticGateConfig(
+        pre_report_json=tmp_path / "pre.json",
+        post_report_json=tmp_path / "post.json",
+        min_mean_delta=0.1,
+        min_min_delta=0.2,
+        min_row_improved_fraction=0.7,
+        max_row_worsened_fraction=0.1,
+        min_top_positive_delta=2,
+        max_positive_rank_worsened_fraction=0.03,
+        min_protected_label_mean_delta=0.4,
+        protected_label_contains=("preserve", "fixed"),
+        require_context=False,
+    )
+    assert (
+        PairedSwingMechanisticGateRunResult(output_json=tmp_path / "gate.json", report={"passed": True}).exit_code == 0
+    )
+    assert (
+        PairedSwingMechanisticGateRunResult(output_json=tmp_path / "gate.json", report={"passed": False}).exit_code == 2
+    )
+
+
+def test_paired_swing_mechanistic_gate_reporting_preserves_compact_console_payload(tmp_path: Path) -> None:
+    report = {"passed": False, "failures": ["bad"], "summary": {"row_count": 2}}
+
+    assert paired_swing_mechanistic_gate_output_payload(output_json=tmp_path / "gate.json", report=report) == {
+        "output_json": (tmp_path / "gate.json").as_posix(),
+        "passed": False,
+        "failures": ["bad"],
+        "summary": {"row_count": 2},
+    }
 
 
 def test_paired_swing_mechanistic_gate_passes_clean_top_action_improvement(tmp_path: Path) -> None:
