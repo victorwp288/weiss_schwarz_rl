@@ -1,19 +1,13 @@
+#!/usr/bin/env python3
+"""Compatibility shim for the package-owned paper-readiness fixture CLI."""
+
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
+from weiss_rl.eval import paper_readiness_fixture_entrypoint as _impl
+from weiss_rl.workflows.script_compat import install_package_entrypoint_exports
 
-from weiss_rl.eval.paper_readiness_fixture import write_paper_readiness_run_fixture
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Write a minimal thesis-grade run tree for readiness checks")
-    parser.add_argument("--run-dir", type=Path, required=True, help="Destination run directory")
-    args = parser.parse_args()
-
-    run_dir = write_paper_readiness_run_fixture(args.run_dir)
-    print(f"Wrote paper-readiness fixture run: {run_dir}")
+install_package_entrypoint_exports(globals(), _impl)
 
 
 if __name__ == "__main__":
-    main()
+    _impl.main()

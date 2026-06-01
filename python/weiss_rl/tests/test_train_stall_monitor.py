@@ -24,6 +24,7 @@ from scripts.train import (
 
 from weiss_rl.config import load_stack_config
 from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
+from weiss_rl.training import checkpoint_guard
 
 
 def _repo_root():
@@ -416,6 +417,54 @@ def test_dev_eval_ineligibility_reasons_identify_borderline_confidence_only() ->
     )
 
     assert reasons == ("confidence_ci",)
+
+
+def test_dev_eval_assessment_collects_timeout_rates_and_confidence() -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+
+    assessment = checkpoint_guard.assess_dev_eval_metric_eligibility(
+        stack,
+        dev_eval_summary={
+            "aggregate_score": 0.625,
+            "anchors": {
+                "B0 RandomLegal": {
+                    "summary": {"games": 10, "truncations": 1, "no_progress_timeouts": 2, "natural_timeouts": 3},
+                    "uncertainty": {"prob_gt_half": 0.9, "prob_lt_half": 0.1, "ci_half_width": 0.08},
+                },
+                "B1 NoLeague baseline": {
+                    "summary": {"games": 20, "truncations": 5, "no_progress_timeouts": 1, "natural_timeouts": 0},
+                    "uncertainty": {"prob_gt_half": 0.55, "prob_lt_half": 0.45, "ci_half_width": 0.30},
+                },
+            },
+        },
+    )
+
+    assert assessment.score == pytest.approx(0.625)
+    assert assessment.timeout_rates.worst_truncation_rate == pytest.approx(0.25)
+    assert assessment.timeout_rates.worst_no_progress_timeout_rate == pytest.approx(0.20)
+    assert assessment.timeout_rates.worst_natural_timeout_rate == pytest.approx(0.30)
+    assert assessment.timeout_rates.worst_stall_rate == pytest.approx(0.20)
+    assert assessment.confidence == checkpoint_guard.DevEvalConfidenceStats(
+        min_prob_gt_half=0.55,
+        max_prob_lt_half=0.45,
+        max_ci_half_width=0.30,
+    )
+    assert assessment.reasons == ("confidence_prob", "confidence_ci")
+    assert not assessment.eligible
+    assert checkpoint_guard.dev_eval_confidence_stats(
+        {
+            "anchors": {
+                "B0 RandomLegal": {"uncertainty": {"prob_gt_half": 0.9, "prob_lt_half": 0.1, "ci_half_width": 0.08}},
+                "B1 NoLeague baseline": {
+                    "uncertainty": {"prob_gt_half": 0.55, "prob_lt_half": 0.45, "ci_half_width": 0.30}
+                },
+            }
+        }
+    ) == {
+        "min_prob_gt_half": 0.55,
+        "max_prob_lt_half": 0.45,
+        "max_ci_half_width": 0.30,
+    }
 
 
 def test_dev_eval_ineligibility_reasons_apply_checkpoint_confidence_when_stall_monitor_disabled() -> None:

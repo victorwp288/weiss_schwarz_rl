@@ -173,6 +173,70 @@ def test_build_learner_batch_signs_discount_when_next_value_is_opponent_perspect
     assert batch["discounts"][:, 0].tolist() == pytest.approx([-gamma, -gamma])
 
 
+def test_build_learner_batch_marks_reset_after_done_rows() -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+    rollout = replace(
+        _minimal_rollout(),
+        obs=np.zeros((3, 1, 1), dtype=np.float32),
+        legal_mask=np.ones((3, 1, 2), dtype=np.bool_),
+        actions=np.zeros((3, 1), dtype=np.int64),
+        rewards=np.zeros((3, 1), dtype=np.float32),
+        terminated=np.asarray([[False], [True], [False]], dtype=np.bool_),
+        truncated=np.zeros((3, 1), dtype=np.bool_),
+        to_play_seat=np.zeros((3, 1), dtype=np.int64),
+        behavior_logp=np.zeros((3, 1), dtype=np.float32),
+        logits=np.zeros((3, 1, 2), dtype=np.float32),
+        values=np.zeros((3, 1), dtype=np.float32),
+    )
+
+    batch = build_learner_batch(
+        stack,
+        rollout,
+        np.zeros((1,), dtype=np.float32),
+        action_dim=2,
+        initial_hidden_state=torch.zeros((1, 1), dtype=torch.float32),
+        pass_action_id=1,
+    )
+
+    assert batch["reset_before_step"][:, 0].tolist() == [False, False, True]
+    assert stack.config.rewards is not None
+    gamma = float(stack.config.rewards.gamma)
+    assert batch["discounts"][:, 0].tolist() == pytest.approx([gamma, 0.0, gamma])
+
+
+def test_build_learner_batch_threads_bootstrap_value_into_vtrace_targets() -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+    behavior_logp = np.full((1, 1), -np.log(2.0), dtype=np.float32)
+    rollout = replace(
+        _minimal_rollout(),
+        obs=np.zeros((1, 1, 1), dtype=np.float32),
+        legal_mask=np.ones((1, 1, 2), dtype=np.bool_),
+        actions=np.zeros((1, 1), dtype=np.int64),
+        rewards=np.zeros((1, 1), dtype=np.float32),
+        terminated=np.zeros((1, 1), dtype=np.bool_),
+        truncated=np.zeros((1, 1), dtype=np.bool_),
+        to_play_seat=np.zeros((1, 1), dtype=np.int64),
+        behavior_logp=behavior_logp,
+        logits=np.zeros((1, 1, 2), dtype=np.float32),
+        values=np.zeros((1, 1), dtype=np.float32),
+        bootstrap_actor=np.asarray([0], dtype=np.int64),
+    )
+
+    batch = build_learner_batch(
+        stack,
+        rollout,
+        np.asarray([2.0], dtype=np.float32),
+        action_dim=2,
+        initial_hidden_state=torch.zeros((1, 1), dtype=torch.float32),
+        pass_action_id=1,
+    )
+
+    assert stack.config.rewards is not None
+    expected_target = float(stack.config.rewards.gamma) * 2.0
+    assert batch["vtrace_result"].vs[:, 0].tolist() == pytest.approx([expected_target])
+    assert batch["vtrace_result"].pg_advantages[:, 0].tolist() == pytest.approx([expected_target])
+
+
 def test_bootstrap_values_only_evaluates_live_actor_rows() -> None:
     class _Model:
         def forward_seat_aware(self, obs, actor, hidden):

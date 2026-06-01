@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -11,6 +12,76 @@ from weiss_rl.training.checkpoint_publish import (
     CHECKPOINT_SNAPSHOT_METADATA_FORMAT,
     publish_checkpoint_snapshot,
 )
+from weiss_rl.training.checkpoint_publish_reporting import checkpoint_publish_output_text
+from weiss_rl.training.checkpoint_publish_runtime import run_checkpoint_publish
+
+
+def test_checkpoint_publish_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.training import (
+        checkpoint_publish,
+        checkpoint_publish_cli,
+        checkpoint_publish_entrypoint,
+        checkpoint_publish_runtime,
+    )
+
+    assert checkpoint_publish_entrypoint._build_parser is checkpoint_publish_cli.build_checkpoint_publish_parser
+    assert checkpoint_publish_entrypoint.run_checkpoint_publish is checkpoint_publish_runtime.run_checkpoint_publish
+    assert checkpoint_publish_entrypoint.publish_checkpoint_snapshot is checkpoint_publish.publish_checkpoint_snapshot
+
+
+def test_checkpoint_publish_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.training.checkpoint_publish_cli import build_checkpoint_publish_parser
+
+    args = build_checkpoint_publish_parser().parse_args(
+        [
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--checkpoint-path",
+            str(tmp_path / "run" / "training" / "checkpoints" / "checkpoint_25.pt"),
+        ]
+    )
+
+    assert args.run_dir == tmp_path / "run"
+    assert args.checkpoint_path == tmp_path / "run" / "training" / "checkpoints" / "checkpoint_25.pt"
+    assert args.policy_id is None
+    assert args.pin is False
+    assert args.replace is False
+
+
+def test_checkpoint_publish_runtime_maps_args(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from weiss_rl.training import checkpoint_publish_runtime
+
+    observed: dict[str, object] = {}
+
+    def _fake_publish(**kwargs):
+        observed.update(kwargs)
+        return {"policy_id": "checkpoint_000025"}
+
+    monkeypatch.setattr(checkpoint_publish_runtime, "publish_checkpoint_snapshot", _fake_publish)
+    args = SimpleNamespace(
+        run_dir=tmp_path / "run",
+        checkpoint_path=tmp_path / "run" / "training" / "checkpoints" / "checkpoint_25.pt",
+        policy_id="candidate_u25",
+        pin=True,
+        replace=True,
+    )
+
+    result = run_checkpoint_publish(args)
+
+    assert observed == {
+        "run_dir": tmp_path / "run",
+        "checkpoint_path": tmp_path / "run" / "training" / "checkpoints" / "checkpoint_25.pt",
+        "policy_id": "candidate_u25",
+        "pin": True,
+        "replace": True,
+    }
+    assert result.result == {"policy_id": "checkpoint_000025"}
+
+
+def test_checkpoint_publish_reporting_preserves_pretty_json() -> None:
+    assert checkpoint_publish_output_text({"policy_id": "checkpoint_000025", "pinned": False}) == (
+        '{\n  "pinned": false,\n  "policy_id": "checkpoint_000025"\n}'
+    )
 
 
 def _write_manifest(run_dir: Path) -> None:

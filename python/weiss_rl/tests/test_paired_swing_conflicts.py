@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
 
+from weiss_rl.experiments.paired_swing_conflict_report_reporting import (
+    paired_swing_conflict_report_output_payload,
+)
+from weiss_rl.experiments.paired_swing_conflict_report_runtime import (
+    paired_swing_conflict_report_config_from_args,
+)
 from weiss_rl.experiments.paired_swing_conflicts import (
     PairedSwingConflictConfig,
     build_paired_swing_conflict_report,
@@ -11,6 +20,85 @@ from weiss_rl.replay.trajectory_bc import (
     ReplayTrajectoryDataset,
     save_replay_trajectory_bc_dataset,
 )
+
+
+def test_paired_swing_conflict_report_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_swing_conflict_report_cli,
+        paired_swing_conflict_report_entrypoint,
+        paired_swing_conflict_report_runtime,
+        paired_swing_conflicts,
+    )
+
+    assert paired_swing_conflict_report_entrypoint._build_parser is (
+        paired_swing_conflict_report_cli.build_paired_swing_conflict_report_parser
+    )
+    assert paired_swing_conflict_report_entrypoint.run_paired_swing_conflict_report is (
+        paired_swing_conflict_report_runtime.run_paired_swing_conflict_report
+    )
+    assert paired_swing_conflict_report_entrypoint.PairedSwingConflictConfig is (
+        paired_swing_conflicts.PairedSwingConflictConfig
+    )
+    assert paired_swing_conflict_report_entrypoint.build_paired_swing_conflict_report is (
+        paired_swing_conflicts.build_paired_swing_conflict_report
+    )
+    assert paired_swing_conflict_report_entrypoint.write_paired_swing_conflict_report is (
+        paired_swing_conflicts.write_paired_swing_conflict_report
+    )
+
+
+def test_paired_swing_conflict_report_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_swing_conflict_report_cli import (
+        build_paired_swing_conflict_report_parser,
+    )
+
+    args = build_paired_swing_conflict_report_parser().parse_args(
+        [
+            "--dataset",
+            str(tmp_path / "dataset.npz"),
+            "--output-json",
+            str(tmp_path / "conflicts.json"),
+        ]
+    )
+
+    assert args.dataset == [tmp_path / "dataset.npz"]
+    assert args.positive_action_source == "actions"
+    assert args.negative_action_source == "teacher_action"
+    assert args.max_examples == 50
+    assert args.output_json == tmp_path / "conflicts.json"
+
+
+def test_paired_swing_conflict_report_runtime_maps_args(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        dataset=[tmp_path / "a.npz", tmp_path / "b.npz"],
+        positive_action_source="teacher_action",
+        negative_action_source="actions",
+        max_examples=7,
+    )
+
+    config = paired_swing_conflict_report_config_from_args(args)
+
+    assert config == PairedSwingConflictConfig(
+        dataset_paths=(tmp_path / "a.npz", tmp_path / "b.npz"),
+        positive_action_source="teacher_action",
+        negative_action_source="actions",
+        max_examples=7,
+    )
+
+
+def test_paired_swing_conflict_report_reporting_preserves_compact_console_payload(tmp_path: Path) -> None:
+    report = {
+        "preference_row_count": 4,
+        "current_state_conflict_count": 2,
+        "history_conflict_count": 1,
+    }
+
+    assert paired_swing_conflict_report_output_payload(output_json=tmp_path / "conflicts.json", report=report) == {
+        "output_json": (tmp_path / "conflicts.json").as_posix(),
+        "preference_row_count": 4,
+        "current_state_conflict_count": 2,
+        "history_conflict_count": 1,
+    }
 
 
 def test_paired_swing_conflict_report_detects_exact_reversed_same_history(tmp_path):

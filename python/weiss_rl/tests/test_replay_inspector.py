@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -36,10 +37,25 @@ from weiss_rl.replay.inspector import (
     format_replay_inspection_report,
     inspect_replay_bundle,
 )
+from weiss_rl.replay.inspector import (
+    write_replay_inspection_report as facade_write_replay_inspection_report,
+)
+from weiss_rl.replay.inspector_report import (
+    format_replay_inspection_report as report_format_replay_inspection_report,
+)
+from weiss_rl.replay.inspector_report import (
+    write_replay_inspection_report,
+)
 from weiss_rl.runtime_components.legal_meta import action_catalog_indices
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_replay_inspector_report_helpers_are_package_owned() -> None:
+    assert format_replay_inspection_report is report_format_replay_inspection_report
+    assert facade_write_replay_inspection_report is write_replay_inspection_report
+    assert report_format_replay_inspection_report.__module__ == "weiss_rl.replay.inspector_report"
 
 
 class FakeReplayEnv:
@@ -930,6 +946,7 @@ def test_replay_forward_policy_uses_packed_candidate_scoring_for_structured_mode
 
     assert logits[2] == pytest.approx(4.0)
     assert logits[5] == pytest.approx(9.0)
+    assert next_hidden is not None
     assert float(next_hidden.item()) == pytest.approx(1.0)
 
 
@@ -985,6 +1002,7 @@ def test_replay_forward_policy_passes_opponent_context_index_to_packed_scoring()
 
     assert logits[2] == pytest.approx(4.0)
     assert logits[5] == pytest.approx(9.0)
+    assert next_hidden is not None
     assert float(next_hidden.item()) == pytest.approx(1.0)
 
 
@@ -1244,7 +1262,7 @@ def test_replay_inspector_cli_main_supports_json_stdout_and_report_file(
         captured_kwargs.update(_)
         return canned_report
 
-    monkeypatch.setattr(module, "inspect_replay_bundle", fake_inspect_replay_bundle)
+    monkeypatch.setattr(module._impl, "inspect_replay_bundle", fake_inspect_replay_bundle)
 
     exit_code = module.main(
         [
@@ -1299,7 +1317,7 @@ def _write_policy_weights(
         for parameter in model.parameters():
             parameter.zero_()
         for action_id, value in logits.items():
-            model.policy_head.bias[action_id] = value
+            cast(Any, model.policy_head).bias[action_id] = value
     weights_path = weights_dir / "weights.pt"
     torch.save(
         {

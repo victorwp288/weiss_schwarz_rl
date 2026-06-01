@@ -5,8 +5,9 @@ from typing import Any, cast
 
 import numpy as np
 import pytest
-import scripts.play_vs_model as play_script
 import torch
+
+from weiss_rl.human_play import play_vs_model_entrypoint as play_script
 
 
 class _DummyModel:

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
 from weiss_rl.experiments.paired_outcome_preference_span_audit import (
     PairedOutcomePreferenceSpanAuditConfig,
     build_paired_outcome_preference_span_audit,
+)
+from weiss_rl.experiments.paired_outcome_preference_span_audit_reporting import (
+    paired_outcome_preference_span_audit_output_line,
+    paired_outcome_preference_span_audit_output_payload,
+)
+from weiss_rl.experiments.paired_outcome_preference_span_audit_runtime import (
+    paired_outcome_preference_span_audit_config_from_args,
 )
 from weiss_rl.replay.trajectory_bc import BC_DATASET_FORMAT, ReplayTrajectoryDataset, save_replay_trajectory_bc_dataset
 
@@ -72,6 +80,105 @@ def _bundle(*, pair_id: int, role: int, source_pair_index: int, episode_seed: in
         "episode_seed": episode_seed,
         "swap_index": 0,
     }
+
+
+def test_span_audit_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_outcome_preference_span_audit,
+        paired_outcome_preference_span_audit_cli,
+        paired_outcome_preference_span_audit_entrypoint,
+        paired_outcome_preference_span_audit_runtime,
+    )
+
+    assert paired_outcome_preference_span_audit_entrypoint._build_parser is (
+        paired_outcome_preference_span_audit_cli.build_paired_outcome_preference_span_audit_parser
+    )
+    assert paired_outcome_preference_span_audit_entrypoint.run_paired_outcome_preference_span_audit is (
+        paired_outcome_preference_span_audit_runtime.run_paired_outcome_preference_span_audit
+    )
+    assert paired_outcome_preference_span_audit_entrypoint.PairedOutcomePreferenceSpanAuditConfig is (
+        paired_outcome_preference_span_audit.PairedOutcomePreferenceSpanAuditConfig
+    )
+    assert paired_outcome_preference_span_audit_entrypoint.build_paired_outcome_preference_span_audit is (
+        paired_outcome_preference_span_audit.build_paired_outcome_preference_span_audit
+    )
+    assert paired_outcome_preference_span_audit_entrypoint.write_paired_outcome_preference_span_audit is (
+        paired_outcome_preference_span_audit.write_paired_outcome_preference_span_audit
+    )
+
+
+def test_span_audit_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_outcome_preference_span_audit_cli import (
+        build_paired_outcome_preference_span_audit_parser,
+    )
+
+    args = build_paired_outcome_preference_span_audit_parser().parse_args(
+        [
+            "--dataset",
+            str(tmp_path / "preference.npz"),
+            "--output-json",
+            str(tmp_path / "span_audit.json"),
+        ]
+    )
+
+    assert args.dataset == tmp_path / "preference.npz"
+    assert args.spec_bundle_json is None
+    assert args.output_json == tmp_path / "span_audit.json"
+    assert args.max_gap == 1
+    assert args.max_compact_span_width == 8
+    assert args.min_repeated_pair_count == 2
+    assert args.max_examples == 20
+
+
+def test_span_audit_runtime_maps_args_and_resolves_input_paths(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        dataset=tmp_path / "preference.npz",
+        spec_bundle_json=tmp_path / "spec_bundle.json",
+        max_gap=2,
+        max_compact_span_width=5,
+        min_repeated_pair_count=3,
+        max_examples=7,
+    )
+
+    config = paired_outcome_preference_span_audit_config_from_args(args)
+
+    assert config == PairedOutcomePreferenceSpanAuditConfig(
+        dataset_path=(tmp_path / "preference.npz").resolve(),
+        spec_bundle_json=(tmp_path / "spec_bundle.json").resolve(),
+        max_gap=2,
+        max_compact_span_width=5,
+        min_repeated_pair_count=3,
+        max_examples=7,
+    )
+
+
+def test_span_audit_reporting_preserves_compact_console_json(tmp_path: Path) -> None:
+    report = {
+        "span_gate": {"passed": True, "passing_opponents": ["B2 HeuristicPublic"]},
+        "complete_pair_count": 4,
+        "different_action_count": 8,
+        "compact_span_count": 2,
+    }
+
+    assert paired_outcome_preference_span_audit_output_payload(
+        output_json=tmp_path / "span_audit.json",
+        report=report,
+    ) == {
+        "output_json": (tmp_path / "span_audit.json").as_posix(),
+        "passed": True,
+        "complete_pair_count": 4,
+        "different_action_count": 8,
+        "compact_span_count": 2,
+        "passing_opponents": ["B2 HeuristicPublic"],
+    }
+    assert paired_outcome_preference_span_audit_output_line(
+        output_json=tmp_path / "span_audit.json",
+        report=report,
+    ) == (
+        '{"compact_span_count": 2, "complete_pair_count": 4, "different_action_count": 8, '
+        f'"output_json": "{(tmp_path / "span_audit.json").as_posix()}", '
+        '"passed": true, "passing_opponents": ["B2 HeuristicPublic"]}'
+    )
 
 
 def test_span_audit_finds_repeated_compact_action_pattern(tmp_path: Path) -> None:

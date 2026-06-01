@@ -40,7 +40,7 @@ def test_make_figures_target_forwards_run_dir_fig_id_and_formats() -> None:
         check=True,
     )
 
-    assert "python/scripts/make_figures.py" in result.stdout
+    assert "-m weiss_rl.workflows.figures_entrypoint" in result.stdout
     assert '--run-dir "runs/synthetic"' in result.stdout
     assert '--fig-id "seat_bias"' in result.stdout
     assert "--format pdf --format png" in result.stdout

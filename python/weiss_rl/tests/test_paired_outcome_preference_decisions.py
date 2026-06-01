@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
 
 from weiss_rl.experiments.paired_outcome_preference_decisions import (
     PairedOutcomePreferenceDecisionConfig,
     build_paired_outcome_preference_decision_report,
+)
+from weiss_rl.experiments.paired_outcome_preference_decisions_reporting import (
+    paired_outcome_preference_decisions_output_line,
+    paired_outcome_preference_decisions_output_payload,
+)
+from weiss_rl.experiments.paired_outcome_preference_decisions_runtime import (
+    paired_outcome_preference_decision_config_from_args,
 )
 from weiss_rl.replay.trajectory_bc import (
     ReplayTrajectoryDataset,
@@ -12,7 +22,105 @@ from weiss_rl.replay.trajectory_bc import (
 )
 
 
-def test_paired_outcome_preference_decision_report_detects_reversed_same_state_conflict(tmp_path):
+def test_paired_outcome_preference_decisions_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_outcome_preference_decisions,
+        paired_outcome_preference_decisions_cli,
+        paired_outcome_preference_decisions_entrypoint,
+        paired_outcome_preference_decisions_runtime,
+    )
+
+    assert paired_outcome_preference_decisions_entrypoint._build_parser is (
+        paired_outcome_preference_decisions_cli.build_paired_outcome_preference_decisions_parser
+    )
+    assert paired_outcome_preference_decisions_entrypoint.run_paired_outcome_preference_decisions is (
+        paired_outcome_preference_decisions_runtime.run_paired_outcome_preference_decisions
+    )
+    assert paired_outcome_preference_decisions_entrypoint.PairedOutcomePreferenceDecisionConfig is (
+        paired_outcome_preference_decisions.PairedOutcomePreferenceDecisionConfig
+    )
+    assert paired_outcome_preference_decisions_entrypoint.build_paired_outcome_preference_decision_report is (
+        paired_outcome_preference_decisions.build_paired_outcome_preference_decision_report
+    )
+    assert paired_outcome_preference_decisions_entrypoint.write_paired_outcome_preference_decision_report is (
+        paired_outcome_preference_decisions.write_paired_outcome_preference_decision_report
+    )
+
+
+def test_paired_outcome_preference_decisions_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_outcome_preference_decisions_cli import (
+        build_paired_outcome_preference_decisions_parser,
+    )
+
+    args = build_paired_outcome_preference_decisions_parser().parse_args(
+        [
+            "--dataset",
+            str(tmp_path / "preference.npz"),
+            "--output-json",
+            str(tmp_path / "decisions.json"),
+        ]
+    )
+
+    assert args.dataset == tmp_path / "preference.npz"
+    assert args.spec_bundle_json is None
+    assert args.max_examples == 25
+    assert args.top_action_edges == 25
+    assert args.output_json == tmp_path / "decisions.json"
+
+
+def test_paired_outcome_preference_decisions_runtime_maps_args(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        dataset=tmp_path / "preference.npz",
+        spec_bundle_json=tmp_path / "spec_bundle.json",
+        max_examples=7,
+        top_action_edges=9,
+    )
+
+    config = paired_outcome_preference_decision_config_from_args(args)
+
+    assert config.dataset_path == tmp_path / "preference.npz"
+    assert config.spec_bundle_json == tmp_path / "spec_bundle.json"
+    assert config.max_examples == 7
+    assert config.top_action_edges == 9
+
+
+def test_paired_outcome_preference_decisions_reporting_preserves_compact_console_json(tmp_path: Path) -> None:
+    report = {
+        "preference_pair_count": 4,
+        "complete_pair_count": 3,
+        "aligned_different_action_count": 2,
+        "same_current_state_edge_count": 8,
+        "same_current_state_different_action_edge_count": 1,
+        "current_state_conflict_count": 5,
+        "history_conflict_count": 6,
+    }
+
+    assert paired_outcome_preference_decisions_output_payload(
+        output_json=tmp_path / "decisions.json",
+        report=report,
+    ) == {
+        "output_json": (tmp_path / "decisions.json").as_posix(),
+        "preference_pair_count": 4,
+        "complete_pair_count": 3,
+        "aligned_different_action_count": 2,
+        "same_current_state_edge_count": 8,
+        "same_current_state_different_action_edge_count": 1,
+        "current_state_conflict_count": 5,
+        "history_conflict_count": 6,
+    }
+    assert paired_outcome_preference_decisions_output_line(
+        output_json=tmp_path / "decisions.json",
+        report=report,
+    ) == (
+        '{"aligned_different_action_count": 2, "complete_pair_count": 3, '
+        '"current_state_conflict_count": 5, "history_conflict_count": 6, '
+        f'"output_json": "{(tmp_path / "decisions.json").as_posix()}", '
+        '"preference_pair_count": 4, "same_current_state_different_action_edge_count": 1, '
+        '"same_current_state_edge_count": 8}'
+    )
+
+
+def test_paired_outcome_preference_decision_report_detects_reversed_same_state_conflict(tmp_path: Path) -> None:
     dataset_path = tmp_path / "preference.npz"
     save_replay_trajectory_bc_dataset(dataset_path, _dataset_with_reversed_edges())
 
@@ -43,7 +151,7 @@ def test_paired_outcome_preference_decision_report_detects_reversed_same_state_c
     assert edges[(104, 124)] == 1
 
 
-def test_paired_outcome_preference_decision_report_marks_incomplete_pairs(tmp_path):
+def test_paired_outcome_preference_decision_report_marks_incomplete_pairs(tmp_path: Path) -> None:
     dataset_path = tmp_path / "incomplete.npz"
     dataset = _dataset_with_reversed_edges()
     dataset.metadata["selected_bundles"][1]["preference_pair_id"] = 99
@@ -57,7 +165,7 @@ def test_paired_outcome_preference_decision_report_marks_incomplete_pairs(tmp_pa
     assert report["incomplete_pair_count"] == 2
 
 
-def test_paired_outcome_preference_decision_report_ignores_same_action_conflicts(tmp_path):
+def test_paired_outcome_preference_decision_report_ignores_same_action_conflicts(tmp_path: Path) -> None:
     dataset_path = tmp_path / "same_action.npz"
     dataset = _dataset_with_reversed_edges()
     dataset.actions[:] = 104

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -16,16 +16,17 @@ from weiss_rl.runtime_components.action_surface import (
 )
 from weiss_rl.runtime_components.actor_routing import policy_train_mask_for_actor, split_focal_actor_rows
 from weiss_rl.runtime_components.actor_state import _ActorState
-from weiss_rl.runtime_components.batching import build_impala_learner_batch, build_ppo_learner_batch
 from weiss_rl.runtime_components.bootstrap import bootstrap_values_for_unroll
 from weiss_rl.runtime_components.deterministic_logits import (
     write_deterministic_logits,
     write_deterministic_logits_from_packed,
 )
+from weiss_rl.runtime_components.impala_learner_batch import build_impala_learner_batch
 from weiss_rl.runtime_components.metrics import build_runtime_metrics
 from weiss_rl.runtime_components.opponent_context import initial_seat_hidden_for_opponents
 from weiss_rl.runtime_components.outcomes import update_outcomes, update_outcomes_from_transition_arrays
 from weiss_rl.runtime_components.policy_ids import MIRROR_OPPONENT_POLICY_ID
+from weiss_rl.runtime_components.ppo_learner_batch import build_ppo_learner_batch
 from weiss_rl.runtime_components.types import PendingUnroll, RuntimeUnroll
 
 
@@ -335,7 +336,7 @@ class QueueRuntimeSupportMixin:
                 actor.model,
                 int(self.config.envs_per_actor),
                 device=self._device,
-                opponent_policy_ids=actor.opponent_policy_id_by_env,
+                opponent_policy_ids=cast(Sequence[object], actor.opponent_policy_id_by_env),
             ).clone()
             actor.seat_hidden = initial_hidden.clone()
             actor.opponent_hidden = initial_seat_hidden_for_opponents(
@@ -353,7 +354,7 @@ class QueueRuntimeSupportMixin:
             actor.model,
             int(self.config.envs_per_actor),
             device=self._device,
-            opponent_policy_ids=actor.opponent_policy_id_by_env,
+            opponent_policy_ids=cast(Sequence[object], actor.opponent_policy_id_by_env),
         ).clone()
         actor.seat_hidden = initial_hidden.clone()
         actor.opponent_hidden = initial_seat_hidden_for_opponents(

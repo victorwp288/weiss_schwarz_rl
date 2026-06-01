@@ -8,6 +8,8 @@ import pytest
 import torch
 
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset, save_replay_trajectory_bc_dataset
+from weiss_rl.training import paired_swing_conflict_filter, paired_swing_replay
+from weiss_rl.training.paired_swing_conflict_filter import normalize_paired_swing_action_source
 from weiss_rl.training.paired_swing_replay import (
     PairedSwingReplayState,
     filter_paired_swing_conflict_rows,
@@ -139,6 +141,32 @@ def test_paired_swing_distinct_train_row_count_requires_legal_positive_and_negat
     )
 
     assert paired_swing_distinct_train_row_count(dataset) == 1
+
+
+def test_paired_swing_replay_reexports_canonical_conflict_filter_helpers() -> None:
+    assert paired_swing_replay.filter_paired_swing_conflict_rows is (
+        paired_swing_conflict_filter.filter_paired_swing_conflict_rows
+    )
+    assert paired_swing_replay.paired_swing_distinct_train_row_count is (
+        paired_swing_conflict_filter.paired_swing_distinct_train_row_count
+    )
+    assert paired_swing_replay.normalize_paired_swing_action_source is (
+        paired_swing_conflict_filter.normalize_paired_swing_action_source
+    )
+    assert paired_swing_replay._normalize_action_source is (
+        paired_swing_conflict_filter.normalize_paired_swing_action_source
+    )
+    assert (
+        paired_swing_conflict_filter.filter_paired_swing_conflict_rows.__module__
+        == "weiss_rl.training.paired_swing_conflict_filter"
+    )
+
+
+def test_normalize_paired_swing_action_source_preserves_old_validation() -> None:
+    assert normalize_paired_swing_action_source(" Teacher_Action ", field_name="source") == "teacher_action"
+
+    with pytest.raises(ValueError, match="source must be one of: actions, teacher_action"):
+        normalize_paired_swing_action_source("policy", field_name="source")
 
 
 def test_paired_swing_conflict_filter_masks_current_state_reverse_rows(tmp_path: Path) -> None:

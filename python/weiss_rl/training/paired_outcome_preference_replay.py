@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import torch
 
-from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset, replay_trajectory_bc_batch
-from weiss_rl.training.trajectory_bc_replay import TrajectoryBcReplayState
+from weiss_rl.replay.trajectory_bc import replay_trajectory_bc_batch
+from weiss_rl.training.auxiliary_replay_runner import (
+    AuxiliaryReplayBatchContext,
+)
+from weiss_rl.training.auxiliary_replay_support import (
+    trajectory_bc_compatible_training_config,
+)
+from weiss_rl.training.paired_auxiliary_replay import (
+    emit_paired_auxiliary_replay_metrics,
+    run_due_paired_auxiliary_replay,
+)
+from weiss_rl.training.paired_outcome_preference_dataset import (
+    paired_outcome_preference_complete_pair_count,
+    preference_group_indices_for_episodes,
+)
+from weiss_rl.training.trajectory_bc_sampling import TrajectoryBcReplayState
 
 _AGGREGATIONS = frozenset({"mean", "sum"})
 
@@ -47,10 +59,13 @@ class PairedOutcomePreferenceReplayState:
         group_balance = bool(getattr(structured_aux, "paired_outcome_preference_group_balance", False))
 
         sampler = TrajectoryBcReplayState.from_training_config(
-            _trajectory_bc_compatible_training_config(
+            trajectory_bc_compatible_training_config(
                 structured_aux=structured_aux,
                 dataset_path_text=dataset_path_text,
                 every_updates=every_updates,
+                field_prefix="paired_outcome_preference",
+                seed_default=20260520,
+                include_focus_fields=False,
             ),
             repo_root=repo_root,
         )
@@ -81,178 +96,62 @@ def maybe_run_paired_outcome_preference_replay(
 ) -> None:
     """Run configured paired outcome preference auxiliary steps after an RL update."""
 
-    if state is None:
-        return
-    sampler = state.sampler
-    if int(update_count) <= 0 or int(update_count) % int(sampler.every_updates) != 0:
-        return
-    updater = getattr(learner, "paired_outcome_preference_update", None)
-    if not callable(updater):
-        raise ValueError("learner does not support paired_outcome_preference_update")
+    def make_update_batch(updater: Any) -> Any:
+        def update_batch(batch: dict[str, Any], context: AuxiliaryReplayBatchContext) -> dict[str, float]:
+            assert state is not None
+            preference_group_indices = preference_group_indices_for_episodes(
+                state.sampler.dataset,
+                episode_indices=context.episode_indices,
+            )
+            if preference_group_indices is not None:
+                batch["preference_group_id"] = np.broadcast_to(
+                    np.asarray(preference_group_indices, dtype=np.int64).reshape(1, -1),
+                    np.asarray(batch["actions"]).shape,
+                ).copy()
+            return dict(
+                updater(
+                    batch,
+                    beta=float(state.beta),
+                    coef=float(state.coef),
+                    aggregation=state.aggregation,
+                    group_balance=bool(state.group_balance),
+                )
+            )
 
-    aux_metrics: dict[str, float] = {}
-    total_batch_episodes = 0
-    total_context_episodes = 0
-    for _ in range(int(sampler.aux_updates)):
-        indices = sampler.next_episode_indices()
-        total_batch_episodes += len(indices)
-        opponent_context_indices = _opponent_context_indices_for_episodes(
-            learner.model,
-            sampler.dataset,
-            episode_indices=indices,
-        )
-        if opponent_context_indices is not None:
-            total_context_episodes += int(np.count_nonzero(opponent_context_indices))
-        hidden = _initial_hidden_state(
-            learner.model,
-            batch_size=len(indices),
-            device=device,
-            opponent_context_indices=opponent_context_indices,
-        )
-        batch = replay_trajectory_bc_batch(
-            sampler.dataset,
-            episode_indices=indices,
-            initial_hidden_state=hidden,
-            opponent_context_indices=opponent_context_indices,
-        )
-        preference_group_indices = _preference_group_indices_for_episodes(sampler.dataset, episode_indices=indices)
-        if preference_group_indices is not None:
-            batch["preference_group_id"] = np.broadcast_to(
-                np.asarray(preference_group_indices, dtype=np.int64).reshape(1, -1),
-                np.asarray(batch["actions"]).shape,
-            ).copy()
-        aux_metrics = updater(
-            batch,
-            beta=float(state.beta),
-            coef=float(state.coef),
-            aggregation=state.aggregation,
-            group_balance=bool(state.group_balance),
-        )
+        return update_batch
 
-    latest_metrics["paired_outcome_preference_replay_aux_updates"] = float(sampler.aux_updates)
-    latest_metrics["paired_outcome_preference_replay_batch_episodes"] = float(total_batch_episodes)
-    latest_metrics["paired_outcome_preference_replay_dataset_train_rows"] = float(
-        sampler.dataset.metadata["train_rows"]
+    replay_result = run_due_paired_auxiliary_replay(
+        state=state,
+        learner=learner,
+        device=device,
+        update_count=update_count,
+        updater_method_name="paired_outcome_preference_update",
+        updater_error_message="learner does not support paired_outcome_preference_update",
+        make_update_batch=make_update_batch,
+        batch_factory=replay_trajectory_bc_batch,
+        use_opponent_context=True,
     )
-    latest_metrics["paired_outcome_preference_replay_complete_pair_count"] = float(state.complete_pair_count)
-    latest_metrics["paired_outcome_preference_replay_beta"] = float(state.beta)
-    latest_metrics["paired_outcome_preference_replay_coef"] = float(state.coef)
-    latest_metrics["paired_outcome_preference_replay_aggregation_sum"] = 1.0 if state.aggregation == "sum" else 0.0
-    latest_metrics["paired_outcome_preference_replay_group_balance"] = 1.0 if state.group_balance else 0.0
-    latest_metrics["paired_outcome_preference_replay_opponent_context_episodes"] = float(total_context_episodes)
-    for key, value in aux_metrics.items():
-        if isinstance(value, (int, float)) and np.isfinite(float(value)):
-            latest_metrics[f"paired_outcome_preference_replay_{key}"] = float(value)
+    if replay_result is None:
+        return
 
-
-def paired_outcome_preference_complete_pair_count(dataset: ReplayTrajectoryDataset) -> int:
-    bundles = dataset.metadata.get("selected_bundles")
-    if not isinstance(bundles, list) or len(bundles) != int(dataset.episode_count):
-        return 0
-    roles_by_pair: dict[int, set[int]] = {}
-    train_rows_by_episode = np.asarray(dataset.policy_train_mask, dtype=np.bool_).any(axis=0)
-    for episode_index, bundle in enumerate(bundles):
-        if not train_rows_by_episode[int(episode_index)]:
-            continue
-        if not isinstance(bundle, Mapping):
-            continue
-        if "preference_pair_id" not in bundle or "preference_role" not in bundle:
-            continue
-        pair_id = int(bundle["preference_pair_id"])
-        role = int(bundle["preference_role"])
-        if pair_id < 0 or role not in {0, 1}:
-            continue
-        roles_by_pair.setdefault(pair_id, set()).add(role)
-    return sum(1 for roles in roles_by_pair.values() if {0, 1}.issubset(roles))
-
-
-def _trajectory_bc_compatible_training_config(
-    *, structured_aux: Any, dataset_path_text: str, every_updates: int
-) -> Any:
-    return SimpleNamespace(
-        structured_aux=SimpleNamespace(
-            trajectory_bc_dataset_path=dataset_path_text,
-            trajectory_bc_every_updates=every_updates,
-            trajectory_bc_aux_updates=int(getattr(structured_aux, "paired_outcome_preference_aux_updates", 1)),
-            trajectory_bc_batch_episodes=int(getattr(structured_aux, "paired_outcome_preference_batch_episodes", 8)),
-            trajectory_bc_seed=int(getattr(structured_aux, "paired_outcome_preference_seed", 20260520)),
-            trajectory_bc_focus_source_labels=(),
-            trajectory_bc_focus_fraction=0.0,
-            trajectory_bc_focus_groups=(),
-        )
+    assert state is not None
+    emit_paired_auxiliary_replay_metrics(
+        latest_metrics,
+        prefix="paired_outcome_preference_replay",
+        replay_result=replay_result,
+        static_metrics=_paired_outcome_preference_replay_static_metrics(state),
+        include_context=True,
     )
 
 
-def _opponent_context_indices_for_episodes(
-    model: Any,
-    dataset: ReplayTrajectoryDataset,
-    *,
-    episode_indices: list[int],
-) -> np.ndarray | None:
-    if model is None or not hasattr(model, "opponent_context_indices_for_policy_ids"):
-        return None
-    opponent_ids = _source_opponent_policy_ids_by_episode(dataset)
-    if not opponent_ids:
-        return None
-    selected_policy_ids = [
-        opponent_ids[int(index)] if int(index) < len(opponent_ids) else "" for index in episode_indices
-    ]
-    indices = model.opponent_context_indices_for_policy_ids(selected_policy_ids)
-    return np.asarray(indices, dtype=np.int64).reshape(-1)
-
-
-def _source_opponent_policy_ids_by_episode(dataset: ReplayTrajectoryDataset) -> list[str]:
-    bundles = dataset.metadata.get("selected_bundles")
-    if not isinstance(bundles, list) or len(bundles) != int(dataset.episode_count):
-        return []
-    ids: list[str] = []
-    for bundle in bundles:
-        raw_id = bundle.get("source_opponent_policy_id") if isinstance(bundle, dict) else None
-        ids.append(str(raw_id or "").strip())
-    return ids
-
-
-def _preference_group_indices_for_episodes(
-    dataset: ReplayTrajectoryDataset,
-    *,
-    episode_indices: list[int],
-) -> np.ndarray | None:
-    bundles = dataset.metadata.get("selected_bundles")
-    if not isinstance(bundles, list) or len(bundles) != int(dataset.episode_count):
-        return None
-    labels: list[str] = []
-    for bundle in bundles:
-        if not isinstance(bundle, Mapping):
-            labels.append("")
-            continue
-        labels.append(str(bundle.get("merge_source_dataset_label") or bundle.get("source_dataset_label") or ""))
-    nonempty_labels = sorted({label for label in labels if label})
-    if not nonempty_labels:
-        return None
-    label_to_index = {label: index for index, label in enumerate(nonempty_labels)}
-    indices = [
-        label_to_index.get(labels[int(index)] if int(index) < len(labels) else "", -1) for index in episode_indices
-    ]
-    return np.asarray(indices, dtype=np.int64)
-
-
-def _initial_hidden_state(
-    model: Any,
-    *,
-    batch_size: int,
-    device: torch.device,
-    opponent_context_indices: np.ndarray | None = None,
-) -> np.ndarray | None:
-    if model is None or not hasattr(model, "initial_seat_hidden"):
-        return None
-    kwargs: dict[str, Any] = {"device": device}
-    if opponent_context_indices is not None:
-        kwargs["opponent_context_indices"] = opponent_context_indices
-    try:
-        hidden = model.initial_seat_hidden(int(batch_size), **kwargs)
-    except TypeError:
-        hidden = model.initial_seat_hidden(int(batch_size), device=device)
-    return hidden.detach().cpu().numpy()
+def _paired_outcome_preference_replay_static_metrics(state: PairedOutcomePreferenceReplayState) -> dict[str, float]:
+    return {
+        "paired_outcome_preference_replay_complete_pair_count": float(state.complete_pair_count),
+        "paired_outcome_preference_replay_beta": float(state.beta),
+        "paired_outcome_preference_replay_coef": float(state.coef),
+        "paired_outcome_preference_replay_aggregation_sum": 1.0 if state.aggregation == "sum" else 0.0,
+        "paired_outcome_preference_replay_group_balance": 1.0 if state.group_balance else 0.0,
+    }
 
 
 __all__ = [

@@ -8,7 +8,7 @@ import numpy as np
 
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID, heuristic_public_profile_name_for_policy_id
-from weiss_rl.runtime_components.batching import slice_packed_rows, slice_packed_rows_with_meta
+from weiss_rl.runtime_components.legal_batching import slice_packed_rows, slice_packed_rows_with_meta
 
 
 class QueueRuntimeHeuristicPublicActionsMixin:

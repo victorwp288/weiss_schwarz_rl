@@ -10,6 +10,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from weiss_rl.experiments.bootstrap_commands import build_training_entrypoint_command
+
 
 @dataclass(frozen=True, slots=True)
 class LaunchJob:
@@ -90,7 +92,6 @@ def execute_launch_plan(
     group_dir = runs_root / "launch_groups" / plan.group_label
     group_dir.mkdir(parents=True, exist_ok=True)
     summary_path = group_dir / "summary.json"
-    train_script = repo_root / "weiss_schwarz_rl" / "python" / "scripts" / "train.py"
     python_cmd = python_executable or sys.executable
 
     summary: dict[str, Any] = {
@@ -107,19 +108,15 @@ def execute_launch_plan(
     while pending or active:
         while pending and len(active) < int(plan.max_parallel_jobs):
             job = pending.pop(0)
-            command = [
-                python_cmd,
-                str(train_script),
-                "--stack-config",
-                job.stack_config,
-                "--seed",
-                str(job.seed),
-                "--device",
-                job.device,
-                "--run-label",
-                job.run_label,
-                *job.extra_args,
-            ]
+            command = build_training_entrypoint_command(
+                repo_root=repo_root / "weiss_schwarz_rl",
+                stack_config=Path(job.stack_config),
+                run_label=job.run_label,
+                seed=job.seed,
+                device=job.device,
+                extra_args=job.extra_args,
+                python_executable=python_cmd,
+            )
             started_at = time.time()
             summary["jobs"].append(
                 {

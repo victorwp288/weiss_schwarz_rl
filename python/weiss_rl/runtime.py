@@ -46,21 +46,12 @@ from weiss_rl.runtime_components.actor_state import (
     build_actor_state as build_runtime_actor_state,
 )
 from weiss_rl.runtime_components.actor_unroll import QueueRuntimeActorUnrollMixin
+from weiss_rl.runtime_components.batch_collection import collect_pending_runtime_batch
 from weiss_rl.runtime_components.batching import (
     concat_batch_major_field,
     concat_optional_time_major_field,
     concat_time_major_field,
-    concatenate_batch_legal_actions,
-    concatenate_legal_actions,
     gae_advantages,
-    infer_packed_meta_width,
-    optional_legal_action_meta,
-    require_ids_offsets,
-    require_mask,
-    slice_packed_rows,
-    slice_packed_rows_with_meta,
-    structured_legal_batch_from_mask,
-    structured_legal_batch_from_packed,
 )
 from weiss_rl.runtime_components.central_collection import QueueRuntimeCentralCollectionMixin
 from weiss_rl.runtime_components.central_opponents import QueueRuntimeCentralOpponentMixin
@@ -91,6 +82,18 @@ from weiss_rl.runtime_components.heuristic_actor_rows import QueueRuntimeHeurist
 from weiss_rl.runtime_components.heuristic_public_actions import QueueRuntimeHeuristicPublicActionsMixin
 from weiss_rl.runtime_components.heuristic_rollouts import QueueRuntimeHeuristicRolloutMixin
 from weiss_rl.runtime_components.ipc import deserialize_state_dict_from_ipc, serialize_state_dict_for_ipc
+from weiss_rl.runtime_components.legal_batching import (
+    concatenate_batch_legal_actions,
+    concatenate_legal_actions,
+    infer_packed_meta_width,
+    optional_legal_action_meta,
+    require_ids_offsets,
+    require_mask,
+    slice_packed_rows,
+    slice_packed_rows_with_meta,
+    structured_legal_batch_from_mask,
+    structured_legal_batch_from_packed,
+)
 from weiss_rl.runtime_components.legal_meta import (
     action_catalog_indices,
 )
@@ -826,51 +829,20 @@ class QueueRuntime(
         vtrace_rho_bar: float,
         vtrace_c_bar: float,
     ) -> RuntimeBatch:
-        batch_started = time.perf_counter()
-        self._reset_batch_timer_metrics()
-        occupancy_samples: list[float] = []
-        fill_started = time.perf_counter()
-        self._fill_pending_unrolls(
+        return collect_pending_runtime_batch(
+            self,
             target_count=int(self.config.batch_unrolls_per_update),
-            occupancy_samples=occupancy_samples,
-        )
-        self._record_batch_timer_ms("fill_pending_unrolls", time.perf_counter() - fill_started)
-
-        selected = self._select_pending_unrolls()
-        selected_keys = {(item.actor_id, item.unroll_seq) for item in selected}
-        self._pending_unrolls = deque(
-            item for item in self._pending_unrolls if (item.actor_id, item.unroll_seq) not in selected_keys
-        )
-
-        build_started = time.perf_counter()
-        try:
-            learner_batch = self._build_learner_batch(
+            build_batch=lambda selected: self._build_learner_batch(
                 selected,
                 gamma=gamma,
                 truncation_reward=truncation_reward,
                 truncation_bootstrap_value=truncation_bootstrap_value,
                 vtrace_rho_bar=vtrace_rho_bar,
                 vtrace_c_bar=vtrace_c_bar,
-            )
-            self._record_batch_timer_ms("build_learner_batch", time.perf_counter() - build_started)
-            runtime_metrics = self._runtime_metrics(selected, occupancy_samples=occupancy_samples)
-        finally:
-            self._release_shared_pending_unrolls(selected)
-        self._record_batch_timer_ms("collect_update_batch_total", time.perf_counter() - batch_started)
-        if self._performance_logger is not None:
-            elapsed = time.time() - self._runtime_start
-            log_started = time.perf_counter()
-            self._performance_logger.log(
-                {
-                    "kind": "runtime_performance_v1",
-                    "wall_clock_seconds": elapsed,
-                    **runtime_metrics,
-                    **self._batch_timer_metrics,
-                }
-            )
-            self._record_batch_timer_ms("performance_log", time.perf_counter() - log_started)
-        runtime_metrics.update(self._batch_timer_metrics)
-        return RuntimeBatch(learner_batch=learner_batch, runtime_metrics=runtime_metrics)
+            ),
+            build_timer_name="build_learner_batch",
+            total_timer_name="collect_update_batch_total",
+        )
 
     def collect_policy_batch(
         self,
@@ -880,50 +852,19 @@ class QueueRuntime(
         truncation_reward: float,
         truncation_bootstrap_value: bool,
     ) -> RuntimeBatch:
-        batch_started = time.perf_counter()
-        self._reset_batch_timer_metrics()
-        occupancy_samples: list[float] = []
-        fill_started = time.perf_counter()
-        self._fill_pending_unrolls(
+        return collect_pending_runtime_batch(
+            self,
             target_count=int(self.config.batch_unrolls_per_update),
-            occupancy_samples=occupancy_samples,
-        )
-        self._record_batch_timer_ms("fill_pending_unrolls", time.perf_counter() - fill_started)
-
-        selected = self._select_pending_unrolls()
-        selected_keys = {(item.actor_id, item.unroll_seq) for item in selected}
-        self._pending_unrolls = deque(
-            item for item in self._pending_unrolls if (item.actor_id, item.unroll_seq) not in selected_keys
-        )
-
-        build_started = time.perf_counter()
-        try:
-            learner_batch = self._build_ppo_batch(
+            build_batch=lambda selected: self._build_ppo_batch(
                 selected,
                 gamma=gamma,
                 gae_lambda=gae_lambda,
                 truncation_reward=truncation_reward,
                 truncation_bootstrap_value=truncation_bootstrap_value,
-            )
-            self._record_batch_timer_ms("build_ppo_batch", time.perf_counter() - build_started)
-            runtime_metrics = self._runtime_metrics(selected, occupancy_samples=occupancy_samples)
-        finally:
-            self._release_shared_pending_unrolls(selected)
-        self._record_batch_timer_ms("collect_policy_batch_total", time.perf_counter() - batch_started)
-        if self._performance_logger is not None:
-            elapsed = time.time() - self._runtime_start
-            log_started = time.perf_counter()
-            self._performance_logger.log(
-                {
-                    "kind": "runtime_performance_v1",
-                    "wall_clock_seconds": elapsed,
-                    **runtime_metrics,
-                    **self._batch_timer_metrics,
-                }
-            )
-            self._record_batch_timer_ms("performance_log", time.perf_counter() - log_started)
-        runtime_metrics.update(self._batch_timer_metrics)
-        return RuntimeBatch(learner_batch=learner_batch, runtime_metrics=runtime_metrics)
+            ),
+            build_timer_name="build_ppo_batch",
+            total_timer_name="collect_policy_batch_total",
+        )
 
     def _read_unroll_from_shared_slot(self, slot: Any, metadata: dict[str, Any]) -> RuntimeUnroll:
         return _read_unroll_from_shared_slot(slot, metadata)

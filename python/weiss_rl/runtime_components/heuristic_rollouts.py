@@ -7,21 +7,16 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import torch
 
-from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.diagnostics.action_diagnostics import (
     make_action_sequence_state,
     reset_action_sequence_state,
     update_action_summary_from_ids,
 )
 from weiss_rl.envs.decision_env import _pack_batch
-from weiss_rl.runtime_components.batching import (
-    optional_legal_action_meta as _optional_legal_action_meta,
-)
-from weiss_rl.runtime_components.batching import (
-    require_ids_offsets as _require_ids_offsets,
-)
+from weiss_rl.runtime_components.bootstrap import bootstrap_fields_from_batch, collector_bootstrap_fields_for_actor
+from weiss_rl.runtime_components.collector_step_legal import capture_packed_array_step_legal
+from weiss_rl.runtime_components.collector_unroll_storage import build_collector_runtime_unroll, store_collector_step
 from weiss_rl.runtime_components.counters import (
     accumulate_actor_role_row_counters as _accumulate_actor_role_row_counters,
 )
@@ -37,18 +32,17 @@ from weiss_rl.runtime_components.counters import (
 from weiss_rl.runtime_components.counters import (
     timeout_limits_for_env as _timeout_limits_for_env,
 )
-from weiss_rl.runtime_components.hashing import hash_unroll as _hash_unroll
+from weiss_rl.runtime_components.done_resets import reset_actor_hidden_for_done as _reset_actor_hidden_for_done
+from weiss_rl.runtime_components.legal_batching import (
+    optional_legal_action_meta as _optional_legal_action_meta,
+)
+from weiss_rl.runtime_components.legal_batching import (
+    require_ids_offsets as _require_ids_offsets,
+)
 from weiss_rl.runtime_components.opponent_context import (
-    initial_seat_hidden_for_opponents,
     opponent_context_indices_for_model,
 )
-from weiss_rl.runtime_components.reward_shaping import (
-    apply_mulligan_select_with_confirm_penalty as _apply_mulligan_penalty,
-)
-from weiss_rl.runtime_components.reward_shaping import apply_pass_with_nonpass_penalty as _apply_pass_penalty
-from weiss_rl.runtime_components.reward_shaping import (
-    pass_penalty_ignored_alternative_family_ids as _pass_penalty_ignored_family_ids,
-)
+from weiss_rl.runtime_components.reward_shaping import apply_collector_reward_shaping as _apply_reward_shaping
 from weiss_rl.runtime_components.types import RuntimeUnroll
 
 if TYPE_CHECKING:
@@ -153,37 +147,25 @@ class QueueRuntimeHeuristicRolloutMixin:
                 None if legal_meta_all is None else np.asarray(legal_meta_all[step_index], dtype=np.uint16)[:used]
             )
 
-            teacher_family_step = teacher_slot_step = teacher_move_source_step = teacher_attack_type_step = (
-                teacher_action_step
-            ) = teacher_valid_step = None
-            if teacher_labels_enabled:
-                teacher_started = time.perf_counter()
-                (
-                    teacher_family_step,
-                    teacher_slot_step,
-                    teacher_move_source_step,
-                    teacher_attack_type_step,
-                    teacher_action_step,
-                    teacher_valid_step,
-                ) = self._teacher_labels_from_ids(
-                    focal_rows=focal_rows,
-                    decision_kind=np.asarray(decision_kind_all[step_index], dtype=np.int32),
-                    obs_step=np.asarray(obs[step_index], dtype=np.float32),
-                    legal_ids=step_ids,
-                    legal_offsets=step_offsets,
-                    legal_action_meta=step_meta,
-                    counters=counters,
-                )
-                counters["teacher_label_ms"] += int((time.perf_counter() - teacher_started) * 1000.0)
-            counters["packed_candidate_count"] += int(step_ids.shape[0])
-
-            offset_base = int(packed_offsets[-1][-1])
-            packed_ids.append(np.array(step_ids, dtype=np.uint32, copy=True))
-            if step_meta is not None:
-                packed_meta.append(np.array(step_meta, dtype=np.uint16, copy=True))
-            packed_offsets.append(np.asarray(step_offsets[1:] + offset_base, dtype=np.uint32))
+            packed_legal = capture_packed_array_step_legal(
+                legal_ids=step_ids,
+                legal_offsets=step_offsets,
+                legal_action_meta=step_meta,
+                decision_kind=np.asarray(decision_kind_all[step_index], dtype=np.int32),
+                focal_rows=focal_rows,
+                obs_step=np.asarray(obs[step_index], dtype=np.float32),
+                counters=counters,
+                teacher_labels_from_ids=self._teacher_labels_from_ids if teacher_labels_enabled else None,
+                packed_ids=packed_ids,
+                packed_meta=packed_meta,
+                packed_offsets=packed_offsets,
+            )
+            step_ids = packed_legal.legal_ids
+            step_offsets = packed_legal.legal_offsets
+            step_meta = packed_legal.legal_action_meta
 
             if teacher_labels_enabled:
+                assert packed_legal.teacher_labels is not None
                 assert teacher_family is not None and teacher_slot is not None
                 assert (
                     teacher_move_source is not None
@@ -191,6 +173,14 @@ class QueueRuntimeHeuristicRolloutMixin:
                     and teacher_action is not None
                     and teacher_valid is not None
                 )
+                (
+                    teacher_family_step,
+                    teacher_slot_step,
+                    teacher_move_source_step,
+                    teacher_attack_type_step,
+                    teacher_action_step,
+                    teacher_valid_step,
+                ) = packed_legal.teacher_labels
                 teacher_family[step_index] = teacher_family_step
                 teacher_slot[step_index] = teacher_slot_step
                 teacher_move_source[step_index] = teacher_move_source_step
@@ -223,34 +213,20 @@ class QueueRuntimeHeuristicRolloutMixin:
                 )
                 self._assign_episode_roles(actor, done.astype(np.bool_, copy=False), counters=counters)
                 reset_action_sequence_state(action_sequence_state, done.astype(np.bool_, copy=False))
-            reward_step, penalty_count, penalty_total_micros = _apply_pass_penalty(
+            rewards[step_index] = _apply_reward_shaping(
                 np.asarray(trajectory.rewards[step_index], dtype=np.float32),
                 np.asarray(actions[step_index], dtype=np.int64),
+                counters=counters,
                 pass_action_id=self.config.pass_action_id,
-                penalty=float(getattr(self.config, "pass_with_nonpass_penalty", 0.0)),
-                legal_ids=np.asarray(step_ids, dtype=np.int64),
-                legal_offsets=np.asarray(step_offsets, dtype=np.int64),
-                legal_action_meta=step_meta,
-                ignored_alternative_family_ids=_pass_penalty_ignored_family_ids(
-                    getattr(self, "_action_family_index", None)
+                pass_with_nonpass_penalty=float(getattr(self.config, "pass_with_nonpass_penalty", 0.0)),
+                mulligan_select_with_confirm_penalty=float(
+                    getattr(self.config, "mulligan_select_with_confirm_penalty", 0.0)
                 ),
-            )
-            rewards[step_index] = reward_step
-            counters["pass_with_nonpass_penalty_count"] += penalty_count
-            counters["pass_with_nonpass_penalty_total_micros"] += penalty_total_micros
-            family_index = getattr(self, "_action_family_index", {})
-            rewards[step_index], penalty_count, penalty_total_micros = _apply_mulligan_penalty(
-                rewards[step_index],
-                np.asarray(actions[step_index], dtype=np.int64),
-                penalty=float(getattr(self.config, "mulligan_select_with_confirm_penalty", 0.0)),
+                action_family_index=getattr(self, "_action_family_index", None),
                 legal_ids=np.asarray(step_ids, dtype=np.int64),
                 legal_offsets=np.asarray(step_offsets, dtype=np.int64),
                 legal_action_meta=step_meta,
-                mulligan_select_family_id=int(family_index.get("mulligan_select", -1)),
-                mulligan_confirm_family_id=int(family_index.get("mulligan_confirm", -1)),
             )
-            counters["mulligan_select_with_confirm_penalty_count"] += penalty_count
-            counters["mulligan_select_with_confirm_penalty_total_micros"] += penalty_total_micros
 
         step_out = getattr(actor.env, "_step_out", None)
         if step_out is None:
@@ -265,15 +241,14 @@ class QueueRuntimeHeuristicRolloutMixin:
             step_out=step_out,
             pool=pool,
         )
-        bootstrap_obs = np.asarray(batch.obs, dtype=np.float32)
-        bootstrap_actor = np.asarray(batch.actor, dtype=np.int64)
-        bootstrap_value = np.zeros((batch.obs.shape[0],), dtype=np.float32)
+        bootstrap = bootstrap_fields_from_batch(batch)
 
-        unroll = RuntimeUnroll(
+        unroll = build_collector_runtime_unroll(
             actor_id=actor.actor_id,
             unroll_seq=actor.next_unroll_seq,
             behavior_policy_version=actor.snapshot_version,
-            unroll_hash=_hash_unroll(actions=actions, rewards=rewards, episode_seed=episode_seed),
+            layout_name="i16_legal_ids",
+            action_dim=int(self.action_dim),
             obs=obs,
             actions=actions,
             rewards=rewards,
@@ -282,15 +257,13 @@ class QueueRuntimeHeuristicRolloutMixin:
             to_play_seat=to_play_seat,
             behavior_logp=behavior_logp,
             values=values,
-            legal_actions=LegalActionBatch.from_packed(
-                np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
-                np.concatenate(packed_offsets, axis=0),
-                meta=(np.concatenate(packed_meta, axis=0) if packed_meta else None),
-                action_space=int(self.action_dim),
-            ),
-            bootstrap_obs=bootstrap_obs,
-            bootstrap_actor=bootstrap_actor,
-            bootstrap_value=bootstrap_value,
+            packed_ids=packed_ids,
+            packed_offsets=packed_offsets,
+            packed_meta=packed_meta,
+            mask_steps=[],
+            bootstrap_obs=bootstrap.obs,
+            bootstrap_actor=bootstrap.actor,
+            bootstrap_value=bootstrap.value,
             initial_hidden_state=initial_hidden_state,
             final_hidden_state=actor.seat_hidden.detach().cpu().numpy().copy(),
             episode_seed=episode_seed,
@@ -302,39 +275,10 @@ class QueueRuntimeHeuristicRolloutMixin:
             teacher_attack_type=teacher_attack_type,
             teacher_action=teacher_action,
             teacher_valid=teacher_valid,
-            behavior_logits=None,
+            trajectory_retention_valid=None,
             counters=counters,
+            copy_counters=False,
         )
-        counters["copied_bytes_estimate"] += int(
-            obs.nbytes
-            + actions.nbytes
-            + rewards.nbytes
-            + terminated.nbytes
-            + truncated.nbytes
-            + to_play_seat.nbytes
-            + behavior_logp.nbytes
-            + values.nbytes
-            + episode_seed.nbytes
-            + policy_train_mask.nbytes
-            + opponent_context_index.nbytes
-            + bootstrap_obs.nbytes
-            + bootstrap_actor.nbytes
-            + bootstrap_value.nbytes
-        )
-        if teacher_family is not None:
-            assert teacher_slot is not None
-            assert teacher_move_source is not None
-            assert teacher_attack_type is not None
-            assert teacher_action is not None
-            assert teacher_valid is not None
-            counters["copied_bytes_estimate"] += int(
-                teacher_family.nbytes
-                + teacher_slot.nbytes
-                + teacher_move_source.nbytes
-                + teacher_attack_type.nbytes
-                + teacher_action.nbytes
-                + teacher_valid.nbytes
-            )
         _merge_simulator_timing_counters(counters, actor.env)
         counters["collect_actor_unroll_ms"] += int((time.perf_counter() - unroll_started) * 1000.0)
         actor.next_unroll_seq += 1
@@ -435,35 +379,22 @@ class QueueRuntimeHeuristicRolloutMixin:
                 include_mirror_opponent_rows=False,
             )
 
-            teacher_family_step = teacher_slot_step = teacher_move_source_step = teacher_attack_type_step = (
-                teacher_action_step
-            ) = teacher_valid_step = None
-            if teacher_labels_enabled:
-                teacher_started = time.perf_counter()
-                (
-                    teacher_family_step,
-                    teacher_slot_step,
-                    teacher_move_source_step,
-                    teacher_attack_type_step,
-                    teacher_action_step,
-                    teacher_valid_step,
-                ) = self._teacher_labels_from_ids(
-                    focal_rows=focal_rows,
-                    decision_kind=current_decision_kind,
-                    obs_step=current_obs,
-                    legal_ids=current_legal_ids,
-                    legal_offsets=current_legal_offsets,
-                    legal_action_meta=current_legal_action_meta,
-                    counters=counters,
-                )
-                counters["teacher_label_ms"] += int((time.perf_counter() - teacher_started) * 1000.0)
-            counters["packed_candidate_count"] += int(current_legal_ids.shape[0])
-
-            offset_base = int(packed_offsets[-1][-1])
-            packed_ids.append(np.array(current_legal_ids, dtype=np.uint32, copy=True))
-            if current_legal_action_meta is not None:
-                packed_meta.append(np.array(current_legal_action_meta, dtype=np.uint16, copy=True))
-            packed_offsets.append(np.array(current_legal_offsets[1:] + offset_base, dtype=np.uint32, copy=True))
+            packed_legal = capture_packed_array_step_legal(
+                legal_ids=current_legal_ids,
+                legal_offsets=current_legal_offsets,
+                legal_action_meta=current_legal_action_meta,
+                decision_kind=current_decision_kind,
+                focal_rows=focal_rows,
+                obs_step=current_obs,
+                counters=counters,
+                teacher_labels_from_ids=self._teacher_labels_from_ids if teacher_labels_enabled else None,
+                packed_ids=packed_ids,
+                packed_meta=packed_meta,
+                packed_offsets=packed_offsets,
+            )
+            current_legal_ids = packed_legal.legal_ids
+            current_legal_offsets = packed_legal.legal_offsets
+            current_legal_action_meta = packed_legal.legal_action_meta
 
             policy_started = time.perf_counter()
             if bool(getattr(self, "_actor_behavior_values_required", True)):
@@ -526,61 +457,56 @@ class QueueRuntimeHeuristicRolloutMixin:
             counters["actor_action_summary_ms"] += int((time.perf_counter() - summary_started) * 1000.0)
 
             step_rewards = np.asarray(step_out.rewards, dtype=np.float32)
-            reward_step, penalty_count, penalty_total_micros = _apply_pass_penalty(
+            reward_step = _apply_reward_shaping(
                 step_rewards,
                 action_step,
+                counters=counters,
                 pass_action_id=self.config.pass_action_id,
-                penalty=float(getattr(self.config, "pass_with_nonpass_penalty", 0.0)),
-                legal_ids=np.asarray(current_legal_ids, dtype=np.int64),
-                legal_offsets=np.asarray(current_legal_offsets, dtype=np.int64),
-                legal_action_meta=current_legal_action_meta,
-                ignored_alternative_family_ids=_pass_penalty_ignored_family_ids(
-                    getattr(self, "_action_family_index", None)
+                pass_with_nonpass_penalty=float(getattr(self.config, "pass_with_nonpass_penalty", 0.0)),
+                mulligan_select_with_confirm_penalty=float(
+                    getattr(self.config, "mulligan_select_with_confirm_penalty", 0.0)
                 ),
-            )
-            counters["pass_with_nonpass_penalty_count"] += penalty_count
-            counters["pass_with_nonpass_penalty_total_micros"] += penalty_total_micros
-            family_index = getattr(self, "_action_family_index", {})
-            reward_step, penalty_count, penalty_total_micros = _apply_mulligan_penalty(
-                reward_step,
-                action_step,
-                penalty=float(getattr(self.config, "mulligan_select_with_confirm_penalty", 0.0)),
+                action_family_index=getattr(self, "_action_family_index", None),
                 legal_ids=np.asarray(current_legal_ids, dtype=np.int64),
                 legal_offsets=np.asarray(current_legal_offsets, dtype=np.int64),
                 legal_action_meta=current_legal_action_meta,
-                mulligan_select_family_id=int(family_index.get("mulligan_select", -1)),
-                mulligan_confirm_family_id=int(family_index.get("mulligan_confirm", -1)),
             )
-            counters["mulligan_select_with_confirm_penalty_count"] += penalty_count
-            counters["mulligan_select_with_confirm_penalty_total_micros"] += penalty_total_micros
             step_terminated = np.asarray(step_out.terminated, dtype=np.bool_)
             step_truncated = np.asarray(step_out.truncated, dtype=np.bool_)
             step_episode_seed = np.asarray(pool.episode_seed_batch(), dtype=np.uint64)
             done = np.logical_or(step_terminated, step_truncated)
 
-            obs[step_index] = current_obs_storage
-            actions[step_index] = action_step.astype(np.uint16, copy=False)
-            rewards[step_index] = reward_step
-            terminated[step_index] = step_terminated
-            truncated[step_index] = step_truncated
-            to_play_seat[step_index] = current_actor.astype(np.int8, copy=False)
-            behavior_logp[step_index] = logp_step
-            values[step_index] = value_step
-            episode_seed[step_index] = step_episode_seed
-            if teacher_labels_enabled:
-                assert teacher_family is not None and teacher_slot is not None
-                assert (
-                    teacher_move_source is not None
-                    and teacher_attack_type is not None
-                    and teacher_action is not None
-                    and teacher_valid is not None
-                )
-                teacher_family[step_index] = teacher_family_step
-                teacher_slot[step_index] = teacher_slot_step
-                teacher_move_source[step_index] = teacher_move_source_step
-                teacher_attack_type[step_index] = teacher_attack_type_step
-                teacher_action[step_index] = teacher_action_step
-                teacher_valid[step_index] = teacher_valid_step
+            store_collector_step(
+                step_index=step_index,
+                obs_storage=obs,
+                actions_storage=actions,
+                rewards_storage=rewards,
+                terminated_storage=terminated,
+                truncated_storage=truncated,
+                to_play_seat_storage=to_play_seat,
+                behavior_logp_storage=behavior_logp,
+                values_storage=values,
+                episode_seed_storage=episode_seed,
+                teacher_family_storage=teacher_family,
+                teacher_slot_storage=teacher_slot,
+                teacher_move_source_storage=teacher_move_source,
+                teacher_attack_type_storage=teacher_attack_type,
+                teacher_action_storage=teacher_action,
+                teacher_valid_storage=teacher_valid,
+                trajectory_retention_storage=None,
+                obs_step=current_obs_storage,
+                actions=action_step,
+                rewards=reward_step,
+                terminated=step_terminated,
+                truncated=step_truncated,
+                actor_step=current_actor,
+                behavior_logp=logp_step,
+                values=value_step,
+                episode_seed=step_episode_seed,
+                teacher_labels=packed_legal.teacher_labels,
+                retention_valid=None,
+                counters=counters,
+            )
 
             if np.any(done):
                 terminal_batch = _pack_batch(
@@ -603,22 +529,11 @@ class QueueRuntimeHeuristicRolloutMixin:
                     counters=counters,
                 )
                 reset_started = time.perf_counter()
-                done_mask = torch.as_tensor(done, dtype=torch.bool, device=self._device)
-                self._assign_episode_roles(actor, done.astype(np.bool_, copy=False), counters=counters)
-                reset_hidden = initial_seat_hidden_for_opponents(
-                    actor.model,
-                    int(np.count_nonzero(done)),
-                    device=self._device,
-                    opponent_policy_ids=actor.opponent_policy_id_by_env[done],
-                )
-                actor.seat_hidden[done_mask] = reset_hidden
-                actor.opponent_hidden[done_mask] = initial_seat_hidden_for_opponents(
-                    actor.model,
-                    int(np.count_nonzero(done)),
-                    device=self._device,
-                )
-                reset_action_sequence_state(action_sequence_state, done.astype(np.bool_, copy=False))
-                reset_done_into(np.ascontiguousarray(done, dtype=np.bool_), step_out)
+                done_array = done.astype(np.bool_, copy=False)
+                self._assign_episode_roles(actor, done_array, counters=counters)
+                reset_result = _reset_actor_hidden_for_done(actor=actor, done=done_array, device=self._device)
+                reset_action_sequence_state(action_sequence_state, reset_result.done)
+                reset_done_into(np.ascontiguousarray(reset_result.done, dtype=np.bool_), step_out)
                 reset_elapsed = time.perf_counter() - reset_started
                 actor.env._record_python_timing("python_reset_done", int(reset_elapsed * 1_000_000_000.0))
                 actor.env._handle_engine_status(step_out, weiss_sim=None)
@@ -644,43 +559,26 @@ class QueueRuntimeHeuristicRolloutMixin:
             step_out=step_out,
             pool=pool,
         )
-        bootstrap_value = np.zeros((batch.obs.shape[0],), dtype=np.float32)
-        bootstrap_obs = np.asarray(batch.obs, dtype=np.float32)
-        bootstrap_actor = np.asarray(batch.actor, dtype=np.int64)
-        valid_bootstrap_rows = (bootstrap_actor == 0) | (bootstrap_actor == 1)
-        if bool(getattr(self, "_actor_behavior_values_required", True)) and np.any(valid_bootstrap_rows):
-            bootstrap_started = time.perf_counter()
-            with (
-                torch.inference_mode(),
-                torch.amp.autocast(
-                    device_type=self._device.type,
-                    enabled=self._actor_amp_enabled,
-                ),
-            ):
-                actor_model = _actor_inference_model(actor)
-                value_seat_aware = getattr(actor_model, "value_seat_aware", None)
-                if callable(value_seat_aware):
-                    bootstrap_value_tensor = value_seat_aware(
-                        torch.as_tensor(bootstrap_obs[valid_bootstrap_rows], device=self._device),
-                        torch.as_tensor(bootstrap_actor[valid_bootstrap_rows], device=self._device, dtype=torch.long),
-                        actor.seat_hidden[valid_bootstrap_rows],
-                    )
-                else:
-                    _, bootstrap_value_tensor, _ = actor_model.forward_seat_aware(
-                        torch.as_tensor(bootstrap_obs[valid_bootstrap_rows], device=self._device),
-                        torch.as_tensor(bootstrap_actor[valid_bootstrap_rows], device=self._device, dtype=torch.long),
-                        actor.seat_hidden[valid_bootstrap_rows],
-                    )
-            bootstrap_value[valid_bootstrap_rows] = (
-                bootstrap_value_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+        bootstrap_values_required = bool(getattr(self, "_actor_behavior_values_required", True))
+        if bootstrap_values_required:
+            bootstrap = collector_bootstrap_fields_for_actor(
+                batch=batch,
+                actor=actor,
+                actor_model=_actor_inference_model(actor),
+                bootstrap_device=self._device,
+                actor_amp_enabled=self._actor_amp_enabled,
+                values_required=True,
+                counters=counters,
             )
-            counters["actor_bootstrap_ms"] += int((time.perf_counter() - bootstrap_started) * 1000.0)
+        else:
+            bootstrap = bootstrap_fields_from_batch(batch)
 
-        unroll = RuntimeUnroll(
+        unroll = build_collector_runtime_unroll(
             actor_id=actor.actor_id,
             unroll_seq=actor.next_unroll_seq,
             behavior_policy_version=actor.snapshot_version,
-            unroll_hash=_hash_unroll(actions=actions, rewards=rewards, episode_seed=episode_seed),
+            layout_name="i16_legal_ids",
+            action_dim=int(self.action_dim),
             obs=obs,
             actions=actions,
             rewards=rewards,
@@ -689,15 +587,13 @@ class QueueRuntimeHeuristicRolloutMixin:
             to_play_seat=to_play_seat,
             behavior_logp=behavior_logp,
             values=values,
-            legal_actions=LegalActionBatch.from_packed(
-                np.concatenate(packed_ids, axis=0) if packed_ids else np.zeros((0,), dtype=np.uint32),
-                np.concatenate(packed_offsets, axis=0),
-                meta=(np.concatenate(packed_meta, axis=0) if packed_meta else None),
-                action_space=int(self.action_dim),
-            ),
-            bootstrap_obs=bootstrap_obs,
-            bootstrap_actor=bootstrap_actor,
-            bootstrap_value=bootstrap_value,
+            packed_ids=packed_ids,
+            packed_offsets=packed_offsets,
+            packed_meta=packed_meta,
+            mask_steps=[],
+            bootstrap_obs=bootstrap.obs,
+            bootstrap_actor=bootstrap.actor,
+            bootstrap_value=bootstrap.value,
             initial_hidden_state=initial_hidden_state,
             final_hidden_state=actor.seat_hidden.detach().cpu().numpy().copy(),
             episode_seed=episode_seed,
@@ -709,39 +605,10 @@ class QueueRuntimeHeuristicRolloutMixin:
             teacher_attack_type=teacher_attack_type,
             teacher_action=teacher_action,
             teacher_valid=teacher_valid,
-            behavior_logits=None,
+            trajectory_retention_valid=None,
             counters=counters,
+            copy_counters=False,
         )
-        counters["copied_bytes_estimate"] += int(
-            obs.nbytes
-            + actions.nbytes
-            + rewards.nbytes
-            + terminated.nbytes
-            + truncated.nbytes
-            + to_play_seat.nbytes
-            + behavior_logp.nbytes
-            + values.nbytes
-            + episode_seed.nbytes
-            + policy_train_mask.nbytes
-            + opponent_context_index.nbytes
-            + bootstrap_obs.nbytes
-            + bootstrap_actor.nbytes
-            + bootstrap_value.nbytes
-        )
-        if teacher_family is not None:
-            assert teacher_slot is not None
-            assert teacher_move_source is not None
-            assert teacher_attack_type is not None
-            assert teacher_action is not None
-            assert teacher_valid is not None
-            counters["copied_bytes_estimate"] += int(
-                teacher_family.nbytes
-                + teacher_slot.nbytes
-                + teacher_move_source.nbytes
-                + teacher_attack_type.nbytes
-                + teacher_action.nbytes
-                + teacher_valid.nbytes
-            )
         _merge_simulator_timing_counters(counters, actor.env)
         counters["collect_actor_unroll_ms"] += int((time.perf_counter() - unroll_started) * 1000.0)
         actor.next_unroll_seq += 1

@@ -117,7 +117,7 @@ class QueueRuntimePolicyOutputMixin:
             focal_model = _actor_inference_model(actor)
             opponent_context_index = opponent_context_indices_for_model(
                 focal_model,
-                actor.opponent_policy_id_by_env,
+                actor.opponent_policy_id_by_env.tolist(),
                 batch_size=actor.opponent_policy_id_by_env.shape[0],
             )
             self._apply_policy_rows_ids(

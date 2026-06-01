@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+from weiss_rl.experiments.main_league_multiobjective_gate import FIXED_THESIS_OPPONENTS
 from weiss_rl.experiments.paired_swing_report import (
     PairedSwingReportConfig,
     build_paired_swing_report,
 )
+from weiss_rl.experiments.paired_swing_report_reporting import (
+    paired_swing_report_output_payload,
+)
+from weiss_rl.experiments.paired_swing_report_runtime import paired_swing_report_config_from_args
 
 
 def _write_compare_json(path: Path) -> Path:
@@ -70,6 +76,85 @@ def _write_compare_json(path: Path) -> Path:
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return path
+
+
+def test_paired_swing_report_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
+    from weiss_rl.experiments import (
+        paired_swing_report,
+        paired_swing_report_cli,
+        paired_swing_report_entrypoint,
+        paired_swing_report_runtime,
+    )
+
+    assert paired_swing_report_entrypoint._build_parser is paired_swing_report_cli.build_paired_swing_report_parser
+    assert paired_swing_report_entrypoint.run_paired_swing_report is paired_swing_report_runtime.run_paired_swing_report
+    assert paired_swing_report_entrypoint.PairedSwingReportConfig is paired_swing_report.PairedSwingReportConfig
+    assert paired_swing_report_entrypoint.build_paired_swing_report is paired_swing_report.build_paired_swing_report
+    assert paired_swing_report_entrypoint.write_paired_swing_report is paired_swing_report.write_paired_swing_report
+
+
+def test_paired_swing_report_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.paired_swing_report_cli import build_paired_swing_report_parser
+
+    args = build_paired_swing_report_parser().parse_args(
+        [
+            "--compare-json",
+            str(tmp_path / "compare.json"),
+            "--output-json",
+            str(tmp_path / "report.json"),
+        ]
+    )
+
+    assert args.compare_json == [tmp_path / "compare.json"]
+    assert args.opponent_pool_jsonl == []
+    assert args.fixed_opponent is None
+    assert args.learned_opponent == []
+    assert args.max_examples_per_bucket == 24
+    assert args.notes == ""
+    assert args.output_json == tmp_path / "report.json"
+
+
+def test_paired_swing_report_runtime_maps_args_and_resolves_inputs(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        compare_json=[tmp_path / "compare.json"],
+        opponent_pool_jsonl=[tmp_path / "pool.jsonl"],
+        fixed_opponent=None,
+        learned_opponent=["policy_000004"],
+        max_examples_per_bucket=9,
+        notes="unit",
+    )
+
+    config = paired_swing_report_config_from_args(args)
+
+    assert config == PairedSwingReportConfig(
+        compare_jsons=((tmp_path / "compare.json").resolve(),),
+        opponent_pool_jsonls=((tmp_path / "pool.jsonl").resolve(),),
+        fixed_opponents=FIXED_THESIS_OPPONENTS,
+        learned_opponents=("policy_000004",),
+        max_examples_per_bucket=9,
+        notes="unit",
+    )
+
+
+def test_paired_swing_report_reporting_preserves_compact_console_payload(tmp_path: Path) -> None:
+    report = {
+        "aggregate": {
+            "groups": {
+                "all": {"delta_wins": 2},
+                "fixed": {"delta_wins": 1},
+                "learned": {"delta_wins": -1},
+                "hard_negative": {"delta_wins": -2},
+            }
+        }
+    }
+
+    assert paired_swing_report_output_payload(output_json=tmp_path / "report.json", report=report) == {
+        "output_json": (tmp_path / "report.json").as_posix(),
+        "all_delta_wins": 2,
+        "fixed_delta_wins": 1,
+        "learned_delta_wins": -1,
+        "hard_negative_delta_wins": -2,
+    }
 
 
 def test_paired_swing_report_summarizes_fixed_learned_and_pool_tags(tmp_path: Path) -> None:

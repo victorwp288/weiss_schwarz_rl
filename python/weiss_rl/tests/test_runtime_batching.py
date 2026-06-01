@@ -9,12 +9,16 @@ import pytest
 
 from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.runtime import QueueRuntime, RuntimeUnroll
+from weiss_rl.runtime_components import impala_learner_batch, ppo_learner_batch
 from weiss_rl.runtime_components.batching import (
     actor_perspective_discounts,
     build_impala_learner_batch,
+    build_ppo_learner_batch,
+    gae_advantages,
+)
+from weiss_rl.runtime_components.legal_batching import (
     concatenate_batch_legal_actions,
     concatenate_legal_actions,
-    gae_advantages,
     require_ids_offsets,
     slice_packed_rows_with_meta,
     structured_legal_batch_from_packed,
@@ -52,6 +56,132 @@ def _make_runtime_unroll(
         behavior_logits=None,
         counters=counters,
     )
+
+
+def test_runtime_batching_facade_reexports_algorithm_payload_builders() -> None:
+    assert build_impala_learner_batch is impala_learner_batch.build_impala_learner_batch
+    assert build_ppo_learner_batch is ppo_learner_batch.build_ppo_learner_batch
+    assert build_impala_learner_batch.__module__ == "weiss_rl.runtime_components.impala_learner_batch"
+    assert build_ppo_learner_batch.__module__ == "weiss_rl.runtime_components.ppo_learner_batch"
+
+
+def test_build_impala_batch_exposes_stable_learner_payload_contract() -> None:
+    unroll = replace(
+        _make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=0),
+        behavior_logp=np.asarray([[-0.25]], dtype=np.float32),
+        values=np.asarray([[0.5]], dtype=np.float32),
+        bootstrap_value=np.asarray([0.75], dtype=np.float32),
+        bootstrap_obs=np.asarray([[3.0]], dtype=np.float32),
+        bootstrap_actor=np.asarray([1], dtype=np.int64),
+        final_hidden_state=np.asarray([[[2.0]]], dtype=np.float32),
+    )
+
+    batch = build_impala_learner_batch(
+        [unroll],
+        action_dim=1,
+        gamma=1.0,
+        truncation_reward=0.0,
+        truncation_bootstrap_value=False,
+        vtrace_rho_bar=1.25,
+        vtrace_c_bar=0.75,
+    )
+
+    assert set(batch) == {
+        "obs",
+        "actions",
+        "legal_actions",
+        "legal_mask",
+        "legal_action_meta",
+        "to_play_seat",
+        "actor",
+        "initial_hidden_state",
+        "rewards",
+        "discounts",
+        "reset_before_step",
+        "policy_train_mask",
+        "opponent_context_index",
+        "teacher_family",
+        "teacher_slot",
+        "teacher_move_source",
+        "teacher_attack_type",
+        "teacher_action",
+        "teacher_valid",
+        "trajectory_retention_valid",
+        "bootstrap_obs",
+        "bootstrap_actor",
+        "final_hidden_state",
+        "behavior_logp",
+        "behavior_values",
+        "bootstrap_value",
+        "vtrace_rho_bar",
+        "vtrace_c_bar",
+        "terminal_outcome_backfill_count",
+        "terminal_outcome_backfill_total_micros",
+        "terminal_outcome_trace_backfill_count",
+        "terminal_outcome_trace_backfill_total_micros",
+    }
+    assert batch["actor"] is batch["to_play_seat"]
+    assert np.allclose(batch["behavior_logp"], np.asarray([[-0.25]], dtype=np.float32))
+    assert np.allclose(batch["behavior_values"], np.asarray([[0.5]], dtype=np.float32))
+    assert batch["bootstrap_value"].tolist() == pytest.approx([0.75])
+    assert np.allclose(batch["bootstrap_obs"], np.asarray([[3.0]], dtype=np.float32))
+    assert batch["bootstrap_actor"].tolist() == [1]
+    assert np.allclose(batch["final_hidden_state"], np.asarray([[[2.0]]], dtype=np.float32))
+    assert batch["vtrace_rho_bar"] == pytest.approx(1.25)
+    assert batch["vtrace_c_bar"] == pytest.approx(0.75)
+    assert batch["terminal_outcome_backfill_count"] == 0
+    assert batch["terminal_outcome_trace_backfill_total_micros"] == 0
+
+
+def test_build_ppo_batch_exposes_stable_learner_payload_contract() -> None:
+    unroll = replace(
+        _make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=0),
+        behavior_logp=np.asarray([[-0.25]], dtype=np.float32),
+        values=np.asarray([[0.5]], dtype=np.float32),
+        rewards=np.asarray([[0.25]], dtype=np.float32),
+        bootstrap_value=np.asarray([0.75], dtype=np.float32),
+    )
+
+    batch = build_ppo_learner_batch(
+        [unroll],
+        action_dim=1,
+        gamma=1.0,
+        gae_lambda=1.0,
+        truncation_reward=0.0,
+        truncation_bootstrap_value=False,
+    )
+
+    assert set(batch) == {
+        "obs",
+        "actions",
+        "legal_actions",
+        "legal_mask",
+        "legal_action_meta",
+        "to_play_seat",
+        "actor",
+        "initial_hidden_state",
+        "rewards",
+        "discounts",
+        "reset_before_step",
+        "policy_train_mask",
+        "opponent_context_index",
+        "teacher_family",
+        "teacher_slot",
+        "teacher_move_source",
+        "teacher_attack_type",
+        "teacher_action",
+        "teacher_valid",
+        "trajectory_retention_valid",
+        "old_logp",
+        "old_values",
+        "returns",
+        "advantages",
+    }
+    assert batch["actor"] is batch["to_play_seat"]
+    assert np.allclose(batch["old_logp"], np.asarray([[-0.25]], dtype=np.float32))
+    assert np.allclose(batch["old_values"], np.asarray([[0.5]], dtype=np.float32))
+    assert np.allclose(batch["advantages"], np.asarray([[0.5]], dtype=np.float32))
+    assert np.allclose(batch["returns"], np.asarray([[1.0]], dtype=np.float32))
 
 
 def test_runtime_batching_concatenates_packed_legal_actions_in_time_major_order() -> None:
@@ -235,6 +365,36 @@ def test_runtime_batching_concatenate_legal_actions_reorders_packed_rows_to_matc
     assert combined.action_space == 64
     assert combined.offsets.tolist() == [0, 1, 2, 3, 4, 5, 6, 7, 8]
     assert combined.ids.tolist() == [10, 11, 30, 31, 20, 21, 40, 41]
+
+
+def test_runtime_batching_mixed_legal_payloads_fall_back_to_dense_mask() -> None:
+    packed_unroll = replace(
+        _make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=0),
+        obs=np.zeros((2, 1, 1), dtype=np.float32),
+        legal_actions=LegalActionBatch.from_packed(
+            np.asarray([1, 3, 2], dtype=np.uint32),
+            np.asarray([0, 2, 3], dtype=np.uint32),
+            action_space=5,
+        ),
+    )
+    mask_unroll = replace(
+        _make_runtime_unroll(actor_id=1, unroll_seq=0, behavior_policy_version=0),
+        obs=np.zeros((2, 1, 1), dtype=np.float32),
+        legal_actions=LegalActionBatch.from_mask(
+            np.asarray([[[True, False, False, False, True]], [[False, True, False, True, False]]], dtype=np.bool_),
+            action_space=5,
+        ),
+    )
+
+    combined = concatenate_legal_actions([packed_unroll, mask_unroll], action_space=5)
+
+    assert combined.ids is None
+    assert combined.offsets is None
+    assert combined.mask is not None
+    assert combined.mask.tolist() == [
+        [[False, True, False, True, False], [True, False, False, False, True]],
+        [[False, False, True, False, False], [False, True, False, True, False]],
+    ]
 
 
 def test_runtime_batching_slices_packed_rows_with_meta() -> None:
@@ -655,3 +815,66 @@ def test_build_ppo_batch_uses_stored_behavior_bootstrap_values() -> None:
 
     assert batch["advantages"][:, 0].tolist() == pytest.approx([0.25])
     assert batch["returns"][:, 0].tolist() == pytest.approx([0.25])
+
+
+def test_build_ppo_batch_preserves_shared_auxiliary_labels() -> None:
+    labeled = replace(
+        _make_runtime_unroll(actor_id=0, unroll_seq=0, behavior_policy_version=0),
+        obs=np.zeros((2, 1, 1), dtype=np.float32),
+        actions=np.zeros((2, 1), dtype=np.int64),
+        rewards=np.zeros((2, 1), dtype=np.float32),
+        terminated=np.zeros((2, 1), dtype=np.bool_),
+        truncated=np.zeros((2, 1), dtype=np.bool_),
+        to_play_seat=np.zeros((2, 1), dtype=np.int64),
+        behavior_logp=np.zeros((2, 1), dtype=np.float32),
+        values=np.zeros((2, 1), dtype=np.float32),
+        legal_actions=LegalActionBatch.from_mask(np.ones((2, 1, 3), dtype=np.bool_)),
+        bootstrap_obs=np.zeros((1, 1), dtype=np.float32),
+        bootstrap_actor=np.zeros((1,), dtype=np.int64),
+        bootstrap_value=np.zeros((1,), dtype=np.float32),
+        initial_hidden_state=np.zeros((1, 1), dtype=np.float32),
+        final_hidden_state=np.zeros((1, 1), dtype=np.float32),
+        episode_seed=np.zeros((2, 1), dtype=np.uint64),
+        policy_train_mask=np.ones((2, 1), dtype=np.bool_),
+        teacher_action=np.asarray([[4], [5]], dtype=np.int32),
+        teacher_valid=np.asarray([[True], [False]], dtype=np.bool_),
+        trajectory_retention_valid=np.asarray([[False], [True]], dtype=np.bool_),
+    )
+    unlabeled = replace(
+        _make_runtime_unroll(actor_id=1, unroll_seq=0, behavior_policy_version=0),
+        obs=np.zeros((2, 2, 1), dtype=np.float32),
+        actions=np.zeros((2, 2), dtype=np.int64),
+        rewards=np.zeros((2, 2), dtype=np.float32),
+        terminated=np.zeros((2, 2), dtype=np.bool_),
+        truncated=np.zeros((2, 2), dtype=np.bool_),
+        to_play_seat=np.zeros((2, 2), dtype=np.int64),
+        behavior_logp=np.zeros((2, 2), dtype=np.float32),
+        values=np.zeros((2, 2), dtype=np.float32),
+        legal_actions=LegalActionBatch.from_mask(np.ones((2, 2, 3), dtype=np.bool_)),
+        bootstrap_obs=np.zeros((2, 1), dtype=np.float32),
+        bootstrap_actor=np.zeros((2,), dtype=np.int64),
+        bootstrap_value=np.zeros((2,), dtype=np.float32),
+        initial_hidden_state=np.zeros((2, 1), dtype=np.float32),
+        final_hidden_state=np.zeros((2, 1), dtype=np.float32),
+        episode_seed=np.zeros((2, 2), dtype=np.uint64),
+        policy_train_mask=np.ones((2, 2), dtype=np.bool_),
+        teacher_action=None,
+        teacher_valid=None,
+        trajectory_retention_valid=None,
+    )
+
+    batch = build_ppo_learner_batch(
+        [labeled, unlabeled],
+        action_dim=3,
+        gamma=0.99,
+        gae_lambda=0.95,
+        truncation_reward=0.0,
+        truncation_bootstrap_value=True,
+    )
+
+    assert batch["teacher_action"] is not None
+    assert batch["teacher_action"].tolist() == [[4, -1, -1], [5, -1, -1]]
+    assert batch["teacher_valid"] is not None
+    assert batch["teacher_valid"].tolist() == [[True, False, False], [False, False, False]]
+    assert batch["trajectory_retention_valid"] is not None
+    assert batch["trajectory_retention_valid"].tolist() == [[False, False, False], [True, False, False]]

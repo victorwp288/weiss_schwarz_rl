@@ -9,9 +9,15 @@ import torch
 from weiss_rl.core.masking import masked_logp_from_mask
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
 from weiss_rl.runtime_components.batching import actor_perspective_discounts
-
-IMPALA_ALGORITHMS = frozenset({"impala_vtrace_gru", "impala_vtrace_ff", "structured_v2", "impala_vtrace_structured_v1"})
-PPO_ALGORITHMS = frozenset({"ppo_lite_masked_v1"})
+from weiss_rl.training.algorithm_families import (
+    IMPALA_ALGORITHMS as IMPALA_ALGORITHMS,
+)
+from weiss_rl.training.algorithm_families import (
+    PPO_ALGORITHMS as PPO_ALGORITHMS,
+)
+from weiss_rl.training.algorithm_families import (
+    training_algorithm_family,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +34,14 @@ class MinimalRollout:
     values: np.ndarray
     bootstrap_obs: np.ndarray
     bootstrap_actor: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class _ImpalaBatchInputs:
+    rewards: np.ndarray
+    discounts: np.ndarray
+    reset_before_step: np.ndarray
+    vtrace_result: VTraceTargets
 
 
 def bootstrap_values(
@@ -61,7 +75,8 @@ def collect_training_batch(
 ) -> Any:
     """Collect one algorithm-specific training batch from the queue runtime."""
 
-    if algorithm in IMPALA_ALGORITHMS:
+    family = training_algorithm_family(algorithm)
+    if family == "impala":
         return runtime.collect_update_batch(
             gamma=float(rewards_config.gamma),
             truncation_reward=float(rewards_config.truncation.reward),
@@ -69,7 +84,7 @@ def collect_training_batch(
             vtrace_rho_bar=float(training_config.vtrace_rho_bar),
             vtrace_c_bar=float(training_config.vtrace_c_bar),
         )
-    if algorithm in PPO_ALGORITHMS:
+    if family == "ppo":
         return runtime.collect_policy_batch(
             gamma=float(rewards_config.gamma),
             gae_lambda=float(training_config.ppo_gae_lambda),
@@ -77,6 +92,110 @@ def collect_training_batch(
             truncation_bootstrap_value=bool(rewards_config.truncation.bootstrap_value),
         )
     raise RuntimeError(f"Unsupported training.algorithm: {algorithm}")
+
+
+def _training_and_rewards_config(stack: Any) -> tuple[Any, Any]:
+    training_config = stack.config.training
+    rewards_config = stack.config.rewards
+    if training_config is None or rewards_config is None:
+        raise RuntimeError("The canonical single-node path requires training and rewards config blocks")
+    return training_config, rewards_config
+
+
+def _rollout_target_logp(
+    rollout: MinimalRollout,
+    *,
+    action_dim: int,
+    pass_action_id: int,
+) -> np.ndarray:
+    return masked_logp_from_mask(
+        rollout.logits.reshape(-1, action_dim),
+        rollout.legal_mask.reshape(-1, action_dim),
+        rollout.actions.reshape(-1),
+        pass_action_id=pass_action_id,
+    ).reshape(rollout.actions.shape)
+
+
+def _rollout_done_flags(rollout: MinimalRollout) -> np.ndarray:
+    return np.logical_or(rollout.terminated, rollout.truncated)
+
+
+def _reset_before_step(done: np.ndarray) -> np.ndarray:
+    reset_before_step = np.zeros_like(done, dtype=np.bool_)
+    reset_before_step[1:] = done[:-1]
+    return reset_before_step
+
+
+def _values_with_bootstrap(rollout: MinimalRollout, bootstrap_value: np.ndarray) -> np.ndarray:
+    return np.concatenate([rollout.values, bootstrap_value[np.newaxis, :]], axis=0)
+
+
+def _impala_batch_inputs(
+    *,
+    rollout: MinimalRollout,
+    bootstrap_value: np.ndarray,
+    action_dim: int,
+    pass_action_id: int,
+    gamma: float,
+    vtrace_rho_bar: float,
+    vtrace_c_bar: float,
+) -> _ImpalaBatchInputs:
+    target_logp = _rollout_target_logp(
+        rollout,
+        action_dim=action_dim,
+        pass_action_id=pass_action_id,
+    )
+    rewards = np.asarray(rollout.rewards, dtype=np.float32)
+    done = _rollout_done_flags(rollout)
+    discounts = actor_perspective_discounts(
+        done=done,
+        to_play_seat=rollout.to_play_seat,
+        bootstrap_actor=rollout.bootstrap_actor,
+        gamma=gamma,
+    )
+    values = _values_with_bootstrap(rollout, bootstrap_value)
+    vtrace_result = compute_vtrace_targets(
+        rewards,
+        values,
+        discounts,
+        rollout.behavior_logp,
+        target_logp,
+        rho_bar=vtrace_rho_bar,
+        c_bar=vtrace_c_bar,
+    )
+    return _ImpalaBatchInputs(
+        rewards=rewards,
+        discounts=discounts,
+        reset_before_step=_reset_before_step(done),
+        vtrace_result=vtrace_result,
+    )
+
+
+def _impala_learner_payload(
+    *,
+    rollout: MinimalRollout,
+    inputs: _ImpalaBatchInputs,
+    initial_hidden_state: torch.Tensor,
+    vtrace_rho_bar: float,
+    vtrace_c_bar: float,
+) -> dict[str, Any]:
+    return {
+        "obs": rollout.obs,
+        "actions": rollout.actions,
+        "legal_mask": rollout.legal_mask,
+        "to_play_seat": rollout.to_play_seat,
+        "actor": rollout.to_play_seat,
+        "initial_hidden_state": initial_hidden_state.detach().cpu().numpy(),
+        "rewards": inputs.rewards,
+        "discounts": inputs.discounts,
+        "reset_before_step": inputs.reset_before_step,
+        "behavior_logp": rollout.behavior_logp,
+        "behavior_logits": rollout.logits,
+        "logits": rollout.logits,
+        "vtrace_result": inputs.vtrace_result,
+        "vtrace_rho_bar": float(vtrace_rho_bar),
+        "vtrace_c_bar": float(vtrace_c_bar),
+    }
 
 
 def build_learner_batch(
@@ -88,55 +207,20 @@ def build_learner_batch(
     initial_hidden_state: torch.Tensor,
     pass_action_id: int,
 ) -> dict[str, Any]:
-    training_config = stack.config.training
-    rewards_config = stack.config.rewards
-    if training_config is None or rewards_config is None:
-        raise RuntimeError("The canonical single-node path requires training and rewards config blocks")
-
-    target_logp = masked_logp_from_mask(
-        rollout.logits.reshape(-1, action_dim),
-        rollout.legal_mask.reshape(-1, action_dim),
-        rollout.actions.reshape(-1),
+    training_config, rewards_config = _training_and_rewards_config(stack)
+    inputs = _impala_batch_inputs(
+        rollout=rollout,
+        bootstrap_value=bootstrap_value,
+        action_dim=action_dim,
         pass_action_id=pass_action_id,
-    ).reshape(rollout.actions.shape)
-
-    rewards = np.asarray(rollout.rewards, dtype=np.float32)
-
-    done = np.logical_or(rollout.terminated, rollout.truncated)
-    discounts = actor_perspective_discounts(
-        done=done,
-        to_play_seat=rollout.to_play_seat,
-        bootstrap_actor=rollout.bootstrap_actor,
         gamma=float(rewards_config.gamma),
+        vtrace_rho_bar=float(training_config.vtrace_rho_bar),
+        vtrace_c_bar=float(training_config.vtrace_c_bar),
     )
-    reset_before_step = np.zeros_like(done, dtype=np.bool_)
-    reset_before_step[1:] = done[:-1]
-
-    values = np.concatenate([rollout.values, bootstrap_value[np.newaxis, :]], axis=0)
-    vtrace_result: VTraceTargets = compute_vtrace_targets(
-        rewards,
-        values,
-        discounts,
-        rollout.behavior_logp,
-        target_logp,
-        rho_bar=training_config.vtrace_rho_bar,
-        c_bar=training_config.vtrace_c_bar,
+    return _impala_learner_payload(
+        rollout=rollout,
+        inputs=inputs,
+        initial_hidden_state=initial_hidden_state,
+        vtrace_rho_bar=float(training_config.vtrace_rho_bar),
+        vtrace_c_bar=float(training_config.vtrace_c_bar),
     )
-
-    return {
-        "obs": rollout.obs,
-        "actions": rollout.actions,
-        "legal_mask": rollout.legal_mask,
-        "to_play_seat": rollout.to_play_seat,
-        "actor": rollout.to_play_seat,
-        "initial_hidden_state": initial_hidden_state.detach().cpu().numpy(),
-        "rewards": rewards,
-        "discounts": discounts,
-        "reset_before_step": reset_before_step,
-        "behavior_logp": rollout.behavior_logp,
-        "behavior_logits": rollout.logits,
-        "logits": rollout.logits,
-        "vtrace_result": vtrace_result,
-        "vtrace_rho_bar": float(training_config.vtrace_rho_bar),
-        "vtrace_c_bar": float(training_config.vtrace_c_bar),
-    }

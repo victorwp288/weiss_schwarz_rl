@@ -46,7 +46,7 @@ else
 endif
 
 check-placeholders:
-	@$(PYRUN) python/scripts/check_core_placeholders.py
+	@$(PYRUN) -m weiss_rl.diagnostics.core_placeholder_check_entrypoint
 
 lint:
 	@$(PYRUN) -m ruff check python tests examples python/scripts
@@ -58,7 +58,7 @@ fmt-check:
 	@$(PYRUN) -m ruff format --check python tests examples python/scripts
 
 type:
-	@$(PYRUN) -m mypy python/scripts/thesis_run.py python/scripts/eval.py python/scripts/play_vs_model.py
+	@$(PYRUN) -m mypy python/weiss_rl/workflows/thesis_wrapper.py python/weiss_rl/workflows/eval_entrypoint.py python/weiss_rl/human_play/play_vs_model_entrypoint.py
 
 deadcode:
 	@$(PYRUN) -m vulture python/weiss_rl python/scripts examples --min-confidence 80
@@ -67,13 +67,13 @@ test:
 	@$(PYRUN) -m pytest -q python/weiss_rl/tests
 
 standard-wrapper-smoke:
-	@$(PYRUN) python/scripts/thesis_run.py --preset standard --run-label standard_surface_ci --dry-run --skip-compare
+	@$(PYRUN) -m weiss_rl.workflows.thesis_wrapper --preset standard --run-label standard_surface_ci --dry-run --skip-compare
 
 standard-auto-gpu-wrapper-smoke:
-	@$(PYRUN) python/scripts/thesis_run.py --preset standard-auto-gpu --run-label standard_auto_gpu_surface_ci --dry-run --skip-compare
+	@$(PYRUN) -m weiss_rl.workflows.thesis_wrapper --preset standard-auto-gpu --run-label standard_auto_gpu_surface_ci --dry-run --skip-compare
 
 verify: sync
-	@$(PYRUN) python/scripts/verify_repo.py
+	@$(PYRUN) -m weiss_rl.workflows.verify_repo_entrypoint
 
 check: verify
 
@@ -94,33 +94,30 @@ else
 endif
 
 artifact-contract: sync
-	@$(MAKE) artifact-hygiene
-	@rm -rf runs/paper_readiness_fixture_ci
-	@$(PYRUN) python/scripts/write_paper_readiness_fixture.py --run-dir runs/paper_readiness_fixture_ci
-	@$(PYRUN) python/scripts/paper_readiness_check.py --run-dir runs/paper_readiness_fixture_ci
+	@$(PYRUN) -m weiss_rl.workflows.artifact_contract_entrypoint
 
 train-min:
-	@$(PYRUN) python/scripts/train.py --stack-config configs/stack_smoke.yaml
+	@$(PYRUN) -m weiss_rl.training.train_entrypoint --stack-config configs/stack_smoke.yaml
 
 train-inline-smoke:
-	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --run-label m3_08_smoke --device cpu
+	@PYTHONPATH=$(abspath ../weiss-schwarz-simulator/python)$${PYTHONPATH:+:$$PYTHONPATH} $(PYRUN) -m weiss_rl.training.train_entrypoint --stack-config configs/presets/structured_acceptance_standard.yaml --run-label m3_08_smoke --device cpu
 
 toy-public-e2e:
 	@rm -rf runs/toy_public_demo_ci
-	@$(PYRUN) python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --public-demo --run-label toy_public_demo_ci
-	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --public-demo --run-dir runs/toy_public_demo_ci
-	@$(PYRUN) python/scripts/make_figures.py --public-demo --final-eval-dir runs/toy_public_demo_ci/eval/final_eval --out-dir runs/toy_public_demo_ci/figures
+	@$(PYRUN) -m weiss_rl.training.train_entrypoint --stack-config configs/presets/structured_acceptance_standard.yaml --public-demo --run-label toy_public_demo_ci
+	@$(PYRUN) -m weiss_rl.workflows.eval_entrypoint --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --public-demo --run-dir runs/toy_public_demo_ci
+	@$(PYRUN) -m weiss_rl.workflows.figures_entrypoint --public-demo --final-eval-dir runs/toy_public_demo_ci/eval/final_eval --out-dir runs/toy_public_demo_ci/figures
 
 artifact-hygiene:
 	@$(MAKE) toy-public-e2e
-	@$(PYRUN) python/scripts/artifact_scan.py --artifact-root runs/toy_public_demo_ci
+	@$(PYRUN) -m weiss_rl.diagnostics.artifact_scan_entrypoint --artifact-root runs/toy_public_demo_ci
 
 eval-dev:
-	@$(PYRUN) python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
+	@$(PYRUN) -m weiss_rl.workflows.eval_entrypoint --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
 
 figures:
 	@test -n "$(RUN_DIR)" || { echo "Usage: make figures RUN_DIR=runs/<run_dir> [FIG_ID=seat_bias] [FORMATS=\"pdf png\"]" >&2; exit 1; }
-	@$(PYRUN) python/scripts/make_figures.py --run-dir "$(RUN_DIR)" $(strip $(FIGURE_ID_ARG)) $(strip $(FIGURE_FORMAT_ARGS))
+	@$(PYRUN) -m weiss_rl.workflows.figures_entrypoint --run-dir "$(RUN_DIR)" $(strip $(FIGURE_ID_ARG)) $(strip $(FIGURE_FORMAT_ARGS))
 
 clean:
 	@find . -type d -name '__pycache__' -prune -exec rm -rf {} +

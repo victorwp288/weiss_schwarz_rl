@@ -2,6 +2,10 @@
 
 Run these from the repo root.
 
+Package modules are the canonical command surface. Files under `python/scripts/`
+remain supported as compatibility shims for older runs, notebooks, and shell
+history.
+
 Preferred workflow after setup:
 
 ```bash
@@ -23,15 +27,15 @@ The current ship-ready stack surface is:
 The wrapper exposes them as named presets, so the shortest standard commands are:
 
 ```bash
-uv run python python/scripts/thesis_run.py --list-presets
-uv run python python/scripts/train.py --stack-config configs/presets/baselines/structured_acceptance_tiny32_fast_noleague.yaml --run-label b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset standard --run-label thesis_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/thesis_run.py --preset standard-auto-gpu --run-label thesis_server_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
-uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --run-dir runs/<run_dir>
-uv run python python/scripts/play_vs_model.py --run-dir runs/<run_dir>
+uv run python -m weiss_rl.workflows.thesis_wrapper --list-presets
+uv run python -m weiss_rl.training.train_entrypoint --stack-config configs/presets/baselines/structured_acceptance_tiny32_fast_noleague.yaml --run-label b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python -m weiss_rl.workflows.thesis_wrapper --preset standard --run-label thesis_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --device cuda --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python -m weiss_rl.workflows.thesis_wrapper --preset standard-auto-gpu --run-label thesis_server_seed1 --b1-baseline-run-dir runs/b1_anchor_seed1 --num-envs 4096 --unroll-length 64 --runtime-mode train_async_fast --max-updates 200
+uv run python -m weiss_rl.workflows.eval_entrypoint --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --run-dir runs/<run_dir>
+uv run python -m weiss_rl.human_play.play_vs_model_entrypoint --run-dir runs/<run_dir>
 ```
 
-`thesis_run.py --preset standard` now trains with `structured_acceptance_standard.yaml`, requires `--run-label`, imports the canonical `B1 NoLeague baseline` from `--b1-baseline-run-dir`, and by default evaluates with `structured_acceptance_standard_thesis_eval.yaml`.
+`weiss_rl.workflows.thesis_wrapper --preset standard` now trains with `structured_acceptance_standard.yaml`, requires `--run-label`, imports the canonical `B1 NoLeague baseline` from `--b1-baseline-run-dir`, and by default evaluates with `structured_acceptance_standard_thesis_eval.yaml`.
 
 For the current recommended ablations and what they answer, see `docs/standard_recipe.md`.
 
@@ -40,7 +44,7 @@ For the current recommended ablations and what they answer, see `docs/standard_r
 Use the cross-platform verification entrypoint for the release-facing local check:
 
 ```bash
-uv run python python/scripts/verify_repo.py
+uv run python -m weiss_rl.workflows.verify_repo_entrypoint
 ```
 
 If GNU Make is installed, `make verify` delegates to the same command chain. On Unix-like shells, `bash scripts/run_local_ci_parity.sh` remains the matching wrapper.
@@ -56,7 +60,7 @@ make train-min
 # or, when you want a low-level simulator-backed smoke on the canonical stack
 make train-inline-smoke
 # or directly
-PYTHONPATH=../weiss-schwarz-simulator/python uv run python python/scripts/train.py --stack-config configs/presets/structured_acceptance_standard.yaml --run-label m3_08_smoke --device cpu
+PYTHONPATH=../weiss-schwarz-simulator/python uv run python -m weiss_rl.training.train_entrypoint --stack-config configs/presets/structured_acceptance_standard.yaml --run-label m3_08_smoke --device cpu
 ```
 
 What it does today:
@@ -86,7 +90,7 @@ Important: the simulator-backed training path requires the active interpreter it
 Resume support:
 
 ```bash
-uv run python python/scripts/train.py \
+uv run python -m weiss_rl.training.train_entrypoint \
   --stack-config configs/presets/structured_acceptance_standard.yaml \
   --resume-run-dir runs/my_locked_run \
   --resume-from latest \
@@ -109,7 +113,7 @@ The same entrypoint also supports the shipped baseline stacks:
 Public-safe toy/demo staging:
 
 ```bash
-uv run python python/scripts/train.py \
+uv run python -m weiss_rl.training.train_entrypoint \
   --stack-config configs/presets/structured_acceptance_standard.yaml \
   --public-demo \
   --run-label toy_public_demo
@@ -124,13 +128,13 @@ Evaluation reporting and contract-check entrypoint.
 Contract-only smoke check:
 
 ```bash
-uv run python python/scripts/eval.py --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
+uv run python -m weiss_rl.workflows.eval_entrypoint --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml
 ```
 
 Summary export from an existing episodes file:
 
 ```bash
-uv run python python/scripts/eval.py \
+uv run python -m weiss_rl.workflows.eval_entrypoint \
   --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml \
   --episodes-jsonl runs/some_eval/episodes.jsonl \
   --summary-json runs/some_eval/summary.json \
@@ -157,7 +161,7 @@ What it does **not** do today:
 Public-safe toy/demo eval:
 
 ```bash
-uv run python python/scripts/eval.py \
+uv run python -m weiss_rl.workflows.eval_entrypoint \
   --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml \
   --public-demo \
   --run-dir runs/toy_public_demo
@@ -170,7 +174,7 @@ That path writes demo-only `final_eval/` artifacts and labels them clearly in me
 Thin orchestration wrapper for the canonical thesis flow: `train.py -> eval.py -> compare_runs.py`.
 
 ```bash
-uv run python python/scripts/thesis_run.py \
+uv run python -m weiss_rl.workflows.thesis_wrapper \
   --preset standard \
   --run-label thesis_seed1 \
   --b1-baseline-run-dir runs/b1_anchor_seed1 \
@@ -181,7 +185,7 @@ uv run python python/scripts/thesis_run.py \
 Dry-run planning:
 
 ```bash
-uv run python python/scripts/thesis_run.py \
+uv run python -m weiss_rl.workflows.thesis_wrapper \
   --preset standard \
   --run-label thesis_seed1 \
   --dry-run
@@ -287,8 +291,8 @@ What it does today:
 Paper figure renderer for completed run artifacts.
 
 ```bash
-uv run python python/scripts/make_figures.py --run-dir runs/<run_dir>
-uv run python python/scripts/make_figures.py --run-dir runs/<run_dir> --fig-id seat_bias
+uv run python -m weiss_rl.workflows.figures_entrypoint --run-dir runs/<run_dir>
+uv run python -m weiss_rl.workflows.figures_entrypoint --run-dir runs/<run_dir> --fig-id seat_bias
 ```
 
 Current behavior:
@@ -303,12 +307,12 @@ Current behavior:
 - writes `fig_*.pdf` and `fig_*.png` under `runs/<run_dir>/figures/paper/`
 - with `--public-demo`, renders a clearly-labeled demo-only placeholder bundle from `final_eval/summary.json`
 
-### `launch_experiments.py`
+### `weiss_rl.experiments.launch_experiments_entrypoint`
 
 Single-node launcher for multi-seed and multi-stack runs. It round-robins jobs across a provided device list and falls back cleanly to one GPU or CPU.
 
 ```bash
-uv run python python/scripts/launch_experiments.py \
+uv run python -m weiss_rl.experiments.launch_experiments_entrypoint \
   --group-label baseline_suite \
   --stack-config configs/presets/baselines/noleague_impala.yaml \
   --stack-config configs/presets/baselines/ppo_lite.yaml \
@@ -318,12 +322,12 @@ uv run python python/scripts/launch_experiments.py \
   --device cuda:1
 ```
 
-### `compare_runs.py`
+### `weiss_rl.workflows.compare_runs_entrypoint`
 
 Cross-run comparison renderer for baseline and scaling artifacts. It writes seed-aggregated benchmark plots plus JSON/CSV/Markdown summaries from existing run directories.
 
 ```bash
-uv run python python/scripts/compare_runs.py \
+uv run python -m weiss_rl.workflows.compare_runs_entrypoint \
   --run-dir runs/impala_main_seed1 \
   --run-dir runs/ppo_baseline_seed1
 ```
@@ -331,16 +335,16 @@ uv run python python/scripts/compare_runs.py \
 Or directly from a launcher/sweep group summary:
 
 ```bash
-uv run python python/scripts/compare_runs.py \
+uv run python -m weiss_rl.workflows.compare_runs_entrypoint \
   --launch-group-summary runs/launch_groups/impala_tune_a/summary.json
 ```
 
-### `sweep_experiments.py`
+### `weiss_rl.experiments.sweep_experiments_entrypoint`
 
 Compact reproducible sweep launcher for the thesis baselines. It uses deterministic config overrides so each sweep run still has a proper canonical config hash and manifest.
 
 ```bash
-uv run python python/scripts/sweep_experiments.py \
+uv run python -m weiss_rl.experiments.sweep_experiments_entrypoint \
   --preset impala_compact \
   --group-label impala_tune_a \
   --seed 1 \
@@ -359,7 +363,7 @@ Current non-claim:
 Public-safe toy/demo figures:
 
 ```bash
-uv run python python/scripts/make_figures.py \
+uv run python -m weiss_rl.workflows.figures_entrypoint \
   --public-demo \
   --final-eval-dir runs/toy_public_demo/eval/final_eval \
   --out-dir runs/toy_public_demo/figures

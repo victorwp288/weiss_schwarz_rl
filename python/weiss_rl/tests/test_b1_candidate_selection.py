@@ -5,12 +5,23 @@ from pathlib import Path
 
 import pytest
 
+from weiss_rl.experiments.b1_candidate_discovery import confirmation_scores
+from weiss_rl.experiments.b1_candidate_publish import (
+    SELECTED_CANDIDATE_ALIAS_METADATA_FORMAT,
+    publish_snapshot_alias,
+)
+from weiss_rl.experiments.b1_candidate_report import candidate_metrics_from_anchor_scores, candidate_sort_key
 from weiss_rl.experiments.b1_candidate_selection import (
     build_b1_candidate_selection,
     load_b1_dev_eval_records,
     load_reference_anchor_scores,
     publish_b1_baseline_alias,
     publish_selected_candidate_alias,
+)
+from weiss_rl.experiments.select_b1_candidate_reporting import command_text, select_b1_candidate_output_lines
+from weiss_rl.experiments.select_b1_candidate_runtime import (
+    baseline_alias_selection_summary,
+    selected_alias_selection_summary,
 )
 
 
@@ -35,6 +46,136 @@ def _write_registry(run_dir: Path, updates: tuple[int, ...]) -> None:
             ],
         },
     )
+
+
+def test_select_b1_candidate_entrypoint_facade_reexports_cli_runtime_and_selection_helpers() -> None:
+    from weiss_rl.experiments import (
+        select_b1_candidate_cli,
+        select_b1_candidate_entrypoint,
+        select_b1_candidate_reporting,
+        select_b1_candidate_runtime,
+    )
+
+    assert select_b1_candidate_entrypoint._build_parser is select_b1_candidate_cli.build_select_b1_candidate_parser
+    assert select_b1_candidate_entrypoint._command_text is select_b1_candidate_reporting.command_text
+    assert select_b1_candidate_entrypoint.run_select_b1_candidate is select_b1_candidate_runtime.run_select_b1_candidate
+    assert select_b1_candidate_entrypoint._baseline_alias_selection_summary is (
+        select_b1_candidate_runtime.baseline_alias_selection_summary
+    )
+    assert select_b1_candidate_entrypoint._selected_alias_selection_summary is (
+        select_b1_candidate_runtime.selected_alias_selection_summary
+    )
+    assert select_b1_candidate_entrypoint.build_b1_candidate_selection is build_b1_candidate_selection
+    assert select_b1_candidate_entrypoint.publish_b1_baseline_alias is publish_b1_baseline_alias
+
+
+def test_select_b1_candidate_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.experiments.select_b1_candidate_cli import build_select_b1_candidate_parser
+
+    parser = build_select_b1_candidate_parser()
+    args = parser.parse_args(["--run-dir", str(tmp_path / "seed_a")])
+
+    assert args.run_dir == [tmp_path / "seed_a"]
+    assert args.stack_config is None
+    assert args.required_anchor is None
+    assert args.confirm_opponent is None
+    assert args.min_required_anchor_score == 0.5
+    assert args.falloff_warning_threshold == 0.05
+    assert args.confirm_paired_seeds == 64
+    assert args.reference_label == "reference"
+    assert args.publish_baseline_alias is False
+    assert args.publish_selected_alias is False
+
+
+def test_select_b1_candidate_alias_selection_summaries_preserve_payload_keys() -> None:
+    summary = {
+        "required_anchors": ["B2 HeuristicPublic", "B3 HeuristicPublicAggro", "B4 HeuristicPublicControl"],
+        "min_required_anchor_score": 0.5,
+    }
+    selected = {
+        "run_name": "seed_a",
+        "train_policy_id": "train_u50_p2",
+        "snapshot_policy_id": "policy_000002",
+        "update_count": 50,
+        "aggregate_score": 0.7,
+        "required_anchor_mean": 0.6,
+        "required_anchor_min": 0.55,
+        "selection_score": 0.58,
+        "confirmatory_dev_eval": {"aggregate_score": 0.71},
+        "selection_score_source": "targeted_confirm",
+        "selection_confirmation_summary_path": "eval/targeted_confirm128/summary.json",
+        "not_exported": "nope",
+    }
+
+    assert baseline_alias_selection_summary(summary=summary, selected=selected) == {
+        "required_anchors": summary["required_anchors"],
+        "min_required_anchor_score": 0.5,
+        "selected": {
+            "run_name": "seed_a",
+            "train_policy_id": "train_u50_p2",
+            "snapshot_policy_id": "policy_000002",
+            "update_count": 50,
+            "aggregate_score": 0.7,
+            "required_anchor_mean": 0.6,
+            "required_anchor_min": 0.55,
+            "selection_score": 0.58,
+            "confirmatory_dev_eval": {"aggregate_score": 0.71},
+        },
+    }
+    assert selected_alias_selection_summary(summary=summary, selected=selected) == {
+        "required_anchors": summary["required_anchors"],
+        "min_required_anchor_score": 0.5,
+        "selected": {
+            "run_name": "seed_a",
+            "train_policy_id": "train_u50_p2",
+            "snapshot_policy_id": "policy_000002",
+            "update_count": 50,
+            "aggregate_score": 0.7,
+            "required_anchor_mean": 0.6,
+            "required_anchor_min": 0.55,
+            "selection_score": 0.58,
+            "selection_score_source": "targeted_confirm",
+            "selection_confirmation_summary_path": "eval/targeted_confirm128/summary.json",
+        },
+    }
+
+
+def test_select_b1_candidate_reporting_preserves_console_lines(tmp_path: Path) -> None:
+    summary = {
+        "candidate_count": 1,
+        "warnings": ["watch this"],
+        "selected": {
+            "run_name": "seed a",
+            "snapshot_policy_id": "policy_000002",
+            "update_count": 50,
+            "selection_score": 0.5812349,
+            "required_anchor_min": 0.55,
+            "eligible": True,
+            "confirmation_command": ["uv", "run", "python", "-m", "module with space"],
+        },
+        "published_baseline_alias": {
+            "policy_id": "b1_noleague_baseline",
+            "alias_for_policy_id": "policy_000002",
+            "update": 50,
+        },
+        "published_selected_alias": {
+            "policy_id": "guided_bootstrap_selected",
+            "alias_for_policy_id": "policy_000002",
+            "update": 50,
+        },
+    }
+
+    assert command_text(["uv", "run", "module with space"]) == 'uv run "module with space"'
+    assert select_b1_candidate_output_lines(summary, output_json=None) == [
+        '{\n  "candidate_count": 1,\n  "warnings": [\n    "watch this"\n  ]\n}',
+        "selected run=seed a snapshot=policy_000002 update=50 score=0.581235 required_min=0.550000 eligible=True",
+        'confirm_command uv run python -m "module with space"',
+        "published_baseline_alias policy_id=b1_noleague_baseline source=policy_000002 update=50",
+        "published_selected_alias policy_id=guided_bootstrap_selected source=policy_000002 update=50",
+    ]
+    assert select_b1_candidate_output_lines(summary, output_json=tmp_path / "summary.json") == [
+        str(tmp_path / "summary.json")
+    ]
 
 
 def test_b1_candidate_selection_maps_train_policy_to_snapshot_and_flags_falloff(tmp_path: Path) -> None:
@@ -126,6 +267,14 @@ def test_b1_candidate_selection_maps_train_policy_to_snapshot_and_flags_falloff(
     assert selected["confirmatory_dev_eval"]["aggregate_score"] == 0.71
     assert selected["confirmatory_dev_eval"]["anchor_scores"]["B4 HeuristicPublicControl"] == 0.58
     assert any("good_seed fell off" in warning for warning in summary["warnings"])
+    assert selected["confirmation_command"][:7] == ["uv", "run", "--extra", "dev", "--extra", "sim", "python"]
+    assert selected["confirmation_command"][7:9] == ["-m", "weiss_rl.eval.targeted_confirm_entrypoint"]
+    run_dir_flag_index = selected["confirmation_command"].index("--run-dir")
+    assert selected["confirmation_command"][run_dir_flag_index + 1] == good.resolve().as_posix()
+    snapshot_registry_index = selected["confirmation_command"].index("--snapshot-registry-json")
+    assert selected["confirmation_command"][snapshot_registry_index + 1].endswith(
+        "good_seed/training/snapshots/registry.json"
+    )
     output_flag_index = selected["confirmation_command"].index("--output-subdir")
     assert selected["confirmation_command"][output_flag_index + 1] == "b1_candidate_confirm64_policy_000002"
 
@@ -212,6 +361,40 @@ def test_b1_candidate_selection_uses_targeted_confirmation_for_eligibility(tmp_p
     assert rejected["selection_score_source"] == "targeted_confirm"
     assert rejected["eligible"] is False
     assert rejected["ineligibility_reasons"] == ["B4 HeuristicPublicControl 0.4900 < 0.5000"]
+
+
+def test_b1_candidate_report_scores_required_anchor_mean_min_and_rank_key() -> None:
+    metrics = candidate_metrics_from_anchor_scores(
+        {
+            "B2 HeuristicPublic": 0.60,
+            "B3 HeuristicPublicAggro": 0.50,
+            "B4 HeuristicPublicControl": 0.45,
+            "B0 RandomLegal": 1.0,
+        },
+        required_anchors=(
+            "B2 HeuristicPublic",
+            "B3 HeuristicPublicAggro",
+            "B4 HeuristicPublicControl",
+        ),
+        min_required_anchor_score=0.50,
+    )
+    candidate = {
+        **metrics,
+        "selection_paired_seeds": 128,
+        "selection_score_source_rank": 2,
+        "aggregate_score": 0.80,
+        "update_count": 50,
+        "run_name": "seed_a",
+    }
+
+    assert metrics["required_anchor_mean"] == pytest.approx((0.60 + 0.50 + 0.45) / 3)
+    assert metrics["required_anchor_min"] == 0.45
+    assert metrics["eligible"] is False
+    assert metrics["ineligibility_reasons"] == ["B4 HeuristicPublicControl 0.4500 < 0.5000"]
+    sort_key = candidate_sort_key(candidate)
+    assert sort_key[:3] == (False, 128, 2)
+    assert sort_key[3] == pytest.approx(0.7 * ((0.60 + 0.50 + 0.45) / 3) + 0.3 * 0.45)
+    assert sort_key[4:] == (0.45, 0.80, 50, "seed_a")
 
 
 def test_b1_candidate_selection_prefers_policy_version_snapshot_over_seed_snapshot(tmp_path: Path) -> None:
@@ -339,6 +522,74 @@ def test_b1_candidate_selection_prefers_complete_highest_seed_confirmation(tmp_p
     assert selected["selection_score_source"] == "targeted_confirm"
     assert selected["selection_confirmation_summary_path"].endswith(
         "targeted_confirm128_policy_000001/targeted_confirm128_summary.json"
+    )
+
+
+def test_b1_candidate_discovery_filters_low_seed_and_incomplete_confirmations(tmp_path: Path) -> None:
+    run_dir = tmp_path / "confirm_discovery"
+    _write_registry(run_dir, (25,))
+    _write_json(
+        run_dir / "eval" / "targeted_confirm32_policy_000001" / "targeted_confirm32_summary.json",
+        {
+            "focal_policy_id": "policy_000001",
+            "paired_seeds": 32,
+            "rows": [
+                {"opponent_policy_id": "B2 HeuristicPublic", "mean": 0.70},
+                {"opponent_policy_id": "B3 HeuristicPublicAggro", "mean": 0.70},
+                {"opponent_policy_id": "B4 HeuristicPublicControl", "mean": 0.70},
+            ],
+        },
+    )
+    _write_json(
+        run_dir / "eval" / "targeted_confirm128_policy_000001_incomplete" / "targeted_confirm128_summary.json",
+        {
+            "focal_policy_id": "policy_000001",
+            "paired_seeds": 128,
+            "rows": [
+                {"opponent_policy_id": "B2 HeuristicPublic", "mean": 0.66},
+                {"opponent_policy_id": "B4 HeuristicPublicControl", "mean": 0.64},
+            ],
+        },
+    )
+    _write_json(
+        run_dir / "eval" / "targeted_confirm64_policy_000001" / "targeted_confirm64_summary.json",
+        {
+            "focal_policy_id": "policy_000001",
+            "paired_seeds": 64,
+            "rows": [
+                {"opponent_policy_id": "B2 HeuristicPublic", "mean": 0.61},
+                {"opponent_policy_id": "B3 HeuristicPublicAggro", "mean": 0.60},
+                {"opponent_policy_id": "B4 HeuristicPublicControl", "mean": 0.59},
+            ],
+        },
+    )
+
+    selected = confirmation_scores(
+        run_dir,
+        "policy_000001",
+        required_anchors=(
+            "B2 HeuristicPublic",
+            "B3 HeuristicPublicAggro",
+            "B4 HeuristicPublicControl",
+        ),
+        min_paired_seeds=64,
+    )
+
+    assert selected is not None
+    assert selected["paired_seeds"] == 64
+    assert selected["summary_path"].endswith("targeted_confirm64_policy_000001/targeted_confirm64_summary.json")
+    assert (
+        confirmation_scores(
+            run_dir,
+            "policy_000001",
+            required_anchors=(
+                "B2 HeuristicPublic",
+                "B3 HeuristicPublicAggro",
+                "B4 HeuristicPublicControl",
+            ),
+            min_paired_seeds=128,
+        )
+        is None
     )
 
 
@@ -667,6 +918,19 @@ def test_publish_selected_candidate_alias_refuses_canonical_b1_alias(tmp_path: P
             run_dir=run_dir,
             source_policy_id="policy_000001",
             alias_policy_id="b1_noleague_baseline",
+        )
+
+
+def test_publish_snapshot_alias_reports_missing_source_weights(tmp_path: Path) -> None:
+    run_dir = tmp_path / "missing_weights"
+    _write_registry(run_dir, (90,))
+
+    with pytest.raises(FileNotFoundError, match="source weights not found"):
+        publish_snapshot_alias(
+            run_dir=run_dir,
+            source_policy_id="policy_000001",
+            alias_policy_id="selected_candidate",
+            metadata_format=SELECTED_CANDIDATE_ALIAS_METADATA_FORMAT,
         )
 
 
