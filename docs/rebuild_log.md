@@ -18315,3 +18315,105 @@ uv run --extra dev --extra sim python -m ruff format --check .
 
 - Continue with the next thesis-facing cleanup batch now that the workflow
   refactor is verifier-clean.
+
+## 2026-06-01 - Consolidate Dirty Refactor Worktrees Onto Local Branch
+
+### What Changed
+
+- Created local consolidated branch `idea/consolidated-refactors-20260601` from
+  the dirty `cleanup` worktree.
+- Committed the current cleanup/config/docs surface as
+  `8a4ad640b wip: snapshot cleanup refactor surface`.
+- Converted the dirty `C:\Users\Bruger\.codex\worktrees\f1ef\weiss_schwarz_rl`
+  worktree into source branch `idea/refactor-source-snapshot-20260601` and
+  committed it as `9c0cc2dd9 wip: snapshot modular refactor worktree`.
+- Merged that source branch into the consolidated branch as `c81b0d17b`.
+- Resolved merge conflicts by keeping the modular package-owned entrypoint and
+  extracted-helper implementation where it conflicted with older script bodies,
+  while preserving the cleanup branch's archive/config/doc layout through the
+  first WIP commit.
+
+### Commands Run
+
+```powershell
+git worktree list --porcelain
+git status --short --branch
+git switch -c idea/consolidated-refactors-20260601
+git add -A
+git commit -m "wip: snapshot cleanup refactor surface"
+git -C C:\Users\Bruger\.codex\worktrees\f1ef\weiss_schwarz_rl switch -c idea/refactor-source-snapshot-20260601
+git -C C:\Users\Bruger\.codex\worktrees\f1ef\weiss_schwarz_rl add -A
+git -C C:\Users\Bruger\.codex\worktrees\f1ef\weiss_schwarz_rl commit -m "wip: snapshot modular refactor worktree"
+git merge --no-ff --no-edit idea/refactor-source-snapshot-20260601
+uv run python -m compileall -q python/weiss_rl python/scripts
+uv run python -m pytest -q python/weiss_rl/tests/test_cli_workflow.py python/weiss_rl/tests/test_script_entrypoint_smokes.py python/weiss_rl/tests/test_training_minimal_loop.py python/weiss_rl/tests/test_training_checkpoint_writers.py python/weiss_rl/tests/test_runtime_opponent_sampling.py python/weiss_rl/tests/test_runtime_opponents.py
+uv run ruff check python/weiss_rl python/scripts
+uv run python -m pytest -q python/weiss_rl/tests
+uv run ruff format --check python/weiss_rl python/scripts
+uv run mypy python
+uv run mypy
+uv run mypy python/weiss_rl/cli.py python/weiss_rl/workflows python/scripts/thesis_run.py python/scripts/eval.py python/scripts/play_vs_model.py
+```
+
+### Results
+
+- Branch consolidation completed locally:
+  `idea/consolidated-refactors-20260601` now contains both the cleanup/archive
+  refactor and the modular extraction refactor.
+- Compile pass succeeded.
+- Targeted conflict-adjacent pytest slice passed: 304 passed, 14 warnings.
+- Ruff check passed for `python/weiss_rl` and `python/scripts`.
+- Full package pytest passed: 2634 passed, 2 skipped, 14 warnings.
+- Ruff format check passed: 1192 files already formatted.
+- Focused workflow mypy slice passed: 142 source files.
+- `uv run mypy python` did not run because mypy sees
+  `python/scripts/eval.py` as both `eval` and `scripts.eval`.
+- `uv run mypy` is still not repo-green; it reports broader typing debt across
+  experiments/tests/script compatibility surfaces. This was not fixed in this
+  consolidation pass.
+
+### Tests Added
+
+- No new tests were authored in this pass; existing tests from both refactor
+  worktrees were consolidated.
+
+### Failures Found
+
+- Stale `.git/index.lock` from 2026-05-28 blocked the first local snapshot
+  commit. No owning Git writer was active; live Git processes were status,
+  rev-parse, remote, and fsmonitor readers. The stale lock was removed.
+- Merge conflicts occurred in package entrypoints, script docs, training loop
+  extraction, checkpoint extraction, and runtime role assignment files.
+- Whole-repo mypy remains blocked by module discovery and existing typing debt.
+
+### Fixes Applied
+
+- Removed the stale `.git/index.lock`.
+- Resolved all merge conflicts and committed the merge.
+- Chose the modular package-owned entrypoint shims for conflicted scripts and
+  the extracted package helpers for conflicted learner/training/runtime files.
+
+### Behavior Changes
+
+- No benchmarked training/eval behavior change was claimed here.
+- Local branch state is now consolidated and reproducible through normal Git
+  commits instead of uncommitted worktree-only state.
+
+### Performance Numbers
+
+- None.
+
+### Remaining Risks
+
+- The consolidation branch has not been pushed.
+- Full `uv run mypy` and `uv run mypy python` are not passing.
+- The merge favored the modular source branch for conflicted code, so future
+  review should check whether any small cleanup-branch script behavior should be
+  reintroduced intentionally.
+
+### Next Action
+
+- Continue work from `idea/consolidated-refactors-20260601`.
+- Decide whether to make whole-repo mypy part of the rebuild contract or narrow
+  it to the maintained workflow/package surface until experiment/test typing
+  debt is paid down.
