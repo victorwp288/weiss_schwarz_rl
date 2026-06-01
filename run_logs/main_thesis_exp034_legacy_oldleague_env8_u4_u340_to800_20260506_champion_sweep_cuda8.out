@@ -1,2 +1,0 @@
-device=cuda foci=['policy_000020', 'policy_000021', 'policy_000026', 'policy_000028'] opponents=8 paired=8
-{"ci_high": 1.0, "ci_low": 1.0, "draws": 0, "focal_policy_id": "policy_000020", "games": 16, "losses": 0, "mean": 1.0, "opponent_policy_id": "B0 RandomLegal", "paired_seeds": 8, "prob_gt_half": 1.0, "wins": 16}

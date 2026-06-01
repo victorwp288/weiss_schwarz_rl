@@ -18417,3 +18417,112 @@ uv run mypy python/weiss_rl/cli.py python/weiss_rl/workflows python/scripts/thes
 - Decide whether to make whole-repo mypy part of the rebuild contract or narrow
   it to the maintained workflow/package surface until experiment/test typing
   debt is paid down.
+
+## 2026-06-01 - Thesis Artifact Cleanup Audit
+
+### What Changed
+
+- Read the submitted thesis PDF from
+  `../Master_Thesis_RL_WeissSchwarz_Final_2026-06-01.pdf` and extracted paths
+  and run names that touch final thesis results.
+- Built local inventories for `runs/`, `configs/`, `diagnostics/`,
+  `run_logs/`, `thesis_figures_final/`, and `vast_artifacts/`.
+- Added `docs/thesis_artifact_cleanup_plan_20260601.md` with a protected set
+  and a proposed archive-first cleanup policy.
+- Wrote a non-destructive archive dry-run manifest for every unprotected
+  `runs/*` directory.
+- Moved all unprotected run directories and non-protected run logs to a sibling
+  archive directory outside the active repo.
+- Archived ignored top-level generated outputs and removed reproducible local
+  tool caches.
+
+### Commands Run
+
+```powershell
+pdftotext -layout "..\Master_Thesis_RL_WeissSchwarz_Final_2026-06-01.pdf" "temp\thesis_cleanup\thesis_text.txt"
+rg -n "main_champion_hardneg_interp_u10_repair_a015_20260517|guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516|targeted_confirm256|god_search_confirm256|main_league_model_lock_20260521|main_league_rebuild_report_20260521|god_search_k4_lock_20260521|figure_data_audit_20260528|report_eval_seeds|RESULTS_TRACE|fig_baseline_fixed_grid|vast_artifacts|seed_c3aac2f9dc" .
+python - <<'PY'
+# Inventory and protected-manifest scripts were run inline to write:
+# temp/thesis_cleanup/artifact_inventory.md
+# temp/thesis_cleanup/artifact_inventory.json
+# temp/thesis_cleanup/pdf_path_references.md
+# temp/thesis_cleanup/pdf_path_references.json
+# temp/thesis_cleanup/protected_artifact_manifest.json
+# temp/thesis_cleanup/archive_dry_run_runs_20260601.csv
+# temp/thesis_cleanup/archive_dry_run_runs_20260601.json
+# temp/thesis_cleanup/archive_move_results_20260601.csv
+# temp/thesis_cleanup/loose_artifact_archive_results_20260601.csv
+# temp/thesis_cleanup/top_level_archive_results_20260601.csv
+# temp/thesis_cleanup/cache_cleanup_results_20260601.csv
+PY
+uv run python python/scripts/paper_readiness_check.py --run-dir runs/main_champion_hardneg_interp_u10_repair_a015_20260517
+uv run python python/scripts/paper_readiness_check.py --run-dir runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01
+```
+
+### Results
+
+- Run directories scanned: 1,272.
+- Total `runs/` size: 121.8 GiB.
+- Protected run directories: 5, totaling 636.6 MiB.
+- Unprotected run directories: 1,267, totaling 121.2 GiB.
+- Dry-run archive manifest rows: 1,267, totaling 121.2 GiB and 10,431
+  checkpoint files.
+- Archive move result: 1,267 moved, 0 skipped, 0 failed.
+- Active `runs/` now contains only the 5 protected run directories and
+  `runs/README.md`.
+- Active `run_logs/` now contains only 4 protected K4/search logs.
+- Archived generated top-level outputs: `dist/`, `now/`, `now.zip`, and
+  `.VSCodeCounter/`.
+- Removed caches: `.mypy_cache/`, `.pytest_cache/`, and `.ruff_cache/`.
+- Protected final thesis runs:
+  - `runs/main_champion_hardneg_interp_u10_repair_a015_20260517`
+  - `runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01`
+  - `runs/main_champion_hardneg_long_v1_u10_20260517_seg01`
+  - `runs/main_champion_hardneg_rehearsal_from_u20_u5_20260517_seg01`
+  - `runs/trajectory_bc_direct_b2_b3_b4_win_64_20260516`
+- The selected A015 run is self-contained for selected/imported snapshots, but
+  its interpolation manifest points back to `checkpoint_10.pt` in
+  `main_champion_hardneg_long_v1_u10_20260517_seg01` and `checkpoint_5.pt` in
+  `main_champion_hardneg_rehearsal_from_u20_u5_20260517_seg01`.
+
+### Failures Found
+
+- Three thesis-named figure/export sidecars were not found locally:
+  - `thesis_figures_final/main_search_20260521/RESULTS_TRACE.json`
+  - `figure_data_audit_20260528.json`
+  - `Kandidatspeciale/Figures/final_results_20260528/`
+- The thesis names several report docs at top-level `docs/` paths, while the
+  current refactor branch stores them under `docs/archive/reports/202605/`.
+
+### Fixes Applied
+
+- Thesis-critical paths were marked as protected and kept in place.
+- Unprotected run directories were moved to
+  `../weiss_schwarz_rl_artifact_archive_20260601/runs/`.
+- Loose `runs/` files, non-protected `run_logs/`, root `tmp_*.log` files, and
+  ignored top-level generated outputs were archived under
+  `../weiss_schwarz_rl_artifact_archive_20260601/`.
+- Reproducible local caches were removed.
+
+### Behavior Changes
+
+- Historical exploratory run directories and non-protected run logs are no
+  longer in the active repo checkout; they live in the sibling archive folder.
+- The two paper-readiness verification commands refreshed the tracked
+  `paper_readiness_summary.json` files for the selected main run and B1 run with
+  the current checker output format.
+
+### Remaining Risks
+
+- The missing final figure sidecars may exist outside this checkout and should
+  be recovered or explicitly marked external before any figure cleanup.
+- Unprotected run directories may still contain useful research history in the
+  sibling archive. Do not delete the archive until the cleanup branch is
+  reviewed.
+- Config cleanup was intentionally deferred because `configs/` is tracked source
+  and provenance, not bulky generated output.
+
+### Next Action
+
+- Do a separate config/reference cleanup pass using `rg` reference checks and
+  workflow tests.

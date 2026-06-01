@@ -6,7 +6,7 @@
       "ci_high": 1.0,
       "ci_low": 1.0,
       "focal_policy_id": "selected_candidate",
-      "focal_policy_source": "explicit_arg",
+      "focal_policy_source": "sole_eligible_non_baseline",
       "has_payoff_samples": true,
       "mean": 1.0,
       "paired_seed_count": 256,
@@ -747,9 +747,10 @@
       },
       "training_metrics": {
         "category": "training",
-        "description": "Training metrics JSONL",
+        "description": "Training metrics JSONL or checkpoint interpolation provenance",
         "expected_paths": [
-          "training/logs/training_metrics.jsonl"
+          "training/logs/training_metrics.jsonl",
+          "eval/diagnostics/checkpoint_interpolation_summary.json"
         ],
         "passed": true,
         "resolved_path": "training/logs/training_metrics.jsonl"

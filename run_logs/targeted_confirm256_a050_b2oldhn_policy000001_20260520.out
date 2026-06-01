@@ -1,4 +1,0 @@
-targeted confirm start: focal=policy_000001 rows=13 paired_seeds=256 workers=1
-done 1/13 policy_000001 vs B0 RandomLegal mean=1.0 wins=512/512
-done 2/13 policy_000001 vs B1 NoLeague baseline mean=0.630859375 wins=323/512
-done 3/13 policy_000001 vs B2 HeuristicPublic mean=0.775390625 wins=397/512

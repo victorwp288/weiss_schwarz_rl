@@ -325,7 +325,7 @@
     }
   },
   "final_eval": {
-    "dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval",
+    "dir": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval",
     "policy_ids": [
       "main_league_selected",
       "B0 RandomLegal",
@@ -338,7 +338,7 @@
       "mode": "explicit",
       "policy_count": 6
     },
-    "summary_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval/summary.json"
+    "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval/summary.json"
   },
   "final_eval_artifact_contract": {
     "duplicate_matchups": [],
@@ -367,7 +367,7 @@
         "B3 HeuristicPublicAggro",
         "B4 HeuristicPublicControl"
       ],
-      "policy_set_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval/policy_set.json"
+      "policy_set_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval/policy_set.json"
     },
     "reference_failures": [],
     "sensitivity_summary": {
@@ -380,9 +380,9 @@
       "missing_cases": [],
       "passed": true,
       "policy_ids_match": true,
-      "summary_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/metagame/summary.json"
+      "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/metagame/summary.json"
     },
-    "summary_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval/summary.json"
+    "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval/summary.json"
   },
   "final_eval_guardrails": {
     "alarms": [],
@@ -394,12 +394,12 @@
   "manifest_contract": {
     "consistency_checks": {
       "config_canonical_json_matches_manifest": {
-        "file_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/config_canonical.json",
+        "file_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/config_canonical.json",
         "message": "JSON file matches manifest",
         "passed": true
       },
       "config_hash_file_matches_manifest": {
-        "file_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/config_hash256.txt",
+        "file_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/config_hash256.txt",
         "message": "text file matches manifest",
         "observed": "21e524c785e6ab7115c9a2c05d07a47a78499cdc83bf0060ad939e0666e21205",
         "passed": true
@@ -407,28 +407,28 @@
       "determinism_report_exists": {
         "message": "ok",
         "passed": true,
-        "path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/determinism_report.json",
+        "path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/determinism_report.json",
         "reason": null
       },
       "environment_manifest_exists": {
         "message": "ok",
         "passed": true,
-        "path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/environment.json",
+        "path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/environment.json",
         "reason": null
       },
       "run_summary_exists": {
         "message": "ok",
         "passed": true,
-        "path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/run_summary.json",
+        "path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/run_summary.json",
         "reason": null
       },
       "spec_bundle_json_matches_manifest": {
-        "file_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/spec_bundle.json",
+        "file_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/spec_bundle.json",
         "message": "JSON file matches manifest",
         "passed": true
       },
       "spec_hash_file_matches_manifest": {
-        "file_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/spec_hash256.txt",
+        "file_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/spec_hash256.txt",
         "message": "text file matches manifest",
         "observed": "a62917cf4825a9dfa3b3ca23c43bb29f6a4abaed0098140192ab326e12ae2319",
         "passed": true
@@ -502,7 +502,7 @@
       }
     },
     "invalid_fields": [],
-    "manifest_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/manifest.json",
+    "manifest_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/manifest.json",
     "message": "manifest satisfies paper-readiness requirements",
     "mismatches": [],
     "missing_fields": [],
@@ -510,7 +510,7 @@
   },
   "passed": true,
   "run_dir": {
-    "dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517"
+    "dir": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517"
   },
   "run_directory_audit": {
     "artifact_count": 33,
@@ -642,7 +642,13 @@
           "figures/paper/fig_learning_curves.pdf",
           "figures/paper/fig_matchup_heatmap.pdf",
           "figures/paper/fig_seat_bias.pdf",
-          "figures/paper/fig_truncation_heatmap.pdf"
+          "figures/paper/fig_truncation_heatmap.pdf",
+          "figures/paper/god_search_k4_confirm256_delta_wins.pdf",
+          "figures/paper/god_search_k4_confirm256_group_rates.pdf",
+          "figures/paper/god_search_k4_confirm256_row_win_rates.pdf",
+          "figures/paper/main_search_confirm256_delta_wins.pdf",
+          "figures/paper/main_search_confirm256_group_rates.pdf",
+          "figures/paper/main_search_confirm256_row_win_rates.pdf"
         ],
         "minimum_count": 1,
         "passed": true
@@ -655,7 +661,13 @@
           "figures/paper/fig_learning_curves.png",
           "figures/paper/fig_matchup_heatmap.png",
           "figures/paper/fig_seat_bias.png",
-          "figures/paper/fig_truncation_heatmap.png"
+          "figures/paper/fig_truncation_heatmap.png",
+          "figures/paper/god_search_k4_confirm256_delta_wins.png",
+          "figures/paper/god_search_k4_confirm256_group_rates.png",
+          "figures/paper/god_search_k4_confirm256_row_win_rates.png",
+          "figures/paper/main_search_confirm256_delta_wins.png",
+          "figures/paper/main_search_confirm256_group_rates.png",
+          "figures/paper/main_search_confirm256_row_win_rates.png"
         ],
         "minimum_count": 1,
         "passed": true
