@@ -16,10 +16,10 @@ JOBS = [
     ("B3 HeuristicPublicAggro", "B4 HeuristicPublicControl"),
     ("B4 HeuristicPublicControl", "B3 HeuristicPublicAggro"),
 ]
-_PYTHON_COMMAND = (".venv-exp034/bin/python",)
-_STACK_CONFIG = pathlib.Path("configs/presets/eval_gpu_exp031_fast_20260506.yaml")
-_RUN_DIR = pathlib.Path("runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506")
-_B1_BASELINE_RUN_DIR = pathlib.Path("runs/exp-002-current-spec-b1-noleague-baseline")
+_PYTHON_COMMAND = None
+_STACK_CONFIG = pathlib.Path("configs/presets/structured_acceptance_standard_thesis_eval.yaml")
+_RUN_DIR = pathlib.Path("runs/main_champion_hardneg_interp_u10_repair_a015_20260517")
+_B1_BASELINE_RUN_DIR = _RUN_DIR
 _OUTPUT_SUBDIR = "heuristic_sanity16"
 _PAIRED_SEEDS = 16
 

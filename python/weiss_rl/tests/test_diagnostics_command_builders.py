@@ -5,6 +5,8 @@ from pathlib import Path
 from weiss_rl.diagnostics.heuristic_sanity_scan_entrypoint import build_heuristic_sanity_command
 from weiss_rl.diagnostics.profile_train_job_entrypoint import build_profile_train_command
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _option(command: list[str], flag: str) -> str:
     return command[command.index(flag) + 1]
@@ -40,24 +42,25 @@ def test_profile_train_command_uses_training_entrypoint_and_preserves_forwarded_
     assert "league.enabled=false" in command
 
 
-def test_heuristic_sanity_command_preserves_legacy_targeted_confirm_job_shape() -> None:
+def test_heuristic_sanity_command_targets_tracked_public_trace_inputs() -> None:
     command = build_heuristic_sanity_command(
         focal="B3 HeuristicPublicAggro",
         opponent="B2 HeuristicPublic",
     )
 
-    assert command[:3] == [
-        ".venv-exp034/bin/python",
-        "-m",
-        "weiss_rl.eval.targeted_confirm.entrypoint",
-    ]
-    assert _option(command, "--stack-config") == "configs/presets/eval_gpu_exp031_fast_20260506.yaml"
-    assert _option(command, "--run-dir") == "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506"
-    assert (
-        _option(command, "--snapshot-registry-json")
-        == "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/training/snapshots/registry.json"
-    )
-    assert _option(command, "--b1-baseline-run-dir") == "runs/exp-002-current-spec-b1-noleague-baseline"
+    stack_config = _option(command, "--stack-config")
+    run_dir = _option(command, "--run-dir")
+    registry = _option(command, "--snapshot-registry-json")
+    b1_baseline = _option(command, "--b1-baseline-run-dir")
+
+    assert command[1:3] == ["-m", "weiss_rl.eval.targeted_confirm.entrypoint"]
+    assert stack_config == "configs/presets/structured_acceptance_standard_thesis_eval.yaml"
+    assert run_dir == "runs/main_champion_hardneg_interp_u10_repair_a015_20260517"
+    assert registry == "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/snapshots/registry.json"
+    assert b1_baseline == run_dir
+    assert (REPO_ROOT / stack_config).is_file()
+    assert (REPO_ROOT / run_dir).is_dir()
+    assert (REPO_ROOT / registry).is_file()
     assert _option(command, "--focal-policy-id") == "B3 HeuristicPublicAggro"
     assert _option(command, "--paired-seeds") == "16"
     assert _option(command, "--workers") == "1"
