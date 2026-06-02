@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from weiss_rl.runtime.components.central_step_inputs import prepare_central_step_inputs
+from weiss_rl.runtime.components.collection.central_step_inputs import prepare_central_step_inputs
 from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
 
 

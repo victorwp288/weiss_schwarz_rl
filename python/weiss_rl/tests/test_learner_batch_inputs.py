@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from weiss_rl.core.legal_actions import LegalActionBatch
-from weiss_rl.runtime.components.bootstrap_values import runtime_bootstrap_fields
-from weiss_rl.runtime.components.learner_batch_inputs import (
+from weiss_rl.runtime.components.batching.bootstrap_values import runtime_bootstrap_fields
+from weiss_rl.runtime.components.batching.learner_batch_inputs import (
     prepare_impala_learner_batch_inputs,
     prepare_ppo_learner_batch_inputs,
     prepare_shared_learner_batch_inputs,

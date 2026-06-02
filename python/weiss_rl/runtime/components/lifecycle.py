@@ -9,7 +9,7 @@ from typing import Any
 
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.runtime.components.hashing import hash_state_dict as _hash_state_dict
-from weiss_rl.runtime.components.ipc import serialize_state_dict_for_ipc as _serialize_state_dict_for_ipc
+from weiss_rl.runtime.components.ipc_shared.ipc import serialize_state_dict_for_ipc as _serialize_state_dict_for_ipc
 
 
 class QueueRuntimeLifecycleMixin:

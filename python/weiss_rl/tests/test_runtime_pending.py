@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from weiss_rl.runtime.components.pending import (
+from weiss_rl.runtime.components.collection.pending import (
     diverse_batch_target_count,
     pending_diverse_unroll_count,
     select_pending_unrolls,

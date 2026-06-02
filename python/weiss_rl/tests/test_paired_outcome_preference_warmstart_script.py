@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from scripts.paired_outcome_preference_warmstart import (
+
+from weiss_rl.training.warmstarts.paired_outcome_preference_warmstart_entrypoint import (
     _parse_pair_role_selectors,
     _parse_pair_weights,
     _preference_pair_role_mask,

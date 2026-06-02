@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.testing as npt
 
-from weiss_rl.runtime.components.heuristic_actor_outputs import (
+from weiss_rl.runtime.components.policy_inference.heuristic_actor_outputs import (
     legal_action_ids_from_mask_rows,
     write_heuristic_actor_outputs_ids,
     write_heuristic_actor_outputs_mask,

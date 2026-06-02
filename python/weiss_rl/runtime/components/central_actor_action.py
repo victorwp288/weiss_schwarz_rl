@@ -6,7 +6,7 @@ from typing import Any, NamedTuple, cast
 
 import numpy as np
 
-from weiss_rl.runtime.components.central_actor_action_context import (
+from weiss_rl.runtime.components.collection.central_actor_action_context import (
     CentralActorActionInputs,
     MaskCentralActorActionCallbacks,
     PackedCentralActorActionCallbacks,

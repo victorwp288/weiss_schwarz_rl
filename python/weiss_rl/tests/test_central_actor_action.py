@@ -10,7 +10,7 @@ from weiss_rl.runtime.components.central_actor_action import (
     execute_mask_central_actor_action,
     execute_packed_central_actor_action,
 )
-from weiss_rl.runtime.components.central_actor_action_context import (
+from weiss_rl.runtime.components.collection.central_actor_action_context import (
     CentralActorActionInputs,
     MaskCentralActorActionCallbacks,
     PackedCentralActorActionCallbacks,

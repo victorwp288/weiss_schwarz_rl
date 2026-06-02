@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from scripts.reward_component_probe import summarize_reward_samples
+
+from weiss_rl.diagnostics.reward_component_probe_entrypoint import summarize_reward_samples
 
 
 def test_summarize_reward_samples_checks_component_sum_and_scale() -> None:

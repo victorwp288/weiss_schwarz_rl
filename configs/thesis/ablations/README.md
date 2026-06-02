@@ -10,6 +10,6 @@ Canonical thesis ablations:
   May 13 reward-shaping probes live in
   `../../archive/thesis_reward_ablations_20260513/`.
 
-Most other files in this directory are dated probes, rescue configs, or
-targeted-confirm investigation configs. Keep them for artifact reproduction,
-but do not present them as the standard thesis config surface.
+`norecurrence_impala.yaml` remains as a legacy compatibility name for historical
+artifact reproduction. Do not present it as an additional public ablation; use
+`no_gru.yaml` in docs and thesis-facing commands.

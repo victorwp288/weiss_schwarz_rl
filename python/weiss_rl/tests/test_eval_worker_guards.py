@@ -3,22 +3,20 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from importlib import util
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+ENTRYPOINT_MODULES = {
+    "parallel_final_eval": "weiss_rl.eval.parallel_final_eval_entrypoint",
+    "targeted_confirm_eval": "weiss_rl.eval.targeted_confirm.entrypoint",
+}
+
 
 def _load_script_module(name: str):
-    module_path = REPO_ROOT / "python" / "scripts" / f"{name}.py"
-    spec = util.spec_from_file_location(f"test_{name}_script", module_path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return import_module(ENTRYPOINT_MODULES[name])
 
 
 def _script_env() -> dict[str, str]:
@@ -38,7 +36,8 @@ def test_targeted_confirm_eval_rejects_parallel_workers_without_escape_hatch() -
     result = subprocess.run(
         [
             sys.executable,
-            "python/scripts/targeted_confirm_eval.py",
+            "-m",
+            ENTRYPOINT_MODULES["targeted_confirm_eval"],
             "--stack-config",
             "missing.yaml",
             "--run-dir",
@@ -67,7 +66,8 @@ def test_parallel_final_eval_rejects_parallel_workers_without_escape_hatch() -> 
     result = subprocess.run(
         [
             sys.executable,
-            "python/scripts/parallel_final_eval.py",
+            "-m",
+            ENTRYPOINT_MODULES["parallel_final_eval"],
             "--stack-config",
             "missing.yaml",
             "--run-dir",
@@ -92,7 +92,8 @@ def test_targeted_confirm_eval_requires_fixed_pythonhashseed() -> None:
     result = subprocess.run(
         [
             sys.executable,
-            "python/scripts/targeted_confirm_eval.py",
+            "-m",
+            ENTRYPOINT_MODULES["targeted_confirm_eval"],
             "--stack-config",
             "missing.yaml",
             "--run-dir",
@@ -121,7 +122,8 @@ def test_parallel_final_eval_requires_fixed_pythonhashseed() -> None:
     result = subprocess.run(
         [
             sys.executable,
-            "python/scripts/parallel_final_eval.py",
+            "-m",
+            ENTRYPOINT_MODULES["parallel_final_eval"],
             "--stack-config",
             "missing.yaml",
             "--run-dir",

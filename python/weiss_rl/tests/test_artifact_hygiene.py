@@ -139,7 +139,8 @@ def test_artifact_scan_entrypoint_returns_nonzero_on_findings(tmp_path: Path) ->
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "python" / "scripts" / "artifact_scan.py"),
+            "-m",
+            "weiss_rl.diagnostics.artifact_scan_entrypoint",
             "--repo-root",
             str(tmp_path),
             "--artifact-root",

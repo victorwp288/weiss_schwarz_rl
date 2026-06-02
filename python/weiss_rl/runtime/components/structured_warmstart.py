@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.runtime.components.ipc import serialize_state_dict_for_ipc
+from weiss_rl.runtime.components.ipc_shared.ipc import serialize_state_dict_for_ipc
 
 
 def _model_guidance_payload(model: Any | None) -> dict[str, float] | None:

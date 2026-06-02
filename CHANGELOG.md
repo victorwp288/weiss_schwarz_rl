@@ -4,11 +4,15 @@ This project has historically been thesis-run driven. New codebase-quality chang
 
 ## Unreleased
 
+- Retired the `python/scripts/*.py` compatibility wrappers; package modules under
+  `python -m weiss_rl...` are now the only maintained Python CLI surface.
+- Consolidated docs navigation, artifact evidence ownership, local README
+  pointers, and contributor guidance.
 - Added refactor documentation and contributor guidance.
-- Extracted the training CLI parser into `weiss_rl.training.cli` while preserving `python/scripts/train.py`.
-- Extracted checkpoint tracker/path helpers into `weiss_rl.training.checkpoints` while preserving `train.py` wrapper names.
+- Extracted the training CLI parser into `weiss_rl.training.cli` while preserving the legacy path-based training facade.
+- Extracted checkpoint tracker/path helpers into `weiss_rl.training.checkpoints` while preserving training facade names.
 - Added checkpoint restore negative tests and extracted checkpoint payload contract validation into `weiss_rl.training.checkpoints`.
-- Extracted snapshot artifact and registry-retention helpers into `weiss_rl.training.snapshots` while preserving `train.py` wrapper names.
+- Extracted snapshot artifact and registry-retention helpers into `weiss_rl.training.snapshots` while preserving training facade names.
 - Extracted shared imported-snapshot artifact writing for B1 and seeded snapshot imports.
 - Added checkpoint payload shape characterization and extracted pure checkpoint payload construction.
 - Extracted pure checkpoint guard dev-eval scoring and best-checkpoint promotion helpers.
@@ -119,7 +123,7 @@ This project has historically been thesis-run driven. New codebase-quality chang
 - Extracted structured-model action and factorized lookup table construction into `model_action_tables.py` with direct characterization tests.
 - Extracted structured-model stage feature gathering helpers into `model_feature_gathering.py` with direct characterization tests and preserved model method wrappers.
 - Extracted structured-model public-heuristic scoring into `model_public_heuristic_scoring.py` while preserving the structured policy-head private method surface.
-- Replaced another group of pure `python/scripts/train.py` compatibility wrappers with explicit aliases while preserving the `MinimalRollout` script import surface.
+- Replaced another group of pure the legacy path-based training facade compatibility wrappers with explicit aliases while preserving the `MinimalRollout` script import surface.
 - Extracted structured-model public-heuristic tensor utilities into `model_public_heuristics.py` with direct characterization tests and preserved model method wrappers.
 - Extracted public-heuristic slot preference construction and front-row attack profile helpers into `model_public_heuristics.py`.
 - Extracted structured-model candidate family partitioning into `model_candidate_partitioning.py` with direct characterization tests and a preserved model method wrapper.
@@ -133,9 +137,9 @@ This project has historically been thesis-run driven. New codebase-quality chang
 - Extracted training profiler block/profiler construction helpers into `training/profiling.py` with direct characterization tests for disabled profiling, named record regions, CPU profiler construction, and CUDA activity selection.
 - Extracted algorithm-specific runtime batch collection into `training/batches.py` with direct characterization tests for IMPALA/V-trace arguments, PPO/GAE arguments, and unsupported algorithm errors.
 - Extracted CPU eval-model cloning for periodic dev eval and promotion gates into `training/dev_eval.py` with direct characterization tests for weights, guidance handoff, eval mode, and missing model config.
-- Extracted the periodic dev-eval runner into `training/dev_eval_runner.py` while preserving the `train.py` compatibility class and deterministic script-surface tests.
-- Extracted the promotion-gate runner into `training/promotion_gate_runner.py` while preserving the `train.py` compatibility class and deterministic script-surface tests.
-- Extracted periodic dev-eval opponent resolution into `training/dev_eval_opponents.py` while preserving the `train.py` compatibility wrapper and monkeypatchable script dependencies.
+- Extracted the periodic dev-eval runner into `training/dev_eval_runner.py` while preserving the training compatibility class and deterministic script-surface tests.
+- Extracted the promotion-gate runner into `training/promotion_gate_runner.py` while preserving the training compatibility class and deterministic script-surface tests.
+- Extracted periodic dev-eval opponent resolution into `training/dev_eval_opponents.py` while preserving the training compatibility wrapper and monkeypatchable script dependencies.
 - Extracted runtime hard-negative opponent selection into `runtime_opponents.py` with direct characterization of sample/win-rate filtering and registry-update tie breaking.
 - Extracted factorized structured-action legality plan construction into `model_action_plans.py` with direct packed row-order characterization.
 - Extracted runtime structured-warmstart source-mix handling into `runtime_structured_warmstart.py` with restore-on-exception characterization.
@@ -148,12 +152,12 @@ This project has historically been thesis-run driven. New codebase-quality chang
 - Extracted runtime PFSP/opponent policy sampling into `runtime_opponents.py` with seeded RNG/counter characterization and preserved runtime wrappers.
 - Extracted runtime active/configured opponent policy-id bookkeeping into `runtime_opponents.py` with direct ordering and deduplication characterization.
 - Extracted QueueRuntime opponent/PFSP adapter methods into `runtime_opponent_mixin.py` while preserving the private `QueueRuntime` method surface.
-- Extracted training learner construction into `training/learner_factory.py` while preserving the `train.py` compatibility wrapper.
-- Extracted structured warmstart execution into `training/warmstart.py` while preserving the `train.py` compatibility wrapper.
+- Extracted training learner construction into `training/learner_factory.py` while preserving the training compatibility wrapper.
+- Extracted structured warmstart execution into `training/warmstart.py` while preserving the training compatibility wrapper.
 - Extracted periodic dev-eval seed-usage payload construction into `training/dev_eval.py`.
-- Extracted periodic dev-eval execution orchestration into `training/periodic_dev_eval_run.py` while preserving the `train.py` compatibility wrapper.
-- Collapsed pure checkpoint-guard metric forwarding helpers in `train.py` into explicit compatibility aliases.
-- Collapsed pure startup/input forwarding helpers in `train.py` into explicit compatibility aliases.
+- Extracted periodic dev-eval execution orchestration into `training/periodic_dev_eval_run.py` while preserving the training compatibility wrapper.
+- Collapsed pure checkpoint-guard metric forwarding helpers in the training facade into explicit compatibility aliases.
+- Collapsed pure startup/input forwarding helpers in the training facade into explicit compatibility aliases.
 - Extracted runtime teacher-label ID/mask routing into `runtime_teacher_labels.py` while preserving `QueueRuntime` wrappers.
 - Extracted IMPALA public-heuristic target-logit scoring into `learners/structured_auxiliary.py` with direct profile-selection coverage.
 - Extracted IMPALA structured dense group lookup/log-prob helpers into `learners/structured_auxiliary.py`.
@@ -161,4 +165,4 @@ This project has historically been thesis-run driven. New codebase-quality chang
 - Extracted policy/value observation encoder construction into `model_typed_encoder.py` with direct MLP/typed encoder characterization.
 - Collapsed another group of pure IMPALA learner private helper facades into explicit aliases while preserving wrapper functions whose identity is protected by tests.
 - Collapsed pure top-level `model.py` tensor and observation helper facades into explicit aliases while preserving the monkeypatchable private sampling wrappers.
-- Collapsed another bounded group of pure `python/scripts/train.py` compatibility wrappers into explicit aliases while preserving monkeypatchable heuristic-policy construction and script-level `DecisionBoundaryBatch`/`ScheduledGame` imports.
+- Collapsed another bounded group of pure the legacy path-based training facade compatibility wrappers into explicit aliases while preserving monkeypatchable heuristic-policy construction and script-level `DecisionBoundaryBatch`/`ScheduledGame` imports.

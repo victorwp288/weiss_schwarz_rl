@@ -10,7 +10,7 @@ import numpy as np
 
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
 from weiss_rl.runtime.components.central.legal_hooks import optional_legal_action_meta, require_ids_offsets
-from weiss_rl.runtime.components.heuristic_actor_outputs import write_heuristic_actor_outputs_ids
+from weiss_rl.runtime.components.policy_inference.heuristic_actor_outputs import write_heuristic_actor_outputs_ids
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState

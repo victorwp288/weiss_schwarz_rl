@@ -1,7 +1,6 @@
 """Training orchestration helpers.
 
 The canonical training CLI is ``python -m weiss_rl.training.train_entrypoint``.
-The legacy ``python/scripts/train.py`` path remains a compatibility shim.
 """
 
 from importlib import import_module
@@ -157,43 +156,17 @@ from .warmstart import run_structured_warmstart
 
 _TRAIN_ENTRYPOINT_MODULES = frozenset(
     {
-        "aliases",
-        "best_checkpoint_wrappers",
-        "checkpoint_hooks",
-        "checkpoint_io_hooks",
-        "checkpoint_io_wrappers",
-        "checkpoint_lifecycle_hooks",
-        "checkpoint_lifecycle_wrappers",
-        "checkpoint_wrappers",
-        "cli_phase",
-        "compat_exports",
-        "core_aliases",
+        "checkpoints",
+        "cli",
+        "compat",
         "core_exports",
-        "current_checkpoint_wrapper",
-        "dev_eval_wrappers",
-        "eval_aliases",
         "eval_exports",
-        "execution_phase",
-        "guard_aliases",
-        "learner_hooks",
-        "learner_wrappers",
-        "main",
-        "manifest_phase",
+        "lifecycle",
         "metadata_hooks",
         "metadata_wrappers",
-        "minimal_wrapper",
-        "namespace",
-        "phases",
-        "promotion_wrapper",
         "runner_hooks",
         "runner_wrappers",
-        "runtime_wrappers",
-        "script_wrappers",
-        "snapshot_hooks",
-        "snapshot_wrappers",
-        "startup_phase",
-        "state",
-        "training_aliases",
+        "snapshots",
         "training_exports",
         "wrappers",
     }

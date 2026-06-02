@@ -1,8 +1,12 @@
 # Artifact Contract
 
-This repo now treats the run tree as a contract, not an implementation accident.
+Run trees are part of the thesis contract. A run is not paper-grade just because
+it has checkpoints or a smoke eval; it must contain the canonical files and
+directories below.
 
-## Canonical run-root files
+## Run Root
+
+Canonical run-root files:
 
 - `manifest.json`
 - `environment.json`
@@ -13,7 +17,7 @@ This repo now treats the run tree as a contract, not an implementation accident.
 - `spec_bundle.json`
 - `spec_hash256.txt`
 
-## Canonical tree
+Canonical directories:
 
 - `training/`
 - `eval/final_eval/`
@@ -24,71 +28,50 @@ This repo now treats the run tree as a contract, not an implementation accident.
 - `figures/paper/`
 - `figures/data/`
 
-## What belongs where
+## Directory Ownership
 
-### `training/`
-
-- learner metrics
-- checkpoint artifacts
-- training-time provenance and logging
-
-### `eval/final_eval/`
-
-- raw `episodes.jsonl`
-- summary tables
-- payoff matrices
-- matchup manifests
-- posterior or uncertainty artifacts when they are part of the selected evaluation path
-
-### `eval/diagnostics/`
-
-- seat-bias summaries
-- truncation inputs
-- replay verification summaries
-- other run-level eval diagnostics
-
-### `eval/metagame/`
-
-- Nash outputs
-- AlphaRank outputs, including the selection mode used (`local` or `global`)
-- sensitivity deltas
-- solver reports
-
-### `replays/`
-
-- raw simulator replay files
-- replay indices
-- replay verification annotations
-
-### `figures/paper/`
-
-- rendered thesis figures
-- figure manifests and metadata
+| Path | Contents |
+| --- | --- |
+| `training/` | Learner metrics, checkpoints, snapshot registry, training provenance, and TensorBoard logs. |
+| `eval/final_eval/` | Raw `episodes.jsonl`, summaries, payoff matrices, matchup manifests, and uncertainty artifacts. |
+| `eval/diagnostics/` | Seat-bias summaries, truncation inputs, replay verification summaries, and run-level eval diagnostics. |
+| `eval/b2_disagreement/` | Learner-vs-B2 causal disagreement audits and replay-backed summaries. |
+| `eval/metagame/` | Nash outputs, AlphaRank outputs, sensitivity deltas, solver reports, and selection mode metadata. |
+| `replays/` | Simulator replay files, replay indices, and verification annotations. |
+| `figures/paper/` | Rendered thesis figures, figure manifests, and figure metadata. |
+| `figures/data/` | Figure source tables and compact data exports. |
 
 ## Formats
 
-- `JSONL` for raw episode streams
-- `CSV` for tables and matrices
-- `JSON` for manifests, summaries, and provenance
-- `NPZ` only when a dense array representation is materially better than JSON
+- `JSONL` for raw episode streams.
+- `CSV` for tables and matrices.
+- `JSON` for manifests, summaries, reports, and provenance.
+- `NPZ` only when a dense array representation is materially better than JSON.
 
-## Legacy compatibility
+## Quality Bar
 
-The repo may keep short-lived compatibility aliases while paths migrate, but paper-grade checks should consume the canonical tree only.
+- Demo runs may be synthetic, but they must be labeled clearly.
+- Smoke profiles are plumbing checks and must not be cited as thesis-quality
+  model evidence.
+- Paper-grade readiness must consume the canonical tree, not reconstruct
+  missing outputs from fallback paths.
+- Simulator-backed canonical runs must record the published `weiss-sim` spec
+  bundle verbatim.
+- Policy selection, policy ordering, seeds, and provenance must be resolved
+  explicitly before final reporting.
 
-## Quality bar
+## Compatibility
 
-- demo runs may be synthetic, but they must still be labeled clearly
-- smoke profiles are plumbing checks and must not be confused with thesis-grade train/eval runs
-- simulator-backed canonical runs are validated against the published `weiss-sim` package and should record the runtime spec bundle verbatim
-- paper-grade runs must have resolved policy selection, stable ordering, and explicit provenance
-- readiness should fail if it has to reconstruct missing canonical outputs from fallback paths
+Short-lived path aliases are acceptable while implementation paths migrate.
+Paper-grade checks should consume canonical paths only.
 
-## Useful checks
+## Checks
 
-```bash
-make artifact-hygiene
-uv run python python/scripts/verify_repo.py
-make verify
-bash scripts/run_local_ci_parity.sh
+```powershell
+uv run python -m weiss_rl.workflows.artifact_contract.artifact_contract_entrypoint --dry-run
+uv run python -m weiss_rl.workflows.artifact_contract.artifact_contract_entrypoint
+uv run python -m weiss_rl.workflows.verify_repo_entrypoint
 ```
+
+On systems with `make`, the equivalent targets are `make artifact-contract` and
+`make verify`.

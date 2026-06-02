@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
@@ -31,6 +29,7 @@ from weiss_rl.league.registry import (
 from weiss_rl.learners.impala import ImpalaLearner
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.tests._config_paths import canonical_stack_config_path
+from weiss_rl.training import train_entrypoint as train_entrypoint_module
 from weiss_rl.training.snapshots import demote_registry_champions_newer_than, seed_snapshot_policy_id
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -42,19 +41,7 @@ class _TrainingPathsLike(Protocol):
 
 @lru_cache(maxsize=1)
 def _load_train_script_module() -> ModuleType:
-    python_root = str(REPO_ROOT / "python")
-    if python_root not in sys.path:
-        sys.path.insert(0, python_root)
-
-    train_script_path = REPO_ROOT / "python" / "scripts" / "train.py"
-    spec = importlib.util.spec_from_file_location("train_script_for_tests", train_script_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load train.py from {train_script_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return train_entrypoint_module
 
 
 def _retention_stack(*, recent_size: int, champion_size: int) -> SimpleNamespace:

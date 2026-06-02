@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.testing as npt
 
-from weiss_rl.runtime.components.deterministic_logits import (
+from weiss_rl.runtime.components.policy_inference.deterministic_logits import (
     write_deterministic_logits,
     write_deterministic_logits_from_packed,
 )

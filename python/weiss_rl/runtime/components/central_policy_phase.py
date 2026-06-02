@@ -10,13 +10,13 @@ import numpy as np
 from weiss_rl.runtime.components.central_dense_policy_phase import (
     run_dense_central_policy_phase as _run_dense_central_policy_phase,
 )
-from weiss_rl.runtime.components.central_policy_outputs import (
-    CentralPolicyPhaseOutputs as CentralPolicyPhaseOutputs,
-)
 from weiss_rl.runtime.components.central_structured_policy_phase import (
     run_structured_central_policy_phase as _run_structured_central_policy_phase,
 )
 from weiss_rl.runtime.components.collector_state import CollectorUnrollState
+from weiss_rl.runtime.components.policy_inference.central_policy_outputs import (
+    CentralPolicyPhaseOutputs as CentralPolicyPhaseOutputs,
+)
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState

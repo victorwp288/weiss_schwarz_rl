@@ -8,19 +8,19 @@ from typing import TYPE_CHECKING, Any
 
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
 from weiss_rl.runtime.components.central_actor_step import execute_central_actor_step
-from weiss_rl.runtime.components.central_actor_step_context import (
-    CentralActorStepCallbacks,
-    CentralActorStepInputs,
-    CentralActorStepPolicyInputs,
-    CentralActorStepRuntimeContext,
-)
 from weiss_rl.runtime.components.central_collection_setup import (
     actors_have_single_layout,
     build_central_actor_collection_setup,
 )
 from weiss_rl.runtime.components.central_finalization import finalize_central_actor_unrolls
 from weiss_rl.runtime.components.central_policy_phase import run_central_policy_phase
-from weiss_rl.runtime.components.central_step_inputs import prepare_central_step_inputs
+from weiss_rl.runtime.components.collection.central_actor_step_context import (
+    CentralActorStepCallbacks,
+    CentralActorStepInputs,
+    CentralActorStepPolicyInputs,
+    CentralActorStepRuntimeContext,
+)
+from weiss_rl.runtime.components.collection.central_step_inputs import prepare_central_step_inputs
 from weiss_rl.runtime.components.types import RuntimeUnroll
 
 if TYPE_CHECKING:

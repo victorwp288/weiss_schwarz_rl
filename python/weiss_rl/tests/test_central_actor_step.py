@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from weiss_rl.runtime.components.central_actor_step import execute_central_actor_step
-from weiss_rl.runtime.components.central_actor_step_context import (
+from weiss_rl.runtime.components.collection.central_actor_step_context import (
     CentralActorStepCallbacks,
     CentralActorStepInputs,
     CentralActorStepPolicyInputs,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -19,6 +18,7 @@ from weiss_rl.eval.policies.set import (
 )
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, PolicyValueModel
+from weiss_rl.replay import inspector_entrypoint
 from weiss_rl.replay.bundles import (
     ReplayRerunContract,
     ReplayStep,
@@ -1230,12 +1230,6 @@ def test_replay_inspector_cli_main_supports_json_stdout_and_report_file(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    module_path = REPO_ROOT / "python" / "scripts" / "replay_inspector.py"
-    spec = importlib.util.spec_from_file_location("replay_inspector_script", module_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
     report_path = tmp_path / "report.json"
     canned_report = {
         "bundle_path": "bundle.zip",
@@ -1258,9 +1252,9 @@ def test_replay_inspector_cli_main_supports_json_stdout_and_report_file(
         captured_kwargs.update(_)
         return canned_report
 
-    monkeypatch.setattr(module._impl, "inspect_replay_bundle", fake_inspect_replay_bundle)
+    monkeypatch.setattr(inspector_entrypoint, "inspect_replay_bundle", fake_inspect_replay_bundle)
 
-    exit_code = module.main(
+    exit_code = inspector_entrypoint.main(
         [
             "--bundle",
             str(tmp_path / "bundle.zip"),

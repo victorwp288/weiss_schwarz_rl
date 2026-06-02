@@ -2,6 +2,7 @@
 
 This directory is intentionally small. Public thesis configs live under
 `configs/thesis/`; compatibility wrapper presets live under `configs/presets/`.
+Descriptions and launch context live in [../docs/configuration.md](../docs/configuration.md).
 
 ## Thesis
 
@@ -16,7 +17,8 @@ This directory is intentionally small. Public thesis configs live under
 - `thesis/ablations/terminal_only_reward.yaml`
 
 `thesis/_shared/` contains only fragments needed by those public configs and by
-the retained main-model provenance configs.
+the retained main-model provenance configs. `thesis/base_fixed_deck_structured.yaml`
+is also a shared base, not a normal launch target.
 
 ## Compatibility Presets
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from weiss_rl.diagnostics.repo_hygiene import run_repo_hygiene_check, summary_payload
+from weiss_rl.diagnostics.repo_hygiene import RepoHygieneFinding, run_repo_hygiene_check, summary_payload
 from weiss_rl.workflows import cli_parser, parsers
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -25,7 +25,7 @@ def test_current_repo_passes_repo_hygiene_check() -> None:
     summary = run_repo_hygiene_check(repo_root=REPO_ROOT)
 
     assert summary.passed
-    assert summary.script_shim_count >= 30
+    assert summary.legacy_script_count == 0
     assert summary_payload(summary)["findings"] == []
 
 
@@ -44,21 +44,27 @@ def test_repo_hygiene_flags_generated_top_level_tracked_file(tmp_path: Path) -> 
     }
 
 
-def test_repo_hygiene_flags_oversized_legacy_script(tmp_path: Path) -> None:
+def test_repo_hygiene_flags_legacy_script_entrypoint(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
     script_dir = tmp_path / "python" / "scripts"
     script_dir.mkdir(parents=True)
     script_path = script_dir / "legacy.py"
-    script_path.write_text(
-        '"""Compatibility shim for a package-owned command."""\n' + "\n".join("x = 1" for _ in range(130)),
-        encoding="utf-8",
-    )
+    script_path.write_text("from weiss_rl.cli import main\n", encoding="utf-8")
     subprocess.run(["git", "add", "python/scripts/legacy.py"], cwd=tmp_path, check=True, capture_output=True, text=True)
 
     summary = run_repo_hygiene_check(repo_root=tmp_path)
 
     assert not summary.passed
-    assert any(finding.code == "oversized_legacy_script" for finding in summary.findings)
+    assert summary.findings == (
+        RepoHygieneFinding(
+            code="legacy_script_entrypoint",
+            path="python/scripts/legacy.py",
+            message=(
+                "Path-based Python script entrypoints were retired; use package modules under "
+                "`python -m weiss_rl...` instead."
+            ),
+        ),
+    )
 
 
 def test_legacy_cli_parser_facade_delegates_to_canonical_parser() -> None:

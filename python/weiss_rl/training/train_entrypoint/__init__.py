@@ -6,8 +6,8 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from weiss_rl.training.train_entrypoint.main import run_train_main
-from weiss_rl.training.train_entrypoint.namespace import (
+from weiss_rl.training.train_entrypoint.cli import run_train_main
+from weiss_rl.training.train_entrypoint.compat import (
     install_train_entrypoint_aliases,
     install_train_entrypoint_compat_exports,
 )

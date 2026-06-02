@@ -50,7 +50,7 @@ GENERATED_TOP_LEVEL = frozenset(
     }
 )
 
-MAX_SCRIPT_SHIM_LINES = 120
+LEGACY_SCRIPT_DIR = "python/scripts"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +64,7 @@ class RepoHygieneFinding:
 class RepoHygieneSummary:
     passed: bool
     tracked_file_count: int
-    script_shim_count: int
+    legacy_script_count: int
     findings: tuple[RepoHygieneFinding, ...]
 
 
@@ -109,8 +109,8 @@ def _tracked_root_findings(paths: tuple[str, ...]) -> list[RepoHygieneFinding]:
     return findings
 
 
-def _script_shim_findings(repo_root: Path) -> tuple[list[RepoHygieneFinding], int]:
-    scripts_dir = repo_root / "python" / "scripts"
+def _legacy_script_findings(repo_root: Path) -> tuple[list[RepoHygieneFinding], int]:
+    scripts_dir = repo_root / LEGACY_SCRIPT_DIR
     findings: list[RepoHygieneFinding] = []
     script_count = 0
     if not scripts_dir.is_dir():
@@ -118,27 +118,16 @@ def _script_shim_findings(repo_root: Path) -> tuple[list[RepoHygieneFinding], in
     for script_path in sorted(scripts_dir.glob("*.py")):
         script_count += 1
         rel_path = script_path.relative_to(repo_root).as_posix()
-        text = script_path.read_text(encoding="utf-8")
-        line_count = len(text.splitlines())
-        if line_count > MAX_SCRIPT_SHIM_LINES:
-            findings.append(
-                RepoHygieneFinding(
-                    code="oversized_legacy_script",
-                    path=rel_path,
-                    message=(
-                        f"Compatibility scripts should stay thin shims; "
-                        f"{line_count} lines exceeds {MAX_SCRIPT_SHIM_LINES}."
-                    ),
-                )
+        findings.append(
+            RepoHygieneFinding(
+                code="legacy_script_entrypoint",
+                path=rel_path,
+                message=(
+                    "Path-based Python script entrypoints were retired; use package modules under "
+                    "`python -m weiss_rl...` instead."
+                ),
             )
-        if "Compatibility shim" not in text[:240]:
-            findings.append(
-                RepoHygieneFinding(
-                    code="legacy_script_missing_shim_marker",
-                    path=rel_path,
-                    message="Compatibility scripts should state that package modules are canonical.",
-                )
-            )
+        )
     return findings, script_count
 
 
@@ -146,12 +135,12 @@ def run_repo_hygiene_check(repo_root: Path | None = None) -> RepoHygieneSummary:
     resolved_root = repo_root_from_here() if repo_root is None else repo_root.resolve()
     paths = tracked_files(resolved_root)
     findings = _tracked_root_findings(paths)
-    script_findings, script_count = _script_shim_findings(resolved_root)
-    findings.extend(script_findings)
+    legacy_script_findings, legacy_script_count = _legacy_script_findings(resolved_root)
+    findings.extend(legacy_script_findings)
     return RepoHygieneSummary(
         passed=not findings,
         tracked_file_count=len(paths),
-        script_shim_count=script_count,
+        legacy_script_count=legacy_script_count,
         findings=tuple(findings),
     )
 
@@ -160,7 +149,7 @@ def summary_payload(summary: RepoHygieneSummary) -> dict[str, object]:
     return {
         "passed": summary.passed,
         "tracked_file_count": summary.tracked_file_count,
-        "script_shim_count": summary.script_shim_count,
+        "legacy_script_count": summary.legacy_script_count,
         "findings": [asdict(finding) for finding in summary.findings],
     }
 
@@ -181,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     elif summary.passed:
         print(
             "Repo hygiene checks passed "
-            f"({summary.tracked_file_count} tracked files, {summary.script_shim_count} legacy script shims)."
+            f"({summary.tracked_file_count} tracked files, {summary.legacy_script_count} legacy script entrypoints)."
         )
     else:
         print("Repo hygiene checks failed:")
@@ -193,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = [
     "ALLOWED_TRACKED_TOP_LEVEL",
     "GENERATED_TOP_LEVEL",
-    "MAX_SCRIPT_SHIM_LINES",
+    "LEGACY_SCRIPT_DIR",
     "RepoHygieneFinding",
     "RepoHygieneSummary",
     "build_parser",

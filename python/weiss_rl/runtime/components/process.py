@@ -16,17 +16,17 @@ from weiss_rl.config import StackConfig
 from weiss_rl.eval.policies.set import HEURISTIC_PUBLIC_POLICY_ID
 from weiss_rl.experiments.baselines import NOLEAGUE_BASELINE_POLICY_ID
 from weiss_rl.model import build_policy_value_model
-from weiss_rl.runtime.components.collector_commands import handle_collector_commands
 from weiss_rl.runtime.components.config import QueueRuntimeConfig
-from weiss_rl.runtime.components.ipc import deserialize_state_dict_from_ipc, serialize_state_dict_for_ipc
-from weiss_rl.runtime.components.logging import process_debug_log
-from weiss_rl.runtime.components.shared_transport import (
+from weiss_rl.runtime.components.ipc_shared.collector_commands import handle_collector_commands
+from weiss_rl.runtime.components.ipc_shared.ipc import deserialize_state_dict_from_ipc, serialize_state_dict_for_ipc
+from weiss_rl.runtime.components.ipc_shared.logging import process_debug_log
+from weiss_rl.runtime.components.ipc_shared.shared_transport import (
     create_shared_collector_slot_config,
     open_shared_collector_slot,
     shared_unroll_metadata,
     write_unroll_to_shared_slot,
 )
-from weiss_rl.runtime.components.threads import configure_runtime_actor_torch_threads
+from weiss_rl.runtime.components.ipc_shared.threads import configure_runtime_actor_torch_threads
 
 
 def start_process_collectors(

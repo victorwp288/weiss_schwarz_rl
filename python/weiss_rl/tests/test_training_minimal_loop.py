@@ -64,10 +64,10 @@ from weiss_rl.training.minimal.update import (
     _run_training_update_step,
     _schedule_update_count_for_next_update,
 )
-from weiss_rl.training.train_entrypoint.main import _require_explicit_resume_geometry
-from weiss_rl.training.train_entrypoint.phases import (
+from weiss_rl.training.train_entrypoint.cli import (
     TrainCliState,
     TrainStartupState,
+    _require_explicit_resume_geometry,
     execute_train_run,
     prepare_train_manifest_state,
     prepare_train_startup_state,
@@ -75,30 +75,16 @@ from weiss_rl.training.train_entrypoint.phases import (
 )
 
 
-def test_train_entrypoint_phases_facade_reexports_split_phase_modules() -> None:
-    from weiss_rl.training import (
-        train_entrypoint_cli_phase,
-        train_entrypoint_execution_phase,
-        train_entrypoint_manifest_phase,
-        train_entrypoint_phases,
-        train_entrypoint_startup_phase,
-        train_entrypoint_state,
-    )
+def test_train_entrypoint_cli_facade_owns_lifecycle_helpers() -> None:
+    from weiss_rl.training import train_entrypoint_cli
 
-    assert train_entrypoint_phases.TrainCliState is train_entrypoint_state.TrainCliState
-    assert train_entrypoint_phases.TrainStartupState is train_entrypoint_state.TrainStartupState
-    assert train_entrypoint_phases.TrainManifestState is train_entrypoint_state.TrainManifestState
-    assert train_entrypoint_phases.require_explicit_resume_geometry is (
-        train_entrypoint_cli_phase.require_explicit_resume_geometry
-    )
-    assert train_entrypoint_phases.resolve_train_cli_state is train_entrypoint_cli_phase.resolve_train_cli_state
-    assert train_entrypoint_phases.prepare_train_startup_state is (
-        train_entrypoint_startup_phase.prepare_train_startup_state
-    )
-    assert train_entrypoint_phases.prepare_train_manifest_state is (
-        train_entrypoint_manifest_phase.prepare_train_manifest_state
-    )
-    assert train_entrypoint_phases.execute_train_run is train_entrypoint_execution_phase.execute_train_run
+    assert train_entrypoint_cli.TrainCliState is TrainCliState
+    assert train_entrypoint_cli.TrainStartupState is TrainStartupState
+    assert train_entrypoint_cli._require_explicit_resume_geometry is _require_explicit_resume_geometry
+    assert train_entrypoint_cli.resolve_train_cli_state is resolve_train_cli_state
+    assert train_entrypoint_cli.prepare_train_startup_state is prepare_train_startup_state
+    assert train_entrypoint_cli.prepare_train_manifest_state is prepare_train_manifest_state
+    assert train_entrypoint_cli.execute_train_run is execute_train_run
 
 
 def test_minimal_promotion_reexports_checkpoint_snapshot_promotion_boundary() -> None:

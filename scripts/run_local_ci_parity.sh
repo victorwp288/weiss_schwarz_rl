@@ -39,13 +39,6 @@ else
   fi
 fi
 
-run_python_file() {
-  local label="$1"
-  shift
-  log_step "$label"
-  "${RUN[@]}" "$@"
-}
-
 run_module() {
   local label="$1"
   shift
@@ -53,7 +46,7 @@ run_module() {
   "${RUN[@]}" -m "$@"
 }
 
-run_python_file "Cross-platform verify" python/scripts/verify_repo.py
+run_module "Cross-platform verify" weiss_rl.workflows.verify_repo_entrypoint
 
 echo
 echo "Local CI parity checks completed."

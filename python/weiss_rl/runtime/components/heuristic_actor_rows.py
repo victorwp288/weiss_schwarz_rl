@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import torch
 
-from weiss_rl.runtime.components.heuristic_actor_outputs import (
+from weiss_rl.runtime.components.policy_inference.heuristic_actor_outputs import (
     write_heuristic_actor_outputs_ids,
     write_heuristic_actor_outputs_mask,
 )

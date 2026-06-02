@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from scripts.trajectory_bc_warmstart import _initial_hidden_state
+
+from weiss_rl.training.warmstarts.trajectory_bc_warmstart_entrypoint import _initial_hidden_state
 
 
 def test_trajectory_bc_warmstart_entrypoint_facade_reexports_cli_runtime_and_helpers() -> None:

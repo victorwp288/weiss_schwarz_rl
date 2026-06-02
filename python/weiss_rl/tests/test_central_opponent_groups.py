@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from weiss_rl.runtime.components.central_opponent_groups import group_central_opponent_rows
+from weiss_rl.runtime.components.opponents.central_opponent_groups import group_central_opponent_rows
 from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
 
 

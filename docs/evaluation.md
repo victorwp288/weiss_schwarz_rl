@@ -1,34 +1,19 @@
 # Evaluation
 
-Evaluation is a thesis reporting contract. Preserve policy ordering, seed pairing, seat swaps, payoff folding, and summary schemas.
+Evaluation is a reporting contract. Preserve policy ordering, paired seeds,
+seat swaps, payoff folding, uncertainty summaries, and output schemas.
 
-## Standard Entry Points
+## Entry Points
 
-Smoke evaluation:
+| Task | Command |
+| --- | --- |
+| Smoke eval | `uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/<run_dir> --b1-run runs/<b1_run>` |
+| Thesis final eval | `uv run --extra dev --extra sim python -m weiss_rl.cli eval-final --run-dir runs/<run_dir> --b1-run runs/<b1_run>` |
+| Low-level eval | `uv run python -m weiss_rl.workflows.eval_entrypoint --stack-config configs/thesis/final_eval.yaml --run-dir runs/<run_dir>` |
 
-```powershell
-uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/<run_dir> --b1-run runs/<b1_run>
-```
-
-The smoke wrapper uses the plain packed `configs/thesis/main_league.yaml`
-contract so it can evaluate the standard B1/main smoke checkpoints.
-
-Thesis final evaluation:
-
-```powershell
-uv run --extra dev --extra sim python -m weiss_rl.cli eval-final --run-dir runs/<run_dir> --b1-run runs/<b1_run>
-```
-
-The final wrapper uses `configs/thesis/final_eval.yaml`, the selected
-factorized final-eval contract for thesis reproduction.
-
-Low-level package entrypoint:
-
-```powershell
-uv run python -m weiss_rl.workflows.eval_entrypoint `
-  --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml `
-  --run-dir runs/<run_dir>
-```
+Smoke eval uses the packed `configs/thesis/main_league.yaml` contract so it can
+evaluate standard B1/main smoke checkpoints. Final eval uses the selected
+factorized `configs/thesis/final_eval.yaml` contract.
 
 ## Public Demo
 
@@ -43,20 +28,33 @@ Demo artifacts are synthetic and must not be cited as thesis results.
 
 ## Determinism
 
-Final evaluation uses committed paired seed files, stable policy-set resolution, pinned RNG, and deterministic artifact paths. CPU is the default eval device unless the config explicitly requests otherwise.
+Final evaluation uses committed paired seed files, stable policy-set resolution,
+pinned RNG, deterministic artifact paths, and explicit policy IDs. CPU is the
+default eval device unless the config requests otherwise.
 
 ## Periodic Dev Eval
 
-Training presets may run periodic dev eval during training. Pure support helpers for that path live in `weiss_rl.training.dev_eval`: contract validation, seed-file resolution, deterministic RNG/bootstrap seeds, interval checks, log-path helpers, summary persistence, and stall-monitor updates. The simulator-backed runner and promotion-gate execution are wired through explicit training compatibility hooks so call order and artifact writes stay auditable.
+Training configs may run periodic dev eval during learning. That path is useful
+for trend detection and checkpoint promotion, but it is not a replacement for
+the selected final-eval contract.
+
+Pure support helpers live in `weiss_rl.training.dev_eval`; simulator-backed
+execution is wired through explicit training compatibility hooks so call order
+and artifact writes stay auditable.
 
 ## Outputs
 
-Canonical evaluation writes under `runs/<run>/eval/final_eval/`, including matchup summaries, uncertainty payloads, diagnostics, and final policy-set metadata. Some canonical eval paths update run-level reports, so do not point ad-hoc eval commands at historical result directories casually.
+Canonical evaluation writes under `runs/<run>/eval/final_eval/`, including
+matchup summaries, uncertainty payloads, diagnostics, payoff matrices, and
+final policy-set metadata.
+
+Current selected-run evidence is tracked in [artifacts.md](artifacts.md). Keep
+this page focused on evaluation entrypoints and reporting semantics.
 
 ## B2 Flatline Diagnosis
 
-Use the standard disagreement audit when B2 is flat, suspicious, or improving
-differently from B0/B1:
+Use the disagreement audit when B2 is flat, suspicious, or moving differently
+from B0/B1:
 
 ```powershell
 uv run --extra dev --extra sim python -m weiss_rl.cli b2-audit `

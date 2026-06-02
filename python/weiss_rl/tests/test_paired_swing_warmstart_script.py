@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from scripts.paired_swing_warmstart import (
+
+from weiss_rl.training.warmstarts.paired_swing_warmstart_entrypoint import (
     _opponent_context_indices_for_episodes,
     _sample_episode_indices,
     _source_opponent_policy_ids_by_episode,

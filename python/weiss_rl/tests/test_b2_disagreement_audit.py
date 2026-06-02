@@ -1,27 +1,29 @@
 from __future__ import annotations
 
-import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from weiss_rl.diagnostics import b2_disagreement_audit as audit_module
 from weiss_rl.eval.harness import EvalGameRecord
 from weiss_rl.eval.heuristic_public import ActionCatalog
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = REPO_ROOT / "python" / "scripts" / "b2_disagreement_audit.py"
 
 
 def _load_script_module():
-    spec = importlib.util.spec_from_file_location("b2_disagreement_audit_script", SCRIPT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return audit_module
+
+
+def _module_env() -> dict[str, str]:
+    env = dict(os.environ)
+    python_path = str(REPO_ROOT / "python")
+    env["PYTHONPATH"] = python_path if not env.get("PYTHONPATH") else python_path + os.pathsep + env["PYTHONPATH"]
+    return env
 
 
 def _make_record(
@@ -94,7 +96,8 @@ def test_b2_disagreement_audit_requires_fixed_pythonhashseed(tmp_path: Path, mon
     result = subprocess.run(
         [
             sys.executable,
-            "python/scripts/b2_disagreement_audit.py",
+            "-m",
+            "weiss_rl.diagnostics.b2_disagreement_audit",
             "--stack-config",
             "missing.yaml",
             "--run-dir",
@@ -107,6 +110,7 @@ def test_b2_disagreement_audit_requires_fixed_pythonhashseed(tmp_path: Path, mon
             "policy_000001",
         ],
         cwd=REPO_ROOT,
+        env=_module_env(),
         capture_output=True,
         text=True,
         check=False,

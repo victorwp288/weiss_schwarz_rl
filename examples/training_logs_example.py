@@ -5,7 +5,7 @@ Run from the repo root after installing the project:
     uv run python examples/training_logs_example.py
 
 This exercises `TrainingLogger` and `ImpalaLearner` directly.
-It does not go through `python/scripts/train.py`.
+It does not go through the package training entrypoint.
 """
 
 from __future__ import annotations

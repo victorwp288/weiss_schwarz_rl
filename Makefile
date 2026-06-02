@@ -58,19 +58,19 @@ repo-hygiene:
 	@$(PYRUN) -m weiss_rl.diagnostics.repo_hygiene_check_entrypoint
 
 lint:
-	@$(PYRUN) -m ruff check python tests examples python/scripts
+	@$(PYRUN) -m ruff check python tests examples
 
 fmt:
-	@$(PYRUN) -m ruff format python tests examples python/scripts
+	@$(PYRUN) -m ruff format python tests examples
 
 fmt-check:
-	@$(PYRUN) -m ruff format --check python tests examples python/scripts
+	@$(PYRUN) -m ruff format --check python tests examples
 
 type:
 	@$(PYRUN) -m mypy python/weiss_rl/workflows/thesis_wrapper.py python/weiss_rl/workflows/eval_entrypoint.py python/weiss_rl/human_play/play_vs_model_entrypoint.py
 
 deadcode:
-	@$(PYRUN) -m vulture python/weiss_rl python/scripts examples --min-confidence 80
+	@$(PYRUN) -m vulture python/weiss_rl examples --min-confidence 80
 
 test:
 	@$(PYRUN) -m pytest -q python/weiss_rl/tests

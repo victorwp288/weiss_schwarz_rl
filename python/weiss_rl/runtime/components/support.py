@@ -16,17 +16,17 @@ from weiss_rl.runtime.components.action_surface import (
 )
 from weiss_rl.runtime.components.actor_routing import policy_train_mask_for_actor, split_focal_actor_rows
 from weiss_rl.runtime.components.actor_state import _ActorState
+from weiss_rl.runtime.components.batching.impala_learner_batch import build_impala_learner_batch
+from weiss_rl.runtime.components.batching.ppo_learner_batch import build_ppo_learner_batch
 from weiss_rl.runtime.components.bootstrap import bootstrap_values_for_unroll
-from weiss_rl.runtime.components.deterministic_logits import (
-    write_deterministic_logits,
-    write_deterministic_logits_from_packed,
-)
-from weiss_rl.runtime.components.impala_learner_batch import build_impala_learner_batch
 from weiss_rl.runtime.components.metrics import build_runtime_metrics
 from weiss_rl.runtime.components.opponent_context import initial_seat_hidden_for_opponents
 from weiss_rl.runtime.components.outcomes import update_outcomes, update_outcomes_from_transition_arrays
 from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
-from weiss_rl.runtime.components.ppo_learner_batch import build_ppo_learner_batch
+from weiss_rl.runtime.components.policy_inference.deterministic_logits import (
+    write_deterministic_logits,
+    write_deterministic_logits_from_packed,
+)
 from weiss_rl.runtime.components.types import PendingUnroll, RuntimeUnroll
 
 

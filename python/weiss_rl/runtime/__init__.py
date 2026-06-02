@@ -33,8 +33,6 @@ from weiss_rl.league.registry import REGISTRY_FILENAME
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.models.loading import load_snapshot_model_from_path
 from weiss_rl.runtime.components import shared as runtime_shared
-from weiss_rl.runtime.components import shared_transport as runtime_shared_transport
-from weiss_rl.runtime.components.actor_models import actor_inference_model, maybe_compile_runtime_actor_model
 from weiss_rl.runtime.components.actor_state import (
     _ActorState,
     build_runtime_env,
@@ -54,9 +52,7 @@ from weiss_rl.runtime.components.batching import (
     gae_advantages,
 )
 from weiss_rl.runtime.components.central_collection import QueueRuntimeCentralCollectionMixin
-from weiss_rl.runtime.components.central_opponents import QueueRuntimeCentralOpponentMixin
 from weiss_rl.runtime.components.central_rows import QueueRuntimeCentralRowsMixin
-from weiss_rl.runtime.components.collector_commands import handle_collector_commands
 from weiss_rl.runtime.components.config import QueueRuntimeConfig
 from weiss_rl.runtime.components.config import build_runtime_config as build_runtime_config
 from weiss_rl.runtime.components.counters import (
@@ -76,12 +72,15 @@ from weiss_rl.runtime.components.devices import (
 from weiss_rl.runtime.components.devices import (
     resolve_actor_device_layout as resolve_runtime_actor_device_layout,
 )
-from weiss_rl.runtime.components.episode_roles import QueueRuntimeEpisodeRolesMixin
 from weiss_rl.runtime.components.hashing import hash_state_dict, hash_unroll
 from weiss_rl.runtime.components.heuristic_actor_rows import QueueRuntimeHeuristicActorRowsMixin
 from weiss_rl.runtime.components.heuristic_public_actions import QueueRuntimeHeuristicPublicActionsMixin
 from weiss_rl.runtime.components.heuristic_rollouts import QueueRuntimeHeuristicRolloutMixin
-from weiss_rl.runtime.components.ipc import deserialize_state_dict_from_ipc, serialize_state_dict_for_ipc
+from weiss_rl.runtime.components.ipc_shared import shared_transport as runtime_shared_transport
+from weiss_rl.runtime.components.ipc_shared.collector_commands import handle_collector_commands
+from weiss_rl.runtime.components.ipc_shared.ipc import deserialize_state_dict_from_ipc, serialize_state_dict_for_ipc
+from weiss_rl.runtime.components.ipc_shared.logging import PerformanceLogger, process_debug_log
+from weiss_rl.runtime.components.ipc_shared.threads import configure_runtime_actor_torch_threads
 from weiss_rl.runtime.components.legal_batching import (
     concatenate_batch_legal_actions,
     concatenate_legal_actions,
@@ -98,11 +97,16 @@ from weiss_rl.runtime.components.legal_meta import (
     action_catalog_indices,
 )
 from weiss_rl.runtime.components.lifecycle import QueueRuntimeLifecycleMixin
-from weiss_rl.runtime.components.logging import PerformanceLogger, process_debug_log
 from weiss_rl.runtime.components.opponent_mixin import QueueRuntimeOpponentMixin
 from weiss_rl.runtime.components.opponent_rows import QueueRuntimeOpponentRowsMixin
+from weiss_rl.runtime.components.opponents.central_opponents import QueueRuntimeCentralOpponentMixin
+from weiss_rl.runtime.components.opponents.episode_roles import QueueRuntimeEpisodeRolesMixin
 from weiss_rl.runtime.components.pending_mixin import QueueRuntimePendingMixin
 from weiss_rl.runtime.components.policy_ids import FIXED_OPPONENT_EXCLUSIONS, MIRROR_OPPONENT_POLICY_ID
+from weiss_rl.runtime.components.policy_inference.actor_models import (
+    actor_inference_model,
+    maybe_compile_runtime_actor_model,
+)
 from weiss_rl.runtime.components.policy_outputs import QueueRuntimePolicyOutputMixin
 from weiss_rl.runtime.components.policy_rows import QueueRuntimePolicyRowsMixin
 from weiss_rl.runtime.components.process import collector_process_main, start_process_collectors
@@ -115,7 +119,6 @@ from weiss_rl.runtime.components.structured_warmstart import (
 )
 from weiss_rl.runtime.components.support import QueueRuntimeSupportMixin
 from weiss_rl.runtime.components.teacher_heuristic_mixin import QueueRuntimeTeacherHeuristicMixin
-from weiss_rl.runtime.components.threads import configure_runtime_actor_torch_threads
 from weiss_rl.runtime.components.topology import QueueRuntimeMode, resolve_actor_topology
 from weiss_rl.runtime.components.types import PendingUnroll, RuntimeBatch, RuntimeUnroll
 

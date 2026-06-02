@@ -9,26 +9,23 @@ from the active tree.
 
 ## Start Here
 
-- [Docs hub](docs/README.md)
-- [Thesis workflow](docs/thesis_workflow.md)
-- [Configuration](docs/configuration.md)
-- [Training](docs/training.md)
-- [Evaluation](docs/evaluation.md)
-- [Artifacts](docs/artifacts.md)
-- [Testing](docs/testing.md)
+- [Getting started](docs/getting_started.md) for setup and a tiny smoke run.
+- [Docs hub](docs/README.md) for the ownership map.
+- [Thesis workflow](docs/thesis_workflow.md) for canonical train/eval/figure commands.
+- [Artifacts](docs/artifacts.md) for retained thesis evidence and current selected runs.
 
 ## Install
 
-```bash
+```powershell
 uv sync --extra dev
 uv sync --extra dev --extra sim
 ```
 
-The simulator-backed path expects `weiss-sim>=1.2.0`.
+The simulator-backed path expects `weiss-sim>=1.2.0,<2`.
 
 ## Verify
 
-```bash
+```powershell
 uv run python -m weiss_rl.workflows.verify_repo_entrypoint
 ```
 
@@ -37,26 +34,15 @@ mypy, Vulture, pytest, and wrapper dry-runs.
 
 ## Canonical Workflow
 
-```bash
-uv run python -m weiss_rl.cli train-b1 --run-label b1_smoke --profile smoke
-uv run python -m weiss_rl.cli train-main --run-label main_smoke --b1-run runs/b1_smoke --profile smoke
-uv run python -m weiss_rl.cli smoke-eval --run-dir runs/main_smoke --b1-run runs/b1_smoke
-uv run python -m weiss_rl.cli figures --run-dir runs/main_smoke --format png
+```powershell
+uv run --extra dev --extra sim python -m weiss_rl.cli train-b1 --run-label b1_smoke --profile smoke
+uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label main_smoke --b1-run runs/b1_smoke --profile smoke
+uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/main_smoke --b1-run runs/b1_smoke
+uv run --extra dev python -m weiss_rl.cli figures --run-dir runs/main_smoke --format png
 ```
 
-Public thesis configs live under `configs/thesis/`:
-
-- `b1_noleague.yaml`
-- `main_league.yaml`
-- `main_league_auto_gpu.yaml`
-- `final_eval.yaml`
-- `final_eval_gpu.yaml`
-- `multideck_exploratory.yaml`
-- `ablations/no_gru.yaml`
-- `ablations/ppo_lite.yaml`
-- `ablations/terminal_only_reward.yaml`
-
-Compatibility wrapper presets live under `configs/presets/structured_acceptance_standard*.yaml`.
+Configuration details live in [docs/configuration.md](docs/configuration.md)
+and [configs/README.md](configs/README.md).
 
 ## Retained Artifacts
 
@@ -67,7 +53,6 @@ outputs as read-only unless deliberately replacing a thesis artifact.
 ## Repo Shape
 
 - `python/weiss_rl/`: package code.
-- `python/scripts/`: thin compatibility shims.
 - `configs/`: small active config surface and seed files.
 - `docs/`: concise thesis workflow, artifact, and validation docs.
 - `runs/`, `diagnostics/`, `vast_artifacts/`, `thesis_figures_final/`: retained thesis evidence.

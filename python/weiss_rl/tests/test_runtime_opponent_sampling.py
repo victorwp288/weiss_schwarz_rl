@@ -20,7 +20,7 @@ from weiss_rl.runtime import (
     QueueRuntime,
 )
 from weiss_rl.runtime.components.counters import collector_counter_template
-from weiss_rl.runtime.components.episode_roles import (
+from weiss_rl.runtime.components.opponents.episode_roles import (
     accumulate_last_pfsp_exposure_counters,
     nondiverse_opponent_role_assignment,
     resolve_fixed_opponent_role_assignment,

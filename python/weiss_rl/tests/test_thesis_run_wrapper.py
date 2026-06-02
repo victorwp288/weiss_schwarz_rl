@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
 import sys
@@ -10,19 +9,11 @@ from types import SimpleNamespace
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _load_script_module(script_name: str):
-    script_path = REPO_ROOT / "python" / "scripts" / script_name
-    spec = importlib.util.spec_from_file_location(f"test_script_{script_path.stem}", script_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load script module: {script_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+def _thesis_wrapper_command() -> list[str]:
+    return ["-m", "weiss_rl.workflows.thesis_wrapper"]
 
 
-def test_thesis_run_script_is_thin_workflow_facade() -> None:
-    script_module = _load_script_module("thesis_run.py")
+def test_thesis_wrapper_package_module_reexports_workflow_facade() -> None:
     from weiss_rl.workflows import (
         thesis_wrapper,
         thesis_wrapper_cli,
@@ -33,36 +24,20 @@ def test_thesis_run_script_is_thin_workflow_facade() -> None:
         thesis_wrapper_state,
         thesis_wrapper_summary,
     )
+    from weiss_rl.workflows.thesis_wrapper_support import command_builders, commands, inputs
 
-    assert script_module.main is thesis_wrapper.main
-    assert script_module._PRESET_PATHS is thesis_wrapper._PRESET_PATHS
-    assert script_module._resolve_stack_config is thesis_wrapper._resolve_stack_config
-    assert script_module._resolve_eval_stack_config is thesis_wrapper._resolve_eval_stack_config
-    assert script_module.build_thesis_train_command is thesis_wrapper.build_thesis_train_command
-    assert script_module.build_thesis_eval_command is thesis_wrapper.build_thesis_eval_command
-    assert script_module.build_thesis_compare_command is thesis_wrapper.build_thesis_compare_command
-    assert script_module.build_thesis_wrapper_commands is thesis_wrapper.build_thesis_wrapper_commands
-    assert script_module.build_thesis_wrapper_parser is thesis_wrapper.build_thesis_wrapper_parser
-    assert script_module.ThesisWrapperInputs is thesis_wrapper.ThesisWrapperInputs
-    assert script_module.ThesisWrapperCommands is thesis_wrapper.ThesisWrapperCommands
-    assert script_module.ThesisWrapperRequest is thesis_wrapper.ThesisWrapperRequest
-    assert script_module.build_thesis_wrapper_plan is thesis_wrapper.build_thesis_wrapper_plan
-    assert script_module.build_thesis_wrapper_plan_for_request is thesis_wrapper.build_thesis_wrapper_plan_for_request
-    assert script_module.build_thesis_wrapper_commands_for_request is (
-        thesis_wrapper.build_thesis_wrapper_commands_for_request
-    )
-    assert script_module.run_thesis_wrapper_cli is thesis_wrapper.run_thesis_wrapper_cli
-    assert script_module.run_thesis_wrapper_commands is thesis_wrapper.run_thesis_wrapper_commands
-    assert script_module.run_thesis_wrapper_plan is thesis_wrapper.run_thesis_wrapper_plan
-    assert script_module.thesis_wrapper_repo_root is thesis_wrapper.thesis_wrapper_repo_root
-    assert script_module.thesis_wrapper_commands_for_plan is thesis_wrapper.thesis_wrapper_commands_for_plan
-    assert script_module.thesis_wrapper_inputs_from_args is thesis_wrapper.thesis_wrapper_inputs_from_args
-    assert script_module.thesis_wrapper_request is thesis_wrapper.thesis_wrapper_request
-    assert script_module.write_thesis_wrapper_summary is thesis_wrapper.write_thesis_wrapper_summary
     assert thesis_wrapper.main is thesis_wrapper_cli.main
+    assert thesis_wrapper._PRESET_PATHS is commands._PRESET_PATHS
+    assert thesis_wrapper._resolve_stack_config is commands._resolve_stack_config
+    assert thesis_wrapper._resolve_eval_stack_config is commands._resolve_eval_stack_config
+    assert thesis_wrapper.build_thesis_train_command is command_builders.build_thesis_train_command
+    assert thesis_wrapper.build_thesis_eval_command is command_builders.build_thesis_eval_command
+    assert thesis_wrapper.build_thesis_compare_command is command_builders.build_thesis_compare_command
     assert thesis_wrapper.build_thesis_wrapper_parser is thesis_wrapper_cli.build_thesis_wrapper_parser
     assert thesis_wrapper.run_thesis_wrapper_cli is thesis_wrapper_cli.run_thesis_wrapper_cli
     assert thesis_wrapper.thesis_wrapper_repo_root is thesis_wrapper_cli.thesis_wrapper_repo_root
+    assert thesis_wrapper.ThesisWrapperInputs is inputs.ThesisWrapperInputs
+    assert thesis_wrapper.thesis_wrapper_inputs_from_args is inputs.thesis_wrapper_inputs_from_args
     assert thesis_wrapper.ThesisWrapperPlan is thesis_wrapper_state.ThesisWrapperPlan
     assert thesis_wrapper.ThesisWrapperRequest is thesis_wrapper_state.ThesisWrapperRequest
     assert thesis_wrapper.ThesisWrapperResult is thesis_wrapper_state.ThesisWrapperResult
@@ -555,7 +530,7 @@ def test_thesis_run_wrapper_dry_run_writes_plan(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            *_thesis_wrapper_command(),
             "--repo-root",
             str(repo_root),
             "--stack-config",
@@ -625,7 +600,7 @@ def test_thesis_run_wrapper_defaults_to_standard_preset_when_stack_config_is_omi
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            *_thesis_wrapper_command(),
             "--repo-root",
             str(repo_root),
             "--run-label",
@@ -658,7 +633,7 @@ def test_thesis_run_wrapper_reuses_custom_stack_config_for_eval_when_no_eval_ove
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            *_thesis_wrapper_command(),
             "--repo-root",
             str(repo_root),
             "--stack-config",
@@ -695,7 +670,7 @@ def test_thesis_run_wrapper_resolves_relative_config_paths_against_repo_root(tmp
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            *_thesis_wrapper_command(),
             "--repo-root",
             str(repo_root),
             "--stack-config",
@@ -727,7 +702,7 @@ def test_thesis_run_wrapper_defaults_to_multideck_eval_surface_for_multideck_pre
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            *_thesis_wrapper_command(),
             "--repo-root",
             str(repo_root),
             "--preset",
@@ -758,7 +733,7 @@ def test_thesis_run_wrapper_lists_named_presets_without_run_label(tmp_path: Path
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            *_thesis_wrapper_command(),
             "--repo-root",
             str(repo_root),
             "--list-presets",
@@ -786,7 +761,7 @@ def test_thesis_run_wrapper_passes_b1_baseline_run_dir_to_train_and_eval(tmp_pat
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "python" / "scripts" / "thesis_run.py"),
+            *_thesis_wrapper_command(),
             "--repo-root",
             str(repo_root),
             "--stack-config",

@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 
 from weiss_rl.runtime.components.bootstrap import add_shared_elapsed_ms
-from weiss_rl.runtime.components.central_policy_outputs import CentralPolicyPhaseOutputs
 from weiss_rl.runtime.components.collector_state import CollectorUnrollState
+from weiss_rl.runtime.components.policy_inference.central_policy_outputs import CentralPolicyPhaseOutputs
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState

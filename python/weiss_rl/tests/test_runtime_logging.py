@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from weiss_rl.runtime.components.logging import PerformanceLogger, process_debug_log
+from weiss_rl.runtime.components.ipc_shared.logging import PerformanceLogger, process_debug_log
 
 
 def test_performance_logger_writes_sorted_jsonl(tmp_path) -> None:

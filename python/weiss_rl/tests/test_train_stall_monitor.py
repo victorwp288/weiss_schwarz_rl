@@ -6,9 +6,13 @@ from typing import Any, cast
 
 import numpy as np
 import pytest
-import scripts.train as train_script
 import torch
-from scripts.train import (
+
+import weiss_rl.training.train_entrypoint as train_script
+from weiss_rl.config import apply_stack_overrides, load_stack_config
+from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
+from weiss_rl.training import checkpoint_guard
+from weiss_rl.training.train_entrypoint import (
     MinimalRollout,
     TrainingPaths,
     _build_learner_batch,
@@ -21,10 +25,6 @@ from scripts.train import (
     _should_promote_best_checkpoint,
     _update_stall_monitor,
 )
-
-from weiss_rl.config import apply_stack_overrides, load_stack_config
-from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
-from weiss_rl.training import checkpoint_guard
 
 
 def _repo_root():

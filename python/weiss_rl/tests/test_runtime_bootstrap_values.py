@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from weiss_rl.runtime.components.bootstrap_values import (
+from weiss_rl.runtime.components.batching.bootstrap_values import (
     BootstrapArraySpec,
     actor_perspective_discounts,
     concat_bootstrap_array,

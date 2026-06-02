@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from weiss_rl.runtime.components.bootstrap import add_shared_elapsed_ms
-from weiss_rl.runtime.components.central_policy_outputs import CentralPolicyPhaseOutputs
 from weiss_rl.runtime.components.central_row_partitions import partition_central_actor_rows
 from weiss_rl.runtime.components.collector_state import CollectorUnrollState
 from weiss_rl.runtime.components.legal_batching import optional_legal_action_meta, require_ids_offsets
+from weiss_rl.runtime.components.policy_inference.central_policy_outputs import CentralPolicyPhaseOutputs
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState

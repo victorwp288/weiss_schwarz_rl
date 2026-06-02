@@ -46,7 +46,7 @@ def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationSt
         ),
         VerificationStep(
             "Ruff check",
-            _module_command(python_exe, "ruff", "check", "python", "tests", "examples", "python/scripts"),
+            _module_command(python_exe, "ruff", "check", "python", "tests", "examples"),
         ),
         VerificationStep(
             "Ruff format check",
@@ -58,7 +58,6 @@ def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationSt
                 "python",
                 "tests",
                 "examples",
-                "python/scripts",
             ),
         ),
         VerificationStep(
@@ -77,7 +76,6 @@ def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationSt
                 python_exe,
                 "vulture",
                 "python/weiss_rl",
-                "python/scripts",
                 "examples",
                 "--min-confidence",
                 "80",

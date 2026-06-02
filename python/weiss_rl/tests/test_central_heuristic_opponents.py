@@ -5,14 +5,16 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.runtime.components.central_heuristic_opponent_apply import apply_central_heuristic_opponent_outputs
-from weiss_rl.runtime.components.central_heuristic_opponents import (
+from weiss_rl.runtime.components.opponents.central_heuristic_opponent_apply import (
+    apply_central_heuristic_opponent_outputs,
+)
+from weiss_rl.runtime.components.opponents.central_heuristic_opponents import (
     build_central_packed_heuristic_batch,
     legal_action_ids_from_mask_rows,
     split_central_heuristic_entries,
 )
-from weiss_rl.runtime.components.central_opponent_groups import CentralOpponentEntry
-from weiss_rl.runtime.components.deterministic_logits import (
+from weiss_rl.runtime.components.opponents.central_opponent_groups import CentralOpponentEntry
+from weiss_rl.runtime.components.policy_inference.deterministic_logits import (
     write_deterministic_logits,
     write_deterministic_logits_from_packed,
 )

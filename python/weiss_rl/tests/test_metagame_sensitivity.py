@@ -305,7 +305,8 @@ def test_metagame_entrypoint_writes_sensitivity_tree(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "python" / "scripts" / "metagame.py"),
+            "-m",
+            "weiss_rl.metagame.metagame_entrypoint",
             "--study-config",
             str(STUDY_CONFIG_PATH),
             "--final-eval-dir",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from weiss_rl.runtime.components.reward_backfill import (
+from weiss_rl.runtime.components.batching.reward_backfill import (
     apply_runtime_reward_backfills,
     apply_terminal_outcome_backfill,
     apply_terminal_outcome_trace_backfill,

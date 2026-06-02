@@ -5,11 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable, MutableMapping
 from typing import Any
 
-from weiss_rl.training.train_entrypoint.checkpoint_wrappers import install_checkpoint_wrappers
+from weiss_rl.training.train_entrypoint.checkpoints import install_checkpoint_wrappers
+from weiss_rl.training.train_entrypoint.lifecycle import install_minimal_training_wrapper, install_script_wrappers
 from weiss_rl.training.train_entrypoint.metadata_wrappers import install_metadata_wrappers
 from weiss_rl.training.train_entrypoint.runner_wrappers import install_runner_wrappers
-from weiss_rl.training.train_entrypoint.runtime_wrappers import install_minimal_training_wrapper
-from weiss_rl.training.train_entrypoint.script_wrappers import install_script_wrappers
 
 
 def install_train_entrypoint_wrappers(

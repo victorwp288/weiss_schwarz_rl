@@ -1,7 +1,11 @@
 # Thesis Workflow
 
 This is the canonical operator surface for the rebuild. Use the package CLI for
-normal work and keep `python/scripts/*` for compatibility and diagnostics.
+normal work; lower-level diagnostics now use package modules under `weiss_rl.*`.
+
+This page owns commands and operating rules. Current evidence lives in
+[artifacts.md](artifacts.md), config ownership in [configuration.md](configuration.md),
+and run-tree requirements in [artifact_contract.md](artifact_contract.md).
 
 ## Setup
 
@@ -117,7 +121,7 @@ captures replay bundles, and writes the causal disagreement summary under
 Reward-component probe:
 
 ```powershell
-uv run --extra dev python python/scripts/reward_component_probe.py `
+uv run --extra dev python -m weiss_rl.diagnostics.reward_component_probe_entrypoint `
   --stack-config configs/thesis/b1_noleague.yaml `
   --num-envs 64 `
   --steps 256 `
@@ -132,7 +136,7 @@ only carries scalar rewards.
 Learning-progress diagnostic:
 
 ```powershell
-uv run --extra dev python python/scripts/learning_progress_diagnostic.py `
+uv run --extra dev python -m weiss_rl.diagnostics.learning_progress `
   --run-dir runs/b1_reward_full_shaping_probe100_20260513
 ```
 
@@ -141,88 +145,16 @@ summarizes reward scale, V-trace/off-policy health, route purity, checkpoint
 selection, and periodic dev-eval trend so a run that peaked at update 50 and
 stalled by update 100 is visible without manual log inspection.
 
-B1 candidate selection:
+B1 candidate selection is currently manual in this checkout: use periodic
+dev-eval, targeted confirmation, and the snapshot registry artifacts to choose
+the explicit `b1_noleague_baseline` source run before launching `train-main`.
+No standalone selector entrypoint is active in the package surface.
 
-```powershell
-uv run --extra dev --extra sim python python/scripts/select_b1_candidate.py `
-  --stack-config configs/thesis/b1_noleague.yaml `
-  --run-dir runs/b1_thesis_seed1 `
-  --output-json diagnostics/b1_candidate_selection_seed1.json
-```
+## Artifact State
 
-Use this before a B1 run is consumed by the league trainer. It ranks saved
-checkpoints by B2/B3/B4 anchor performance, reports best-vs-latest falloff,
-maps training policy ids to snapshot ids, and emits a deterministic
-confirmation-eval command for the selected snapshot. If targeted confirmation
-or checkpoint-guard confirmatory eval artifacts already exist, selector
-eligibility and ranking use those higher-seed scores instead of the noisier
-periodic dev-eval scores. Complete targeted-confirm artifacts are also allowed
-to create candidates for checkpointed policies that fell between periodic
-dev-eval intervals; this is how a confirmed update-90 checkpoint can be selected
-without rewriting chronological `latest.pt`.
-
-When comparing against the B2 heuristic baseline itself, pass a saved
-anchor-vs-anchor targeted-confirm summary:
-
-```powershell
-uv run --extra dev python python/scripts/select_b1_candidate.py `
-  --stack-config configs/thesis/b1_noleague.yaml `
-  --run-dir runs/b1_thesis_seed1 `
-  --reference-summary-json runs/main_guided_factorized_continuation_teacherfade_b2mix020_u50_20260515/eval/targeted_confirm128_b2_vs_b3b4_20260515/targeted_confirm128_summary.json `
-  --reference-label "B2 HeuristicPublic reference" `
-  --output-json diagnostics/b1_candidate_selection_seed1_reference_b2.json
-```
-
-`--publish-baseline-alias` is intentionally restricted to source runs marked
-`experiment.role=baseline_noleague`. Guided public-teacher runs are useful
-ablations, but they must not be published as the canonical B1 NoLeague anchor.
-For guided/bootstrap candidates, use `--publish-selected-alias` with an explicit
-alias such as `--selected-alias-policy-id guided_bootstrap_selected`; this pins
-the selected checkpoint as a generic registry snapshot without changing
-`latest.pt`, strict `best.pt`, or `b1_noleague_baseline`.
-
-## Current Paper-Ready Artifacts
-
-Locked B1 NoLeague seed:
-
-- run: `runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01`
-- selected policy id: `selected_candidate`
-- source policy id: `policy_000003`
-- update: `15`
-- weights hash: `66767c1e70c70d1706c058bfd38a7b20cb902c9740d96b6fb1ba664a2b65a685`
-- supporting artifacts: final-eval outputs and paper-readiness summary inside
-  the run directory.
-
-Selected main fixed-deck model:
-
-- run: `runs/main_champion_hardneg_interp_u10_repair_a015_20260517`
-- selected alias: `main_league_selected`
-- source policy id: `main_interp_repair_a015`
-- update: `5`
-- weights hash: `1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26`
-- provenance runs:
-  `runs/main_champion_hardneg_long_v1_u10_20260517_seg01` and
-  `runs/main_champion_hardneg_rehearsal_from_u20_u5_20260517_seg01`.
-
-Targeted confirm256 evidence for the selected main source checkpoint:
-
-| Opponent | Wins | Games | Win rate |
-|---|---:|---:|---:|
-| B0 RandomLegal | 512 | 512 | 1.000000 |
-| B1 NoLeague baseline | 322 | 512 | 0.628906 |
-| B2 HeuristicPublic | 399 | 512 | 0.779297 |
-| B3 HeuristicPublicAggro | 365 | 512 | 0.712891 |
-| B4 HeuristicPublicControl | 382 | 512 | 0.746094 |
-
-The canonical final eval for `main_league_selected` writes B0-B4 plus B1
-matrix artifacts, metagame summaries, replay verification, paper figures, and a
-passing `paper_readiness_summary.json` in the selected main run directory.
-
-The current selected main checkpoint is an explicit interpolation between the
-first champion/hard-negative u10 league checkpoint and a later rehearsal repair
-checkpoint. It is positive against every imported learned champion/hard-negative
-candidate in the 128-paired-seed panel, but that panel is supporting robustness
-evidence rather than the headline selection criterion.
+Current selected runs, checkpoint hashes, final-eval evidence, figure traces,
+and smoke/probe metrics live in [artifacts.md](artifacts.md). Keep this workflow
+doc focused on commands and operating rules.
 
 ## Profiles
 
@@ -259,23 +191,3 @@ ran close to the RTX 5080 VRAM ceiling.
 - B3 aggro: `preset:aggro_deck_5hy_nino_v1`.
 - B4 control: `preset:control_deck_jj_s66_v1`.
 - Multideck results are exploratory and must be labeled separately.
-
-## Current Smoke Evidence
-
-On 2026-05-12:
-
-- `rebuild_smoke_b1_20260512_v5` completed 1 B1 update at 547.05 samples/sec.
-- `rebuild_smoke_main_20260512_v2` completed 1 main league update at 446.58 samples/sec and imported the B1 anchor.
-- Smoke eval on `rebuild_smoke_main_20260512_v2` resolved B0-B4 and wrote `eval/final_eval/summary.json`.
-- Figure export wrote four PNG paper figures under `figures/paper/`.
-- Full local verifier passed after the rebuild: `1205 passed, 2 skipped`.
-- `phase2_b1_gpu_probe_20260512` completed 2 B1 updates on CUDA with
-  `torch 2.11.0+cu128`, mean throughput 5634.83 samples/sec, max GPU memory
-  2312 MB, and max GPU util 25%.
-- `phase2_main_gpu_probe_20260512` completed 2 main league updates on CUDA,
-  imported the B1 probe anchor, and reached mean throughput 5427.90 samples/sec.
-- `phase2_b1_medium64_probe_20260512` completed 2 B1 updates with the medium64
-  model at thesis-local shape, mean throughput 21001.79 samples/sec, max GPU
-  memory 10474 MB, and max GPU util 69%.
-
-These are plumbing and throughput smoke numbers only.
