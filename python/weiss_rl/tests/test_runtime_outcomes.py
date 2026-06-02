@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 from weiss_rl.eval.harness import GameResult
-from weiss_rl.runtime_components.outcomes import (
+from weiss_rl.runtime.components.outcomes import (
     MIRROR_OPPONENT_POLICY_ID,
     apply_outcome_counters_to_tracker,
     update_outcomes,

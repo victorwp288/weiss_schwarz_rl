@@ -1,0 +1,47 @@
+schema_version: 2
+description: "Longer main-league probe from the current selected main checkpoint with real learned champion sampling, emergent hard-negative sampling, B1 residency, and B0-B4+B1 guardrails. Imported seed snapshots are training-pool opponents only; thesis promotion still requires paired confirmation."
+extends: ../../main_league.yaml
+league:
+  pool:
+    recent_size: 24
+    champion_size: 8
+    champion_max_age_updates: 0
+    seed_snapshot_import_filter: all
+    seed_snapshot_champion_import: all
+  warmup:
+    first_updates: 2
+  sampling:
+    mirror_mix_fraction: 0.05
+    mirror_mix_end_updates: -1
+    mirror_final_mix_fraction: 0.05
+    heuristic_public_mix_fraction: 0.05
+    heuristic_public_final_mix_fraction: 0.05
+    heuristic_public_variant_mix_fraction: 0.10
+    heuristic_public_variant_final_mix_fraction: 0.10
+    noleague_baseline_reserved_envs_per_actor: 4
+    noleague_baseline_mix_fraction: 0.30
+    noleague_baseline_mix_end_updates: -1
+    warmup_snapshot_mix_fraction: 0.10
+    champion_mix_fraction: 0.25
+    hard_negative_mix_fraction: 0.15
+    hard_negative_min_samples: 8
+    hard_negative_max_win_rate: 0.50
+training:
+  optimizer:
+    learning_rate: 0.00004
+  exploration:
+    entropy_coef: 0.003
+    actor_sampling_temperature: 0.95
+  fixed_model_opponent_action_selection: argmax
+  structured_aux:
+    teacher_supervised_start_updates: 0
+    teacher_supervised_end_updates: 0
+    teacher_supervised_final_scale: 0.0
+    teacher_public_heuristic_coef: 0.0
+    teacher_public_heuristic_end_updates: 0
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_heuristic_profiles_end_updates: 0
+    policy_anchor_coef: 0.12
+    policy_anchor_top_action_coef: 0.01
+    policy_anchor_temperature: 0.75
+    trajectory_bc_every_updates: 0

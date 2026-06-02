@@ -5,7 +5,7 @@ from typing import Any, cast
 import numpy as np
 import torch
 
-from weiss_rl.runtime_components.ipc import deserialize_state_dict_from_ipc, serialize_state_dict_for_ipc
+from weiss_rl.runtime.components.ipc_shared.ipc import deserialize_state_dict_from_ipc, serialize_state_dict_for_ipc
 
 
 def test_serialize_state_dict_for_ipc_converts_tensors_to_independent_numpy_arrays() -> None:

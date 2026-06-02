@@ -1,7 +1,0 @@
-schema_version: 2
-description: "Main league probe: stronger/sharper policy anchoring from the confirmed teacherfade best, testing whether weak global KL failed only because it was too diffuse to protect B3/B4-sensitive decisions."
-extends: main_league_guided_factorized_postbest_anchor_probe.yaml
-training:
-  structured_aux:
-    policy_anchor_coef: 0.8
-    policy_anchor_temperature: 0.5

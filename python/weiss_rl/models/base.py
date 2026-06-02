@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Mapping, Sequence, Set
+from typing import Any, cast
 
 import torch
 from torch import Tensor, nn
@@ -102,7 +102,7 @@ class PolicyValueModelBaseMixin:
         return result
 
     def should_apply_opponent_context_for_eval_policy(self, policy_id: str) -> bool:
-        enabled = getattr(self, "opponent_context_eval_policy_ids", frozenset())
+        enabled = cast(Set[str], getattr(self, "opponent_context_eval_policy_ids", frozenset()))
         return str(policy_id).strip() in enabled
 
     def encode(self, obs: Tensor) -> Tensor:
@@ -456,9 +456,7 @@ class PolicyValueModelBaseMixin:
                     context + adapter.to(device=device, dtype=dtype).index_select(0, adapter_indices) * adapter_scale
                 )
         context = context.masked_fill((indices == 0).unsqueeze(1), 0.0)
-        if has_nonzero_context:
-            return context
-        return None
+        return context
 
     def _opponent_context_indices_tensor(
         self,

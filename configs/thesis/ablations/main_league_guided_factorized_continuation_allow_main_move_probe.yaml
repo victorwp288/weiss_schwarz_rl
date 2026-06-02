@@ -1,6 +1,0 @@
-schema_version: 2
-description: "Main league probe: guided factorized continuation with main_move-only rows left legal, testing whether the inherited pass-over-main-move guard hurts B4/control transfer."
-extends: main_league_guided_factorized_continuation_no_b1_anchor_probe.yaml
-training:
-  action_surface:
-    force_pass_over_main_move_only: false

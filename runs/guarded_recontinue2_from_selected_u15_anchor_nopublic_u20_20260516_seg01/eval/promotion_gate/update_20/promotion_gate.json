@@ -1,0 +1,219 @@
+{
+  "anchors": [
+    {
+      "anchor_name": "B0 RandomLegal",
+      "episodes_path": "promotion_gate_episodes/00_b0_randomlegal.jsonl",
+      "matchup_summary": {
+        "decision_limit_timeouts": 0,
+        "draws": 0,
+        "engine_errors": 0,
+        "games": 16,
+        "losses": 0,
+        "main_move_actions": 0,
+        "max_consecutive_main_moves": 0,
+        "natural_timeouts": 0,
+        "no_progress_timeouts": 0,
+        "pass_actions": 0,
+        "pass_with_nonpass_available": 0,
+        "tick_limit_timeouts": 0,
+        "timeout_unknown": 0,
+        "total_actions": 0,
+        "truncations": 0,
+        "wins": 16
+      },
+      "opponent_policy_id": "b0_randomlegal",
+      "posterior": {
+        "ci_half_width": 0.0,
+        "ci_high": 1.0,
+        "ci_low": 1.0,
+        "gt_target": 0.55,
+        "lt_guardrail": 0.45,
+        "mean": 1.0,
+        "paired_seed_count": 8,
+        "prob_gt_half": 1.0,
+        "prob_gt_target": 1.0,
+        "prob_lt_guardrail": 0.0,
+        "prob_lt_half": 0.0,
+        "sample_count": 1000
+      },
+      "truncation": {
+        "denominator": 16,
+        "numerator": 0,
+        "rate": 0.0
+      }
+    },
+    {
+      "anchor_name": "B2 HeuristicPublic",
+      "episodes_path": "promotion_gate_episodes/01_b2_heuristicpublic.jsonl",
+      "matchup_summary": {
+        "decision_limit_timeouts": 0,
+        "draws": 0,
+        "engine_errors": 0,
+        "games": 16,
+        "losses": 6,
+        "main_move_actions": 0,
+        "max_consecutive_main_moves": 0,
+        "natural_timeouts": 0,
+        "no_progress_timeouts": 0,
+        "pass_actions": 0,
+        "pass_with_nonpass_available": 0,
+        "tick_limit_timeouts": 0,
+        "timeout_unknown": 0,
+        "total_actions": 0,
+        "truncations": 0,
+        "wins": 10
+      },
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "posterior": {
+        "ci_half_width": 0.13162148319092382,
+        "ci_high": 0.7860897890727616,
+        "ci_low": 0.522846822690914,
+        "gt_target": 0.55,
+        "lt_guardrail": 0.45,
+        "mean": 0.625,
+        "paired_seed_count": 8,
+        "prob_gt_half": 1.0,
+        "prob_gt_target": 0.859,
+        "prob_lt_guardrail": 0.0,
+        "prob_lt_half": 0.0,
+        "sample_count": 1000
+      },
+      "truncation": {
+        "denominator": 16,
+        "numerator": 0,
+        "rate": 0.0
+      }
+    },
+    {
+      "anchor_name": "B3 HeuristicPublicAggro",
+      "episodes_path": "promotion_gate_episodes/02_b3_heuristicpublicaggro.jsonl",
+      "matchup_summary": {
+        "decision_limit_timeouts": 0,
+        "draws": 0,
+        "engine_errors": 0,
+        "games": 16,
+        "losses": 7,
+        "main_move_actions": 0,
+        "max_consecutive_main_moves": 0,
+        "natural_timeouts": 0,
+        "no_progress_timeouts": 0,
+        "pass_actions": 0,
+        "pass_with_nonpass_available": 0,
+        "tick_limit_timeouts": 0,
+        "timeout_unknown": 0,
+        "total_actions": 0,
+        "truncations": 0,
+        "wins": 9
+      },
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "posterior": {
+        "ci_half_width": 0.19929060798947276,
+        "ci_high": 0.7622823120251236,
+        "ci_low": 0.3637010960461781,
+        "gt_target": 0.55,
+        "lt_guardrail": 0.45,
+        "mean": 0.5625,
+        "paired_seed_count": 8,
+        "prob_gt_half": 0.754,
+        "prob_gt_target": 0.547,
+        "prob_lt_guardrail": 0.126,
+        "prob_lt_half": 0.246,
+        "sample_count": 1000
+      },
+      "truncation": {
+        "denominator": 16,
+        "numerator": 0,
+        "rate": 0.0
+      }
+    },
+    {
+      "anchor_name": "B4 HeuristicPublicControl",
+      "episodes_path": "promotion_gate_episodes/03_b4_heuristicpubliccontrol.jsonl",
+      "matchup_summary": {
+        "decision_limit_timeouts": 0,
+        "draws": 0,
+        "engine_errors": 0,
+        "games": 16,
+        "losses": 2,
+        "main_move_actions": 0,
+        "max_consecutive_main_moves": 0,
+        "natural_timeouts": 0,
+        "no_progress_timeouts": 0,
+        "pass_actions": 0,
+        "pass_with_nonpass_available": 0,
+        "tick_limit_timeouts": 0,
+        "timeout_unknown": 0,
+        "total_actions": 0,
+        "truncations": 0,
+        "wins": 14
+      },
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "posterior": {
+        "ci_half_width": 0.1293302148249102,
+        "ci_high": 0.9782406027627524,
+        "ci_low": 0.719580173112932,
+        "gt_target": 0.55,
+        "lt_guardrail": 0.45,
+        "mean": 0.875,
+        "paired_seed_count": 8,
+        "prob_gt_half": 1.0,
+        "prob_gt_target": 1.0,
+        "prob_lt_guardrail": 0.0,
+        "prob_lt_half": 0.0,
+        "sample_count": 1000
+      },
+      "truncation": {
+        "denominator": 16,
+        "numerator": 0,
+        "rate": 0.0
+      }
+    }
+  ],
+  "decision": {
+    "passed": false,
+    "reasons": [
+      {
+        "anchor_name": "B3 HeuristicPublicAggro",
+        "code": "anchor_loss_guardrail_exceeded",
+        "max_allowed": 0.05,
+        "observed": 0.126,
+        "threshold": 0.45
+      }
+    ]
+  },
+  "focal_policy_id": "policy_000004",
+  "folding": "S0",
+  "ordered_opponents": [
+    "B0 RandomLegal",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "overall_posterior": {
+    "ci_half_width": 0.09096990703055458,
+    "ci_high": 0.856179653439943,
+    "ci_low": 0.6742398393788338,
+    "gt_target": 0.55,
+    "lt_guardrail": 0.45,
+    "mean": 0.765625,
+    "paired_seed_count": 32,
+    "prob_gt_half": 1.0,
+    "prob_gt_target": 1.0,
+    "prob_lt_guardrail": 0.0,
+    "prob_lt_half": 0.0,
+    "sample_count": 1000
+  },
+  "paired_seed_count": 8,
+  "record_path": "promotion_gate.json",
+  "seat_swap": true,
+  "seed_file": {
+    "path": "configs/seeds/local_promotion_eval_seeds.txt",
+    "sha256": "03fbbaa2c6e7e53c08e35c2dfaf141c4ad69d155eca607027fedf17f0e6cd07f"
+  },
+  "truncation": {
+    "denominator": 64,
+    "numerator": 0,
+    "rate": 0.0
+  },
+  "weighting": "uniform_across_anchors"
+}

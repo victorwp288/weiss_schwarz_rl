@@ -1,0 +1,36 @@
+{
+  "case_id": "S2",
+  "scheme": "S2",
+  "top_policies_by_mean_mixture": [
+    {
+      "mean_mixture": 0.9999999996159933,
+      "policy_id": "main_league_selected",
+      "prob_mass_gt_0_05": 1.0
+    },
+    {
+      "mean_mixture": 3.834074075206471e-10,
+      "policy_id": "B1 NoLeague baseline",
+      "prob_mass_gt_0_05": 0.0
+    },
+    {
+      "mean_mixture": 6e-13,
+      "policy_id": "B0 RandomLegal",
+      "prob_mass_gt_0_05": 0.0
+    },
+    {
+      "mean_mixture": 0.0,
+      "policy_id": "B2 HeuristicPublic",
+      "prob_mass_gt_0_05": 0.0
+    },
+    {
+      "mean_mixture": 0.0,
+      "policy_id": "B3 HeuristicPublicAggro",
+      "prob_mass_gt_0_05": 0.0
+    },
+    {
+      "mean_mixture": 0.0,
+      "policy_id": "B4 HeuristicPublicControl",
+      "prob_mass_gt_0_05": 0.0
+    }
+  ]
+}

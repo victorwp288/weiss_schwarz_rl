@@ -61,6 +61,19 @@ select = ["E", "F", "B", "I", "UP"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
+testpaths = ["python/weiss_rl/tests"]
+norecursedirs = [
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "dist",
+    "run_logs",
+    "runs",
+    "temp",
+    "vast_artifacts",
+]
 markers = [
     "simulator: tests that require weiss-sim 1.2.0 or a compatible sibling checkout",
     "artifact: tests that exercise artifact and docs contracts",

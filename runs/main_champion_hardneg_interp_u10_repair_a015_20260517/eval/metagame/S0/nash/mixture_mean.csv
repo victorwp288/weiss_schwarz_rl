@@ -1,0 +1,7 @@
+policy_id,mean_mixture,prob_mass_gt_0_05
+main_league_selected,0.9999999996159933,1.0
+B1 NoLeague baseline,3.834074075206471e-10,0.0
+B0 RandomLegal,6e-13,0.0
+B2 HeuristicPublic,0.0,0.0
+B3 HeuristicPublicAggro,0.0,0.0
+B4 HeuristicPublicControl,0.0,0.0

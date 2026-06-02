@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from weiss_rl.eval import DevEvalPolicySummary
-from weiss_rl.eval.policy_set import select_final_policy_set_deterministic_v1
+from weiss_rl.eval.policies.set import select_final_policy_set_deterministic_v1
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.training.run_metadata import load_json_object, manifest_source_path
 

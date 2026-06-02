@@ -1,0 +1,7 @@
+focal_policy_id,main_league_selected,B0 RandomLegal,B1 NoLeague baseline,B2 HeuristicPublic,B3 HeuristicPublicAggro,B4 HeuristicPublicControl
+main_league_selected,0.0,1.0,0.28125,0.5625,0.40625,0.4375
+B0 RandomLegal,-1.0,0.0,-0.984375,-0.953125,-0.96875,-0.984375
+B1 NoLeague baseline,-0.28125,0.984375,0.0,0.390625,0.390625,0.34375
+B2 HeuristicPublic,-0.5625,0.953125,-0.390625,0.0,-0.359375,-0.01171875
+B3 HeuristicPublicAggro,-0.40625,0.96875,-0.390625,0.359375,0.0,-0.1515151515151515
+B4 HeuristicPublicControl,-0.4375,0.984375,-0.34375,0.01171875,0.15151515151515138,0.0

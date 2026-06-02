@@ -1,0 +1,7 @@
+{
+  "format": "interpolated_snapshot_meta_v1",
+  "policy_id": "main_a025_b2pair70_u1_a075",
+  "source_checkpoint_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_a025_b2pair70_u1_a075_20260520/training/checkpoints/checkpoint_interpolated.pt",
+  "update": 1,
+  "weights_sha256": "39c7799b7d205f549b566e1366febfe12baa29e66db067980e75d79f2376764c"
+}

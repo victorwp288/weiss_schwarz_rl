@@ -1,0 +1,12 @@
+{
+  "format": "seeded_train_snapshot_metadata_v1",
+  "imported_from_policy_id": "main_league_selected",
+  "imported_from_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_b1only_bestresponse_from_u50_to_u100_20260517",
+  "imported_from_snapshot_path": "training/snapshots/main_league_selected/weights.pt",
+  "imported_from_update": 30,
+  "imported_from_weights_sha256": "afac081c5821cf69c5981a044ce755b6cb1b7d76a1f0cee61d1c0e992393b887",
+  "policy_id": "seed_c3aac2f9dc_main_league_selected",
+  "update": 0,
+  "weights_path": "training/snapshots/seed_c3aac2f9dc_main_league_selected/weights.pt",
+  "weights_sha256": "39686bf80ce8746f41e81a06d5fe5dc00a9812572d82d3b5b9077981b84f1b0a"
+}

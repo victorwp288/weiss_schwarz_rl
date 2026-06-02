@@ -1,7 +1,0 @@
-schema_version: 2
-description: structured_acceptance tiny32 fast packed WSL frontier with cyclic public teacher, persistent B1 mix, and terminal-only rewards
-extends: structured_acceptance_tiny32_fast_pubcycle3_b1mix015.yaml
-rewards:
-  objective: terminal_only_pm1
-  shaping:
-    enable_damage_shaping: false

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
@@ -19,10 +17,19 @@ from weiss_rl.envs.decision_env import DecisionBoundaryBatch
 from weiss_rl.eval.harness import ScheduledGame
 from weiss_rl.eval.simulator_runner import ResolvedEvalPolicy, SimulatorEvalRunner
 from weiss_rl.league import PromotionGatePosterior, PromotionGateRate, PromotionGateResult
-from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
-from weiss_rl.learners.impala_learner import ImpalaLearner
+from weiss_rl.league.registry import (
+    ChampionDemotion,
+    SnapshotReferenceNormalization,
+    SnapshotRegistry,
+    champion_demotion_newer_than,
+    champion_demotion_stale_by_age,
+    normalize_snapshot_references,
+    snapshot_weights_relpath,
+)
+from weiss_rl.learners.impala import ImpalaLearner
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.tests._config_paths import canonical_stack_config_path
+from weiss_rl.training import train_entrypoint as train_entrypoint_module
 from weiss_rl.training.snapshots import demote_registry_champions_newer_than, seed_snapshot_policy_id
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -34,19 +41,7 @@ class _TrainingPathsLike(Protocol):
 
 @lru_cache(maxsize=1)
 def _load_train_script_module() -> ModuleType:
-    python_root = str(REPO_ROOT / "python")
-    if python_root not in sys.path:
-        sys.path.insert(0, python_root)
-
-    train_script_path = REPO_ROOT / "python" / "scripts" / "train.py"
-    spec = importlib.util.spec_from_file_location("train_script_for_tests", train_script_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load train.py from {train_script_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return train_entrypoint_module
 
 
 def _retention_stack(*, recent_size: int, champion_size: int) -> SimpleNamespace:
@@ -416,6 +411,50 @@ def test_snapshot_registry_add_champion_dedupes_and_trims_window() -> None:
     assert registry.champion_snapshots == ["policy_000001", "policy_000003"]
 
 
+def test_snapshot_reference_normalization_reports_dropped_and_trimmed_refs() -> None:
+    result = normalize_snapshot_references(
+        ["ghost", "policy_000001", "policy_000002", "policy_000001", "policy_000003"],
+        existing_snapshot_ids={"policy_000001", "policy_000002", "policy_000003"},
+        limit=2,
+    )
+
+    assert result == SnapshotReferenceNormalization(
+        refs=["policy_000001", "policy_000003"],
+        dropped_refs=["ghost"],
+        trimmed_refs=["policy_000002"],
+    )
+
+
+def test_champion_demotion_helpers_preserve_order_and_report_remaining_refs() -> None:
+    refs = ["policy_000080", "policy_000120", "policy_000160"]
+    updates_by_policy = {
+        "policy_000080": 80,
+        "policy_000120": 120,
+        "policy_000160": 160,
+    }
+
+    newer = champion_demotion_newer_than(
+        refs,
+        updates_by_policy=updates_by_policy,
+        update=120,
+    )
+    stale = champion_demotion_stale_by_age(
+        refs,
+        updates_by_policy=updates_by_policy,
+        current_update=180,
+        max_age_updates=80,
+    )
+
+    assert newer == ChampionDemotion(
+        removed_refs=["policy_000160"],
+        remaining_refs=["policy_000080", "policy_000120"],
+    )
+    assert stale == ChampionDemotion(
+        removed_refs=["policy_000080"],
+        remaining_refs=["policy_000120", "policy_000160"],
+    )
+
+
 def test_snapshot_registry_add_champion_rejects_unknown_snapshot() -> None:
     registry = SnapshotRegistry()
 
@@ -712,14 +751,11 @@ def test_ensure_noleague_baseline_anchor_imports_explicit_b1_run_when_required_b
     tmp_path: Path,
 ) -> None:
     train_script = _load_train_script_module()
-    stack_path = (
-        REPO_ROOT
-        / "configs"
-        / "thesis"
-        / ("main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml")
-    )
+    stack_path = REPO_ROOT / "configs" / "thesis" / "main_league.yaml"
     stack = load_stack_config(stack_path)
-    assert "B1 NoLeague baseline" in stack.config.league.promotion_anchor_set_v1.required
+    league_config = stack.config.league
+    assert league_config is not None
+    assert "B1 NoLeague baseline" in league_config.promotion_anchor_set_v1.required
     selected_run_dir = _write_b1_baseline_run_fixture(
         tmp_path,
         update=15,
@@ -1984,22 +2020,29 @@ def test_demote_stale_champions_removes_old_refs_only() -> None:
 
 def test_resolve_resume_checkpoint_path_defaults_to_latest_alias(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
+    from weiss_rl.training import checkpoint_resolution
     from weiss_rl.training.checkpoints import resolve_resume_checkpoint_path
 
     run_dir = tmp_path / "resume_run"
     latest_path = run_dir / "training" / "checkpoints" / "latest.pt"
+    best_path = run_dir / "training" / "checkpoints" / "best.pt"
     observed_best_path = run_dir / "training" / "checkpoints" / "observed_best.pt"
     latest_path.parent.mkdir(parents=True, exist_ok=True)
     latest_path.write_bytes(b"checkpoint")
+    best_path.write_bytes(b"best")
     observed_best_path.write_bytes(b"observed")
+    explicit_checkpoint_path = tmp_path / "manual.pt"
+    explicit_checkpoint_path.write_bytes(b"manual")
 
     resolved = train_script._resolve_resume_checkpoint_path(
         resume_from="",
         resume_run_dir=run_dir,
     )
 
+    assert resolve_resume_checkpoint_path is checkpoint_resolution.resolve_resume_checkpoint_path
     assert resolved == latest_path.resolve()
     assert resolve_resume_checkpoint_path(resume_from="", resume_run_dir=run_dir) == latest_path.resolve()
+    assert resolve_resume_checkpoint_path(resume_from=" BEST ", resume_run_dir=run_dir) == best_path.resolve()
     assert (
         train_script._resolve_resume_checkpoint_path(
             resume_from="observed_best",
@@ -2011,6 +2054,12 @@ def test_resolve_resume_checkpoint_path_defaults_to_latest_alias(tmp_path: Path)
         resolve_resume_checkpoint_path(resume_from="observed_best", resume_run_dir=run_dir)
         == observed_best_path.resolve()
     )
+    assert (
+        resolve_resume_checkpoint_path(resume_from=str(explicit_checkpoint_path), resume_run_dir=None)
+        == explicit_checkpoint_path.resolve()
+    )
+    with pytest.raises(ValueError, match="requires --resume-run-dir"):
+        resolve_resume_checkpoint_path(resume_from="latest", resume_run_dir=None)
 
 
 def test_periodic_dev_eval_runner_resets_env_with_scheduled_episode_seed(tmp_path: Path, monkeypatch) -> None:

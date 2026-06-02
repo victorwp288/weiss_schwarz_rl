@@ -1,6 +1,0 @@
-schema_version: 2
-description: "Final eval surface for ablations that also remove model pass choices when attack is legal."
-extends: final_eval_mainmoveguard_mulliganguard.yaml
-training:
-  action_surface:
-    force_attack_over_pass_when_attack_legal: true

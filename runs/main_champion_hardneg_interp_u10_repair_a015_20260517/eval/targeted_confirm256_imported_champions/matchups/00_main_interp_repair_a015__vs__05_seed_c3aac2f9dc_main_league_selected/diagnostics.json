@@ -1,0 +1,32 @@
+{
+  "focal_policy_id": "main_interp_repair_a015",
+  "opponent_policy_id": "seed_c3aac2f9dc_main_league_selected",
+  "pair_count": 256,
+  "policy_breakdown": {
+    "main_interp_repair_a015": {
+      "games_as_seat0": 256,
+      "games_as_seat1": 256,
+      "total_wins": 274,
+      "wins_as_seat0": 135,
+      "wins_as_seat1": 139
+    },
+    "seed_c3aac2f9dc_main_league_selected": {
+      "games_as_seat0": 256,
+      "games_as_seat1": 256,
+      "total_wins": 238,
+      "wins_as_seat0": 117,
+      "wins_as_seat1": 121
+    }
+  },
+  "seat_results": {
+    "decisive_games": 512,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.4921875,
+    "seat0_wins": 252,
+    "seat1_win_rate": 0.5078125,
+    "seat1_wins": 260,
+    "total_games": 512,
+    "truncations": 0
+  }
+}

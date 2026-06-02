@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from weiss_rl.runtime_components.counters import (
+from weiss_rl.runtime.components.counters import (
     accumulate_actor_role_row_counters,
     accumulate_timeout_counters,
     collector_counter_template,

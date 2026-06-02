@@ -28,7 +28,7 @@ from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_poo
 from weiss_rl.eval import load_dev_eval_summaries
 from weiss_rl.eval.god_search import GodSearchConfig
 from weiss_rl.eval.harness import ScheduledGame, game_result_from_step
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,

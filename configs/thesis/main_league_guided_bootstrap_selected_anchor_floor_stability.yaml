@@ -1,8 +1,0 @@
-schema_version: 2
-description: "Selected guided-bootstrap continuation with KL anchor, public floor, and lower learner update pressure. This tests whether the remaining post-25 falloff is update-size drift rather than missing guidance."
-extends: main_league_guided_bootstrap_selected_anchor_floor.yaml
-training:
-  optimizer:
-    learning_rate: 0.00005
-  exploration:
-    actor_sampling_temperature: 1.0

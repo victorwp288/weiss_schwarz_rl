@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from weiss_rl.runtime import QueueRuntime
-from weiss_rl.runtime_components.actor_routing import policy_train_mask_for_actor, split_focal_actor_rows
+from weiss_rl.runtime.components.actor_routing import policy_train_mask_for_actor, split_focal_actor_rows
 
 
 def test_split_focal_actor_rows_requires_teacher_policy() -> None:

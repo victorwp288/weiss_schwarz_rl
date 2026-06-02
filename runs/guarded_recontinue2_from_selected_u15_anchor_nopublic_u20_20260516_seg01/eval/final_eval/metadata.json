@@ -1,0 +1,36 @@
+{
+  "matchup_artifacts": {
+    "canonical_order": "focal_policy_index <= opponent_policy_index",
+    "kind": "canonical_unordered_pairs_v1",
+    "reverse_matrix_cells": "derived_from_canonical_matchup_artifacts"
+  },
+  "matchup_count": 15,
+  "max_paired_seeds": 256,
+  "paired_seed_budget": 256,
+  "pipeline": {
+    "kind": "canonical_eval_pipeline_v1",
+    "paired_seed_limit": 256,
+    "seed_file": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/configs/seeds/report_eval_seeds.txt",
+    "selection": {
+      "mode": "explicit_cli",
+      "policy_count": 5
+    }
+  },
+  "policy_count": 5,
+  "recommended_focal_policy_id": null,
+  "sample_count": 4000,
+  "scheme": "S0",
+  "seed_file": {
+    "path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/configs/seeds/report_eval_seeds.txt",
+    "sha256": "5db0677f8ff932a95bb86cb91e6902de3ed3460ad8303858e169e0a17c728df0"
+  },
+  "selection": {
+    "mode": "explicit",
+    "policy_count": 5
+  },
+  "stage1_paired_seeds": 256,
+  "stop_rules": {
+    "stop_confidence": 0.95,
+    "stop_delta_ci_half_width": 0.03
+  }
+}

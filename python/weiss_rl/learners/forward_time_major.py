@@ -270,7 +270,7 @@ def forward_time_major(
     if acting_seat is None:
         hidden_state = prepare_legacy_hidden_state(initial_hidden_state, batch_size=batch_size, like=obs)
         for step_index, step_obs in enumerate(obs.unbind(dim=0)):
-            if reset_before_step is not None:
+            if reset_before_step is not None and hidden_state is not None:
                 step_reset = reset_before_step[step_index].to(device=hidden_state.device, dtype=torch.bool)
                 if bool(step_reset.any().item()):
                     hidden_state = hidden_state.clone()
@@ -290,7 +290,8 @@ def forward_time_major(
                 )
             logits_steps.append(torch.as_tensor(step_logits))
             value_steps.append(torch.as_tensor(step_value))
-            hidden_state = torch.as_tensor(hidden_state)
+            if hidden_state is not None:
+                hidden_state = torch.as_tensor(hidden_state)
         return ForwardTimeMajorResult(
             logits=torch.stack(logits_steps, dim=0),
             values=torch.stack(value_steps, dim=0),
@@ -298,7 +299,7 @@ def forward_time_major(
 
     seat_hidden_state = prepare_seat_hidden_state(initial_hidden_state, batch_size=batch_size, like=obs)
     for step_index, (step_obs, step_seat) in enumerate(zip(obs.unbind(dim=0), acting_seat.unbind(dim=0), strict=True)):
-        if reset_before_step is not None:
+        if reset_before_step is not None and seat_hidden_state is not None:
             step_reset = reset_before_step[step_index].to(device=seat_hidden_state.device, dtype=torch.bool)
             if bool(step_reset.any().item()):
                 seat_hidden_state = seat_hidden_state.clone()
@@ -323,7 +324,8 @@ def forward_time_major(
             )
         logits_steps.append(torch.as_tensor(step_logits))
         value_steps.append(torch.as_tensor(step_value))
-        seat_hidden_state = torch.as_tensor(seat_hidden_state)
+        if seat_hidden_state is not None:
+            seat_hidden_state = torch.as_tensor(seat_hidden_state)
     record_timing_ms("learner_forward_time_major", time.perf_counter() - sequence_started)
     return ForwardTimeMajorResult(
         logits=torch.stack(logits_steps, dim=0),

@@ -1,0 +1,16 @@
+baseline_case_id,case_id,focal_policy_id,opponent_policy_id,s0_p_ij_mean,case_p_ij_mean,delta_p_ij_mean,abs_delta_p_ij_mean,s0_has_payoff_samples,case_has_payoff_samples
+S0,S2,B0 RandomLegal,B1 NoLeague baseline,0.0078125,0.0078125,0.0,0.0,True,True
+S0,S2,B0 RandomLegal,B2 HeuristicPublic,0.0234375,0.0234375,0.0,0.0,True,True
+S0,S2,B0 RandomLegal,B3 HeuristicPublicAggro,0.015625,0.015625,0.0,0.0,True,True
+S0,S2,B0 RandomLegal,B4 HeuristicPublicControl,0.0078125,0.0078125,0.0,0.0,True,True
+S0,S2,B1 NoLeague baseline,B2 HeuristicPublic,0.6953125,0.6953125,0.0,0.0,True,True
+S0,S2,B1 NoLeague baseline,B3 HeuristicPublicAggro,0.6953125,0.6953125,0.0,0.0,True,True
+S0,S2,B1 NoLeague baseline,B4 HeuristicPublicControl,0.671875,0.671875,0.0,0.0,True,True
+S0,S2,B2 HeuristicPublic,B3 HeuristicPublicAggro,0.3203125,0.3203125,0.0,0.0,True,True
+S0,S2,B2 HeuristicPublic,B4 HeuristicPublicControl,0.494140625,0.494140625,0.0,0.0,True,True
+S0,S2,B3 HeuristicPublicAggro,B4 HeuristicPublicControl,0.42424242424242425,0.42424242424242425,0.0,0.0,True,True
+S0,S2,main_league_selected,B0 RandomLegal,1.0,1.0,0.0,0.0,True,True
+S0,S2,main_league_selected,B1 NoLeague baseline,0.640625,0.640625,0.0,0.0,True,True
+S0,S2,main_league_selected,B2 HeuristicPublic,0.78125,0.78125,0.0,0.0,True,True
+S0,S2,main_league_selected,B3 HeuristicPublicAggro,0.703125,0.703125,0.0,0.0,True,True
+S0,S2,main_league_selected,B4 HeuristicPublicControl,0.71875,0.71875,0.0,0.0,True,True

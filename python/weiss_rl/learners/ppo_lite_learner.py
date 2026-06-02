@@ -13,7 +13,7 @@ from torch.nn.utils import clip_grad_norm_
 
 from weiss_rl.diagnostics.training_logger import TrainingMetrics
 
-from .impala_learner import (
+from .impala import (
     ImpalaLearner,
     _batch_value,
     _masked_action_logp_and_entropy,

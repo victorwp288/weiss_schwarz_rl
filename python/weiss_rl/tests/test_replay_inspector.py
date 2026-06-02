@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -11,13 +11,14 @@ import torch
 from weiss_rl.config import StackConfig, compute_config_hash256, load_stack_config
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,
 )
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, PolicyValueModel
+from weiss_rl.replay import inspector_entrypoint
 from weiss_rl.replay.bundles import (
     ReplayRerunContract,
     ReplayStep,
@@ -36,10 +37,25 @@ from weiss_rl.replay.inspector import (
     format_replay_inspection_report,
     inspect_replay_bundle,
 )
-from weiss_rl.runtime_components.legal_meta import action_catalog_indices
+from weiss_rl.replay.inspector import (
+    write_replay_inspection_report as facade_write_replay_inspection_report,
+)
+from weiss_rl.replay.inspector_report import (
+    format_replay_inspection_report as report_format_replay_inspection_report,
+)
+from weiss_rl.replay.inspector_report import (
+    write_replay_inspection_report,
+)
+from weiss_rl.runtime.components.legal_meta import action_catalog_indices
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_replay_inspector_report_helpers_are_package_owned() -> None:
+    assert format_replay_inspection_report is report_format_replay_inspection_report
+    assert facade_write_replay_inspection_report is write_replay_inspection_report
+    assert report_format_replay_inspection_report.__module__ == "weiss_rl.replay.inspector_report"
 
 
 class FakeReplayEnv:
@@ -766,9 +782,7 @@ def test_inspect_replay_bundle_supports_all_heuristic_public_policy_ids(tmp_path
 
 
 def test_replay_policy_surface_guard_filters_model_only_main_move_rows() -> None:
-    stack = load_stack_config(
-        REPO_ROOT / "configs" / "thesis" / "ablations" / "final_eval_mainmoveguard_mulliganguard.yaml"
-    )
+    stack = load_stack_config(REPO_ROOT / "configs" / "thesis" / "b1_noleague.yaml")
 
     class FakeModel:
         action_catalog = ActionCatalog.from_spec_bundle(_heuristic_spec_bundle())
@@ -822,9 +836,7 @@ def test_replay_policy_surface_guard_filters_model_only_main_move_rows() -> None
 
 
 def test_replay_policy_surface_guard_filters_model_only_pass_when_attack_is_available() -> None:
-    stack = load_stack_config(
-        REPO_ROOT / "configs" / "thesis" / "ablations" / "final_eval_attackguard_mainmoveguard_mulliganguard.yaml"
-    )
+    stack = load_stack_config(REPO_ROOT / "configs" / "thesis" / "b1_noleague.yaml")
 
     class FakeModel:
         action_catalog = ActionCatalog.from_spec_bundle(_heuristic_spec_bundle())
@@ -930,6 +942,7 @@ def test_replay_forward_policy_uses_packed_candidate_scoring_for_structured_mode
 
     assert logits[2] == pytest.approx(4.0)
     assert logits[5] == pytest.approx(9.0)
+    assert next_hidden is not None
     assert float(next_hidden.item()) == pytest.approx(1.0)
 
 
@@ -985,6 +998,7 @@ def test_replay_forward_policy_passes_opponent_context_index_to_packed_scoring()
 
     assert logits[2] == pytest.approx(4.0)
     assert logits[5] == pytest.approx(9.0)
+    assert next_hidden is not None
     assert float(next_hidden.item()) == pytest.approx(1.0)
 
 
@@ -1216,12 +1230,6 @@ def test_replay_inspector_cli_main_supports_json_stdout_and_report_file(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    module_path = REPO_ROOT / "python" / "scripts" / "replay_inspector.py"
-    spec = importlib.util.spec_from_file_location("replay_inspector_script", module_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
     report_path = tmp_path / "report.json"
     canned_report = {
         "bundle_path": "bundle.zip",
@@ -1244,9 +1252,9 @@ def test_replay_inspector_cli_main_supports_json_stdout_and_report_file(
         captured_kwargs.update(_)
         return canned_report
 
-    monkeypatch.setattr(module, "inspect_replay_bundle", fake_inspect_replay_bundle)
+    monkeypatch.setattr(inspector_entrypoint, "inspect_replay_bundle", fake_inspect_replay_bundle)
 
-    exit_code = module.main(
+    exit_code = inspector_entrypoint.main(
         [
             "--bundle",
             str(tmp_path / "bundle.zip"),
@@ -1299,7 +1307,7 @@ def _write_policy_weights(
         for parameter in model.parameters():
             parameter.zero_()
         for action_id, value in logits.items():
-            model.policy_head.bias[action_id] = value
+            cast(Any, model.policy_head).bias[action_id] = value
     weights_path = weights_dir / "weights.pt"
     torch.save(
         {

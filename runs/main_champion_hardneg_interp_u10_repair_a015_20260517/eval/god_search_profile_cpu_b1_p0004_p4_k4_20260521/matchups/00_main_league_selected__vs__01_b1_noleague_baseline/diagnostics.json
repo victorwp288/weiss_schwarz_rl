@@ -1,0 +1,583 @@
+{
+  "focal_policy_id": "main_league_selected",
+  "god_search": {
+    "changed_fraction": 0.5,
+    "config": {
+      "apply_to_focal_only": true,
+      "fail_on_prefix_mismatch": true,
+      "max_rollout_decisions": 0,
+      "max_search_decisions_per_game": 1,
+      "mode": "same_world_prefix_rollout",
+      "rollout_policy": "argmax",
+      "rollouts_per_action": 1,
+      "top_k": 4,
+      "trace_limit": 8,
+      "verify_prefix_replay": true
+    },
+    "counters": {
+      "candidate_evaluations": 32,
+      "changed_decisions": 4,
+      "horizon_cutoffs": 0,
+      "prefix_replay_failures": 0,
+      "rollout_games": 32,
+      "search_decisions": 8,
+      "skipped_no_model": 0,
+      "skipped_non_focal": 592,
+      "skipped_single_candidate": 190,
+      "terminal_rollouts": 32,
+      "truncated_rollouts": 0
+    },
+    "kind": "god_search_diagnostics_v1",
+    "traces": [
+      {
+        "actor_seat": 0,
+        "base_action": 0,
+        "candidates": [
+          {
+            "action": 0,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 138,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -0.6652532815933228
+          },
+          {
+            "action": 4,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 161,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -1.2777345180511475
+          },
+          {
+            "action": 2,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 180,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -2.618293523788452
+          },
+          {
+            "action": 1,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 165,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -2.7191250324249268
+          }
+        ],
+        "current_policy_id": "main_league_selected",
+        "decision_id": 0,
+        "episode_seed": 71186667182790612,
+        "opponent_policy_id": "B1 NoLeague baseline",
+        "pair_index": 0,
+        "selected_action": 0,
+        "swap_index": 0
+      },
+      {
+        "actor_seat": 1,
+        "base_action": 0,
+        "candidates": [
+          {
+            "action": 0,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 147,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -0.6636156439781189
+          },
+          {
+            "action": 2,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 169,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -1.5483685731887817
+          },
+          {
+            "action": 3,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 172,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -2.0348916053771973
+          },
+          {
+            "action": 4,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 174,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -2.6572794914245605
+          }
+        ],
+        "current_policy_id": "main_league_selected",
+        "decision_id": 1,
+        "episode_seed": 71186667182790612,
+        "opponent_policy_id": "B1 NoLeague baseline",
+        "pair_index": 0,
+        "selected_action": 2,
+        "swap_index": 1
+      },
+      {
+        "actor_seat": 0,
+        "base_action": 0,
+        "candidates": [
+          {
+            "action": 0,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 167,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -0.662582516670227
+          },
+          {
+            "action": 2,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 164,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -1.3241052627563477
+          },
+          {
+            "action": 3,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 136,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -2.64711856842041
+          },
+          {
+            "action": 1,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 133,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -2.726870536804199
+          }
+        ],
+        "current_policy_id": "main_league_selected",
+        "decision_id": 1,
+        "episode_seed": 74532068704462917,
+        "opponent_policy_id": "B1 NoLeague baseline",
+        "pair_index": 1,
+        "selected_action": 0,
+        "swap_index": 0
+      },
+      {
+        "actor_seat": 1,
+        "base_action": 0,
+        "candidates": [
+          {
+            "action": 0,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 141,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -0.6670293211936951
+          },
+          {
+            "action": 2,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 167,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -1.1723315715789795
+          },
+          {
+            "action": 3,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 167,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -2.6081411838531494
+          },
+          {
+            "action": 4,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 155,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -2.764662981033325
+          }
+        ],
+        "current_policy_id": "main_league_selected",
+        "decision_id": 0,
+        "episode_seed": 74532068704462917,
+        "opponent_policy_id": "B1 NoLeague baseline",
+        "pair_index": 1,
+        "selected_action": 4,
+        "swap_index": 1
+      },
+      {
+        "actor_seat": 0,
+        "base_action": 0,
+        "candidates": [
+          {
+            "action": 0,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 201,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -0.6653645634651184
+          },
+          {
+            "action": 2,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 140,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -0.8888790011405945
+          },
+          {
+            "action": 1,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 139,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -2.927138566970825
+          },
+          {
+            "action": 5,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 134,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -3.9223482608795166
+          }
+        ],
+        "current_policy_id": "main_league_selected",
+        "decision_id": 1,
+        "episode_seed": 119544824309379461,
+        "opponent_policy_id": "B1 NoLeague baseline",
+        "pair_index": 2,
+        "selected_action": 2,
+        "swap_index": 0
+      },
+      {
+        "actor_seat": 1,
+        "base_action": 0,
+        "candidates": [
+          {
+            "action": 0,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 152,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -0.6659293174743652
+          },
+          {
+            "action": 1,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 171,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -1.0133379697799683
+          },
+          {
+            "action": 4,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 145,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -2.3432483673095703
+          },
+          {
+            "action": 3,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 170,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -3.652453899383545
+          }
+        ],
+        "current_policy_id": "main_league_selected",
+        "decision_id": 0,
+        "episode_seed": 119544824309379461,
+        "opponent_policy_id": "B1 NoLeague baseline",
+        "pair_index": 2,
+        "selected_action": 0,
+        "swap_index": 1
+      },
+      {
+        "actor_seat": 0,
+        "base_action": 0,
+        "candidates": [
+          {
+            "action": 0,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 136,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -0.676410973072052
+          },
+          {
+            "action": 5,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 137,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -1.095654010772705
+          },
+          {
+            "action": 2,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 138,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -2.295393466949463
+          },
+          {
+            "action": 4,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 166,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -2.877169132232666
+          }
+        ],
+        "current_policy_id": "main_league_selected",
+        "decision_id": 1,
+        "episode_seed": 163020724606140457,
+        "opponent_policy_id": "B1 NoLeague baseline",
+        "pair_index": 3,
+        "selected_action": 0,
+        "swap_index": 0
+      },
+      {
+        "actor_seat": 1,
+        "base_action": 0,
+        "candidates": [
+          {
+            "action": 0,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 145,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -0.6699902415275574
+          },
+          {
+            "action": 4,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 132,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -1.031693458557129
+          },
+          {
+            "action": 1,
+            "mean_score": -1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 131,
+                "score": -1.0,
+                "status": "terminal",
+                "winner_seat": 0
+              }
+            ],
+            "root_logit": -2.440438747406006
+          },
+          {
+            "action": 3,
+            "mean_score": 1.0,
+            "rollouts": [
+              {
+                "rollout_decisions": 172,
+                "score": 1.0,
+                "status": "terminal",
+                "winner_seat": 1
+              }
+            ],
+            "root_logit": -3.4782533645629883
+          }
+        ],
+        "current_policy_id": "main_league_selected",
+        "decision_id": 0,
+        "episode_seed": 163020724606140457,
+        "opponent_policy_id": "B1 NoLeague baseline",
+        "pair_index": 3,
+        "selected_action": 3,
+        "swap_index": 1
+      }
+    ]
+  },
+  "opponent_policy_id": "B1 NoLeague baseline",
+  "pair_count": 4,
+  "policy_breakdown": {
+    "B1 NoLeague baseline": {
+      "games_as_seat0": 4,
+      "games_as_seat1": 4,
+      "total_wins": 0,
+      "wins_as_seat0": 0,
+      "wins_as_seat1": 0
+    },
+    "main_league_selected": {
+      "games_as_seat0": 4,
+      "games_as_seat1": 4,
+      "total_wins": 8,
+      "wins_as_seat0": 4,
+      "wins_as_seat1": 4
+    }
+  },
+  "seat_results": {
+    "decisive_games": 8,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.5,
+    "seat0_wins": 4,
+    "seat1_win_rate": 0.5,
+    "seat1_wins": 4,
+    "total_games": 8,
+    "truncations": 0
+  }
+}

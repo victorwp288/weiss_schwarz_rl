@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from weiss_rl.eval.policy_set import AGGRO_DECK_ID, CONTROL_DECK_ID, MAIN_DECK_ID, STARTER_DECK_ID
+from weiss_rl.eval.policies.set import AGGRO_DECK_ID, CONTROL_DECK_ID, MAIN_DECK_ID, STARTER_DECK_ID
 
 _PRESET_PREFIX = "preset:"
 _ROLE_BY_PRESET = {

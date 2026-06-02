@@ -3,7 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from weiss_rl.runtime_components.reward_shaping import (
+from weiss_rl.runtime.components.reward_shaping import (
+    apply_collector_reward_shaping,
     apply_mulligan_select_with_confirm_penalty,
     apply_pass_with_nonpass_penalty,
     mulligan_select_with_confirm_penalty_mask_from_ids,
@@ -167,3 +168,78 @@ def test_apply_mulligan_select_with_confirm_penalty_returns_shaped_copy_and_coun
     assert rewards.tolist() == pytest.approx([0.0, 1.0, -1.0])
     assert count == 1
     assert total_micros == 20_000
+
+
+def test_apply_collector_reward_shaping_updates_ids_penalty_counters() -> None:
+    counters = {
+        "pass_with_nonpass_penalty_count": 0,
+        "pass_with_nonpass_penalty_total_micros": 0,
+        "mulligan_select_with_confirm_penalty_count": 0,
+        "mulligan_select_with_confirm_penalty_total_micros": 0,
+    }
+    rewards = np.array([0.0, 1.0, -1.0], dtype=np.float32)
+    actions = np.array([5, 1, 5], dtype=np.int64)
+    legal_ids = np.array([5, 8, 0, 1, 5, 7], dtype=np.uint32)
+    legal_offsets = np.array([0, 2, 4, 6], dtype=np.uint32)
+    legal_action_meta = np.array(
+        [
+            [1, 0, 0, 0],
+            [2, 0, 0, 0],
+            [3, 0, 0, 0],
+            [4, 0, 0, 0],
+            [1, 0, 0, 0],
+            [2, 0, 0, 0],
+        ],
+        dtype=np.uint16,
+    )
+
+    shaped = apply_collector_reward_shaping(
+        rewards,
+        actions,
+        counters=counters,
+        pass_action_id=5,
+        pass_with_nonpass_penalty=0.02,
+        mulligan_select_with_confirm_penalty=0.03,
+        action_family_index={"main_move": 2, "mulligan_confirm": 3, "mulligan_select": 4},
+        legal_ids=legal_ids,
+        legal_offsets=legal_offsets,
+        legal_action_meta=legal_action_meta,
+    )
+
+    assert shaped.tolist() == pytest.approx([0.0, 0.97, -1.0])
+    assert rewards.tolist() == pytest.approx([0.0, 1.0, -1.0])
+    assert counters["pass_with_nonpass_penalty_count"] == 0
+    assert counters["pass_with_nonpass_penalty_total_micros"] == 0
+    assert counters["mulligan_select_with_confirm_penalty_count"] == 1
+    assert counters["mulligan_select_with_confirm_penalty_total_micros"] == 30_000
+
+
+def test_apply_collector_reward_shaping_updates_mask_penalty_counters_without_mulligan() -> None:
+    counters = {
+        "pass_with_nonpass_penalty_count": 0,
+        "pass_with_nonpass_penalty_total_micros": 0,
+        "mulligan_select_with_confirm_penalty_count": 0,
+        "mulligan_select_with_confirm_penalty_total_micros": 0,
+    }
+
+    shaped = apply_collector_reward_shaping(
+        np.array([0.0, 1.0], dtype=np.float32),
+        np.array([2, 1], dtype=np.int64),
+        counters=counters,
+        pass_action_id=2,
+        pass_with_nonpass_penalty=0.05,
+        mulligan_select_with_confirm_penalty=0.07,
+        legal_mask=np.array(
+            [
+                [False, True, True],
+                [False, True, True],
+            ],
+            dtype=np.bool_,
+        ),
+    )
+
+    assert shaped.tolist() == pytest.approx([-0.05, 1.0])
+    assert counters["pass_with_nonpass_penalty_count"] == 1
+    assert counters["pass_with_nonpass_penalty_total_micros"] == 50_000
+    assert counters["mulligan_select_with_confirm_penalty_count"] == 0
+    assert counters["mulligan_select_with_confirm_penalty_total_micros"] == 0

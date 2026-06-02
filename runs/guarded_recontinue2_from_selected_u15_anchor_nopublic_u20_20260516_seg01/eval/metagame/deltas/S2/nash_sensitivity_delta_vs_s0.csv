@@ -1,0 +1,6 @@
+policy_id,baseline_case_id,case_id,s0_mean_mixture,case_mean_mixture,delta_mean_mixture,abs_delta_mean_mixture
+B0 RandomLegal,S0,S2,0.0,0.0,0.0,0.0
+B2 HeuristicPublic,S0,S2,3.0388981529456085e-10,3.0388981529456085e-10,0.0,0.0
+B3 HeuristicPublicAggro,S0,S2,0.0,0.0,0.0,0.0
+B4 HeuristicPublicControl,S0,S2,0.0,0.0,0.0,0.0
+selected_candidate,S0,S2,0.9999999996961085,0.9999999996961085,0.0,0.0

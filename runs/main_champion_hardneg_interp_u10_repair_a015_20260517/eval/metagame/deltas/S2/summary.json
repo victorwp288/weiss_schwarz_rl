@@ -1,0 +1,238 @@
+{
+  "baseline_case_id": "S0",
+  "case_id": "S2",
+  "top_alpharank_mass_deltas": [
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_stationary_mass": 0.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "B0 RandomLegal",
+      "s0_mean_stationary_mass": 0.0
+    },
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_stationary_mass": 1.2984983550303456e-222,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "B1 NoLeague baseline",
+      "s0_mean_stationary_mass": 1.2984983550303456e-222
+    },
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_stationary_mass": 0.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "B2 HeuristicPublic",
+      "s0_mean_stationary_mass": 0.0
+    },
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_stationary_mass": 0.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "B3 HeuristicPublicAggro",
+      "s0_mean_stationary_mass": 0.0
+    },
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_stationary_mass": 0.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "B4 HeuristicPublicControl",
+      "s0_mean_stationary_mass": 0.0
+    },
+    {
+      "abs_delta_mean_stationary_mass": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_stationary_mass": 1.0,
+      "delta_mean_stationary_mass": 0.0,
+      "policy_id": "main_league_selected",
+      "s0_mean_stationary_mass": 1.0
+    }
+  ],
+  "top_matchup_pij_shifts": [
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.0078125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B0 RandomLegal",
+      "opponent_policy_id": "B1 NoLeague baseline",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.0078125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.0234375,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B0 RandomLegal",
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.0234375
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.015625,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B0 RandomLegal",
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.015625
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.0078125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B0 RandomLegal",
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.0078125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.6953125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B1 NoLeague baseline",
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.6953125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.6953125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B1 NoLeague baseline",
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.6953125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.671875,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B1 NoLeague baseline",
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.671875
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.3203125,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B2 HeuristicPublic",
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.3203125
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.494140625,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B2 HeuristicPublic",
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.494140625
+    },
+    {
+      "abs_delta_p_ij_mean": 0.0,
+      "baseline_case_id": "S0",
+      "case_has_payoff_samples": true,
+      "case_id": "S2",
+      "case_p_ij_mean": 0.42424242424242425,
+      "delta_p_ij_mean": 0.0,
+      "focal_policy_id": "B3 HeuristicPublicAggro",
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "s0_has_payoff_samples": true,
+      "s0_p_ij_mean": 0.42424242424242425
+    }
+  ],
+  "top_nash_mixture_deltas": [
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_mixture": 6e-13,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "B0 RandomLegal",
+      "s0_mean_mixture": 6e-13
+    },
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_mixture": 3.834074075206471e-10,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "B1 NoLeague baseline",
+      "s0_mean_mixture": 3.834074075206471e-10
+    },
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_mixture": 0.0,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "B2 HeuristicPublic",
+      "s0_mean_mixture": 0.0
+    },
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_mixture": 0.0,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "B3 HeuristicPublicAggro",
+      "s0_mean_mixture": 0.0
+    },
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_mixture": 0.0,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "B4 HeuristicPublicControl",
+      "s0_mean_mixture": 0.0
+    },
+    {
+      "abs_delta_mean_mixture": 0.0,
+      "baseline_case_id": "S0",
+      "case_id": "S2",
+      "case_mean_mixture": 0.9999999996159933,
+      "delta_mean_mixture": 0.0,
+      "policy_id": "main_league_selected",
+      "s0_mean_mixture": 0.9999999996159933
+    }
+  ]
+}

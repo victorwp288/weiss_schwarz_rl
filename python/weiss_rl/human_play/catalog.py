@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from weiss_rl.config import load_stack_config
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,
@@ -189,7 +189,7 @@ def _label_from_policy_id(policy_id: str, *, update: int | None) -> str:
 
 def _optional_int(value: object) -> int | None:
     try:
-        return None if value is None else int(value)
+        return None if value is None else int(cast(Any, value))
     except (TypeError, ValueError):
         return None
 

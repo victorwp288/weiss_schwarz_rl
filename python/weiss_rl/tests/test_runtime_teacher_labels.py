@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.runtime_components.teacher_heuristic_mixin import QueueRuntimeTeacherHeuristicMixin
-from weiss_rl.runtime_components.teacher_labels import (
+from weiss_rl.runtime.components.teacher_heuristic_mixin import QueueRuntimeTeacherHeuristicMixin
+from weiss_rl.runtime.components.teacher_labels import (
     PUBLIC_TEACHER_DECISION_KINDS,
     selected_teacher_label_profile,
     teacher_guidance_active_for_collection,

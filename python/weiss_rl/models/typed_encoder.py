@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch import Tensor, nn
@@ -39,7 +39,7 @@ class TypedSegmentEncoder(nn.Module):
         )
 
     def forward(self, obs: Tensor) -> Tensor:
-        return self._projection(obs.index_select(1, self._indices))
+        return self._projection(obs.index_select(1, cast(Tensor, self._indices)))
 
 
 class TypedPlayerBlockEncoder(nn.Module):

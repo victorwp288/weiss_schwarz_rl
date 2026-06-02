@@ -1,0 +1,14 @@
+group,opponent_id,opponent,baseline_wins,candidate_wins,delta_wins,shared_games,baseline_rate,candidate_rate,delta_rate
+fixed,B0 RandomLegal,B0 Random Legal,512,512,0,512,1.0,1.0,0.0
+fixed,B1 NoLeague baseline,B1 No-League,322,455,133,512,0.62890625,0.888671875,0.259765625
+fixed,B2 HeuristicPublic,B2 Public heuristic,399,498,99,512,0.779296875,0.97265625,0.193359375
+fixed,B3 HeuristicPublicAggro,B3 Aggro heuristic,365,480,115,512,0.712890625,0.9375,0.224609375
+fixed,B4 HeuristicPublicControl,B4 Control heuristic,382,475,93,512,0.74609375,0.927734375,0.181640625
+learned,seed_c3aac2f9dc_policy_000001,League policy 1,328,454,126,512,0.640625,0.88671875,0.24609375
+learned,seed_c3aac2f9dc_policy_000002,League policy 2,299,447,148,512,0.583984375,0.873046875,0.2890625
+learned,seed_c3aac2f9dc_checkpoint_000025,Checkpoint u25,289,431,142,512,0.564453125,0.841796875,0.27734375
+learned,seed_c3aac2f9dc_main_bestresponse_u25_devbest,Best response u25,289,431,142,512,0.564453125,0.841796875,0.27734375
+learned,seed_c3aac2f9dc_main_league_selected,Imported main selected,274,424,150,512,0.53515625,0.828125,0.29296875
+learned,seed_c3aac2f9dc_policy_000003,League policy 3,274,424,150,512,0.53515625,0.828125,0.29296875
+learned,seed_c3aac2f9dc_policy_000004,League policy 4,291,433,142,512,0.568359375,0.845703125,0.27734375
+learned,seed_c3aac2f9dc_policy_000005,League policy 5,273,425,152,512,0.533203125,0.830078125,0.296875

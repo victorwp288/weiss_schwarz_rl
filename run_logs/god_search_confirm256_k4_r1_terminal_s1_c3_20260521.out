@@ -1,0 +1,16 @@
+targeted confirm start: focal=main_league_selected rows=13 paired_seeds=256 workers=1
+done 1/13 main_league_selected vs B0 RandomLegal mean=1.0 wins=512/512
+done 2/13 main_league_selected vs B1 NoLeague baseline mean=0.888671875 wins=455/512
+done 3/13 main_league_selected vs B2 HeuristicPublic mean=0.97265625 wins=498/512
+done 4/13 main_league_selected vs B3 HeuristicPublicAggro mean=0.9375 wins=480/512
+done 5/13 main_league_selected vs B4 HeuristicPublicControl mean=0.927734375 wins=475/512
+done 6/13 main_league_selected vs seed_c3aac2f9dc_policy_000001 mean=0.88671875 wins=454/512
+done 7/13 main_league_selected vs seed_c3aac2f9dc_policy_000002 mean=0.873046875 wins=447/512
+done 8/13 main_league_selected vs seed_c3aac2f9dc_checkpoint_000025 mean=0.841796875 wins=431/512
+done 9/13 main_league_selected vs seed_c3aac2f9dc_main_bestresponse_u25_devbest mean=0.841796875 wins=431/512
+done 10/13 main_league_selected vs seed_c3aac2f9dc_main_league_selected mean=0.828125 wins=424/512
+done 11/13 main_league_selected vs seed_c3aac2f9dc_policy_000003 mean=0.828125 wins=424/512
+done 12/13 main_league_selected vs seed_c3aac2f9dc_policy_000004 mean=0.845703125 wins=433/512
+done 13/13 main_league_selected vs seed_c3aac2f9dc_policy_000005 mean=0.830078125 wins=425/512
+summary runs\main_champion_hardneg_interp_u10_repair_a015_20260517\eval\god_search_confirm256_k4_r1_terminal_s1_c3_20260521\targeted_confirm256_summary.json
+{"games": 6656, "mean": 0.884765625, "wins": 5889}

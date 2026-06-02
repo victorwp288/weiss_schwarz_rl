@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from weiss_rl.runtime import _configure_runtime_actor_torch_threads
-from weiss_rl.runtime_components import threads as runtime_threads
+from weiss_rl.runtime.components.ipc_shared import threads as runtime_threads
 
 
 def test_configure_runtime_actor_torch_threads_preserves_runtime_wrapper(monkeypatch) -> None:

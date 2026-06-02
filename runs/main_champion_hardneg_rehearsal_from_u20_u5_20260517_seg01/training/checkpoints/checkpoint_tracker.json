@@ -1,0 +1,14 @@
+{
+  "best": null,
+  "format": "checkpoint_tracker_v1",
+  "latest": {
+    "alias": "latest",
+    "alias_path": "training/checkpoints/latest.pt",
+    "metric_kind": null,
+    "metric_value": null,
+    "policy_version": 1,
+    "source_checkpoint_path": "training/checkpoints/checkpoint_5.pt",
+    "update_count": 5
+  },
+  "observed_best": null
+}

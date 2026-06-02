@@ -9,7 +9,7 @@ import pytest
 from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.runtime import RuntimeBatch as RuntimeBatchFromRuntime
 from weiss_rl.runtime import RuntimeUnroll as RuntimeUnrollFromRuntime
-from weiss_rl.runtime_components.types import RuntimeBatch, RuntimeUnroll
+from weiss_rl.runtime.components.types import RuntimeBatch, RuntimeUnroll
 
 
 def _runtime_unroll() -> RuntimeUnroll:

@@ -1,27 +1,15 @@
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = REPO_ROOT / "python" / "scripts" / "trajectory_audit_compare.py"
-
-
-def _load_script_module():
-    spec = importlib.util.spec_from_file_location("trajectory_audit_compare_script", SCRIPT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+from weiss_rl.diagnostics import trajectory_audit_compare_entrypoint as audit_compare_module
 
 
 def test_compare_audit_summaries_reports_outcome_role_and_numeric_deltas(tmp_path: Path) -> None:
-    module = _load_script_module()
+    module = audit_compare_module
     baseline_path = tmp_path / "baseline" / "summary.json"
     candidate_path = tmp_path / "candidate" / "summary.json"
     baseline_path.parent.mkdir()

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from weiss_rl.learners.impala_learner import summarize_vtrace_diagnostics as impala_summarize_vtrace_diagnostics
+from weiss_rl.learners.impala import summarize_vtrace_diagnostics as impala_summarize_vtrace_diagnostics
 from weiss_rl.learners.vtrace import VTraceTargets
 from weiss_rl.learners.vtrace_diagnostics import summarize_vtrace_diagnostics
 

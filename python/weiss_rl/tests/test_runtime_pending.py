@@ -6,12 +6,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from weiss_rl.runtime_components.pending import (
+from weiss_rl.runtime.components.collection.pending import (
     diverse_batch_target_count,
     pending_diverse_unroll_count,
     select_pending_unrolls,
 )
-from weiss_rl.runtime_components.pending_mixin import QueueRuntimePendingMixin
+from weiss_rl.runtime.components.pending_mixin import QueueRuntimePendingMixin
 
 
 def _pending(*, actor_id: int, unroll_seq: int, behavior_policy_version: int) -> SimpleNamespace:

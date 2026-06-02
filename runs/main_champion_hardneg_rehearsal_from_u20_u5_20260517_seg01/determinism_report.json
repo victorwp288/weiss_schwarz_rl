@@ -1,0 +1,62 @@
+{
+  "artifact_schema_version": "run_artifacts_v2",
+  "b1_baseline_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01",
+  "canonical_artifact_hashes": {},
+  "device_policy": {
+    "evaluation": "cpu",
+    "learner": "cuda"
+  },
+  "evaluation_pinning": {
+    "eval_device": "cpu",
+    "eval_inference_mode": true,
+    "eval_sampling_algorithm": "model_argmax_pinned_v1",
+    "legal_fingerprint_mismatch_policy": "hard_fail",
+    "legal_fingerprint_version": "legal_fingerprint_v1",
+    "model_sampling_temperature": 1.0,
+    "seat_swap": true
+  },
+  "init_from_checkpoint_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_long_v1_u10_to_u20_20260517_seg01/training/checkpoints/checkpoint_10.pt",
+  "kind": "determinism_report_v1",
+  "policy_selection_mode": "unresolved",
+  "replay_verification": {
+    "path": "eval/diagnostics/replay_verification.json",
+    "status": "pending"
+  },
+  "run_id256": "baaf9955af16ec60311beaee3c16d07bbd0f790f349b5f885c163a7ade17e200",
+  "run_id64": "60ec16af5599afba",
+  "runtime_mode": "train_async_fast",
+  "seed_derivation": {
+    "actor_seed_formula": "hash64(base_seed64, actor_id)",
+    "cli_seed_override": false,
+    "config_base_seed64": 20260212,
+    "effective_base_seed64": 20260212,
+    "episode_seed_formula": "hash64(actor_seed64, env_id, episode_index)"
+  },
+  "seed_files": {
+    "dev_eval": {
+      "path": "configs/seeds/dev_eval_seeds.txt",
+      "sha256": "568c17562f825562579b8a6ec54d8e83b7ad33471e9bad3de462055efd4679c3"
+    },
+    "promotion_gate": {
+      "path": "configs/seeds/local_promotion_eval_seeds.txt",
+      "sha256": "03fbbaa2c6e7e53c08e35c2dfaf141c4ad69d155eca607027fedf17f0e6cd07f"
+    },
+    "report_eval": {
+      "path": "configs/seeds/report_eval_seeds.txt",
+      "sha256": "5db0677f8ff932a95bb86cb91e6902de3ed3460ad8303858e169e0a17c728df0"
+    }
+  },
+  "seed_snapshot_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_long_v1_u10_to_u20_20260517_seg01",
+  "training_controls": {
+    "actor_heuristic_final_fraction": 0.0,
+    "actor_heuristic_fraction": 0.0,
+    "actor_policy_backend": "model",
+    "actor_sampling_temperature": 0.95,
+    "fixed_opponent_backend": "simulator_native",
+    "profile_timers": true,
+    "structured_metrics_mode": "sampled",
+    "teacher_aux_mode": "always",
+    "torch_profiler": false,
+    "train_on_heuristic_actor_rows": false
+  }
+}

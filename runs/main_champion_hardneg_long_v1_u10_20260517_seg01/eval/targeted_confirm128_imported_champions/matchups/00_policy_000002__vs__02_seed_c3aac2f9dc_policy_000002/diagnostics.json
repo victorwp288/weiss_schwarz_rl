@@ -1,0 +1,32 @@
+{
+  "focal_policy_id": "policy_000002",
+  "opponent_policy_id": "seed_c3aac2f9dc_policy_000002",
+  "pair_count": 128,
+  "policy_breakdown": {
+    "policy_000002": {
+      "games_as_seat0": 128,
+      "games_as_seat1": 128,
+      "total_wins": 151,
+      "wins_as_seat0": 78,
+      "wins_as_seat1": 73
+    },
+    "seed_c3aac2f9dc_policy_000002": {
+      "games_as_seat0": 128,
+      "games_as_seat1": 128,
+      "total_wins": 105,
+      "wins_as_seat0": 55,
+      "wins_as_seat1": 50
+    }
+  },
+  "seat_results": {
+    "decisive_games": 256,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.51953125,
+    "seat0_wins": 133,
+    "seat1_win_rate": 0.48046875,
+    "seat1_wins": 123,
+    "total_games": 256,
+    "truncations": 0
+  }
+}

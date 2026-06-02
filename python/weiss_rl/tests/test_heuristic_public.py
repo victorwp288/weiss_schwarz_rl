@@ -15,9 +15,25 @@ from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
 from weiss_rl.core.action_catalog import ActionCatalog as SharedActionCatalog
 from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.envs.decision_env import DecisionBoundaryEnv
-from weiss_rl.eval import simulator_runner as simulator_runner_module
+from weiss_rl.eval import policy_resolution_context as policy_resolution_context_module
+from weiss_rl.eval.b1_policy_resolution import resolve_b1_policy as b1_policy_resolution_resolve_b1_policy
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.resolution import (
+    _is_recursive_registry_search_root as policy_resolution_is_recursive_registry_search_root,
+)
+from weiss_rl.eval.policies.resolution import _resolve_b1_policy as policy_resolution_resolve_b1_policy
+from weiss_rl.eval.policies.resolution import (
+    _resolve_snapshot_registry_policy as policy_resolution_resolve_snapshot_registry_policy,
+)
+from weiss_rl.eval.policies.resolution import (
+    _resolve_static_eval_policy as policy_resolution_resolve_static_eval_policy,
+)
+from weiss_rl.eval.policies.resolution import (
+    _should_include_common_search_root as policy_resolution_should_include_common_search_root,
+)
+from weiss_rl.eval.policies.resolution import resolve_eval_policies as policy_resolution_resolve_eval_policies
+from weiss_rl.eval.policies.resolution_context import EvalPolicyResolutionContext
+from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,
@@ -26,8 +42,23 @@ from weiss_rl.eval.policy_set import (
 )
 from weiss_rl.eval.simulator_runner import (
     _is_recursive_registry_search_root,
+    _resolve_b1_policy,
+    _resolve_snapshot_registry_policy,
+    _resolve_static_eval_policy,
     _should_include_common_search_root,
     resolve_eval_policies,
+)
+from weiss_rl.eval.snapshot_policy_resolution import (
+    resolve_snapshot_registry_policy as snapshot_policy_resolution_resolve_snapshot_registry_policy,
+)
+from weiss_rl.eval.snapshot_registry_resolution import (
+    is_recursive_registry_search_root as snapshot_registry_is_recursive_registry_search_root,
+)
+from weiss_rl.eval.snapshot_registry_resolution import (
+    should_include_common_search_root as snapshot_registry_should_include_common_search_root,
+)
+from weiss_rl.eval.static_policy_resolution import (
+    resolve_static_eval_policy as static_policy_resolve_static_eval_policy,
 )
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.model import (
@@ -40,6 +71,85 @@ from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+def test_simulator_runner_reexports_policy_resolution_helpers() -> None:
+    assert resolve_eval_policies is policy_resolution_resolve_eval_policies
+    assert _is_recursive_registry_search_root is policy_resolution_is_recursive_registry_search_root
+    assert _should_include_common_search_root is policy_resolution_should_include_common_search_root
+    assert _resolve_b1_policy is policy_resolution_resolve_b1_policy
+    assert _resolve_snapshot_registry_policy is policy_resolution_resolve_snapshot_registry_policy
+    assert _resolve_static_eval_policy is policy_resolution_resolve_static_eval_policy
+    assert policy_resolution_is_recursive_registry_search_root is snapshot_registry_is_recursive_registry_search_root
+    assert policy_resolution_should_include_common_search_root is snapshot_registry_should_include_common_search_root
+    assert policy_resolution_resolve_b1_policy is b1_policy_resolution_resolve_b1_policy
+    assert (
+        policy_resolution_resolve_snapshot_registry_policy
+        is snapshot_policy_resolution_resolve_snapshot_registry_policy
+    )
+    assert policy_resolution_resolve_static_eval_policy is static_policy_resolve_static_eval_policy
+    assert policy_resolution_resolve_eval_policies.__module__ == "weiss_rl.eval.policies.resolution"
+    assert policy_resolution_resolve_b1_policy.__module__ == "weiss_rl.eval.b1_policy_resolution"
+    assert policy_resolution_resolve_snapshot_registry_policy.__module__ == "weiss_rl.eval.snapshot_policy_resolution"
+    assert policy_resolution_resolve_static_eval_policy.__module__ == "weiss_rl.eval.static_policy_resolution"
+    assert (
+        policy_resolution_is_recursive_registry_search_root.__module__ == "weiss_rl.eval.snapshot_registry_resolution"
+    )
+
+
+def test_eval_policy_resolution_context_owns_registry_policy_resolution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_run_dir = tmp_path / "runs" / "source_run"
+    registry_path = registry_run_dir / "training" / "snapshots" / "registry.json"
+    weights_path = registry_run_dir / "training" / "snapshots" / "policy_000100" / "weights.pt"
+    weights_path.parent.mkdir(parents=True, exist_ok=True)
+    weights_path.write_bytes(b"weights")
+    registry = SnapshotRegistry()
+    registry.add_snapshot(
+        policy_id="policy_000100",
+        update=100,
+        weights_sha256=hashlib.sha256(weights_path.read_bytes()).hexdigest(),
+        path="training/snapshots/policy_000100/weights.pt",
+    )
+    registry.save(registry_path)
+    consumer_run_dir = tmp_path / "runs" / "consumer"
+    consumer_run_dir.mkdir(parents=True)
+    context = EvalPolicyResolutionContext.load(
+        run_dir=consumer_run_dir,
+        policy_ids=["policy_000100"],
+        snapshot_registry_path=registry_path,
+    )
+    observed: dict[str, object] = {}
+
+    def _fake_resolve_snapshot_registry_policy(**kwargs: object):
+        observed.update(kwargs)
+        return kwargs["policy_id"]
+
+    monkeypatch.setattr(
+        policy_resolution_context_module,
+        "resolve_snapshot_registry_policy",
+        _fake_resolve_snapshot_registry_policy,
+    )
+
+    resolved = context.resolve_registry_policy(
+        policy_id="policy_000100",
+        stack=cast(StackConfig, object()),
+        observation_dim=512,
+        action_dim=9,
+        spec_bundle={"observation": {}},
+    )
+
+    assert resolved == "policy_000100"
+    assert observed["registry_source"] is context.registry_source
+    assert context.registry_path == registry_path
+    assert context.registry is context.registry_source.registry
+    assert context.snapshots_by_policy_id is context.registry_source.snapshots_by_policy_id
+    assert observed["snapshot_run_dir"] == registry_run_dir.resolve()
+    assert observed["observation_dim"] == 512
+    assert observed["action_dim"] == 9
+    assert context.registry_run_dir_if_resolved == registry_run_dir.resolve()
 
 
 def _heuristic_spec_bundle() -> dict[str, object]:
@@ -1129,8 +1239,8 @@ def test_resolve_eval_policies_skips_registry_resolution_for_explicit_b1_baselin
         raise AssertionError("registry source resolution should not be attempted")
 
     monkeypatch.setattr(
-        simulator_runner_module,
-        "_resolve_snapshot_registry_run_dir",
+        policy_resolution_context_module.SnapshotRegistrySource,
+        "resolve_run_dir",
         _unexpected_registry_resolution,
     )
 

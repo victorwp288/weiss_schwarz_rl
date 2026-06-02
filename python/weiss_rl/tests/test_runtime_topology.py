@@ -15,8 +15,8 @@ from weiss_rl.runtime import (
     _resolve_actor_topology,
     resolve_actor_device_layout,
 )
-from weiss_rl.runtime_components import process as process_components
-from weiss_rl.runtime_components.topology import actor_seed as topology_actor_seed
+from weiss_rl.runtime.components import process as process_components
+from weiss_rl.runtime.components.topology import actor_seed as topology_actor_seed
 
 
 def test_resolve_actor_topology_keeps_ordered_runtime_strict_layout() -> None:

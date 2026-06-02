@@ -1,0 +1,15 @@
+{
+  "checkpoint_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/checkpoints/checkpoint_interpolated.pt",
+  "first_checkpoint": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_long_v1_u10_20260517_seg01/training/checkpoints/checkpoint_10.pt",
+  "format": "checkpoint_interpolation_summary_v1",
+  "output_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517",
+  "second_checkpoint": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_rehearsal_from_u20_u5_20260517_seg01/training/checkpoints/checkpoint_5.pt",
+  "second_weight": 0.15,
+  "snapshot": {
+    "metadata_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/snapshots/main_interp_repair_a015/policy_meta.json",
+    "policy_id": "main_interp_repair_a015",
+    "registry_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/snapshots/registry.json",
+    "weights_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/snapshots/main_interp_repair_a015/weights.pt",
+    "weights_sha256": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26"
+  }
+}

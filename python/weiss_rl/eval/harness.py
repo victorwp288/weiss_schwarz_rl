@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol
 
 import numpy as np
 
@@ -23,11 +22,24 @@ from weiss_rl.core.masking import (
     masked_logp_from_mask,
 )
 from weiss_rl.core.termination_reason import classify_episode_end_reason
-from weiss_rl.eval.policy_set import deck_id_for_policy_id
+from weiss_rl.eval.engine_faults import abort_on_engine_fault_eval as _abort_on_engine_fault_eval
+from weiss_rl.eval.policies.set import deck_id_for_policy_id
+from weiss_rl.eval.sampling_helpers import coerce_eval_legal_ids as _coerce_eval_legal_ids
+from weiss_rl.eval.sampling_helpers import coerce_eval_logits as _coerce_eval_logits
+from weiss_rl.eval.sampling_helpers import coerce_sampling_temperature as _coerce_sampling_temperature
+from weiss_rl.eval.sampling_helpers import legal_probs_for_cdf as _legal_probs_for_cdf
+from weiss_rl.eval.sampling_helpers import normalize_cdf_probs
+from weiss_rl.eval.sampling_helpers import require_pass_action as _require_pass_action
+from weiss_rl.eval.sampling_helpers import sample_cdf_index as _sample_cdf_index
+from weiss_rl.eval.sampling_helpers import selected_logp as _selected_logp
+from weiss_rl.eval.terminal_step import MISSING as _MISSING
+from weiss_rl.eval.terminal_step import optional_step_scalar as _optional_step_scalar
+from weiss_rl.eval.terminal_step import require_seat as _require_seat
+from weiss_rl.eval.terminal_step import required_step_scalar_with_fallback as _required_step_scalar_with_fallback
+from weiss_rl.eval.terminal_step import step_scalar as _step_scalar
+from weiss_rl.eval.terminal_step import winner_seat_from_terminal_step as _winner_seat_from_terminal_step
 
-_CDF_RENORMALIZE_TOL = 1e-6
 _U32_MASK = (1 << 32) - 1
-_MISSING = object()
 
 OutcomeToken = Literal["W", "L", "D", "T"]
 
@@ -218,6 +230,14 @@ def eval_sampler_logp_from_legal_ids(
         actions,
         pass_action_id=pass_action_id,
     )
+
+
+def _normalize_cdf_probs(
+    probs64: np.ndarray,
+    *,
+    anomalies: EvalSamplerAnomalies | None = None,
+) -> np.ndarray:
+    return normalize_cdf_probs(probs64, anomalies=anomalies)
 
 
 def sample_action_pinned(
@@ -470,30 +490,6 @@ def write_episodes_jsonl(path: Path, records: Sequence[EvalGameRecord]) -> None:
             handle.write("\n")
 
 
-def _fault_env_indices(engine_status: Any) -> list[int]:
-    return np.flatnonzero(np.atleast_1d(np.asarray(engine_status)) != 0).astype(int).tolist()
-
-
-def _json_ready_array(value: Any) -> int | list[int]:
-    array = np.asarray(value)
-    if array.ndim == 0:
-        return int(array)
-    return array.astype(int).tolist()
-
-
-def _json_ready_episode_key(episode_key: Any) -> object:
-    if isinstance(episode_key, (bytes, bytearray)):
-        return repr(bytes(episode_key))
-
-    array = np.asarray(episode_key)
-    if array.ndim == 0:
-        scalar = array.item()
-        if isinstance(scalar, (bytes, bytearray)):
-            return repr(bytes(scalar))
-        return scalar
-    return array.tolist()
-
-
 def abort_on_engine_fault_eval(
     *,
     run_dir: Path,
@@ -502,25 +498,13 @@ def abort_on_engine_fault_eval(
     episode_key: Any | None = None,
     note: str = "engine_status!=0 during evaluation",
 ) -> None:
-    """Hard-fail evaluation on engine faults after writing a local artifact."""
-    fault_env_indices = _fault_env_indices(engine_status)
-    if not fault_env_indices:
-        return
-
-    run_dir.mkdir(parents=True, exist_ok=True)
-    fault_path = run_dir / "eval_engine_fault.json"
-    payload: dict[str, object] = {
-        "note": note,
-        "fault_env_indices": fault_env_indices,
-        "engine_status": _json_ready_array(engine_status),
-    }
-    if decision_id is not None:
-        payload["decision_id"] = _json_ready_array(decision_id)
-    if episode_key is not None:
-        payload["episode_key"] = _json_ready_episode_key(episode_key)
-
-    fault_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    raise RuntimeError(f"{note}; wrote {fault_path}")
+    _abort_on_engine_fault_eval(
+        run_dir=run_dir,
+        engine_status=engine_status,
+        decision_id=decision_id,
+        episode_key=episode_key,
+        note=note,
+    )
 
 
 def game_result_from_step(
@@ -612,43 +596,6 @@ def _game_result_reason(result: GameResult) -> str:
     )
 
 
-def _winner_seat_from_terminal_step(
-    step: object,
-    *,
-    env_index: int,
-    reward: float,
-    terminated: bool,
-    truncated: bool,
-    acting_seat: int | None,
-) -> int | None:
-    if not terminated or truncated:
-        return None
-
-    explicit_winner_seat = _optional_terminal_winner_seat(step, env_index=env_index)
-    if explicit_winner_seat is not _MISSING:
-        return cast(int | None, explicit_winner_seat)
-    if reward == 0.0:
-        return None
-
-    perspective_seat = _reward_perspective_seat(step, env_index=env_index, acting_seat=acting_seat)
-    return perspective_seat if reward > 0.0 else 1 - perspective_seat
-
-
-def _optional_terminal_winner_seat(step: object, *, env_index: int) -> object:
-    for name in ("winner_seat", "winner"):
-        if not hasattr(step, name):
-            continue
-        value = _step_value_for_env(step, name=name, env_index=env_index)
-        if value is None:
-            return None
-
-        seat = int(value)
-        if seat == -1:
-            return None
-        return _require_seat(seat, name=name)
-    return _MISSING
-
-
 def resolve_eval_episode_key(
     *,
     scheduled_game: ScheduledGame,
@@ -712,201 +659,3 @@ def _normalize_outcome_token(token: str) -> OutcomeToken:
     if normalized == "T":
         return "T"
     raise ValueError(f"unknown outcome token: {token!r}")
-
-
-def _require_seat(value: int, *, name: str) -> int:
-    seat = int(value)
-    if seat not in (0, 1):
-        raise ValueError(f"{name} must be 0 or 1, got {seat}")
-    return seat
-
-
-def _step_value_for_env(step: object, *, name: str, env_index: int) -> Any:
-    values = np.asarray(getattr(step, name), dtype=object)
-    if values.ndim == 0:
-        value = values.item()
-    else:
-        value = values[env_index]
-        if isinstance(value, np.ndarray) and value.size == 1:
-            value = value.item()
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
-
-
-def _step_scalar(
-    step: object,
-    names: Sequence[str],
-    *,
-    env_index: int,
-    cast_fn: Any,
-) -> Any:
-    for name in names:
-        if hasattr(step, name):
-            return cast_fn(_step_value_for_env(step, name=name, env_index=env_index))
-    joined_names = ", ".join(names)
-    raise AttributeError(f"step is missing required field(s): {joined_names}")
-
-
-def _required_step_scalar_with_fallback(
-    step: object,
-    names: Sequence[str],
-    *,
-    env_index: int,
-    cast_fn: Any,
-    fallback: Any,
-    fallback_name: str,
-) -> Any:
-    try:
-        observed = _step_scalar(step, names, env_index=env_index, cast_fn=cast_fn)
-    except AttributeError:
-        if fallback is _MISSING:
-            joined_names = ", ".join(names)
-            raise AttributeError(
-                f"step is missing required field(s): {joined_names}; provide {fallback_name} when unavailable"
-            ) from None
-        return cast_fn(fallback)
-
-    if fallback is _MISSING:
-        return observed
-
-    expected = cast_fn(fallback)
-    if observed != expected:
-        raise ValueError(f"{fallback_name} mismatch: step={observed}, provided={expected}")
-    return observed
-
-
-def _optional_step_scalar(step: object, names: Sequence[str], *, env_index: int) -> int | bytes | None:
-    for name in names:
-        if not hasattr(step, name):
-            continue
-        value = _step_value_for_env(step, name=name, env_index=env_index)
-        if value is None:
-            return None
-        if isinstance(value, (bytes, bytearray)):
-            return bytes(value)
-        return int(value)
-    return None
-
-
-def _reward_perspective_seat(step: object, *, env_index: int, acting_seat: int | None) -> int:
-    aliases: list[tuple[str, int]] = []
-    if acting_seat is not None:
-        aliases.append(("acting_seat", _require_seat(acting_seat, name="acting_seat")))
-
-    for name in ("actor", "to_play_seat", "to_play"):
-        if not hasattr(step, name):
-            continue
-        seat = _step_scalar(step, (name,), env_index=env_index, cast_fn=int)
-        if seat == -1:
-            continue
-        aliases.append((name, _require_seat(seat, name=name)))
-
-    if not aliases:
-        raise AttributeError(
-            "decisive terminated step must expose acting_seat or a valid actor, to_play_seat, or to_play"
-        )
-
-    canonical_name, canonical_seat = aliases[0]
-    for name, seat in aliases[1:]:
-        if seat != canonical_seat:
-            raise ValueError(f"reward perspective seat mismatch: {canonical_name}={canonical_seat}, {name}={seat}")
-    return canonical_seat
-
-
-def _coerce_eval_logits(logits: np.ndarray) -> np.ndarray:
-    logits_array = np.asarray(logits, dtype=np.float32)
-    if logits_array.ndim != 1:
-        raise ValueError("logits must be a 1D array")
-    return logits_array
-
-
-def _coerce_sampling_temperature(temperature: float) -> float:
-    value = float(temperature)
-    if not np.isfinite(value) or value <= 0.0:
-        raise ValueError(f"temperature must be finite and > 0, got {temperature!r}")
-    return value
-
-
-def _coerce_eval_legal_ids(legal_ids: np.ndarray, *, action_space: int) -> np.ndarray:
-    legal_ids_array = np.asarray(legal_ids)
-    if legal_ids_array.ndim != 1:
-        raise ValueError("legal_ids must be 1D")
-    if legal_ids_array.dtype == np.bool_ or not np.issubdtype(legal_ids_array.dtype, np.integer):
-        raise ValueError("legal_ids must be an integer array")
-
-    signed = legal_ids_array.astype(np.int64, copy=False)
-    if np.any(signed < 0):
-        raise ValueError("legal_ids must be >= 0")
-    if np.any(signed >= action_space):
-        raise ValueError(f"legal_ids must be < action_space ({action_space})")
-    return signed.astype(np.intp, copy=False)
-
-
-def _require_pass_action(pass_action_id: int | None, *, action_space: int) -> int:
-    if pass_action_id is None:
-        raise ValueError("pass_action_id is required when legal_ids is empty")
-    if pass_action_id < 0 or pass_action_id >= action_space:
-        raise ValueError(f"pass_action_id must be in [0, {action_space})")
-    return int(pass_action_id)
-
-
-def _legal_probs_for_cdf(
-    logits: np.ndarray,
-    legal_ids: np.ndarray,
-    *,
-    anomalies: EvalSamplerAnomalies | None = None,
-) -> np.ndarray:
-    legal_logits = logits[legal_ids]
-    if not np.all(np.isfinite(legal_logits)):
-        raise ValueError("legal logits must be finite")
-
-    row_max = np.max(legal_logits)
-    shifted = legal_logits - row_max
-    weights = np.exp(shifted)
-    denom = np.sum(weights, dtype=np.float32)
-    probs64 = np.asarray(weights / denom, dtype=np.float64)
-    return _normalize_cdf_probs(probs64, anomalies=anomalies)
-
-
-def _normalize_cdf_probs(
-    probs64: np.ndarray,
-    *,
-    anomalies: EvalSamplerAnomalies | None = None,
-) -> np.ndarray:
-    prob_sum = float(np.sum(probs64, dtype=np.float64))
-    if not np.isfinite(prob_sum) or prob_sum <= 0.0:
-        raise ValueError("legal probabilities must sum to a finite positive value")
-    if abs(prob_sum - 1.0) > _CDF_RENORMALIZE_TOL:
-        probs64 = probs64 / prob_sum
-        if anomalies is not None:
-            anomalies.cdf_renormalizations += 1
-    return probs64
-
-
-def _sample_cdf_index(probs64: np.ndarray, *, rng: _FloatRng) -> int:
-    cdf = np.cumsum(probs64, dtype=np.float64)
-    cdf[-1] = 1.0
-    draw = float(rng.next_float())
-    if not np.isfinite(draw) or draw < 0.0 or draw > 1.0:
-        raise ValueError("rng.next_float() must return a finite value in [0.0, 1.0]")
-    return min(int(np.searchsorted(cdf, draw, side="right")), cdf.size - 1)
-
-
-def _selected_logp(
-    logits: np.ndarray,
-    legal_ids: np.ndarray,
-    action: int,
-    *,
-    pass_action_id: int | None,
-) -> np.float32:
-    legal_offsets = np.array([0, legal_ids.size], dtype=np.int64)
-    actions = np.array([action], dtype=np.int64)
-    logp = masked_logp_from_legal_ids(
-        logits[np.newaxis, :],
-        legal_ids,
-        legal_offsets,
-        actions,
-        pass_action_id=pass_action_id,
-    )
-    return np.float32(logp[0])

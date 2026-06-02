@@ -1,0 +1,113 @@
+{
+  "anchor_subset": {
+    "games": 640,
+    "mean": 0.76875,
+    "wins": 492
+  },
+  "created_unix": 1779060308.6357388,
+  "elapsed_seconds": 146.50758934020996,
+  "eval_sampling_algorithm": "model_argmax_pinned_v1",
+  "focal_policy_id": "main_interp_repair_a015",
+  "games_per_row": 128,
+  "legacy_subset": {
+    "games": 0,
+    "mean": null,
+    "wins": 0
+  },
+  "model_sampling_temperature": 1.0,
+  "output_dir": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4",
+  "overall": {
+    "games": 640,
+    "mean": 0.76875,
+    "wins": 492
+  },
+  "paired_seeds": 64,
+  "rows": [
+    {
+      "ci_high": 1.0,
+      "ci_low": 1.0,
+      "diagnostics_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__01_b0_randomlegal/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "main_interp_repair_a015",
+      "games": 128,
+      "losses": 0,
+      "mean": 1.0,
+      "opponent_policy_id": "B0 RandomLegal",
+      "paired_seeds": 64,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__01_b0_randomlegal/matchup_summary.json",
+      "truncations": 0,
+      "wins": 128
+    },
+    {
+      "ci_high": 0.7052911355462324,
+      "ci_low": 0.5738368780435049,
+      "diagnostics_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__02_b1_noleague_baseline/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "main_interp_repair_a015",
+      "games": 128,
+      "losses": 46,
+      "mean": 0.640625,
+      "opponent_policy_id": "B1 NoLeague baseline",
+      "paired_seeds": 64,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__02_b1_noleague_baseline/matchup_summary.json",
+      "truncations": 0,
+      "wins": 82
+    },
+    {
+      "ci_high": 0.8485990585236244,
+      "ci_low": 0.7072612242867488,
+      "diagnostics_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__03_b2_heuristicpublic/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "main_interp_repair_a015",
+      "games": 128,
+      "losses": 28,
+      "mean": 0.78125,
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "paired_seeds": 64,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__03_b2_heuristicpublic/matchup_summary.json",
+      "truncations": 0,
+      "wins": 100
+    },
+    {
+      "ci_high": 0.7809078610714171,
+      "ci_low": 0.619922443614348,
+      "diagnostics_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__04_b3_heuristicpublicaggro/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "main_interp_repair_a015",
+      "games": 128,
+      "losses": 38,
+      "mean": 0.703125,
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "paired_seeds": 64,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__04_b3_heuristicpublicaggro/matchup_summary.json",
+      "truncations": 0,
+      "wins": 90
+    },
+    {
+      "ci_high": 0.7876436380209008,
+      "ci_low": 0.649931161922365,
+      "diagnostics_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__05_b4_heuristicpubliccontrol/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "main_interp_repair_a015",
+      "games": 128,
+      "losses": 36,
+      "mean": 0.71875,
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "paired_seeds": 64,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm64_b0_b4/matchups/00_main_interp_repair_a015__vs__05_b4_heuristicpubliccontrol/matchup_summary.json",
+      "truncations": 0,
+      "wins": 92
+    }
+  ],
+  "stack_config": "configs/thesis/ablations/main_league_champion_hardneg_rehearsal_probe.yaml"
+}

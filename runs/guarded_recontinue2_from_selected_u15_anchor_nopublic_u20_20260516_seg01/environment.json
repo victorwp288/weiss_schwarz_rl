@@ -1,0 +1,69 @@
+{
+  "argv": [
+    "python/scripts/train.py",
+    "--stack-config",
+    "configs/thesis/main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml",
+    "--run-label",
+    "guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01",
+    "--num-envs",
+    "288",
+    "--unroll-length",
+    "64",
+    "--max-updates",
+    "20",
+    "--runtime-mode",
+    "train_async_fast",
+    "--profile",
+    "fast",
+    "--device",
+    "cuda",
+    "--checkpoint-interval-updates",
+    "5",
+    "--seed-snapshot-run-dir",
+    "runs/guarded_recontinue_from_selected_u15_anchor_nopublic_u20_20260516_seg01",
+    "--init-from-checkpoint",
+    "runs/guarded_recontinue_from_selected_u15_anchor_nopublic_u20_20260516_seg01/training/checkpoints/checkpoint_15.pt",
+    "--override",
+    "system.collection_backend=process",
+    "--override",
+    "training.profile_timers=true",
+    "--override",
+    "league.pool.seed_snapshot_champion_import=pinned"
+  ],
+  "artifact_schema_version": "run_artifacts_v2",
+  "cwd": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl",
+  "hardware": {
+    "actor_device": "cpu",
+    "actor_device_layout": "cpu,cpu,cpu,cpu,cpu,cpu",
+    "actor_device_unique_count": 1,
+    "cpu_count": 20,
+    "learner_device": "cuda",
+    "machine": "AMD64",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python_version": "3.11.14"
+  },
+  "init_from_checkpoint_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/guarded_recontinue_from_selected_u15_anchor_nopublic_u20_20260516_seg01/training/checkpoints/checkpoint_15.pt",
+  "kind": "environment_manifest_v1",
+  "packages": {
+    "matplotlib": "3.10.1",
+    "numpy": "2.1.3",
+    "scipy": "1.14.1",
+    "torch": "2.11.0+cu128",
+    "weiss-rl": null,
+    "weiss-sim": "1.1.0"
+  },
+  "platform": {
+    "machine": "AMD64",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "release": "10",
+    "system": "Windows"
+  },
+  "python": {
+    "executable": "C:\\Users\\Bruger\\Desktop\\this one\\weiss_schwarz_rl\\.venv\\Scripts\\python.exe",
+    "implementation": "CPython",
+    "version": "3.11.14"
+  },
+  "run_id256": "212478a7aafc20320d05b17598b36496d2a32bed1cf4b27cbc80d6bc915d817e",
+  "run_id64": "3220fcaaa7782421"
+}

@@ -8,10 +8,28 @@ from typing import Any, Literal
 
 import pytest
 
+from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import load_stack_config
 from weiss_rl.config.models import StopRulesConfig
+from weiss_rl.eval import final_eval as final_eval_module
 from weiss_rl.eval import resolve_final_policy_set, run_final_eval
-from weiss_rl.eval.harness import GameResult, ScheduledGame
+from weiss_rl.eval.final.artifacts import (
+    final_eval_matchup_manifest_rows,
+    write_final_eval_artifacts,
+)
+from weiss_rl.eval.final.matchups import (
+    matchup_dir_name,
+    run_final_eval_matchup,
+    scheduled_game,
+)
+from weiss_rl.eval.final.payload import build_final_eval_payload
+from weiss_rl.eval.final.policy_selection import (
+    load_dev_eval_summaries,
+    resolve_final_eval_policy_ids,
+    validate_final_eval_seed_budget,
+)
+from weiss_rl.eval.harness import GameResult, ReplaySampleResult, ScheduledGame
+from weiss_rl.eval.policies.set import DevEvalPolicySummary
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 _RUN_ID256 = "ab" * 32
@@ -61,6 +79,39 @@ class _FakeMatrixRunner:
             truncated=True,
             winner_seat=None,
         )
+
+
+class _AlwaysWinRunner:
+    def __init__(self) -> None:
+        self.calls: list[ScheduledGame] = []
+
+    def run_game(self, scheduled: ScheduledGame) -> GameResult:
+        replay_sample = None
+        if not self.calls:
+            replay_sample = ReplaySampleResult(
+                pair_index=scheduled.pair_index,
+                swap_index=scheduled.swap_index,
+                episode_index=scheduled.episode_index,
+                focal_policy_id=scheduled.focal_policy_id,
+                opponent_policy_id=scheduled.opponent_policy_id,
+                raw_replay_path="raw/replay.json",
+                bundle_path="bundles/replay.zip",
+                verification_report_path="verification/replay.json",
+                verification_status="success",
+                replay_key64="abcd1234",
+                matched=True,
+            )
+        self.calls.append(scheduled)
+        return GameResult(
+            episode_seed=scheduled.episode_seed,
+            terminated=True,
+            truncated=False,
+            winner_seat=scheduled.focal_seat,
+            replay_sample=replay_sample,
+        )
+
+    def god_search_diagnostics(self) -> dict[str, Any]:
+        return {"enabled": True, "checked": len(self.calls)}
 
 
 def _repo_root() -> Path:
@@ -163,6 +214,442 @@ def test_resolve_final_policy_set_uses_deterministic_order_from_artifacts(tmp_pa
         "policy_000100",
         "policy_000150",
     ]
+
+
+def test_final_eval_policy_selection_helpers_preserve_payload_shapes(tmp_path: Path) -> None:
+    summaries_path = tmp_path / "dev_eval_summaries.json"
+    summaries_path.write_text(
+        json.dumps(
+            {
+                "policy_scalar": 0.25,
+                "policy_structured": {
+                    "aggregate_score": 0.75,
+                    "anchor_scores": {"B0 RandomLegal": 0.9},
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summaries = load_dev_eval_summaries(summaries_path)
+    resolved, selection_payload = resolve_final_eval_policy_ids(
+        policy_ids=["B0 RandomLegal", 123],
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+        selection_config=None,
+        final_policy_set_size=None,
+    )
+    validate_final_eval_seed_budget(paired_seeds=[11, 22], stage1_paired_seeds=1, max_paired_seeds=2)
+
+    assert summaries["policy_scalar"] == 0.25
+    assert isinstance(summaries["policy_structured"], DevEvalPolicySummary)
+    assert summaries["policy_structured"].anchor_scores == {"B0 RandomLegal": 0.9}
+    assert resolved == ["B0 RandomLegal", "123"]
+    assert selection_payload == {"mode": "explicit", "policy_count": 2}
+
+
+def test_final_eval_policy_selection_helpers_preserve_errors() -> None:
+    with pytest.raises(ValueError, match="policy_ids must contain at least one policy"):
+        resolve_final_eval_policy_ids(
+            policy_ids=[],
+            snapshot_registry_path=None,
+            dev_eval_summaries_path=None,
+            selection_config=None,
+            final_policy_set_size=None,
+        )
+    with pytest.raises(ValueError, match="policy_ids must be unique"):
+        resolve_final_eval_policy_ids(
+            policy_ids=["policy_dup", "policy_dup"],
+            snapshot_registry_path=None,
+            dev_eval_summaries_path=None,
+            selection_config=None,
+            final_policy_set_size=None,
+        )
+    with pytest.raises(ValueError, match="missing: snapshot_registry_path, dev_eval_summaries_path"):
+        resolve_final_eval_policy_ids(
+            policy_ids=None,
+            snapshot_registry_path=None,
+            dev_eval_summaries_path=None,
+            selection_config=_selection_config(),
+            final_policy_set_size=2,
+        )
+    with pytest.raises(ValueError, match="stage1_paired_seeds must be positive"):
+        validate_final_eval_seed_budget(paired_seeds=[11], stage1_paired_seeds=0, max_paired_seeds=1)
+    with pytest.raises(ValueError, match="max_paired_seeds must be >= stage1_paired_seeds"):
+        validate_final_eval_seed_budget(paired_seeds=[11, 22], stage1_paired_seeds=2, max_paired_seeds=1)
+    with pytest.raises(ValueError, match="final eval requires at least 3 paired seeds, found 2"):
+        validate_final_eval_seed_budget(paired_seeds=[11, 22], stage1_paired_seeds=1, max_paired_seeds=3)
+
+
+def test_final_eval_payload_builder_preserves_metadata_paths_and_reverse_cells(tmp_path: Path) -> None:
+    output_dir = tmp_path / "final_eval"
+    seed_file = tmp_path / "report_eval_seeds.txt"
+    seed_file.write_text("11\n22\n33\n", encoding="utf-8")
+    policy_ids = ["policy_a", "policy_b"]
+
+    def result(
+        *,
+        focal_index: int,
+        opponent_index: int,
+        mean: float,
+        posterior_samples: tuple[float, ...],
+    ) -> dict[str, Any]:
+        matchup_dir = output_dir / "matchups" / f"{focal_index:02d}_vs_{opponent_index:02d}"
+        return {
+            "focal_policy_id": policy_ids[focal_index],
+            "opponent_policy_id": policy_ids[opponent_index],
+            "focal_index": focal_index,
+            "opponent_index": opponent_index,
+            "matchup_dir": matchup_dir,
+            "episodes_path": matchup_dir / "episodes.jsonl",
+            "posterior_samples": posterior_samples,
+            "summary": {
+                "paired_seeds": 3,
+                "observed_paired_seeds": 3,
+                "excluded_paired_seeds": 0,
+                "has_payoff_samples": True,
+                "stop_reason": "precision",
+                "should_stop": True,
+                "summary": {
+                    "games": 6,
+                    "wins": int(round(mean * 6)),
+                    "losses": 6 - int(round(mean * 6)),
+                    "draws": 0,
+                    "truncations": 0,
+                    "engine_errors": 0,
+                },
+                "uncertainty": {
+                    "mean": mean,
+                    "ci_low": max(0.0, mean - 0.1),
+                    "ci_high": min(1.0, mean + 0.1),
+                    "ci_half_width": 0.1,
+                    "prob_gt_half": 0.8,
+                    "prob_lt_half": 0.2,
+                    "paired_seed_count": 3,
+                },
+            },
+        }
+
+    payload = build_final_eval_payload(
+        output_dir=output_dir,
+        policy_ids=policy_ids,
+        matchup_results=[
+            result(focal_index=0, opponent_index=0, mean=0.5, posterior_samples=(0.5,)),
+            result(focal_index=0, opponent_index=1, mean=0.75, posterior_samples=(0.2, 0.8)),
+            result(focal_index=1, opponent_index=1, mean=0.5, posterior_samples=(0.5,)),
+        ],
+        stage1_paired_seeds=2,
+        max_paired_seeds=3,
+        paired_seeds=[11, 22, 33],
+        stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+        scheme="S0",
+        sample_count=16,
+        selection_payload={"mode": "explicit", "policy_count": 2},
+        metadata={"paper_tag": "final_results_v1"},
+        seed_file_path=seed_file,
+    )
+
+    assert final_eval_module._build_final_eval_payload is build_final_eval_payload
+    assert payload["metadata"]["paper_tag"] == "final_results_v1"
+    assert payload["metadata"]["seed_file"]["path"] == seed_file.as_posix()
+    assert payload["metadata"]["seed_file"]["sha256"]
+    assert payload["matrices"]["mean"]["values"] == [[0.5, 0.75], [0.25, 0.5]]
+    assert payload["matrices"]["wins"]["values"] == [[3, 4], [2, 3]]
+    assert payload["posterior_samples"]["values"] == [[[0.5], [0.2, 0.8]], [[0.8, 0.19999999999999996], [0.5]]]
+    assert payload["matchups"][1]["matchup_dir"] == "matchups/00_vs_01"
+    assert payload["matchups"][1]["summary_path"] == "matchups/00_vs_01/matchup_summary.json"
+    assert payload["matchups"][1]["matrix_cells"] == [
+        {"focal_policy_index": 0, "opponent_policy_index": 1},
+        {"focal_policy_index": 1, "opponent_policy_index": 0},
+    ]
+
+
+def test_final_eval_run_split_preserves_facade_and_upper_triangle_jobs(tmp_path: Path) -> None:
+    from weiss_rl.eval import final_eval_run
+
+    jobs = final_eval_run.build_final_eval_matchup_jobs(["policy_a", "policy_b", "policy_c"])
+
+    assert final_eval_module.run_final_eval is final_eval_run.run_final_eval
+    assert final_eval_module._build_matchup_jobs is final_eval_run.build_final_eval_matchup_jobs
+    assert final_eval_module._build_run_payload is final_eval_run.build_final_eval_run_payload
+    assert final_eval_module._resolve_run_policy_ids is final_eval_run.resolve_final_eval_run_policy_ids
+    assert final_eval_module._run_matchup_jobs is final_eval_run.run_final_eval_matchup_jobs
+    assert final_eval_module._validate_run_seed_budget is final_eval_run.validate_final_eval_run_seed_budget
+    assert final_eval_module._write_run_artifacts is final_eval_run.write_final_eval_run_artifacts
+    assert [(job.focal_index, job.opponent_index, job.focal_policy_id, job.opponent_policy_id) for job in jobs] == [
+        (0, 0, "policy_a", "policy_a"),
+        (0, 1, "policy_a", "policy_b"),
+        (0, 2, "policy_a", "policy_c"),
+        (1, 1, "policy_b", "policy_b"),
+        (1, 2, "policy_b", "policy_c"),
+        (2, 2, "policy_c", "policy_c"),
+    ]
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_matchup(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {
+            "focal_index": kwargs["focal_index"],
+            "opponent_index": kwargs["opponent_index"],
+            "focal_policy_id": kwargs["focal_policy_id"],
+            "opponent_policy_id": kwargs["opponent_policy_id"],
+            "matchup_dir": tmp_path / "matchup",
+            "summary": {},
+            "posterior_samples": (),
+            "records": (),
+            "replay_samples": (),
+        }
+
+    results = final_eval_run.run_final_eval_matchup_jobs(
+        output_dir=tmp_path / "final_eval",
+        jobs=jobs[:2],
+        runner=_FakeMatrixRunner({}),
+        paired_seeds=[11, 22],
+        stage1_paired_seeds=1,
+        max_paired_seeds=2,
+        stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+        run_id256=_RUN_ID256,
+        config_hash256=_CONFIG_HASH256,
+        spec_hash256=_SPEC_HASH256,
+        scheme="S1",
+        sample_count=7,
+        run_matchup_fn=fake_run_matchup,
+    )
+
+    assert (tmp_path / "final_eval").is_dir()
+    assert [(result["focal_index"], result["opponent_index"]) for result in results] == [(0, 0), (0, 1)]
+    assert [(call["focal_policy_id"], call["opponent_policy_id"]) for call in calls] == [
+        ("policy_a", "policy_a"),
+        ("policy_a", "policy_b"),
+    ]
+    assert calls[0]["paired_seeds"] == [11, 22]
+    assert calls[0]["stage1_paired_seeds"] == 1
+    assert calls[0]["max_paired_seeds"] == 2
+    assert calls[0]["scheme"] == "S1"
+    assert calls[0]["sample_count"] == 7
+
+
+def test_final_eval_matchup_runner_preserves_schedule_artifacts_and_early_stop(tmp_path: Path) -> None:
+    runner = _AlwaysWinRunner()
+    output_dir = tmp_path / "final_eval"
+    first_swap = scheduled_game(
+        pair_index=2,
+        swap_index=1,
+        episode_seed=33,
+        focal_policy_id="policy_000021",
+        opponent_policy_id="B3 HeuristicPublicAggro",
+    )
+
+    result = run_final_eval_matchup(
+        output_dir=output_dir,
+        focal_index=0,
+        opponent_index=1,
+        focal_policy_id="policy_000021",
+        opponent_policy_id="B3 HeuristicPublicAggro",
+        paired_seeds=[11, 22, 33, 44],
+        stage1_paired_seeds=2,
+        max_paired_seeds=4,
+        stop_rules=StopRulesConfig(stop_delta_ci_half_width=0.05, stop_confidence=0.95),
+        runner=runner,
+        run_id256=_RUN_ID256,
+        config_hash256=_CONFIG_HASH256,
+        spec_hash256=_SPEC_HASH256,
+        scheme="S0",
+        sample_count=8,
+    )
+
+    assert final_eval_module._run_matchup is run_final_eval_matchup
+    assert final_eval_module._scheduled_game is scheduled_game
+    assert final_eval_module._matchup_dir_name is matchup_dir_name
+    assert first_swap.seat0_policy_id == "B3 HeuristicPublicAggro"
+    assert first_swap.seat1_policy_id == "policy_000021"
+    assert first_swap.focal_seat == 1
+    assert first_swap.seat0_deck == "preset:aggro_deck_5hy_nino_v1"
+    assert first_swap.seat1_deck == "preset:main_deck_5hy_yotsuba_v1"
+    assert len(runner.calls) == 4
+    assert [(call.pair_index, call.swap_index, call.focal_seat) for call in runner.calls] == [
+        (0, 0, 0),
+        (0, 1, 1),
+        (1, 0, 0),
+        (1, 1, 1),
+    ]
+    assert result["matchup_dir"].name == "00_policy_000021__vs__01_b3_heuristicpublicaggro"
+    assert result["used_paired_seeds"] == (11, 22)
+    assert len(result["records"]) == 4
+    assert len(result["replay_samples"]) == 1
+    assert result["summary"]["evaluation_context"] == {
+        "artifact_scope": "final_eval",
+        "focal_policy_index": 0,
+        "opponent_policy_index": 1,
+        "stage1_paired_seeds": 2,
+        "max_paired_seeds": 4,
+        "used_paired_seeds": [11, 22],
+    }
+    assert result["diagnostics"]["god_search"] == {"enabled": True, "checked": 4}
+    assert len(result["episodes_path"].read_text(encoding="utf-8").splitlines()) == 4
+    assert (result["matchup_dir"] / "matchup_summary.json").is_file()
+    assert (result["matchup_dir"] / "matchup_summary.csv").is_file()
+    assert (result["matchup_dir"] / "diagnostics.json").is_file()
+    posterior_payload = json.loads((result["matchup_dir"] / "posterior_samples.json").read_text(encoding="utf-8"))
+    assert posterior_payload["requested_sample_count"] == 8
+    assert posterior_payload["sample_count"] == 8
+    assert posterior_payload["has_payoff_samples"] is True
+
+
+def test_final_eval_matchup_split_modules_preserve_legacy_exports(tmp_path: Path) -> None:
+    from weiss_rl.eval import final_eval_matchup_outputs, final_eval_matchup_schedule, final_eval_matchups
+
+    matchup_dir = tmp_path / "matchups" / "00_policy_alpha__vs__01_policy_beta"
+
+    assert final_eval_matchups.scheduled_game is final_eval_matchup_schedule.scheduled_game
+    assert final_eval_matchups.matchup_dir_name is final_eval_matchup_schedule.matchup_dir_name
+    assert final_eval_matchups.slug is final_eval_matchup_schedule.slug
+    assert final_eval_matchups.bootstrap_seed is final_eval_matchup_schedule.bootstrap_seed
+    assert final_eval_matchups.build_matchup_payload is final_eval_matchup_outputs.build_matchup_payload
+    assert final_eval_matchups.matchup_posterior_samples is final_eval_matchup_outputs.matchup_posterior_samples
+    assert final_eval_matchups.build_matchup_diagnostics is final_eval_matchup_outputs.build_matchup_diagnostics
+    assert final_eval_matchups.write_matchup_artifacts is final_eval_matchup_outputs.write_matchup_artifacts
+    assert final_eval_matchups.matchup_artifact_paths is final_eval_matchup_outputs.matchup_artifact_paths
+
+    paths = final_eval_matchup_outputs.matchup_artifact_paths(matchup_dir)
+    assert paths.summary_json == matchup_dir / "matchup_summary.json"
+    assert paths.summary_csv == matchup_dir / "matchup_summary.csv"
+    assert paths.diagnostics_json == matchup_dir / "diagnostics.json"
+    assert paths.posterior_samples_json == matchup_dir / "posterior_samples.json"
+    assert final_eval_matchup_outputs.build_posterior_samples_payload(
+        focal_policy_id="policy_alpha",
+        opponent_policy_id="policy_beta",
+        sample_count=8,
+        posterior_samples=(0.25, 0.75),
+        summary_payload={"has_payoff_samples": True},
+    ) == {
+        "focal_policy_id": "policy_alpha",
+        "opponent_policy_id": "policy_beta",
+        "requested_sample_count": 8,
+        "sample_count": 2,
+        "has_payoff_samples": True,
+        "samples": [0.25, 0.75],
+    }
+
+
+def test_final_eval_artifact_writer_preserves_direct_output_shape(tmp_path: Path) -> None:
+    output_dir = tmp_path / "final_eval"
+    output_dir.mkdir(parents=True)
+    payload = {
+        "metadata": {"selection": {"mode": "explicit", "policy_count": 2}},
+        "policy_ids": ["policy_a", "policy_b"],
+        "posterior_samples": {"policy_ids": ["policy_a", "policy_b"], "values": [[[], []], [[], []]]},
+        "matrices": {
+            "mean": {"policy_ids": ["policy_a", "policy_b"], "values": [[0.5, 0.75], [0.25, 0.5]]},
+        },
+        "matchups": [],
+    }
+    matchup_results = [
+        {
+            "focal_policy_id": "policy_a",
+            "opponent_policy_id": "policy_b",
+            "matchup_dir": output_dir / "matchups" / "00_policy_a__vs__01_policy_b",
+            "summary": {
+                "paired_seeds": 3,
+                "observed_paired_seeds": 3,
+                "excluded_paired_seeds": 0,
+                "has_payoff_samples": True,
+                "stop_reason": "budget",
+            },
+            "records": [],
+            "replay_samples": [],
+        }
+    ]
+
+    write_final_eval_artifacts(output_dir=output_dir, payload=payload, matchup_results=matchup_results)
+    rows = final_eval_matchup_manifest_rows(output_dir=output_dir, matchup_results=matchup_results)
+
+    assert final_eval_module._write_final_eval_artifacts is write_final_eval_artifacts
+    assert json.loads((output_dir / "metadata.json").read_text(encoding="utf-8")) == payload["metadata"]
+    assert json.loads((output_dir / "policy_set.json").read_text(encoding="utf-8")) == {
+        "policy_ids": ["policy_a", "policy_b"]
+    }
+    assert (
+        json.loads((output_dir / "posterior_samples.json").read_text(encoding="utf-8")) == payload["posterior_samples"]
+    )
+    assert (output_dir / "matrices" / "mean.json").is_file()
+    with (output_dir / "matrices" / "mean.csv").open("r", encoding="utf-8") as handle:
+        assert list(csv.reader(handle)) == [
+            ["focal_policy_id", "policy_a", "policy_b"],
+            ["policy_a", "0.5", "0.75"],
+            ["policy_b", "0.25", "0.5"],
+        ]
+    with (output_dir / "matchups.csv").open("r", encoding="utf-8") as handle:
+        manifest = list(csv.DictReader(handle))
+    assert rows[0]["matchup_dir"] == "matchups/00_policy_a__vs__01_policy_b"
+    assert manifest[0]["matchup_dir"] == "matchups/00_policy_a__vs__01_policy_b"
+    assert manifest[0]["has_payoff_samples"] == "True"
+
+
+def test_final_eval_artifact_writer_preserves_canonical_layout_exports(tmp_path: Path) -> None:
+    layout = ArtifactLayout.from_run_dir(tmp_path / "run")
+    layout.ensure_directories()
+    payload = {
+        "metadata": {"selection": {"mode": "explicit", "policy_count": 2}},
+        "policy_ids": ["policy_a", "policy_b"],
+        "posterior_samples": {
+            "policy_ids": ["policy_a", "policy_b"],
+            "values": [[[0.5], [0.75]], [[0.25], [0.5]]],
+        },
+        "matrices": {
+            "mean": {"policy_ids": ["policy_a", "policy_b"], "values": [[0.5, 0.75], [0.25, 0.5]]},
+            "paired_seed_count": {"policy_ids": ["policy_a", "policy_b"], "values": [[3, 4], [4, 3]]},
+        },
+        "matchups": [],
+    }
+    matchup_results = [
+        {
+            "focal_policy_id": "policy_a",
+            "opponent_policy_id": "policy_b",
+            "matchup_dir": layout.final_eval_matchups_dir / "00_policy_a__vs__01_policy_b",
+            "summary": {
+                "paired_seeds": 4,
+                "observed_paired_seeds": 4,
+                "excluded_paired_seeds": 0,
+                "has_payoff_samples": True,
+                "stop_reason": "budget",
+                "summary": {"games": 8, "truncations": 2},
+            },
+            "records": [],
+            "replay_samples": [],
+        }
+    ]
+
+    write_final_eval_artifacts(
+        output_dir=layout.final_eval_dir,
+        payload=payload,
+        matchup_results=matchup_results,
+    )
+
+    assert layout.final_eval_posterior_samples_npz().is_file()
+    assert layout.final_eval_payoff_matrix_csv("p_mean").read_text(encoding="utf-8").splitlines() == [
+        "focal_policy_id,policy_a,policy_b",
+        "policy_a,0.5,0.75",
+        "policy_b,0.25,0.5",
+    ]
+    assert layout.truncation_heatmap_csv().read_text(encoding="utf-8").splitlines() == [
+        "focal_policy_id,policy_a,policy_b",
+        "policy_a,0.0,0.25",
+        "policy_b,0.25,0.0",
+    ]
+    replay_verification = json.loads(layout.replay_verification_json().read_text(encoding="utf-8"))
+    replay_index = json.loads(layout.replay_index_json().read_text(encoding="utf-8"))
+    hashes = json.loads(layout.final_eval_aggregate_hashes_json().read_text(encoding="utf-8"))
+    assert replay_verification["status"] == "not_sampled"
+    assert replay_verification["index_path"] == "replays/index.json"
+    assert replay_index == {"kind": "replay_index_v1", "samples": []}
+    assert "eval/final_eval/summary.json" in hashes["artifacts"]
+    assert "eval/diagnostics/replay_verification.json" in hashes["artifacts"]
+    assert "replays/index.json" in hashes["artifacts"]
 
 
 def test_run_final_eval_writes_matrix_exports_and_posterior_samples(tmp_path: Path) -> None:

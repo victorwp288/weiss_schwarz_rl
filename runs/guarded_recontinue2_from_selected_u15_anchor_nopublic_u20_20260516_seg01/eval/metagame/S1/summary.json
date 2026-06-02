@@ -1,0 +1,14 @@
+{
+  "case_id": "S1",
+  "description": "truncation_draw_like_reported_explicitly",
+  "neutral_fallback_matchup_count": 0,
+  "policy_ids": [
+    "selected_candidate",
+    "B0 RandomLegal",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "scheme": "S1",
+  "top_payoff_shifts_ready": true
+}

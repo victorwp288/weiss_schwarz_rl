@@ -1,6 +1,0 @@
-schema_version: 2
-description: "Trainable opponent-context continuation from the a075 frontier on the full confirm256 paired-swing conflict set. The fixed random hidden offset is disabled; old selected/champion weights load unchanged and a zero-initialized context adapter is allowed to learn opponent-specific corrections from paired-swing replay plus live champion/hard-negative league exposure."
-extends: main_league_champion_hardneg_a075_context_conflict_probe.yaml
-model:
-  opponent_context_hidden_scale: 0.0
-  opponent_context_trainable_hidden_scale: 1.0

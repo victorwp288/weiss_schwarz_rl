@@ -1,6 +1,0 @@
-schema_version: 2
-description: structured_acceptance tiny32 fast packed WSL frontier with cyclic public teacher and reduced steady-state teacher coef
-extends: structured_acceptance_tiny32_fast_pubcycle3.yaml
-training:
-  structured_aux:
-    teacher_public_heuristic_coef: 0.05

@@ -1,6 +1,0 @@
-schema_version: 2
-description: "Guarded guided-bootstrap continuation that imports only pinned source snapshots, such as guided_bootstrap_selected, as training-pool champions. This keeps the selected update-90 candidate available without blessing chronological latest."
-extends: main_league_guided_bootstrap_seedchampion.yaml
-league:
-  pool:
-    seed_snapshot_champion_import: pinned

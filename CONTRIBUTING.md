@@ -4,10 +4,10 @@ This is a behavior-sensitive thesis research repository. Refactors are welcome, 
 
 ## Before Editing
 
-1. Read the relevant workflow and contract docs under `docs/`.
+1. Read `AGENTS.md`, [docs/README.md](docs/README.md), and [docs/architecture.md](docs/architecture.md).
 2. Identify the behavior-sensitive surface you are touching.
 3. Add or identify characterization tests.
-4. Avoid modifying historical run outputs, checkpoints, and thesis figures unless the change is explicitly part of an artifact publication or cleanup.
+4. Avoid modifying historical run outputs, checkpoints, thesis figures, `run_logs/`, or `vast_artifacts/`.
 
 ## Validation
 
@@ -15,15 +15,16 @@ Start with:
 
 ```powershell
 uv sync --extra dev
-uv run python python/scripts/verify_repo.py
+uv run python -m weiss_rl.workflows.verify_repo_entrypoint
 ```
 
 Run focused tests for the area you changed. For simulator-boundary work, also run simulator-extra tests.
+See [docs/testing.md](docs/testing.md) for maintained validation commands.
 
 ## Pull Request Expectations
 
 - Explain whether behavior changed. The default answer should be no.
 - List validation commands and results.
 - Note any artifacts created.
-- Include a concise change note when behavior, commands, config, or artifact layout changes.
+- Update `CHANGELOG.md` or the relevant owner doc when the public surface changes.
 - Include migration notes for import path, CLI, config, or checkpoint changes.

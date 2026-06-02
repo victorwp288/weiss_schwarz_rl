@@ -1,7 +1,0 @@
-schema_version: 2
-description: "Factorized-compatible opponent-context recurrent-adapter micro-probe from the a075 frontier. This trains a zero-initialized per-opponent recurrent-output adapter at every decision, rather than only seeding the initial hidden state, so identical public states can separate fixed-anchor and champion/hard-negative objectives without a global action compromise."
-extends: main_league_champion_hardneg_a075_context_trainable_conflict_probe.yaml
-model:
-  opponent_context_trainable_hidden_scale: 0.0
-  opponent_context_trainable_recurrent_scale: 1.0
-  opponent_context_adapter_lr_multiplier: 1000.0

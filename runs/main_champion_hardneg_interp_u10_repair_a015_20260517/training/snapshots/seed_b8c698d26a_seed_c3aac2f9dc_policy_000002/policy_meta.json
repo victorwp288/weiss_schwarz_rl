@@ -1,0 +1,12 @@
+{
+  "format": "seeded_train_snapshot_metadata_v1",
+  "imported_from_policy_id": "seed_c3aac2f9dc_policy_000002",
+  "imported_from_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_long_v1_u10_20260517_seg01",
+  "imported_from_snapshot_path": "training/snapshots/seed_c3aac2f9dc_policy_000002/weights.pt",
+  "imported_from_update": 0,
+  "imported_from_weights_sha256": "3288d8fa8aa831730d5b9c7570a18a377342c7f5a1d2cdf08e18caa2cc771afc",
+  "policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+  "update": 0,
+  "weights_path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_policy_000002/weights.pt",
+  "weights_sha256": "8e8841f1184d446033fdb0b086f14a69297520e827c482a2429493e59644e42d"
+}

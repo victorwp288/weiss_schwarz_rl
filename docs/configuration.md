@@ -1,37 +1,54 @@
 # Configuration
 
-The repository uses grouped stack configs. Config files are behavior: defaults, override paths, inheritance, and hashes must remain stable unless a confirmed bug is documented.
+The active config surface is intentionally small. Public thesis commands should
+name one of the launch configs below; shared fragments and compatibility presets
+exist to preserve provenance and tests.
 
-## Loading
+## Public Launch Configs
 
-Use `load_stack_config(path)` from `weiss_rl.config`. The parser rejects unknown keys and resolves `extends` relative to repo-root config paths.
+| Config | Use |
+| --- | --- |
+| `configs/thesis/b1_noleague.yaml` | Canonical B1 no-league training. |
+| `configs/thesis/main_league.yaml` | Canonical main league training. |
+| `configs/thesis/main_league_auto_gpu.yaml` | Server-oriented main league lane. |
+| `configs/thesis/final_eval.yaml` | Selected thesis final-eval contract. |
+| `configs/thesis/final_eval_gpu.yaml` | GPU final-eval variant. |
+| `configs/thesis/multideck_exploratory.yaml` | Explicitly labeled multideck exploration. |
+| `configs/thesis/ablations/no_gru.yaml` | Public no-GRU IMPALA ablation. |
+| `configs/thesis/ablations/ppo_lite.yaml` | Masked PPO-lite baseline. |
+| `configs/thesis/ablations/terminal_only_reward.yaml` | Terminal-reward-only B1 reward ablation. |
 
-Common config roots:
+`configs/thesis/base_fixed_deck_structured.yaml` and
+`configs/thesis/_shared/` are implementation fragments. Do not present them as
+launch targets unless the workflow explicitly names them.
 
-- `configs/stack_smoke.yaml`: scaffold-only manifest smoke.
-- `configs/presets/structured_acceptance_standard.yaml`: canonical current training recipe.
-- `configs/presets/structured_acceptance_standard_thesis_eval.yaml`: richer final-eval companion.
-- `configs/presets/baselines/`: comparison baseline surfaces.
-- `configs/seeds/`: committed deterministic seed sets.
+## Compatibility Presets
+
+| Preset | Use |
+| --- | --- |
+| `configs/presets/structured_acceptance_standard.yaml` | Structured acceptance compatibility. |
+| `configs/presets/structured_acceptance_standard_auto_gpu.yaml` | Auto-GPU structured acceptance compatibility. |
+| `configs/presets/structured_acceptance_standard_thesis_eval.yaml` | Legacy structured final-eval compatibility. |
+| `configs/presets/structured_acceptance_standard_multideck.yaml` | Legacy multideck compatibility. |
+| `configs/presets/typed_thesis_locked.yaml` | Locked typed thesis compatibility. |
+| `configs/presets/typed_local.yaml` | Local typed diagnostic compatibility. |
+| `configs/presets/typed_structured_v2.yaml` | Typed structured-v2 compatibility. |
+
+## Seeds
+
+Seed files under `configs/seeds/` define deterministic evaluation and promotion
+surfaces. Treat them as reporting contracts, not casual tuning knobs.
 
 ## Overrides
 
-CLI overrides use grouped dotted paths:
+Lower-level package entrypoints accept dotted config overrides for diagnostics:
 
 ```powershell
-uv run python python/scripts/train.py `
-  --stack-config configs/presets/structured_acceptance_standard.yaml `
+uv run python -m weiss_rl.training.train_entrypoint `
+  --stack-config configs/thesis/main_league.yaml `
   --override training.optimizer.learning_rate=0.0001
 ```
 
-Override values are parsed as JSON. This keeps booleans, numbers, lists, and strings unambiguous.
-
-## Hashes
-
-`compute_config_hash256(stack)` hashes the canonical config dictionary. Refactors must preserve the hash for the same loaded config unless a behavior change is intentionally documented as a bug fix.
-
-## Compatibility Notes
-
-- Historical `config_canonical.json` payloads are compatibility inputs.
-- Seed files are not casual tuning knobs; they define deterministic evaluation and promotion surfaces.
-- CLI flag defaults can override or complement YAML values. Treat those defaults as public behavior.
+Prefer `python -m weiss_rl.cli` for normal thesis runs. Use overrides only when
+the changed behavior is named in the run label and recorded in the artifact
+trail.

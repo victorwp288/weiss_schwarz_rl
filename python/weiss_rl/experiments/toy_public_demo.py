@@ -12,7 +12,7 @@ from weiss_rl.artifacts.reproducibility import parse_seed_file, stable_hash64
 from weiss_rl.config.models import StopRulesConfig
 from weiss_rl.core.spec import spec_bundle_hash
 from weiss_rl.eval import GameResult, ScheduledGame, run_final_eval
-from weiss_rl.eval.policy_set import NO_LEAGUE_POLICY_ID, RANDOM_LEGAL_POLICY_ID
+from weiss_rl.eval.policies.set import NO_LEAGUE_POLICY_ID, RANDOM_LEGAL_POLICY_ID
 
 PUBLIC_DEMO_MODE = "public_demo"
 PUBLIC_DEMO_WARNING = (

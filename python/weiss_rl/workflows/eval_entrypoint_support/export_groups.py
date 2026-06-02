@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+EVAL_REPORT_HELPER_EXPORTS = [
+    "_effective_manifest_git_commit",
+    "_ensure_run_level_report_scaffolding",
+    "_expected_sha256",
+    "_load_determinism_report_or_default",
+    "_load_environment_or_default",
+    "_load_json_object",
+    "_load_run_summary_or_default",
+    "_normalize_git_commit",
+    "_normalize_sha256",
+    "_persist_policy_selection_in_manifest",
+    "_require_matching_hash",
+    "_require_positive_int",
+    "_resolve_policy_ids_for_run",
+    "_resolve_run_label",
+    "_update_run_level_reports",
+    "_write_json",
+]
+
+EVAL_WORKFLOW_COMPAT_EXPORTS = [
+    "build_matchup_export",
+    "build_eval_parser",
+    "build_seat_advantage_diagnostics",
+    "build_canonical_eval_dependencies",
+    "build_eval_dispatch_dependencies",
+    "build_eval_startup_dependencies",
+    "CanonicalEvalDependencies",
+    "assert_spec_bundle_contract",
+    "compute_config_hash256",
+    "EvalDispatchDependencies",
+    "EvalStartup",
+    "EvalStartupDependencies",
+    "EvalValidatedArgs",
+    "load_eval_game_records",
+    "load_stack_config",
+    "load_verified_simulator_contract",
+    "prepare_eval_startup",
+    "print_startup_banner",
+    "public_demo_spec_bundle",
+    "public_demo_spec_hash256",
+    "public_demo_stop_rules",
+    "resolve_final_policy_set",
+    "run_canonical_eval_pipeline",
+    "run_canonical_eval_entrypoint_pipeline",
+    "run_eval_dispatch",
+    "run_public_demo_eval_mode",
+    "run_public_demo_final_eval",
+    "run_summary_only_eval_mode",
+    "validate_eval_args",
+    "write_matchup_diagnostics_json",
+    "write_matchup_summary_csv",
+    "write_matchup_summary_json",
+]
+
+EVAL_ADDITIONAL_COMPAT_EXPORTS = [
+    "ArtifactLayout",
+    "EVAL_ENTRYPOINT_EXPORTS",
+    "SimulatorEvalRunner",
+    "TensorBoardLogger",
+    "build_paper_readiness_summary",
+    "build_sensitivity_report",
+    "load_dev_eval_summaries",
+    "load_study_config",
+    "parse_seed_file",
+    "recommend_focal_policy_id",
+    "render_paper_figures",
+    "resolve_eval_policies",
+    "run_final_eval",
+    "tensorboard_unavailable_reason",
+    "write_paper_readiness_json",
+]
+
+EVAL_ENTRYPOINT_EXPORTS = [
+    *EVAL_REPORT_HELPER_EXPORTS,
+    *EVAL_WORKFLOW_COMPAT_EXPORTS,
+]
+
+__all__ = [
+    "EVAL_ADDITIONAL_COMPAT_EXPORTS",
+    "EVAL_ENTRYPOINT_EXPORTS",
+    "EVAL_REPORT_HELPER_EXPORTS",
+    "EVAL_WORKFLOW_COMPAT_EXPORTS",
+]

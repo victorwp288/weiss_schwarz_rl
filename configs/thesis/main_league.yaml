@@ -1,6 +1,6 @@
 schema_version: 2
 description: "Main league thesis model. Medium64 structured model, model-actor training, fixed deck: preset:main_deck_5hy_yotsuba_v1."
-extends: ../presets/structured_acceptance_standard.yaml
+extends: base_fixed_deck_structured.yaml
 model:
   gru_hidden_size: 64
   encoder_mlp_width: 64

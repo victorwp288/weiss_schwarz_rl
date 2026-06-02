@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from scripts.paired_outcome_preference_warmstart import (
+
+from weiss_rl.training.warmstarts.paired_outcome_preference_warmstart_entrypoint import (
     _parse_pair_role_selectors,
     _parse_pair_weights,
     _preference_pair_role_mask,
@@ -12,6 +14,148 @@ from scripts.paired_outcome_preference_warmstart import (
     _scale_optimizer_learning_rates,
     _serialize_pair_role_selectors,
 )
+
+
+def test_preference_warmstart_entrypoint_facade_reexports_cli_and_support_helpers() -> None:
+    from weiss_rl.training import (
+        paired_outcome_preference_warmstart_cli,
+        paired_outcome_preference_warmstart_entrypoint,
+        paired_outcome_preference_warmstart_runtime,
+        paired_outcome_preference_warmstart_support,
+    )
+
+    assert paired_outcome_preference_warmstart_entrypoint._build_parser is (
+        paired_outcome_preference_warmstart_cli.build_paired_outcome_preference_warmstart_parser
+    )
+    assert paired_outcome_preference_warmstart_entrypoint.parse_paired_outcome_preference_warmstart_args is (
+        paired_outcome_preference_warmstart_cli.parse_paired_outcome_preference_warmstart_args
+    )
+    assert paired_outcome_preference_warmstart_entrypoint.run_paired_outcome_preference_warmstart is (
+        paired_outcome_preference_warmstart_runtime.run_paired_outcome_preference_warmstart
+    )
+    assert paired_outcome_preference_warmstart_entrypoint._parse_pair_weights is (
+        paired_outcome_preference_warmstart_support._parse_pair_weights
+    )
+    assert paired_outcome_preference_warmstart_entrypoint._preference_pair_role_mask is (
+        paired_outcome_preference_warmstart_support._preference_pair_role_mask
+    )
+    assert paired_outcome_preference_warmstart_entrypoint._initial_hidden_state is (
+        paired_outcome_preference_warmstart_support._initial_hidden_state
+    )
+
+
+def test_preference_warmstart_entrypoint_main_delegates_to_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    from weiss_rl.training import paired_outcome_preference_warmstart_entrypoint
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str]) -> int:
+        calls.append(argv)
+        return 17
+
+    monkeypatch.setattr(
+        paired_outcome_preference_warmstart_entrypoint, "run_paired_outcome_preference_warmstart", fake_run
+    )
+
+    assert paired_outcome_preference_warmstart_entrypoint.main(["--dry-run"]) == 17
+    assert calls == [["--dry-run"]]
+
+
+def test_preference_warmstart_parser_preserves_defaults(tmp_path: Path) -> None:
+    from weiss_rl.training.warmstarts.paired_outcome_preference_warmstart_cli import (
+        build_paired_outcome_preference_warmstart_parser,
+    )
+
+    args = build_paired_outcome_preference_warmstart_parser().parse_args(
+        [
+            "--stack-config",
+            str(tmp_path / "stack.yaml"),
+            "--dataset",
+            str(tmp_path / "preference.npz"),
+            "--init-from-checkpoint",
+            str(tmp_path / "init.pt"),
+            "--output-run-dir",
+            str(tmp_path / "run"),
+        ]
+    )
+
+    assert args.stack_config == tmp_path / "stack.yaml"
+    assert args.dataset == tmp_path / "preference.npz"
+    assert args.init_from_checkpoint == tmp_path / "init.pt"
+    assert args.output_run_dir == tmp_path / "run"
+    assert args.device == "cuda"
+    assert args.epochs == 1
+    assert args.batch_episodes == 8
+    assert args.seed == 20260520
+    assert args.beta == 0.2
+    assert args.coef == 0.08
+    assert args.optimizer_lr_scale == 1.0
+    assert args.aggregation == "mean"
+    assert args.group_balance is False
+    assert args.pair_weight == []
+    assert args.target_logp_retention_coef == 0.0
+    assert args.target_logp_retention_margin == 0.0
+    assert args.target_logp_retention_role == "preferred"
+    assert args.target_logp_retention_reference_top_only is False
+    assert args.target_logp_retention_pair_role == []
+    assert args.top_action_retention_coef == 0.0
+    assert args.top_action_retention_margin == 0.0
+    assert args.top_action_retention_role == "all"
+    assert args.top_action_retention_reference_top_only is False
+    assert args.top_action_retention_pair_role == []
+
+
+def test_preference_warmstart_parser_validates_numeric_and_selector_bounds(tmp_path: Path) -> None:
+    from weiss_rl.training.warmstarts.paired_outcome_preference_warmstart_cli import (
+        parse_paired_outcome_preference_warmstart_args,
+    )
+
+    base_args = [
+        "--stack-config",
+        str(tmp_path / "stack.yaml"),
+        "--dataset",
+        str(tmp_path / "preference.npz"),
+        "--init-from-checkpoint",
+        str(tmp_path / "init.pt"),
+        "--output-run-dir",
+        str(tmp_path / "run"),
+    ]
+
+    with pytest.raises(SystemExit):
+        parse_paired_outcome_preference_warmstart_args([*base_args, "--epochs", "0"])
+    with pytest.raises(SystemExit):
+        parse_paired_outcome_preference_warmstart_args([*base_args, "--pair-weight", "9=0"])
+    with pytest.raises(SystemExit):
+        parse_paired_outcome_preference_warmstart_args([*base_args, "--target-logp-retention-pair-role", "9:maybe"])
+
+
+def test_preference_warmstart_runtime_preserves_dataset_train_row_cli_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from weiss_rl.training import paired_outcome_preference_warmstart_runtime
+
+    monkeypatch.setattr(
+        paired_outcome_preference_warmstart_runtime,
+        "load_replay_trajectory_bc_dataset",
+        lambda _path: SimpleNamespace(metadata={"train_rows": 0}),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        paired_outcome_preference_warmstart_runtime.run_paired_outcome_preference_warmstart(
+            [
+                "--stack-config",
+                str(tmp_path / "stack.yaml"),
+                "--dataset",
+                str(tmp_path / "preference.npz"),
+                "--init-from-checkpoint",
+                str(tmp_path / "init.pt"),
+                "--output-run-dir",
+                str(tmp_path / "run"),
+            ]
+        )
+
+    assert exc_info.value.code == 2
 
 
 def test_preference_warmstart_can_scale_optimizer_learning_rates() -> None:

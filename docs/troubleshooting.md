@@ -1,103 +1,48 @@
 # Troubleshooting
 
-This page collects the most common installation and verification issues.
+Start with the smallest command that isolates the failing surface.
 
-## Python and packaging
+## Simulator Import Or Spec Failure
 
-### Python 3.13 is not supported
-
-This repo is intentionally narrowed to Python 3.10, 3.11, and 3.12.
-
-Fix:
-
-```bash
-python3.12 -m venv .venv
-uv sync --extra dev
-```
-
-### `uv sync` cannot resolve `torch`
-
-The pinned `torch` build is only intended for the supported Python matrix above.
-
-Fix:
-
-- switch to Python 3.10-3.12
-- re-run `uv sync --extra dev`
-- if you need `weiss-sim 1.2.0` too, use `uv sync --extra dev --extra sim`
-
-## Simulator import issues
-
-### `ModuleNotFoundError: weiss_sim`
-
-Fix one of these ways:
-
-```bash
+```powershell
 uv sync --extra dev --extra sim
+uv run --extra dev --extra sim python -c "import weiss_sim; print(weiss_sim.__version__, weiss_sim.__file__, weiss_sim.SPEC_HASH)"
 ```
 
-or point at a sibling checkout:
+If using a sibling simulator checkout, ensure its built Python package is on
+`PYTHONPATH`; a raw source tree is not enough if the Rust extension is missing.
+See [simulator_compatibility.md](simulator_compatibility.md).
 
-```bash
-export WEISS_SIM_PYTHONPATH=/Users/vwp/code/thesis/weiss-schwarz-simulator/python
-# PowerShell
-$env:WEISS_SIM_PYTHONPATH="C:\\Users\\Bruger\\Desktop\\thesis-repo\\weiss-schwarz-simulator\\python"
+## Verification Failure
+
+Run the reported command directly from the repository root. For maintained
+focused checks, use [testing.md](testing.md).
+
+```powershell
+uv run python -m weiss_rl.workflows.verify_repo_entrypoint
 ```
 
-If the simulator needs a different interpreter, also set:
+If a failure follows a refactor, identify whether it touched a behavior
+boundary listed in [architecture.md](architecture.md).
 
-```bash
-export WEISS_SIM_PYTHON=/path/to/python3.12
-# PowerShell
-$env:WEISS_SIM_PYTHON="C:\\Path\\To\\python.exe"
+## Artifact Or Readiness Failure
+
+Do not use smoke/demo output as a substitute for a paper-grade run tree. Check
+the canonical layout in [artifact_contract.md](artifact_contract.md), then run:
+
+```powershell
+uv run python -m weiss_rl.workflows.artifact_contract.artifact_contract_entrypoint --dry-run
 ```
 
-## Verification issues
+Retained outputs under `runs/`, `diagnostics/`, `vast_artifacts/`, and
+`thesis_figures_final/` should be treated as read-only unless deliberately
+replacing a thesis artifact.
 
-### `python/scripts/verify_repo.py` fails on formatting
+## Config Or Docs Link Failure
 
-Run the formatter first:
-
-```bash
-uv run python -m ruff format python tests examples python/scripts
+```powershell
+uv run python -m pytest -q python/weiss_rl/tests/test_public_config_surface_docs.py
 ```
 
-`make verify` runs the same verification entrypoint when GNU Make is available, so the same fix applies there.
-
-### `python/scripts/verify_repo.py` or `scripts/run_local_ci_parity.sh` fails on missing tools
-
-Install the repo dev dependencies first:
-
-```bash
-uv sync --extra dev
-```
-
-If you are not using `uv`, make sure the editable install includes dev extras:
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-Then run the parity script through `bash`:
-
-```bash
-uv run python python/scripts/verify_repo.py
-bash scripts/run_local_ci_parity.sh
-```
-
-### Artifact checks fail on the toy/demo path
-
-Regenerate the demo tree and inspect the generated files:
-
-```bash
-make artifact-hygiene
-```
-
-Then read:
-
-- [Artifact contract](artifact_contract.md)
-- [Runtime modes](runtime_modes.md)
-
-## Where to look next
-
-- [Getting started](getting_started.md)
-- [Docs hub](README.md)
+This usually means a local Markdown link moved, a documented config path no
+longer exists, or a noncanonical thesis ablation was advertised as public.

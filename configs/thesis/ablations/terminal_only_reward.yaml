@@ -1,6 +1,6 @@
 schema_version: 2
 description: "B1 reward ablation: terminal +/-1 only, no shaping, no truncation penalty."
-extends: reward_ablation_base.yaml
+extends: ../_shared/reward_ablation_base.yaml
 rewards:
   objective: terminal_only_pm1
   discount:

@@ -1,0 +1,33 @@
+{
+  "already_present_policy_ids": [],
+  "champion_snapshots": [
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005"
+  ],
+  "copied_policy_ids": [
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005"
+  ],
+  "include_policy_ids": [],
+  "include_source_champions": true,
+  "kind": "eval_snapshot_registry_augmentation_v1",
+  "mark_imported_champions": true,
+  "missing_policy_ids": [],
+  "output_registry_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/snapshots/registry_with_edgehn_champions_20260519.json",
+  "source_registry_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_selected_outcome_contrastive_edgehn_focus_allseed_u2_confirm64_20260519_seg01/training/snapshots/registry.json",
+  "source_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_selected_outcome_contrastive_edgehn_focus_allseed_u2_confirm64_20260519_seg01",
+  "target_registry_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/snapshots/registry.json",
+  "target_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517"
+}

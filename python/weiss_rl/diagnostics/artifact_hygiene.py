@@ -132,11 +132,14 @@ def scan_tracked_repo_tree(repo_root: Path) -> tuple[tuple[Finding, ...], _ScanS
     findings: list[Finding] = []
     file_count = 0
     for relative_path in _git_ls_files(repo_root):
+        path = repo_root / relative_path
+        if not path.exists():
+            continue
         file_count += 1
         findings.extend(
             _scan_path(
                 surface="repo",
-                path=repo_root / relative_path,
+                path=path,
                 repo_root=repo_root,
                 is_repo_scan=True,
             )

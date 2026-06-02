@@ -5,7 +5,7 @@ Run from the repo root after installing the project:
     uv run python examples/training_logs_example.py
 
 This exercises `TrainingLogger` and `ImpalaLearner` directly.
-It does not go through `python/scripts/train.py`.
+It does not go through the package training entrypoint.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 from weiss_rl.diagnostics.training_logger import TrainingLogger
-from weiss_rl.learners.impala_learner import ImpalaLearner
+from weiss_rl.learners.impala import ImpalaLearner
 
 
 def _example_batch(*, time_steps: int = 8, batch_size: int = 2, action_space: int = 5) -> dict[str, np.ndarray]:

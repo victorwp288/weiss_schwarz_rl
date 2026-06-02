@@ -1,0 +1,78 @@
+{
+  "artifact_schema_version": "run_artifacts_v2",
+  "canonical_artifact_hashes": {
+    "eval/diagnostics/replay_verification.json": "cf6a861845e8e2ca1c2f4ac45541ce7abaffe3c09c0069862704ddaf88cbc9b9",
+    "eval/diagnostics/seat_bias.json": "3c079fe9cd965ed54d741b54caf76dec4fd4464686628d9e287e010b03c6241a",
+    "eval/diagnostics/truncation_heatmap_data.csv": "4c5a44169239e716fd57fca0ae1ec2a5e067b1e277fae3159c468088eeb4e106",
+    "eval/final_eval/matchups.csv": "4ea2f4a2f05cd5231bab36b02ecdc93332b331d953dd1bdf5f1e619f60beac63",
+    "eval/final_eval/matrices/mean.csv": "b533338c4449453b136c83f20c906089d88748e76d1b2293c0a3eabea14c55ea",
+    "eval/final_eval/metadata.json": "916468499573f7ff68bf536f69e14b0bcd88fc6d424e100f372ac460dbee7617",
+    "eval/final_eval/policy_set.json": "23a936754550a9b987cc1a207a9bf56f9f76a12e2982478f04d1555c91833a2b",
+    "eval/final_eval/posterior_samples.json": "2bfe70bd688b69adf5f9b06ac7941cf55706d393b795767114f79390b7398158",
+    "eval/final_eval/posterior_samples.npz": "d94f025626dbdf8ed17642af63196b3b999901ca4520b1f54ac632bddc1890cb",
+    "eval/final_eval/summary.json": "107e4b717a18ce11d5283fe88b4007b003c0aa19ea98fb1c16eb64ccfc91922e",
+    "replays/index.json": "55f0bd4af7ead73a878d9deb462fcc213e50098f579e893e33206419e696e486"
+  },
+  "device_policy": {
+    "evaluation": "cpu",
+    "learner": "interpolated_checkpoint"
+  },
+  "evaluation_pinning": {
+    "eval_device": "cpu",
+    "eval_inference_mode": true,
+    "eval_sampling_algorithm": "model_argmax_pinned_v1",
+    "legal_fingerprint_mismatch_policy": "hard_fail",
+    "legal_fingerprint_version": "legal_fingerprint_v1",
+    "model_sampling_temperature": 1.0,
+    "seat_swap": true
+  },
+  "final_eval": {
+    "matchup_count": 21,
+    "path": "eval/final_eval/summary.json",
+    "policy_ids": [
+      "main_league_selected",
+      "B0 RandomLegal",
+      "B1 NoLeague baseline",
+      "B2 HeuristicPublic",
+      "B3 HeuristicPublicAggro",
+      "B4 HeuristicPublicControl"
+    ],
+    "selection": {
+      "mode": "explicit_cli",
+      "policy_count": 6
+    }
+  },
+  "kind": "determinism_report_v1",
+  "policy_selection_mode": "explicit_cli",
+  "replay_verification": {
+    "failed_episode_count": 0,
+    "path": "eval/diagnostics/replay_verification.json",
+    "sampled_episode_count": 3,
+    "status": "ok",
+    "verified_episode_count": 3
+  },
+  "run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517",
+  "run_id256": "3d4656e0cbc4c388d7e82ee02fd4ab23331c130ea7f4bf0d95de2d6403ebe91d",
+  "run_id64": "60ec16af5599afba",
+  "seed_derivation": {
+    "actor_seed_formula": "hash64(base_seed64, actor_id)",
+    "cli_seed_override": false,
+    "config_base_seed64": 20260212,
+    "effective_base_seed64": 20260212,
+    "episode_seed_formula": "hash64(actor_seed64, env_id, episode_index)"
+  },
+  "seed_files": {
+    "dev_eval": {
+      "path": "configs/seeds/dev_eval_seeds.txt",
+      "sha256": "568c17562f825562579b8a6ec54d8e83b7ad33471e9bad3de462055efd4679c3"
+    },
+    "promotion_gate": {
+      "path": "configs/seeds/local_promotion_eval_seeds.txt",
+      "sha256": "03fbbaa2c6e7e53c08e35c2dfaf141c4ad69d155eca607027fedf17f0e6cd07f"
+    },
+    "report_eval": {
+      "path": "configs/seeds/report_eval_seeds.txt",
+      "sha256": "5db0677f8ff932a95bb86cb91e6902de3ed3460ad8303858e169e0a17c728df0"
+    }
+  }
+}

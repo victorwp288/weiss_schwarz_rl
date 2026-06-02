@@ -1,0 +1,19 @@
+{
+  "already_present_policy_ids": [],
+  "champion_snapshots": [],
+  "copied_policy_ids": [
+    "main_a025_b2pair70_u1_a075"
+  ],
+  "include_policy_ids": [
+    "main_a025_b2pair70_u1_a075"
+  ],
+  "include_source_champions": false,
+  "kind": "eval_snapshot_registry_augmentation_v1",
+  "mark_imported_champions": true,
+  "missing_policy_ids": [],
+  "output_registry_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/snapshots/registry_with_a025_b2pair70_u1_a075_20260520.json",
+  "source_registry_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_a025_b2pair70_u1_a075_20260520/training/snapshots/registry.json",
+  "source_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_a025_b2pair70_u1_a075_20260520",
+  "target_registry_json": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/snapshots/registry.json",
+  "target_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517"
+}

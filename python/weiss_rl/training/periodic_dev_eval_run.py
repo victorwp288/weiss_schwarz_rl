@@ -28,7 +28,7 @@ from weiss_rl.training.dev_eval import (
     validate_periodic_dev_eval_contract,
     write_json,
 )
-from weiss_rl.training.dev_eval_opponents import periodic_dev_eval_opponents
+from weiss_rl.training.dev_eval.opponents import periodic_dev_eval_opponents
 from weiss_rl.training.environments import spec_dimensions
 
 

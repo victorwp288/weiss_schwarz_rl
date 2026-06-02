@@ -1,0 +1,7 @@
+policy_id,mean_stationary_mass
+main_league_selected,1.0
+B1 NoLeague baseline,1.2984983550303456e-222
+B0 RandomLegal,0.0
+B2 HeuristicPublic,0.0
+B3 HeuristicPublicAggro,0.0
+B4 HeuristicPublicControl,0.0

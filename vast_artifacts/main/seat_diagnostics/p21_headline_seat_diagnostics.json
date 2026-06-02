@@ -1,0 +1,122 @@
+[
+  {
+    "opponent": "B0 RandomLegal",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__01_b0_randomlegal/diagnostics.json",
+    "games_as_first": 64,
+    "wins_as_first": 64,
+    "games_as_second": 64,
+    "wins_as_second": 64,
+    "total_wins": 128,
+    "total_games": 128,
+    "truncations": 0,
+    "engine_errors": 0
+  },
+  {
+    "opponent": "B1 NoLeague baseline",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__01_b1_noleague_baseline/diagnostics.json",
+    "games_as_first": 32,
+    "wins_as_first": 24,
+    "games_as_second": 32,
+    "wins_as_second": 26,
+    "total_wins": 50,
+    "total_games": 64,
+    "truncations": 0,
+    "engine_errors": 0
+  },
+  {
+    "opponent": "B2 HeuristicPublic",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__03_b2_heuristicpublic/diagnostics.json",
+    "games_as_first": 64,
+    "wins_as_first": 64,
+    "games_as_second": 64,
+    "wins_as_second": 64,
+    "total_wins": 128,
+    "total_games": 128,
+    "truncations": 0,
+    "engine_errors": 0
+  },
+  {
+    "opponent": "B3 HeuristicPublicAggro",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__01_b3_heuristicpublicaggro/diagnostics.json",
+    "games_as_first": 64,
+    "wins_as_first": 40,
+    "games_as_second": 64,
+    "wins_as_second": 42,
+    "total_wins": 82,
+    "total_games": 128,
+    "truncations": 0,
+    "engine_errors": 0
+  },
+  {
+    "opponent": "B4 HeuristicPublicControl",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__02_b4_heuristicpubliccontrol/diagnostics.json",
+    "games_as_first": 64,
+    "wins_as_first": 40,
+    "games_as_second": 64,
+    "wins_as_second": 43,
+    "total_wins": 83,
+    "total_games": 128,
+    "truncations": 0,
+    "engine_errors": 0
+  },
+  {
+    "opponent": "legacy p11",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__02_seed_2aaa98fc69_seed_ae46265326_seed_bafd7a640b_policy_000011/diagnostics.json",
+    "games_as_first": 32,
+    "wins_as_first": 20,
+    "games_as_second": 32,
+    "wins_as_second": 20,
+    "total_wins": 40,
+    "total_games": 64,
+    "truncations": 0,
+    "engine_errors": 0
+  },
+  {
+    "opponent": "legacy p12",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__03_seed_2aaa98fc69_seed_ae46265326_policy_000012/diagnostics.json",
+    "games_as_first": 32,
+    "wins_as_first": 16,
+    "games_as_second": 32,
+    "wins_as_second": 18,
+    "total_wins": 34,
+    "total_games": 64,
+    "truncations": 0,
+    "engine_errors": 0
+  },
+  {
+    "opponent": "legacy p14",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__04_seed_2aaa98fc69_seed_ae46265326_policy_000014/diagnostics.json",
+    "games_as_first": 32,
+    "wins_as_first": 16,
+    "games_as_second": 32,
+    "wins_as_second": 20,
+    "total_wins": 36,
+    "total_games": 64,
+    "truncations": 0,
+    "engine_errors": 0
+  },
+  {
+    "opponent": "legacy p15",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__05_seed_2aaa98fc69_seed_ae46265326_policy_000015/diagnostics.json",
+    "games_as_first": 32,
+    "wins_as_first": 15,
+    "games_as_second": 32,
+    "wins_as_second": 19,
+    "total_wins": 34,
+    "total_games": 64,
+    "truncations": 0,
+    "engine_errors": 0
+  },
+  {
+    "opponent": "legacy p16",
+    "path": "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506/eval/final_eval/matchups/00_policy_000021__vs__06_seed_2aaa98fc69_seed_ae46265326_policy_000016/diagnostics.json",
+    "games_as_first": 32,
+    "wins_as_first": 14,
+    "games_as_second": 32,
+    "wins_as_second": 19,
+    "total_wins": 33,
+    "total_games": 64,
+    "truncations": 0,
+    "engine_errors": 0
+  }
+]

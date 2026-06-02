@@ -1,8 +1,0 @@
-schema_version: 2
-description: "Main league probe: continue from the confirmed teacherfade best with lower update pressure and actor temperature 1.0, testing whether post-best drift is update-size/off-policy-temperature instability."
-extends: main_league_guided_factorized_postbest_floor_probe.yaml
-training:
-  optimizer:
-    learning_rate: 0.00005
-  exploration:
-    actor_sampling_temperature: 1.0

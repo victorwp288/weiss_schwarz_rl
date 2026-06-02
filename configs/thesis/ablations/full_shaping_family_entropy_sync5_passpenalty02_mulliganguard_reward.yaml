@@ -1,6 +1,0 @@
-schema_version: 2
-description: "B1 reward ablation: family entropy, pass penalty, and RL-side mulligan one-select-then-confirm action-surface guard."
-extends: full_shaping_family_entropy_sync5_passpenalty02_reward.yaml
-training:
-  action_surface:
-    mulligan_force_confirm_after_select: true

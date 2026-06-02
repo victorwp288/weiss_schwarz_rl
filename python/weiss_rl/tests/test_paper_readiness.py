@@ -4,8 +4,18 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-from weiss_rl.eval import build_paper_readiness_summary
-from weiss_rl.eval.policy_set import RANDOM_LEGAL_POLICY_ID
+from weiss_rl.eval import (
+    build_paper_readiness_summary,
+    paper_readiness,
+    paper_readiness_check_cli,
+    paper_readiness_check_entrypoint,
+    paper_readiness_check_reporting,
+    paper_readiness_check_runtime,
+    paper_readiness_contracts,
+    paper_readiness_final_eval_summary,
+    paper_readiness_guardrails,
+)
+from weiss_rl.eval.policies.set import RANDOM_LEGAL_POLICY_ID
 
 SeatResultInput = tuple[int, int] | dict[str, int]
 
@@ -539,6 +549,158 @@ def _write_run_dir_fixture(tmp_path: Path) -> Path:
     (figures_dir / "fig_matchup_heatmap.pdf").write_text("pdf placeholder\n", encoding="utf-8")
     (figures_dir / "fig_matchup_heatmap.png").write_text("png placeholder\n", encoding="utf-8")
     return run_dir
+
+
+def test_paper_readiness_facade_keeps_contract_helpers_aliased() -> None:
+    assert paper_readiness.RequiredArtifactSpec is paper_readiness_contracts.RequiredArtifactSpec
+    assert paper_readiness._build_run_directory_audit is paper_readiness_contracts.build_run_directory_audit
+    assert paper_readiness._build_manifest_contract is paper_readiness_contracts.build_manifest_contract
+    assert paper_readiness._build_final_eval_artifact_contract is (
+        paper_readiness_contracts.build_final_eval_artifact_contract
+    )
+
+
+def test_paper_readiness_guardrails_keep_final_eval_summary_helpers_aliased() -> None:
+    assert paper_readiness_guardrails.policy_ids is paper_readiness_final_eval_summary.policy_ids
+    assert paper_readiness_guardrails.matchups is paper_readiness_final_eval_summary.matchups
+    assert paper_readiness_guardrails.matchup_policy_index is paper_readiness_final_eval_summary.matchup_policy_index
+    assert paper_readiness_guardrails.matrix_cell is paper_readiness_final_eval_summary.matrix_cell
+    assert paper_readiness_guardrails.posterior_samples is paper_readiness_final_eval_summary.posterior_samples
+
+
+def test_paper_readiness_check_entrypoint_keeps_cli_reporting_helpers_aliased() -> None:
+    assert paper_readiness_check_entrypoint._closed_interval is paper_readiness_check_cli.closed_interval
+    assert paper_readiness_check_entrypoint._default_readiness_json is paper_readiness_check_cli.default_readiness_json
+    assert paper_readiness_check_entrypoint._format_alarm is paper_readiness_check_reporting.format_alarm
+    assert paper_readiness_check_entrypoint._format_alarm_detail is paper_readiness_check_reporting.format_alarm_detail
+
+
+def test_paper_readiness_check_parser_defaults_output_and_thresholds(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run_ready"
+    parser = paper_readiness_check_cli.build_paper_readiness_check_parser()
+
+    args = parser.parse_args(["--run-dir", str(run_dir), "--focal-policy-id", "  policy_000300  "])
+
+    assert args.run_dir == run_dir
+    assert args.final_eval_dir is None
+    assert args.readiness_json is None
+    assert paper_readiness_check_cli.default_readiness_json(
+        run_dir=args.run_dir,
+        final_eval_dir=args.final_eval_dir,
+    ) == (run_dir / "paper_readiness_summary.json")
+    assert args.focal_policy_id == "  policy_000300  "
+    assert args.max_truncation_rate == paper_readiness.DEFAULT_TRUNCATION_MAX_RATE
+    assert args.baseline_policy_id == RANDOM_LEGAL_POLICY_ID
+
+
+def test_paper_readiness_check_runtime_threads_args_and_writes_default_json(tmp_path: Path) -> None:
+    final_eval_dir = tmp_path / "final_eval"
+    parser = paper_readiness_check_cli.build_paper_readiness_check_parser()
+    args = parser.parse_args(
+        [
+            "--final-eval-dir",
+            str(final_eval_dir),
+            "--focal-policy-id",
+            "   ",
+            "--baseline-win-rate-threshold",
+            "0.61",
+        ]
+    )
+    observed: dict[str, Any] = {}
+    payload = {"passed": True, "alarms": []}
+
+    def fake_build(**kwargs: Any) -> dict[str, Any]:
+        observed["build"] = kwargs
+        return payload
+
+    def fake_write(path: Path, written_payload: dict[str, Any]) -> None:
+        observed["write"] = (path, written_payload)
+
+    result = paper_readiness_check_runtime.run_paper_readiness_check(
+        args,
+        build_paper_readiness_summary_fn=fake_build,
+        write_paper_readiness_json_fn=fake_write,
+    )
+
+    assert result.readiness_json == final_eval_dir / "paper_readiness_summary.json"
+    assert result.payload is payload
+    assert observed["write"] == (final_eval_dir / "paper_readiness_summary.json", payload)
+    assert observed["build"]["run_dir"] is None
+    assert observed["build"]["final_eval_dir"] == final_eval_dir
+    assert observed["build"]["focal_policy_id"] is None
+    assert observed["build"]["baseline_win_rate_threshold"] == 0.61
+
+
+def test_paper_readiness_check_reporting_formats_failure_sources() -> None:
+    payload = {
+        "passed": False,
+        "alarms": ["baseline_win_rate_vs_b0", "manifest_contract", "final_eval_guardrails", "unknown_alarm"],
+        "checks": {
+            "baseline_win_rate_vs_b0": {
+                "message": "pass --focal-policy-id to choose the focal policy explicitly",
+            }
+        },
+        "manifest_contract": {"reason": "ValueError"},
+        "final_eval_guardrails": {"message": "summary.json is missing"},
+    }
+
+    assert paper_readiness_check_reporting.format_failure_message(payload) == (
+        "Paper readiness checks failed: "
+        "baseline_win_rate_vs_b0 (pass --focal-policy-id to choose the focal policy explicitly), "
+        "manifest_contract (ValueError), "
+        "final_eval_guardrails (summary.json is missing), "
+        "unknown_alarm"
+    )
+
+
+def test_paper_readiness_final_eval_summary_selects_canonical_unordered_matchups() -> None:
+    policies = [RANDOM_LEGAL_POLICY_ID, "policy_000300", "policy_000400"]
+    raw_matchups = [
+        {
+            "focal_policy_id": "policy_000300",
+            "opponent_policy_id": RANDOM_LEGAL_POLICY_ID,
+            "focal_policy_index": 1,
+            "opponent_policy_index": 0,
+            "diagnostics_path": "reciprocal.json",
+        },
+        {
+            "focal_policy_id": RANDOM_LEGAL_POLICY_ID,
+            "opponent_policy_id": "policy_000300",
+            "focal_policy_index": 0,
+            "opponent_policy_index": 1,
+            "diagnostics_path": "canonical.json",
+        },
+        {
+            "focal_policy_id": "policy_000400",
+            "opponent_policy_id": "policy_000400",
+            "focal_policy_index": 2,
+            "opponent_policy_index": 2,
+            "diagnostics_path": "self.json",
+        },
+    ]
+
+    selected = paper_readiness_final_eval_summary.canonical_unordered_matchups(raw_matchups, policy_ids=policies)
+
+    assert [matchup["diagnostics_path"] for matchup in selected] == ["canonical.json", "self.json"]
+
+
+def test_paper_readiness_contract_catalog_keeps_thesis_artifact_surfaces() -> None:
+    specs = {spec.artifact_id: spec for spec in paper_readiness_contracts.required_run_artifact_specs()}
+
+    assert specs["training_metrics"].paths == (
+        Path("training/logs/training_metrics.jsonl"),
+        Path("eval/diagnostics/checkpoint_interpolation_summary.json"),
+    )
+    assert specs["sensitivity_summary"].paths == (
+        Path("eval/metagame/summary.json"),
+        Path("eval/final_eval/sensitivity/summary.json"),
+    )
+    assert specs["sensitivity_s0_nash_mixture"].paths == (
+        Path("eval/metagame/S0/nash/mixture_mean.csv"),
+        Path("eval/final_eval/sensitivity/S0/nash/mixture_mean.csv"),
+    )
+    assert specs["paper_figures_pdf"].glob == "figures/paper/*.pdf"
+    assert specs["paper_figures_png"].glob == "figures/paper/*.png"
 
 
 def test_build_paper_readiness_summary_passes_with_balanced_seats_and_strong_b0_winrate(tmp_path: Path) -> None:

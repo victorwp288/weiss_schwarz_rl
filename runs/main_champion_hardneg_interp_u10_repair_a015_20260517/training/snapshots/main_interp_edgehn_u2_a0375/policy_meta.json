@@ -1,0 +1,7 @@
+{
+  "format": "interpolated_snapshot_meta_v1",
+  "policy_id": "main_interp_edgehn_u2_a0375",
+  "source_checkpoint_path": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_a015_edgehn_u2_a0375_20260519/training/checkpoints/checkpoint_interpolated.pt",
+  "update": 2,
+  "weights_sha256": "518e5b4af6017f5930c5e7754010144f5886ea5358e7494dee261b015ab32c1e"
+}

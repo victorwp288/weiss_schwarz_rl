@@ -1,8 +1,0 @@
-schema_version: 2
-description: "B1 guided ablation: B2-exact teacher with low entropy pressure so ranked actions become decisive under stochastic eval."
-extends: public_teacher_b2exact_mainmoveguard_mulliganguard_reward.yaml
-training:
-  exploration:
-    entropy_coef: 0.003
-    entropy_anneal_to: 0.0
-    entropy_anneal_steps_updates: 75

@@ -1,4 +1,10 @@
-Top-level test entrypoint directory.
+# Tests
 
 Primary module tests currently live under `python/weiss_rl/tests/`.
-Use `PYTHONPATH=python pytest python/weiss_rl/tests` to run them.
+
+```powershell
+uv run python -m pytest -q python/weiss_rl/tests
+```
+
+See [../docs/testing.md](../docs/testing.md) for verifier, lint, type, simulator,
+and docs/config surface checks.

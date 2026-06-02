@@ -1,0 +1,31 @@
+{
+  "case_id": "S1",
+  "scheme": "S1",
+  "selection_mode": "local",
+  "top_policies_by_stationary_mass": [
+    {
+      "mean_stationary_mass": 1.0,
+      "policy_id": "main_league_selected"
+    },
+    {
+      "mean_stationary_mass": 1.2984983550303456e-222,
+      "policy_id": "B1 NoLeague baseline"
+    },
+    {
+      "mean_stationary_mass": 0.0,
+      "policy_id": "B0 RandomLegal"
+    },
+    {
+      "mean_stationary_mass": 0.0,
+      "policy_id": "B2 HeuristicPublic"
+    },
+    {
+      "mean_stationary_mass": 0.0,
+      "policy_id": "B3 HeuristicPublicAggro"
+    },
+    {
+      "mean_stationary_mass": 0.0,
+      "policy_id": "B4 HeuristicPublicControl"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "format": "seeded_train_snapshot_metadata_v1",
+  "imported_from_policy_id": "policy_000005",
+  "imported_from_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_b1only_bestresponse_from_u50_to_u100_20260517",
+  "imported_from_snapshot_path": "training/snapshots/policy_000005/weights.pt",
+  "imported_from_update": 50,
+  "imported_from_weights_sha256": "d8e564a719155cf1610aaf951440e7857f64b9b7b8f8bf2375d81206302790f8",
+  "policy_id": "seed_c3aac2f9dc_policy_000005",
+  "update": 0,
+  "weights_path": "training/snapshots/seed_c3aac2f9dc_policy_000005/weights.pt",
+  "weights_sha256": "bdd38684460cd51e56630c6c18d0b2648df58365e19f9775099a0af99df84a2a"
+}

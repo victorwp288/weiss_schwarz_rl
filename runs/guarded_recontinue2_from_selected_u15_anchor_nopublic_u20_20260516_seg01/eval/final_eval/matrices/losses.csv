@@ -1,0 +1,6 @@
+focal_policy_id,selected_candidate,B0 RandomLegal,B2 HeuristicPublic,B3 HeuristicPublicAggro,B4 HeuristicPublicControl
+selected_candidate,256,0,171,182,191
+B0 RandomLegal,512,266,502,503,503
+B2 HeuristicPublic,341,10,256,356,259
+B3 HeuristicPublicAggro,330,9,156,256,263
+B4 HeuristicPublicControl,321,9,253,249,256

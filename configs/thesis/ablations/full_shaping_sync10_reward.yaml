@@ -1,6 +1,0 @@
-schema_version: 2
-description: "B1 reward ablation: full shaping with faster actor model reloads to test stale-policy collapse."
-extends: full_shaping_reward.yaml
-training:
-  checkpointing:
-    actor_reload_interval_updates: 10

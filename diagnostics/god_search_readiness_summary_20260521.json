@@ -1,0 +1,42 @@
+{
+  "kind": "god_search_readiness_summary_v1",
+  "model_label": "main_league_selected_k4_same_world_search",
+  "base_run": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517",
+  "base_policy_id": "main_league_selected",
+  "search_contract": {
+    "mode": "same_world_prefix_rollout",
+    "top_k": 4,
+    "rollouts_per_action": 1,
+    "max_rollout_decisions": 0,
+    "max_search_decisions_per_game": 1,
+    "rollout_policy": "argmax"
+  },
+  "passed": true,
+  "checks": {
+    "confirm128_completed": true,
+    "confirm256_completed": true,
+    "strict_confirm256_scorecard_passed": true,
+    "no_confirm256_row_regression_vs_selected_a015": true,
+    "prefix_replay_failures": 0,
+    "horizon_cutoffs": 0,
+    "truncated_rollouts": 0,
+    "figures_exported": true,
+    "final_report_written": true,
+    "focused_tests_passed": true
+  },
+  "confirm256": {
+    "summary_json": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_confirm256_k4_r1_terminal_s1_c3_20260521/targeted_confirm256_summary.json",
+    "comparison_json": "diagnostics/god_search_confirm256_k4_r1_terminal_vs_selected_a015_shared256_20260521.json",
+    "scorecard_json": "diagnostics/god_search_scorecard_confirm256_k4_r1_terminal_strict_20260521.json",
+    "overall_wins": 5889,
+    "overall_games": 6656,
+    "fixed_wins": 2420,
+    "fixed_games": 2560,
+    "learned_wins": 3469,
+    "learned_games": 4096,
+    "delta_wins_vs_selected_a015": 1592,
+    "fixed_delta_wins_vs_selected_a015": 440,
+    "learned_delta_wins_vs_selected_a015": 1152
+  },
+  "caveat": "This is a search-specific readiness summary. The canonical paper_readiness_summary.json pipeline targets ordinary square final-eval policy matrices and has not been adapted to wrapped same-world search policies."
+}

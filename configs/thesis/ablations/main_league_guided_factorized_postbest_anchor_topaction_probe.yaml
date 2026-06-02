@@ -1,8 +1,0 @@
-schema_version: 2
-description: "Main league probe: policy anchoring with explicit top-action distillation from the confirmed teacherfade best, testing whether exact-action drift rather than average KL explains B3/B4 falloff."
-extends: main_league_guided_factorized_postbest_anchor_probe.yaml
-training:
-  structured_aux:
-    policy_anchor_coef: 0.2
-    policy_anchor_top_action_coef: 0.06
-    policy_anchor_temperature: 0.75

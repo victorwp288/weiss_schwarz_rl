@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
-from weiss_rl.runtime_components.heuristic_fast_path import (
+from weiss_rl.eval.policies.set import HEURISTIC_PUBLIC_POLICY_ID
+from weiss_rl.runtime.components.heuristic_fast_path import (
     actor_fixed_opponents_all_heuristic_public,
     can_collect_all_heuristic_ids_fast,
     can_collect_all_heuristic_ids_native_rollout,

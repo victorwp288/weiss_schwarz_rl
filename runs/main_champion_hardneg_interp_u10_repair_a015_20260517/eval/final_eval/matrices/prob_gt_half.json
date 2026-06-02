@@ -1,0 +1,60 @@
+{
+  "policy_ids": [
+    "main_league_selected",
+    "B0 RandomLegal",
+    "B1 NoLeague baseline",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "values": [
+    [
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    [
+      0.0,
+      0.1975,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.406
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0405
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.594,
+      0.9595,
+      0.0
+    ]
+  ]
+}

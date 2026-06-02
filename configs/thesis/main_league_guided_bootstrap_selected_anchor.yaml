@@ -1,7 +1,0 @@
-schema_version: 2
-description: "Selected guided-bootstrap continuation with KL anchoring to the loaded guided_bootstrap_selected policy. This tests whether post-selection collapse is policy drift during continuation rather than missing seed champion plumbing."
-extends: main_league_guided_bootstrap_selected.yaml
-training:
-  structured_aux:
-    policy_anchor_coef: 0.2
-    policy_anchor_temperature: 1.0

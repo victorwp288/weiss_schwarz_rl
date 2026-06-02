@@ -1,0 +1,53 @@
+{
+  "alpharank_selection_mode": "local",
+  "cases": {
+    "S0": {
+      "alpharank_stationary_csv": "S0/alpharank/stationary_mean.csv",
+      "nash_mixture_csv": "S0/nash/mixture_mean.csv",
+      "payoff_matchups_csv": "S0/payoff/matchups.csv",
+      "summary_json": "S0/summary.json"
+    },
+    "S1": {
+      "alpharank_stationary_csv": "S1/alpharank/stationary_mean.csv",
+      "nash_mixture_csv": "S1/nash/mixture_mean.csv",
+      "payoff_matchups_csv": "S1/payoff/matchups.csv",
+      "summary_json": "S1/summary.json"
+    },
+    "S2": {
+      "alpharank_stationary_csv": "S2/alpharank/stationary_mean.csv",
+      "nash_mixture_csv": "S2/nash/mixture_mean.csv",
+      "payoff_matchups_csv": "S2/payoff/matchups.csv",
+      "summary_json": "S2/summary.json"
+    }
+  },
+  "deltas": {
+    "S1": {
+      "alpharank_sensitivity_delta_vs_s0": "deltas/S1/alpharank_sensitivity_delta_vs_s0.csv",
+      "largest_matchup_pij_shifts": "deltas/S1/largest_matchup_pij_shifts.csv",
+      "nash_sensitivity_delta_vs_s0": "deltas/S1/nash_sensitivity_delta_vs_s0.csv",
+      "summary_json": "deltas/S1/summary.json"
+    },
+    "S2": {
+      "alpharank_sensitivity_delta_vs_s0": "deltas/S2/alpharank_sensitivity_delta_vs_s0.csv",
+      "largest_matchup_pij_shifts": "deltas/S2/largest_matchup_pij_shifts.csv",
+      "nash_sensitivity_delta_vs_s0": "deltas/S2/nash_sensitivity_delta_vs_s0.csv",
+      "summary_json": "deltas/S2/summary.json"
+    }
+  },
+  "final_eval_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/final_eval",
+  "out_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/metagame",
+  "policy_ids": [
+    "main_league_selected",
+    "B0 RandomLegal",
+    "B1 NoLeague baseline",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "required_outputs": [
+    "nash_sensitivity_delta_vs_s0",
+    "alpharank_sensitivity_delta_vs_s0",
+    "largest_matchup_pij_shifts"
+  ],
+  "sample_count": 1000
+}

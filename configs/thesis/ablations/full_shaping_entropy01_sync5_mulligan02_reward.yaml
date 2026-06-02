@@ -1,6 +1,0 @@
-schema_version: 2
-description: "B1 reward ablation: full shaping with low entropy, sync5 actor reloads, and a small mulligan-select penalty."
-extends: full_shaping_entropy01_sync5_reward.yaml
-rewards:
-  shaping:
-    mulligan_select_with_confirm_penalty: 0.02

@@ -1,0 +1,91 @@
+{
+  "champion_size": 8,
+  "champion_snapshots": [
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+    "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005"
+  ],
+  "pinned_snapshots": [
+    "main_interp_repair_a015",
+    "main_league_selected"
+  ],
+  "recent_size": 24,
+  "schema_version": 1,
+  "snapshots": [
+    {
+      "created_utc": "2026-05-19T14:20:48.906863+00:00",
+      "path": "training/snapshots/seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025/weights.pt",
+      "policy_id": "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+      "update": 0,
+      "weights_sha256": "669068b700c729a8d3310bf5fdbb44834ff6c8516b0860a79112de67b9b7ed71"
+    },
+    {
+      "created_utc": "2026-05-19T14:20:48.944517+00:00",
+      "path": "training/snapshots/seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest/weights.pt",
+      "policy_id": "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+      "update": 0,
+      "weights_sha256": "cb37f75df99cd98b35ac870376d75b6c54150ab69c772599173efdb86d2864fa"
+    },
+    {
+      "created_utc": "2026-05-19T14:20:48.980112+00:00",
+      "path": "training/snapshots/seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected/weights.pt",
+      "policy_id": "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+      "update": 0,
+      "weights_sha256": "55d051c5b7e1d6d590b74074715ffdb07568681d26c1f92678002bfd049642cf"
+    },
+    {
+      "created_utc": "2026-05-19T14:20:49.017768+00:00",
+      "path": "training/snapshots/seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001/weights.pt",
+      "policy_id": "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+      "update": 0,
+      "weights_sha256": "1bd8349f51e5ad13bff37e571467d99314b6b9367dcd34c95b9cda92ef5c2faf"
+    },
+    {
+      "created_utc": "2026-05-19T14:20:49.053911+00:00",
+      "path": "training/snapshots/seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002/weights.pt",
+      "policy_id": "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+      "update": 0,
+      "weights_sha256": "6265d59e95bf85c01ecfbdcaee83d3187965e32cee61610f0bcc8bafb7b6c311"
+    },
+    {
+      "created_utc": "2026-05-19T14:20:49.089235+00:00",
+      "path": "training/snapshots/seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003/weights.pt",
+      "policy_id": "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+      "update": 0,
+      "weights_sha256": "c60f546547f677b2b1aed2f434fe7e763bc656a1acd14c4f402facbdabe150ed"
+    },
+    {
+      "created_utc": "2026-05-19T14:20:49.122590+00:00",
+      "path": "training/snapshots/seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004/weights.pt",
+      "policy_id": "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+      "update": 0,
+      "weights_sha256": "d5205c9847eacd0d6a0142fb428f556f354d6544a9c7f2c9c21fbd2530d75a8b"
+    },
+    {
+      "created_utc": "2026-05-19T14:20:49.158391+00:00",
+      "path": "training/snapshots/seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005/weights.pt",
+      "policy_id": "seed_eaa9de289d_seed_b8c698d26a_seed_c3aac2f9dc_policy_000005",
+      "update": 0,
+      "weights_sha256": "02cb4f73cdaeaba90d91e47941d7b0a702902955569ed407231d5f1329e922fc"
+    },
+    {
+      "created_utc": "2026-05-17T23:22:34.891327+00:00",
+      "path": "training/snapshots/main_interp_repair_a015/weights.pt",
+      "policy_id": "main_interp_repair_a015",
+      "update": 5,
+      "weights_sha256": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26"
+    },
+    {
+      "created_utc": "2026-05-18T00:13:10.415921+00:00",
+      "path": "training/snapshots/main_league_selected/weights.pt",
+      "policy_id": "main_league_selected",
+      "update": 5,
+      "weights_sha256": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26"
+    }
+  ]
+}

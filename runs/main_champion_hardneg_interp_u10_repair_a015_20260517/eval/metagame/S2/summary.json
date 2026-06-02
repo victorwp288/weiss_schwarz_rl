@@ -1,0 +1,15 @@
+{
+  "case_id": "S2",
+  "description": "truncation_rate_still_reported",
+  "neutral_fallback_matchup_count": 0,
+  "policy_ids": [
+    "main_league_selected",
+    "B0 RandomLegal",
+    "B1 NoLeague baseline",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "scheme": "S2",
+  "top_payoff_shifts_ready": true
+}

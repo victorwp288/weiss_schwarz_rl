@@ -1,0 +1,7 @@
+policy_id,baseline_case_id,case_id,s0_mean_stationary_mass,case_mean_stationary_mass,delta_mean_stationary_mass,abs_delta_mean_stationary_mass
+B0 RandomLegal,S0,S2,0.0,0.0,0.0,0.0
+B1 NoLeague baseline,S0,S2,1.2984983550303456e-222,1.2984983550303456e-222,0.0,0.0
+B2 HeuristicPublic,S0,S2,0.0,0.0,0.0,0.0
+B3 HeuristicPublicAggro,S0,S2,0.0,0.0,0.0,0.0
+B4 HeuristicPublicControl,S0,S2,0.0,0.0,0.0,0.0
+main_league_selected,S0,S2,1.0,1.0,0.0,0.0

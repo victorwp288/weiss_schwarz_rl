@@ -181,10 +181,8 @@ def test_canonical_b1_noleague_prerequisites_accept_clean_model_actor_config() -
     assert startup.noleague_training_prerequisite_failure(stack) is None
 
 
-def test_canonical_b1_noleague_prerequisites_accept_tighter_sync_probe() -> None:
-    stack = load_stack_config(
-        repo_root() / "configs" / "thesis" / "ablations" / "b1_noleague_tight_sync20_temp050.yaml"
-    )
+def test_retained_reward_ablation_keeps_clean_noleague_route() -> None:
+    stack = load_stack_config(repo_root() / "configs" / "thesis" / "ablations" / "terminal_only_reward.yaml")
 
     assert startup.noleague_training_prerequisite_failure(stack) is None
 

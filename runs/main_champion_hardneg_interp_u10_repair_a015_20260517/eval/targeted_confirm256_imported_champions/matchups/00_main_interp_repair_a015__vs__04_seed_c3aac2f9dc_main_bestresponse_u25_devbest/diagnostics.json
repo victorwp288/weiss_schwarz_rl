@@ -1,0 +1,32 @@
+{
+  "focal_policy_id": "main_interp_repair_a015",
+  "opponent_policy_id": "seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+  "pair_count": 256,
+  "policy_breakdown": {
+    "main_interp_repair_a015": {
+      "games_as_seat0": 256,
+      "games_as_seat1": 256,
+      "total_wins": 289,
+      "wins_as_seat0": 148,
+      "wins_as_seat1": 141
+    },
+    "seed_c3aac2f9dc_main_bestresponse_u25_devbest": {
+      "games_as_seat0": 256,
+      "games_as_seat1": 256,
+      "total_wins": 223,
+      "wins_as_seat0": 115,
+      "wins_as_seat1": 108
+    }
+  },
+  "seat_results": {
+    "decisive_games": 512,
+    "draws": 0,
+    "engine_errors": 0,
+    "seat0_win_rate": 0.513671875,
+    "seat0_wins": 263,
+    "seat1_win_rate": 0.486328125,
+    "seat1_wins": 249,
+    "total_games": 512,
+    "truncations": 0
+  }
+}

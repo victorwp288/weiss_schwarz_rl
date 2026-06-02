@@ -77,7 +77,7 @@ from weiss_rl.replay.bundles import (
     write_fault_bundle,
     write_replay_bundle,
 )
-from weiss_rl.runtime_components.reward_shaping import apply_pass_with_nonpass_penalty as _apply_pass_penalty
+from weiss_rl.runtime.components.reward_shaping import apply_pass_with_nonpass_penalty as _apply_pass_penalty
 
 torch: ModuleType | None
 try:

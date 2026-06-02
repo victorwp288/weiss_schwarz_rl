@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.learners.impala_learner import (
+from weiss_rl.learners.impala import (
     summarize_structured_policy_metrics as impala_summarize_structured_policy_metrics,
 )
 from weiss_rl.learners.structured_policy_metrics import summarize_structured_policy_metrics

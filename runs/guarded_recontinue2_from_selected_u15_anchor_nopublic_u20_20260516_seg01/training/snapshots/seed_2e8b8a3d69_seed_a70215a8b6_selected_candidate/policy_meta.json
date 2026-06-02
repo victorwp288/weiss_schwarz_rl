@@ -1,0 +1,11 @@
+{
+  "format": "seeded_train_snapshot_metadata_v1",
+  "imported_from_policy_id": "seed_a70215a8b6_selected_candidate",
+  "imported_from_run_dir": "C:/Users/Bruger/Desktop/this one/weiss_schwarz_rl/runs/guarded_recontinue_from_selected_u15_anchor_nopublic_u20_20260516_seg01",
+  "imported_from_snapshot_path": "training/snapshots/seed_a70215a8b6_selected_candidate/weights.pt",
+  "imported_from_update": 0,
+  "policy_id": "seed_2e8b8a3d69_seed_a70215a8b6_selected_candidate",
+  "update": 0,
+  "weights_path": "training/snapshots/seed_2e8b8a3d69_seed_a70215a8b6_selected_candidate/weights.pt",
+  "weights_sha256": "9c911dd7bf7eafdcc74c59ca55335d27c82d86b19e3efdad88bbf31d793c1bc2"
+}

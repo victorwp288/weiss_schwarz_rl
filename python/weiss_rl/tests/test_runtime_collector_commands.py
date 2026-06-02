@@ -7,9 +7,9 @@ from typing import Any, cast
 import numpy as np
 import torch
 
-from weiss_rl.eval.policy_set import HEURISTIC_PUBLIC_POLICY_ID
-from weiss_rl.runtime_components import collector_commands
-from weiss_rl.runtime_components.collector_commands import handle_collector_commands
+from weiss_rl.eval.policies.set import HEURISTIC_PUBLIC_POLICY_ID
+from weiss_rl.runtime.components.ipc_shared import collector_commands
+from weiss_rl.runtime.components.ipc_shared.collector_commands import handle_collector_commands
 
 
 class _Queue:

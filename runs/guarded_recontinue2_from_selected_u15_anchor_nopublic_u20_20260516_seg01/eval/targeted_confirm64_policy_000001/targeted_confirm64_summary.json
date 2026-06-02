@@ -1,0 +1,79 @@
+{
+  "anchor_subset": {
+    "games": 384,
+    "mean": 0.671875,
+    "wins": 258
+  },
+  "created_unix": 1778930338.0466328,
+  "elapsed_seconds": 115.02474784851074,
+  "eval_sampling_algorithm": "model_argmax_pinned_v1",
+  "focal_policy_id": "policy_000001",
+  "games_per_row": 128,
+  "legacy_subset": {
+    "games": 0,
+    "mean": null,
+    "wins": 0
+  },
+  "model_sampling_temperature": 1.0,
+  "output_dir": "runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/eval/targeted_confirm64_policy_000001",
+  "overall": {
+    "games": 384,
+    "mean": 0.671875,
+    "wins": 258
+  },
+  "paired_seeds": 64,
+  "rows": [
+    {
+      "ci_high": 0.7943752410968747,
+      "ci_low": 0.6543392465446155,
+      "diagnostics_path": "runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/eval/targeted_confirm64_policy_000001/matchups/00_policy_000001__vs__01_b2_heuristicpublic/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "policy_000001",
+      "games": 128,
+      "losses": 35,
+      "mean": 0.7265625,
+      "opponent_policy_id": "B2 HeuristicPublic",
+      "paired_seeds": 64,
+      "prob_gt_half": 1.0,
+      "summary_path": "runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/eval/targeted_confirm64_policy_000001/matchups/00_policy_000001__vs__01_b2_heuristicpublic/matchup_summary.json",
+      "truncations": 0,
+      "wins": 93
+    },
+    {
+      "ci_high": 0.7372684163466999,
+      "ci_low": 0.5692659615711381,
+      "diagnostics_path": "runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/eval/targeted_confirm64_policy_000001/matchups/00_policy_000001__vs__02_b3_heuristicpublicaggro/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "policy_000001",
+      "games": 128,
+      "losses": 44,
+      "mean": 0.65625,
+      "opponent_policy_id": "B3 HeuristicPublicAggro",
+      "paired_seeds": 64,
+      "prob_gt_half": 0.9995,
+      "summary_path": "runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/eval/targeted_confirm64_policy_000001/matchups/00_policy_000001__vs__02_b3_heuristicpublicaggro/matchup_summary.json",
+      "truncations": 0,
+      "wins": 84
+    },
+    {
+      "ci_high": 0.715826974429868,
+      "ci_low": 0.5487709654315049,
+      "diagnostics_path": "runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/eval/targeted_confirm64_policy_000001/matchups/00_policy_000001__vs__03_b4_heuristicpubliccontrol/diagnostics.json",
+      "draws": 0,
+      "engine_errors": 0,
+      "focal_policy_id": "policy_000001",
+      "games": 128,
+      "losses": 47,
+      "mean": 0.6328125,
+      "opponent_policy_id": "B4 HeuristicPublicControl",
+      "paired_seeds": 64,
+      "prob_gt_half": 0.998,
+      "summary_path": "runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/eval/targeted_confirm64_policy_000001/matchups/00_policy_000001__vs__03_b4_heuristicpubliccontrol/matchup_summary.json",
+      "truncations": 0,
+      "wins": 81
+    }
+  ],
+  "stack_config": "configs/thesis/main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml"
+}

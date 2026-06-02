@@ -1,0 +1,14 @@
+{
+  "case_id": "S0",
+  "description": "paper_default",
+  "neutral_fallback_matchup_count": 0,
+  "policy_ids": [
+    "selected_candidate",
+    "B0 RandomLegal",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ],
+  "scheme": "S0",
+  "top_payoff_shifts_ready": true
+}

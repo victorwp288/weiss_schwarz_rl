@@ -1,0 +1,9 @@
+{
+  "policy_ids": [
+    "selected_candidate",
+    "B0 RandomLegal",
+    "B2 HeuristicPublic",
+    "B3 HeuristicPublicAggro",
+    "B4 HeuristicPublicControl"
+  ]
+}

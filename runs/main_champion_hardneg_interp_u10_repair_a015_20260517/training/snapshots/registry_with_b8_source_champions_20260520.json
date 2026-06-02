@@ -1,0 +1,91 @@
+{
+  "champion_size": 8,
+  "champion_snapshots": [
+    "seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+    "seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+    "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+    "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+    "seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+    "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+    "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+    "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005"
+  ],
+  "pinned_snapshots": [
+    "main_interp_repair_a015",
+    "main_league_selected"
+  ],
+  "recent_size": 24,
+  "schema_version": 1,
+  "snapshots": [
+    {
+      "created_utc": "2026-05-19T22:06:32.144239+00:00",
+      "path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025/weights.pt",
+      "policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_checkpoint_000025",
+      "update": 0,
+      "weights_sha256": "b181e49c6d03a5e0e8d8f0f7d2456f5c1d769eb05d09f8f6d1d30b80074a142c"
+    },
+    {
+      "created_utc": "2026-05-19T22:06:32.180358+00:00",
+      "path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest/weights.pt",
+      "policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_bestresponse_u25_devbest",
+      "update": 0,
+      "weights_sha256": "ff44f0c98850701de0c92324336c83dec2f11a9fa648c4a6dcec3471f5c305d9"
+    },
+    {
+      "created_utc": "2026-05-19T22:06:32.212458+00:00",
+      "path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected/weights.pt",
+      "policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_main_league_selected",
+      "update": 0,
+      "weights_sha256": "6b57761272d759071c385591d1e401e49faf4e6d5ef6ba38f5bddffd40b1ef2f"
+    },
+    {
+      "created_utc": "2026-05-19T22:06:32.247513+00:00",
+      "path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_policy_000001/weights.pt",
+      "policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000001",
+      "update": 0,
+      "weights_sha256": "90530dcd49fd7010b07b7fd4dcdb7dd7db120036203448bc4849173ae54f0622"
+    },
+    {
+      "created_utc": "2026-05-19T22:06:32.279933+00:00",
+      "path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_policy_000002/weights.pt",
+      "policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000002",
+      "update": 0,
+      "weights_sha256": "8e8841f1184d446033fdb0b086f14a69297520e827c482a2429493e59644e42d"
+    },
+    {
+      "created_utc": "2026-05-19T22:06:32.318703+00:00",
+      "path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_policy_000003/weights.pt",
+      "policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000003",
+      "update": 0,
+      "weights_sha256": "65b9f0d059679490dad7c92cb66d3086ab42d4501d0d411e7dfabf9bffef2da6"
+    },
+    {
+      "created_utc": "2026-05-19T22:06:32.351852+00:00",
+      "path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_policy_000004/weights.pt",
+      "policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000004",
+      "update": 0,
+      "weights_sha256": "6e7cca9ef679659d519d8e2220410ce21199e94ede87edd2ba8af46e74e280af"
+    },
+    {
+      "created_utc": "2026-05-19T22:06:32.386375+00:00",
+      "path": "training/snapshots/seed_b8c698d26a_seed_c3aac2f9dc_policy_000005/weights.pt",
+      "policy_id": "seed_b8c698d26a_seed_c3aac2f9dc_policy_000005",
+      "update": 0,
+      "weights_sha256": "675f8f165a942e5a6d9804454f4229ea50ab7f6f12739201942fb1a7dc1067a0"
+    },
+    {
+      "created_utc": "2026-05-17T23:22:34.891327+00:00",
+      "path": "training/snapshots/main_interp_repair_a015/weights.pt",
+      "policy_id": "main_interp_repair_a015",
+      "update": 5,
+      "weights_sha256": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26"
+    },
+    {
+      "created_utc": "2026-05-18T00:13:10.415921+00:00",
+      "path": "training/snapshots/main_league_selected/weights.pt",
+      "policy_id": "main_league_selected",
+      "update": 5,
+      "weights_sha256": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "bundle_path": "runs\\main_champion_hardneg_interp_u10_repair_a015_20260517\\replays\\bundles\\replay_effd62fc3cb184ec.zip",
+  "compared_steps": 163,
+  "episode_key64": 16672131439175572744,
+  "episode_seed64": 7854681877004080037,
+  "expected_steps": 163,
+  "fault_present": false,
+  "matched": true,
+  "replay_key64": "effd62fc3cb184ec",
+  "report_path": "runs\\main_champion_hardneg_interp_u10_repair_a015_20260517\\replays\\verification\\replay_effd62fc3cb184ec.json",
+  "rerun_contract": {
+    "curriculum_json": null,
+    "deck": "preset:main_deck_5hy_yotsuba_v1",
+    "max_decisions": 2000,
+    "max_ticks": 100000,
+    "observation_visibility": "public",
+    "opponent_deck": "preset:control_deck_jj_s66_v1",
+    "reward_json": "{\"board_reward\": 0.02, \"damage_reward\": 0.05, \"enable_shaping\": true, \"level_reward\": 0.05, \"no_progress_penalty\": 0.005, \"terminal_draw\": 0.0, \"terminal_loss\": -1.0, \"terminal_timeout\": -0.1, \"terminal_win\": 1.0}",
+    "version": 2
+  },
+  "rerun_supported": true,
+  "schema_version": 3,
+  "status": "success",
+  "verified_simulator_episode_key_u64": 9441823206115742186
+}

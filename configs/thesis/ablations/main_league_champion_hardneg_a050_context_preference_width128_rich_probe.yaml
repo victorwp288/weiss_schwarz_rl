@@ -1,6 +1,0 @@
-schema_version: 2
-description: "Base-frozen opponent-context rich candidate-residual preference probe for the a050 confirm256 regression repair surface. The residual reuses the structured head's per-candidate representation, including card and slot context, before any sentinel eval."
-extends: main_league_champion_hardneg_a050_context_preference_width128_probe.yaml
-model:
-  opponent_context_candidate_residual_width: 128
-  opponent_context_candidate_residual_mode: rich

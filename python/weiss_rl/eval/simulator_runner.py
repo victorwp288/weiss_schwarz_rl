@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +22,7 @@ from weiss_rl.diagnostics.action_diagnostics import (
 )
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, DecisionBoundaryEnv
 from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
-from weiss_rl.eval.god_search import GodSearchConfig, GodSearchStats, top_k_legal_actions
+from weiss_rl.eval.god_search import GodSearchConfig, GodSearchStats
 from weiss_rl.eval.harness import (
     EvalGameRunner,
     GameResult,
@@ -35,25 +33,29 @@ from weiss_rl.eval.harness import (
     sample_action_pinned,
     select_action_argmax_pinned,
 )
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
-from weiss_rl.eval.policy_set import (
-    NO_LEAGUE_POLICY_ID,
-    RANDOM_LEGAL_POLICY_ID,
-    heuristic_public_profile_name_for_policy_id,
+from weiss_rl.eval.policies.resolution import (
+    ResolvedEvalPolicy,
+    _candidate_b1_run_dirs,
+    _common_search_root,
+    _config_marks_noleague_baseline,
+    _find_b1_snapshot,
+    _is_recursive_registry_search_root,
+    _load_snapshot_eval_model,
+    _observation_spec_from_bundle,
+    _resolve_b1_policy,
+    _resolve_snapshot_registry_policy,
+    _resolve_snapshot_registry_run_dir,
+    _resolve_static_eval_policy,
+    _sha256_file,
+    _should_include_common_search_root,
+    _snapshot_by_policy_id_or_imported_seed_suffix,
+    _unique_paths,
+    resolve_eval_policies,
 )
 from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
-from weiss_rl.experiments.baselines import (
-    config_marks_noleague_baseline as _shared_config_marks_noleague_baseline,
-)
-from weiss_rl.experiments.baselines import (
-    find_noleague_baseline_snapshot,
-)
-from weiss_rl.league.registry import SnapshotMeta, SnapshotRegistry
+from weiss_rl.eval.simulator_god_search import SimulatorGodSearchMixin
 from weiss_rl.model import PolicyValueModel
-from weiss_rl.models.loading import (
-    load_snapshot_eval_model as _shared_load_snapshot_eval_model,
-)
 from weiss_rl.models.loading import (
     restore_model_guidance_from_payload as _shared_restore_model_guidance_from_payload,
 )
@@ -66,41 +68,43 @@ from weiss_rl.replay.bundles import (
     write_replay_bundle,
 )
 from weiss_rl.replay.runner import verify_replay_bundle
-from weiss_rl.runtime_components.action_surface import (
+from weiss_rl.runtime.components.action_surface import (
     filter_batch_main_move_only_rows_to_pass,
     filter_batch_mulligan_select_after_select,
     filter_batch_pass_when_attack_available,
 )
-from weiss_rl.runtime_components.legal_meta import action_catalog_indices
-from weiss_rl.runtime_components.opponent_context import (
+from weiss_rl.runtime.components.legal_meta import action_catalog_indices
+from weiss_rl.runtime.components.opponent_context import (
     eval_policy_uses_opponent_context,
     initial_seat_hidden_for_opponents,
 )
 
-_LEGACY_B1_POLICY_ID = "b1_noleague_baseline"
 _U64_DENOMINATOR = float(1 << 64)
+
+__all__ = [
+    "ResolvedEvalPolicy",
+    "SimulatorEvalRunner",
+    "_candidate_b1_run_dirs",
+    "_common_search_root",
+    "_config_marks_noleague_baseline",
+    "_find_b1_snapshot",
+    "_is_recursive_registry_search_root",
+    "_load_snapshot_eval_model",
+    "_observation_spec_from_bundle",
+    "_resolve_b1_policy",
+    "_resolve_snapshot_registry_policy",
+    "_resolve_snapshot_registry_run_dir",
+    "_resolve_static_eval_policy",
+    "_sha256_file",
+    "_should_include_common_search_root",
+    "_snapshot_by_policy_id_or_imported_seed_suffix",
+    "_unique_paths",
+    "resolve_eval_policies",
+]
 
 
 def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload: Mapping[str, object]) -> None:
     _shared_restore_model_guidance_from_payload(model, payload)
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedEvalPolicy:
-    policy_id: str
-    kind: str
-    source_run_dir: str | None = None
-    snapshot_path: str | None = None
-    model: PolicyValueModel | None = None
-    heuristic_policy: HeuristicPublicPolicy | None = None
-
-    def to_manifest_dict(self) -> dict[str, Any]:
-        return {
-            "policy_id": self.policy_id,
-            "kind": self.kind,
-            "source_run_dir": self.source_run_dir,
-            "snapshot_path": self.snapshot_path,
-        }
 
 
 @dataclass(slots=True)
@@ -111,332 +115,7 @@ class _ReplayCaptureState:
     steps: list[ReplayStep] | None = None
 
 
-def resolve_eval_policies(
-    *,
-    stack: StackConfig,
-    policy_ids: list[str],
-    run_dir: Path,
-    observation_dim: int,
-    action_dim: int,
-    spec_bundle: Mapping[str, object] | None = None,
-    snapshot_registry_path: Path | None = None,
-    b1_baseline_run_dir: Path | None = None,
-) -> dict[str, ResolvedEvalPolicy]:
-    registry_path = snapshot_registry_path or (
-        ArtifactLayout.from_run_dir(run_dir).training_snapshots_dir / "registry.json"
-    )
-    registry = SnapshotRegistry.load(registry_path)
-    registry_run_dir: Path | None = None
-    snapshots_by_policy_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
-    resolved: dict[str, ResolvedEvalPolicy] = {}
-
-    def _require_registry_run_dir() -> Path:
-        nonlocal registry_run_dir
-        if registry_run_dir is None:
-            registry_run_dir = _resolve_snapshot_registry_run_dir(
-                run_dir=run_dir,
-                registry_path=registry_path,
-                registry=registry,
-                policy_ids=policy_ids,
-            )
-        return registry_run_dir
-
-    for policy_id in policy_ids:
-        if policy_id == RANDOM_LEGAL_POLICY_ID:
-            resolved[policy_id] = ResolvedEvalPolicy(policy_id=policy_id, kind="random_legal")
-            continue
-        heuristic_profile = heuristic_public_profile_name_for_policy_id(policy_id)
-        if heuristic_profile is not None:
-            if spec_bundle is None:
-                raise RuntimeError(f"Resolving {policy_id} requires the loaded simulator spec bundle")
-            resolved[policy_id] = ResolvedEvalPolicy(
-                policy_id=policy_id,
-                kind="heuristic_public",
-                heuristic_policy=HeuristicPublicPolicy.from_spec_bundle(
-                    spec_bundle,
-                    scoring_profile=heuristic_profile,
-                ),
-            )
-            continue
-        if policy_id == NO_LEAGUE_POLICY_ID:
-            b1_registry_run_dir = registry_run_dir
-            if b1_registry_run_dir is None and b1_baseline_run_dir is None:
-                b1_registry_run_dir = _require_registry_run_dir()
-            resolved[policy_id] = _resolve_b1_policy(
-                run_dir=run_dir,
-                registry_run_dir=b1_registry_run_dir,
-                b1_baseline_run_dir=b1_baseline_run_dir,
-                stack=stack,
-                observation_dim=observation_dim,
-                action_dim=action_dim,
-                spec_bundle=spec_bundle,
-            )
-            continue
-
-        snapshot = _snapshot_by_policy_id_or_imported_seed_suffix(
-            snapshots_by_policy_id=snapshots_by_policy_id,
-            policy_id=policy_id,
-            registry_path=registry_path,
-        )
-        if snapshot is None:
-            raise FileNotFoundError(f"Could not resolve eval policy {policy_id!r} in snapshot registry {registry_path}")
-        snapshot_run_dir = _require_registry_run_dir()
-        model = _load_snapshot_eval_model(
-            run_dir=snapshot_run_dir,
-            snapshot_path=snapshot.path,
-            stack=stack,
-            observation_dim=observation_dim,
-            action_dim=action_dim,
-            observation_spec=_observation_spec_from_bundle(spec_bundle),
-            spec_bundle=spec_bundle,
-        )
-        resolved[policy_id] = ResolvedEvalPolicy(
-            policy_id=policy_id,
-            kind="snapshot_registry",
-            source_run_dir=snapshot_run_dir.as_posix(),
-            snapshot_path=snapshot.path,
-            model=model,
-        )
-
-    return resolved
-
-
-def _resolve_snapshot_registry_run_dir(
-    *,
-    run_dir: Path,
-    registry_path: Path,
-    registry: SnapshotRegistry,
-    policy_ids: list[str],
-) -> Path:
-    resolved_run_dir = Path(run_dir).resolve()
-    resolved_registry_path = Path(registry_path).resolve()
-    resolution_snapshots = _snapshot_registry_resolution_snapshots(registry=registry, policy_ids=policy_ids)
-    canonical_candidate = _canonical_snapshot_registry_run_dir(resolved_registry_path)
-    canonical_search_root: Path | None = None
-    if canonical_candidate is not None:
-        if not resolution_snapshots or _run_dir_contains_registry_snapshots(canonical_candidate, resolution_snapshots):
-            return canonical_candidate
-        canonical_search_root = canonical_candidate.parent
-    if not resolution_snapshots:
-        return resolved_run_dir
-
-    candidate_run_dirs: list[Path] = []
-    for candidate in [resolved_run_dir, resolved_registry_path.parent, *resolved_registry_path.parents]:
-        if _run_dir_matches_registry_snapshots(candidate, resolution_snapshots):
-            candidate_run_dirs.append(candidate.resolve())
-    search_roots = [resolved_run_dir.parent, resolved_registry_path.parent]
-    if canonical_search_root is not None:
-        search_roots.append(canonical_search_root)
-        canonical_common_search_root = _common_search_root([resolved_run_dir, canonical_search_root])
-        if canonical_common_search_root is not None and _is_recursive_registry_search_root(
-            canonical_common_search_root
-        ):
-            search_roots.append(canonical_common_search_root)
-    common_search_root = _common_search_root([resolved_run_dir, resolved_registry_path])
-    if (
-        common_search_root is not None
-        and _is_recursive_registry_search_root(common_search_root)
-        and _should_include_common_search_root(search_roots=search_roots, common_search_root=common_search_root)
-    ):
-        search_roots.append(common_search_root)
-    for search_root in _unique_paths(
-        [search_root for search_root in search_roots if _is_recursive_registry_search_root(search_root)]
-    ):
-        candidate_run_dirs.extend(
-            _discover_snapshot_registry_run_dirs(
-                search_root=search_root,
-                snapshots=resolution_snapshots,
-            )
-        )
-
-    unique_candidates = _unique_paths(candidate_run_dirs)
-    if len(unique_candidates) == 1:
-        return unique_candidates[0]
-    if len(unique_candidates) > 1:
-        if any(candidate == resolved_run_dir for candidate in unique_candidates):
-            return resolved_run_dir
-        matches = ", ".join(candidate.as_posix() for candidate in unique_candidates)
-        raise RuntimeError(
-            "Could not uniquely resolve the source run for snapshot registry "
-            f"{resolved_registry_path}; matching run directories: {matches}"
-        )
-    raise FileNotFoundError(
-        "Could not resolve the source run for snapshot registry "
-        f"{resolved_registry_path}. Provide the canonical <run>/training/snapshots/registry.json path "
-        "or place the copied registry next to matching snapshot artifacts."
-    )
-
-
-def _canonical_snapshot_registry_run_dir(registry_path: Path) -> Path | None:
-    resolved_registry_path = Path(registry_path).resolve()
-    if resolved_registry_path.parts[-3:] != ("training", "snapshots", "registry.json"):
-        return None
-    return resolved_registry_path.parent.parent.parent
-
-
-def _snapshot_registry_resolution_snapshots(
-    *,
-    registry: SnapshotRegistry,
-    policy_ids: list[str],
-) -> list[SnapshotMeta]:
-    snapshots_by_policy_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
-    requested_snapshots: list[SnapshotMeta] = []
-    seen_policy_ids: set[str] = set()
-
-    def _append_snapshot(policy_id: str) -> None:
-        snapshot = _snapshot_by_policy_id_or_imported_seed_suffix(
-            snapshots_by_policy_id=snapshots_by_policy_id,
-            policy_id=policy_id,
-            registry_path=None,
-        )
-        if snapshot is None or snapshot.policy_id in seen_policy_ids:
-            return
-        requested_snapshots.append(snapshot)
-        seen_policy_ids.add(snapshot.policy_id)
-
-    for policy_id in policy_ids:
-        _append_snapshot(policy_id)
-    if NO_LEAGUE_POLICY_ID in policy_ids:
-        _append_snapshot(_LEGACY_B1_POLICY_ID)
-    if requested_snapshots:
-        return requested_snapshots
-    return _spaced_snapshot_resolution_samples(registry.snapshots)
-
-
-def _snapshot_by_policy_id_or_imported_seed_suffix(
-    *,
-    snapshots_by_policy_id: Mapping[str, SnapshotMeta],
-    policy_id: str,
-    registry_path: Path | None,
-) -> SnapshotMeta | None:
-    snapshot = snapshots_by_policy_id.get(policy_id)
-    if snapshot is not None:
-        return snapshot
-    normalized = str(policy_id).strip()
-    if not normalized.startswith("seed_"):
-        return None
-    suffix = f"_{normalized}"
-    matches = [
-        candidate
-        for candidate_id, candidate in snapshots_by_policy_id.items()
-        if str(candidate_id).startswith("seed_") and str(candidate_id).endswith(suffix)
-    ]
-    if not matches:
-        return None
-    if len(matches) == 1:
-        return matches[0]
-    registry_hint = "" if registry_path is None else f" in snapshot registry {registry_path}"
-    match_ids = ", ".join(sorted(snapshot.policy_id for snapshot in matches))
-    raise RuntimeError(f"Ambiguous imported seed policy suffix {policy_id!r}{registry_hint}; matches: {match_ids}")
-
-
-def _spaced_snapshot_resolution_samples(snapshots: list[SnapshotMeta]) -> list[SnapshotMeta]:
-    if len(snapshots) <= 3:
-        return list(snapshots)
-    middle_index = len(snapshots) // 2
-    return [
-        snapshots[0],
-        snapshots[middle_index],
-        snapshots[-1],
-    ]
-
-
-def _discover_snapshot_registry_run_dirs(
-    *,
-    search_root: Path,
-    snapshots: list[SnapshotMeta],
-) -> list[Path]:
-    resolved_search_root = Path(search_root).resolve()
-    if not resolved_search_root.is_dir() or not snapshots:
-        return []
-    first_snapshot = snapshots[0]
-    pattern = f"**/training/snapshots/{first_snapshot.policy_id}/weights.pt"
-    candidates: list[Path] = []
-    for weights_path in resolved_search_root.glob(pattern):
-        candidate_run_dir = weights_path.parent.parent.parent.parent
-        if _run_dir_matches_registry_snapshots(candidate_run_dir, snapshots):
-            candidates.append(candidate_run_dir.resolve())
-    return _unique_paths(candidates)
-
-
-def _run_dir_matches_registry_snapshots(
-    candidate_run_dir: Path,
-    snapshots: list[SnapshotMeta],
-) -> bool:
-    resolved_candidate = Path(candidate_run_dir).resolve()
-    for snapshot in snapshots:
-        weights_path = resolved_candidate / snapshot.path
-        if not weights_path.is_file():
-            return False
-        expected_sha256 = str(snapshot.weights_sha256).strip().lower()
-        if expected_sha256 and _sha256_file(weights_path) != expected_sha256:
-            return False
-    return True
-
-
-def _run_dir_contains_registry_snapshots(
-    candidate_run_dir: Path,
-    snapshots: list[SnapshotMeta],
-) -> bool:
-    resolved_candidate = Path(candidate_run_dir).resolve()
-    for snapshot in snapshots:
-        if not (resolved_candidate / snapshot.path).is_file():
-            return False
-    return True
-
-
-def _sha256_file(path: Path) -> str:
-    hasher = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def _unique_paths(paths: list[Path]) -> list[Path]:
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for path in paths:
-        resolved = Path(path).resolve()
-        key = resolved.as_posix()
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(resolved)
-    return unique
-
-
-def _common_search_root(paths: list[Path]) -> Path | None:
-    resolved_paths = [Path(path).resolve() for path in paths]
-    if not resolved_paths:
-        return None
-    common_parts = list(resolved_paths[0].parts)
-    for path in resolved_paths[1:]:
-        shared_prefix_len = 0
-        for left, right in zip(common_parts, path.parts, strict=False):
-            if left != right:
-                break
-            shared_prefix_len += 1
-        common_parts = common_parts[:shared_prefix_len]
-        if not common_parts:
-            return None
-    return Path(*common_parts)
-
-
-def _is_recursive_registry_search_root(path: Path) -> bool:
-    resolved_path = Path(path).resolve()
-    anchor = resolved_path.anchor
-    if anchor and resolved_path == Path(anchor):
-        return False
-    return True
-
-
-def _should_include_common_search_root(*, search_roots: list[Path], common_search_root: Path) -> bool:
-    resolved_common_search_root = Path(common_search_root).resolve()
-    return all(Path(search_root).resolve().parent == resolved_common_search_root for search_root in search_roots)
-
-
-class SimulatorEvalRunner(EvalGameRunner):
+class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
     def __init__(
         self,
         *,
@@ -904,362 +583,6 @@ class SimulatorEvalRunner(EvalGameRunner):
             np.asarray(filtered_ids[int(filtered_offsets[0]) : int(filtered_offsets[1])], dtype=np.uint32),
         )
 
-    def _should_run_god_search(
-        self,
-        *,
-        policy: ResolvedEvalPolicy,
-        current_policy_id: str,
-        scheduled_game: ScheduledGame | None,
-        legal_ids_for_model: np.ndarray,
-        game_search_state: dict[str, int] | None,
-    ) -> bool:
-        config = self._god_search_config
-        if not config.enabled:
-            return False
-        if policy.model is None:
-            self._god_search_stats.skipped_no_model += 1
-            return False
-        if scheduled_game is None:
-            return False
-        if config.apply_to_focal_only and current_policy_id != scheduled_game.focal_policy_id:
-            self._god_search_stats.skipped_non_focal += 1
-            return False
-        if np.asarray(legal_ids_for_model).size <= 1:
-            self._god_search_stats.skipped_single_candidate += 1
-            return False
-        if game_search_state is not None and config.max_search_decisions_per_game > 0:
-            if int(game_search_state.get("searched", 0)) >= int(config.max_search_decisions_per_game):
-                return False
-        return True
-
-    def _select_action_with_god_search(
-        self,
-        *,
-        scheduled_game: ScheduledGame | None,
-        batch: DecisionBoundaryBatch,
-        current_seat: int,
-        current_policy_id: str,
-        opponent_policy_id: str,
-        root_seat_hidden: torch.Tensor,
-        root_next_seat_hidden: torch.Tensor | None,
-        seat_hidden_by_seat: Mapping[int, torch.Tensor | None] | None,
-        action_sequence_state: Any | None,
-        action_history: Sequence[int],
-        root_logits: np.ndarray,
-        legal_ids: np.ndarray,
-        legal_ids_for_model: np.ndarray,
-        base_action: int,
-        game_search_state: dict[str, int] | None,
-    ) -> int:
-        if scheduled_game is None or seat_hidden_by_seat is None:
-            return int(base_action)
-        config = self._god_search_config
-        if config.mode != "same_world_prefix_rollout":
-            raise ValueError(f"unsupported god-search mode: {config.mode!r}")
-        candidates = top_k_legal_actions(root_logits, legal_ids_for_model, top_k=int(config.top_k))
-        if len(candidates) <= 1:
-            self._god_search_stats.skipped_single_candidate += 1
-            return int(base_action)
-        if game_search_state is not None:
-            game_search_state["searched"] = int(game_search_state.get("searched", 0)) + 1
-        self._god_search_stats.search_decisions += 1
-
-        root_logit_by_action = {
-            int(action): float(np.asarray(root_logits, dtype=np.float32)[int(action)]) for action in candidates
-        }
-        candidate_scores: dict[int, list[float]] = {int(action): [] for action in candidates}
-        rollout_details: dict[int, list[dict[str, Any]]] = {int(action): [] for action in candidates}
-        decision_id = int(np.asarray(batch.decision_id, dtype=np.int64)[0])
-        for action in candidates:
-            for rollout_index in range(int(config.rollouts_per_action)):
-                score, detail = self._run_same_world_prefix_rollout(
-                    scheduled_game=scheduled_game,
-                    action_history=action_history,
-                    candidate_action=int(action),
-                    current_seat=current_seat,
-                    current_policy_id=current_policy_id,
-                    opponent_policy_id=opponent_policy_id,
-                    root_seat_hidden=root_seat_hidden,
-                    root_next_seat_hidden=root_next_seat_hidden,
-                    seat_hidden_by_seat=seat_hidden_by_seat,
-                    action_sequence_state=action_sequence_state,
-                    root_legal_ids=legal_ids,
-                    root_decision_id=decision_id,
-                    rollout_index=rollout_index,
-                )
-                candidate_scores[int(action)].append(float(score))
-                rollout_details[int(action)].append(detail)
-
-        averaged = {
-            action: (sum(scores) / float(len(scores)) if scores else float("-inf"))
-            for action, scores in candidate_scores.items()
-        }
-        selected_action = max(candidates, key=lambda action: (averaged[int(action)], root_logit_by_action[int(action)]))
-        if int(selected_action) != int(base_action):
-            self._god_search_stats.changed_decisions += 1
-        self._god_search_stats.add_trace(
-            {
-                "pair_index": int(scheduled_game.pair_index),
-                "swap_index": int(scheduled_game.swap_index),
-                "episode_seed": int(scheduled_game.episode_seed),
-                "decision_id": decision_id,
-                "actor_seat": int(current_seat),
-                "current_policy_id": current_policy_id,
-                "opponent_policy_id": opponent_policy_id,
-                "base_action": int(base_action),
-                "selected_action": int(selected_action),
-                "candidates": [
-                    {
-                        "action": int(action),
-                        "mean_score": float(averaged[int(action)]),
-                        "root_logit": float(root_logit_by_action[int(action)]),
-                        "rollouts": rollout_details[int(action)],
-                    }
-                    for action in candidates
-                ],
-            }
-        )
-        return int(selected_action)
-
-    def _run_same_world_prefix_rollout(
-        self,
-        *,
-        scheduled_game: ScheduledGame,
-        action_history: Sequence[int],
-        candidate_action: int,
-        current_seat: int,
-        current_policy_id: str,
-        opponent_policy_id: str,
-        root_seat_hidden: torch.Tensor,
-        root_next_seat_hidden: torch.Tensor | None,
-        seat_hidden_by_seat: Mapping[int, torch.Tensor | None],
-        action_sequence_state: Any | None,
-        root_legal_ids: np.ndarray,
-        root_decision_id: int,
-        rollout_index: int,
-    ) -> tuple[float, dict[str, Any]]:
-        self._god_search_stats.candidate_evaluations += 1
-        self._god_search_stats.rollout_games += 1
-        env = self._build_ids_eval_env(seed=scheduled_game.episode_seed, scheduled_game=scheduled_game)
-        rollout_decisions = 0
-        last_acting_seat: int | None = None
-        try:
-            batch = env.reset(seed=scheduled_game.episode_seed)
-            for prefix_action in action_history:
-                last_acting_seat = int(batch.actor[0])
-                batch = env.step(np.asarray([int(prefix_action)], dtype=np.uint32))
-                if bool(batch.terminated[0]) or bool(batch.truncated[0]):
-                    return self._prefix_replay_failed(
-                        reason="prefix_terminated_before_root",
-                        scheduled_game=scheduled_game,
-                        root_decision_id=root_decision_id,
-                    )
-
-            if self._god_search_config.verify_prefix_replay:
-                observed_decision_id = int(np.asarray(batch.decision_id, dtype=np.int64)[0])
-                observed_legal_ids = self._legal_ids_for_env_row(batch=batch)
-                if observed_decision_id != int(root_decision_id) or not np.array_equal(
-                    np.asarray(observed_legal_ids, dtype=np.uint32),
-                    np.asarray(root_legal_ids, dtype=np.uint32),
-                ):
-                    return self._prefix_replay_failed(
-                        reason="prefix_root_mismatch",
-                        scheduled_game=scheduled_game,
-                        root_decision_id=root_decision_id,
-                        observed_decision_id=observed_decision_id,
-                        expected_legal_count=int(np.asarray(root_legal_ids).size),
-                        observed_legal_count=int(np.asarray(observed_legal_ids).size),
-                    )
-
-            if int(candidate_action) not in set(int(action) for action in np.asarray(root_legal_ids).tolist()):
-                return self._prefix_replay_failed(
-                    reason="candidate_not_legal_at_root",
-                    scheduled_game=scheduled_game,
-                    root_decision_id=root_decision_id,
-                    candidate_action=int(candidate_action),
-                )
-
-            rollout_hidden = {
-                0: _clone_optional_hidden(seat_hidden_by_seat.get(0)),
-                1: _clone_optional_hidden(seat_hidden_by_seat.get(1)),
-            }
-            rollout_hidden[int(current_seat)] = _clone_optional_hidden(root_next_seat_hidden)
-            rollout_sequence_state = _copy_action_sequence_state(action_sequence_state)
-            update_eval_action_counters(
-                counters=ActionSummaryCounters(),
-                state=rollout_sequence_state,
-                action=int(candidate_action),
-                legal_ids=np.asarray(root_legal_ids, dtype=np.uint32),
-                pass_action_id=self.pass_action_id,
-            )
-            last_acting_seat = int(current_seat)
-            batch = env.step(np.asarray([int(candidate_action)], dtype=np.uint32))
-            if bool(batch.terminated[0]) or bool(batch.truncated[0]):
-                return self._score_rollout_terminal(
-                    batch=batch,
-                    scheduled_game=scheduled_game,
-                    last_acting_seat=last_acting_seat,
-                    rollout_decisions=rollout_decisions,
-                    cutoff=False,
-                )
-
-            max_rollout_decisions = int(self._god_search_config.max_rollout_decisions)
-            while True:
-                if max_rollout_decisions > 0 and rollout_decisions >= max_rollout_decisions:
-                    self._god_search_stats.horizon_cutoffs += 1
-                    return 0.0, {
-                        "score": 0.0,
-                        "status": "horizon_cutoff",
-                        "rollout_decisions": int(rollout_decisions),
-                    }
-                rollout_decisions += 1
-                branch_seat = int(batch.actor[0])
-                branch_policy_id = (
-                    scheduled_game.seat0_policy_id if branch_seat == 0 else scheduled_game.seat1_policy_id
-                )
-                branch_opponent_id = (
-                    scheduled_game.seat1_policy_id if branch_seat == 0 else scheduled_game.seat0_policy_id
-                )
-                branch_legal_ids = self._legal_ids_for_env_row(batch=batch)
-                branch_rng = Pcg32XshRrV1(
-                    self._god_search_rollout_rng_seed(
-                        scheduled_game=scheduled_game,
-                        seat=branch_seat,
-                        candidate_action=int(candidate_action),
-                        rollout_index=int(rollout_index),
-                        decision_id=int(np.asarray(batch.decision_id, dtype=np.int64)[0]),
-                    )
-                )
-                branch_action, branch_next_hidden = self._select_action_without_god_search(
-                    batch=batch,
-                    current_seat=branch_seat,
-                    current_policy_id=branch_policy_id,
-                    opponent_policy_id=branch_opponent_id,
-                    seat_hidden=rollout_hidden.get(branch_seat),
-                    rng=branch_rng,
-                    legal_ids=branch_legal_ids,
-                    action_sequence_state=rollout_sequence_state,
-                    sampling_algorithm=self._god_search_rollout_sampling_algorithm(),
-                )
-                update_eval_action_counters(
-                    counters=ActionSummaryCounters(),
-                    state=rollout_sequence_state,
-                    action=int(branch_action),
-                    legal_ids=branch_legal_ids,
-                    pass_action_id=self.pass_action_id,
-                )
-                last_acting_seat = branch_seat
-                batch = env.step(np.asarray([int(branch_action)], dtype=np.uint32))
-                rollout_hidden[branch_seat] = branch_next_hidden
-                if bool(batch.terminated[0]) or bool(batch.truncated[0]):
-                    return self._score_rollout_terminal(
-                        batch=batch,
-                        scheduled_game=scheduled_game,
-                        last_acting_seat=last_acting_seat,
-                        rollout_decisions=rollout_decisions,
-                        cutoff=False,
-                    )
-        finally:
-            env.close()
-
-    def _prefix_replay_failed(
-        self,
-        *,
-        reason: str,
-        scheduled_game: ScheduledGame,
-        root_decision_id: int,
-        **extra: Any,
-    ) -> tuple[float, dict[str, Any]]:
-        self._god_search_stats.prefix_replay_failures += 1
-        detail = {
-            "score": 0.0,
-            "status": "prefix_replay_failed",
-            "reason": reason,
-            "pair_index": int(scheduled_game.pair_index),
-            "swap_index": int(scheduled_game.swap_index),
-            "episode_seed": int(scheduled_game.episode_seed),
-            "root_decision_id": int(root_decision_id),
-            **extra,
-        }
-        if self._god_search_config.fail_on_prefix_mismatch:
-            raise RuntimeError(f"god-search prefix replay failed: {json.dumps(detail, sort_keys=True)}")
-        return 0.0, detail
-
-    def _score_rollout_terminal(
-        self,
-        *,
-        batch: DecisionBoundaryBatch,
-        scheduled_game: ScheduledGame,
-        last_acting_seat: int | None,
-        rollout_decisions: int,
-        cutoff: bool,
-    ) -> tuple[float, dict[str, Any]]:
-        result = game_result_from_step(
-            batch,
-            env_index=0,
-            acting_seat=last_acting_seat,
-            episode_seed=scheduled_game.episode_seed,
-            max_decisions=getattr(batch, "max_decisions", None),
-            max_ticks=getattr(batch, "max_ticks", None),
-            max_no_progress_decisions=None,
-        )
-        if bool(result.truncated) or cutoff:
-            self._god_search_stats.truncated_rollouts += 1
-            return 0.0, {
-                "score": 0.0,
-                "status": "truncated",
-                "winner_seat": result.winner_seat,
-                "rollout_decisions": int(rollout_decisions),
-            }
-        self._god_search_stats.terminal_rollouts += 1
-        if result.winner_seat is None:
-            score = 0.0
-        else:
-            score = 1.0 if int(result.winner_seat) == int(scheduled_game.focal_seat) else -1.0
-        return score, {
-            "score": float(score),
-            "status": "terminal",
-            "winner_seat": result.winner_seat,
-            "rollout_decisions": int(rollout_decisions),
-        }
-
-    def _god_search_rollout_sampling_algorithm(self) -> str:
-        policy = self._god_search_config.rollout_policy
-        if policy == "argmax":
-            return "model_argmax_pinned_v1"
-        if policy == "sample":
-            return "pinned_cdf_pcg_v1"
-        return self._eval_sampling_algorithm
-
-    def _god_search_rollout_rng_seed(
-        self,
-        *,
-        scheduled_game: ScheduledGame,
-        seat: int,
-        candidate_action: int,
-        rollout_index: int,
-        decision_id: int,
-    ) -> int:
-        return stable_hash64(
-            canonical_json_bytes(
-                {
-                    "kind": "god_search_rollout_rng_v1",
-                    "pair_index": int(scheduled_game.pair_index),
-                    "swap_index": int(scheduled_game.swap_index),
-                    "episode_seed": int(scheduled_game.episode_seed),
-                    "seat": int(seat),
-                    "candidate_action": int(candidate_action),
-                    "rollout_index": int(rollout_index),
-                    "decision_id": int(decision_id),
-                }
-            )
-        )
-
-    def god_search_diagnostics(self) -> dict[str, Any] | None:
-        if not self._god_search_config.enabled:
-            return None
-        return self._god_search_stats.to_json_dict(config=self._god_search_config)
-
     def _initial_hidden(self, policy_id: str, *, opponent_policy_id: str | None = None) -> torch.Tensor | None:
         policy = self.policies.get(policy_id)
         if policy is None or policy.model is None:
@@ -1469,134 +792,3 @@ class SimulatorEvalRunner(EvalGameRunner):
 
     def _simulator_episode_key(self, batch: DecisionBoundaryBatch) -> int | None:
         return int(np.asarray(batch.episode_key, dtype=np.uint64)[0])
-
-
-def _resolve_b1_policy(
-    *,
-    run_dir: Path,
-    registry_run_dir: Path | None,
-    b1_baseline_run_dir: Path | None,
-    stack: StackConfig,
-    observation_dim: int,
-    action_dim: int,
-    spec_bundle: Mapping[str, object] | None,
-) -> ResolvedEvalPolicy:
-    for candidate_run_dir in _candidate_b1_run_dirs(
-        run_dir=run_dir,
-        registry_run_dir=registry_run_dir,
-        b1_baseline_run_dir=b1_baseline_run_dir,
-    ):
-        snapshot = _find_b1_snapshot(candidate_run_dir)
-        if snapshot is None:
-            continue
-        model = _load_snapshot_eval_model(
-            run_dir=candidate_run_dir,
-            snapshot_path=snapshot.path,
-            stack=stack,
-            observation_dim=observation_dim,
-            action_dim=action_dim,
-            observation_spec=_observation_spec_from_bundle(spec_bundle, run_dir=candidate_run_dir),
-            spec_bundle=spec_bundle,
-        )
-        return ResolvedEvalPolicy(
-            policy_id=NO_LEAGUE_POLICY_ID,
-            kind="baseline_noleague",
-            source_run_dir=candidate_run_dir.as_posix(),
-            snapshot_path=snapshot.path,
-            model=model,
-        )
-    raise FileNotFoundError(
-        "Could not resolve the mandatory B1 NoLeague baseline. "
-        "Pass --b1-baseline-run-dir or evaluate from a baseline_noleague run that persisted the canonical baseline snapshot."
-    )
-
-
-def _candidate_b1_run_dirs(
-    *,
-    run_dir: Path,
-    registry_run_dir: Path | None,
-    b1_baseline_run_dir: Path | None,
-) -> list[Path]:
-    candidates: list[Path] = []
-    if b1_baseline_run_dir is not None:
-        candidates.append(Path(b1_baseline_run_dir))
-    if registry_run_dir is not None:
-        candidates.append(Path(registry_run_dir))
-    candidates.append(Path(run_dir))
-    return _unique_paths(candidates)
-
-
-def _config_marks_noleague_baseline(config_canonical: Mapping[str, Any]) -> bool:
-    return _shared_config_marks_noleague_baseline(config_canonical)
-
-
-def _find_b1_snapshot(run_dir: Path) -> SnapshotMeta | None:
-    return find_noleague_baseline_snapshot(
-        run_dir,
-        policy_id_candidates=(NO_LEAGUE_POLICY_ID, _LEGACY_B1_POLICY_ID),
-    )
-
-
-def _load_snapshot_eval_model(
-    *,
-    run_dir: Path,
-    snapshot_path: str,
-    stack: StackConfig,
-    observation_dim: int,
-    action_dim: int,
-    observation_spec: Mapping[str, object] | None = None,
-    spec_bundle: Mapping[str, object] | None = None,
-) -> PolicyValueModel:
-    return _shared_load_snapshot_eval_model(
-        run_dir=run_dir,
-        snapshot_path=snapshot_path,
-        stack=stack,
-        observation_dim=observation_dim,
-        action_dim=action_dim,
-        observation_spec=observation_spec,
-        spec_bundle=spec_bundle,
-    )
-
-
-def _clone_optional_hidden(hidden: torch.Tensor | None) -> torch.Tensor | None:
-    if hidden is None:
-        return None
-    return hidden.detach().clone()
-
-
-def _copy_action_sequence_state(state: Any | None) -> Any:
-    copied = make_action_sequence_state(1)
-    if state is None:
-        return copied
-    source = getattr(state, "consecutive_main_moves_by_env", None)
-    if source is None:
-        return copied
-    source_array = np.asarray(source, dtype=np.int32)
-    if source_array.shape == copied.consecutive_main_moves_by_env.shape:
-        copied.consecutive_main_moves_by_env[...] = source_array
-    return copied
-
-
-def _observation_spec_from_bundle(
-    spec_bundle: Mapping[str, object] | None,
-    *,
-    run_dir: Path | None = None,
-) -> Mapping[str, object] | None:
-    if spec_bundle is not None:
-        observation = spec_bundle.get("observation")
-        if isinstance(observation, Mapping):
-            return observation
-    if run_dir is None:
-        return None
-    layout = ArtifactLayout.from_run_dir(run_dir)
-    if not layout.spec_bundle_path.is_file():
-        return None
-    payload = json.loads(layout.spec_bundle_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"spec_bundle.json must contain an object: {layout.spec_bundle_path}")
-    observation = payload.get("observation")
-    if observation is None:
-        return None
-    if not isinstance(observation, Mapping):
-        raise RuntimeError(f"spec_bundle.json observation payload must be an object: {layout.spec_bundle_path}")
-    return observation

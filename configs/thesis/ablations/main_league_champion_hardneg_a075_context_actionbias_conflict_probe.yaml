@@ -1,7 +1,0 @@
-schema_version: 2
-description: "Opponent-conditioned action-bias micro-probe from the a075 frontier. This keeps the recurrent hidden adapter disabled and trains only a zero-initialized per-opponent action-logit adapter on the full confirm256 conflict set plus live champion/hard-negative league exposure, testing whether identical public states with opponent-specific preferred actions can be separated without moving the global policy."
-extends: main_league_champion_hardneg_a075_context_trainable_conflict_probe.yaml
-model:
-  opponent_context_trainable_hidden_scale: 0.0
-  opponent_context_trainable_action_bias_scale: 1.0
-  opponent_context_adapter_lr_multiplier: 1000.0

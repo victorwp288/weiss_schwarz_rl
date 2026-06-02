@@ -19,11 +19,13 @@ from weiss_rl.league.registry import (
 
 
 class SnapshotTrainingPaths(Protocol):
-    snapshots_dir: Path
+    @property
+    def snapshots_dir(self) -> Path: ...
 
 
 class StackWithLeagueConfig(Protocol):
-    config: Any
+    @property
+    def config(self) -> Any: ...
 
 
 def sha256_file(path: Path) -> str:
