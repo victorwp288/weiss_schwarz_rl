@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from weiss_rl.config import StackConfig
-from weiss_rl.eval.policy_types import ResolvedEvalPolicy
+from weiss_rl.eval.policies.types import ResolvedEvalPolicy
 from weiss_rl.eval.snapshot_model_loading import load_snapshot_eval_model, observation_spec_from_bundle
 from weiss_rl.eval.snapshot_registry_resolution import SnapshotRegistrySource
 

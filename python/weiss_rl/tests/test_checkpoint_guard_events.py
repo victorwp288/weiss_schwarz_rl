@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from weiss_rl.training.checkpoint_guard_events import (
+from weiss_rl.training.checkpointing.guard_events import (
     BestDevEvalCheckpoint,
     best_dev_eval_checkpoint,
     build_finalize_to_best_event_payload,

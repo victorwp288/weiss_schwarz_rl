@@ -6,12 +6,12 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from weiss_rl.workflows.artifact_contract_entrypoint import (
+from weiss_rl.workflows.artifact_contract.artifact_contract_entrypoint import (
     artifact_contract_request,
     run_artifact_contract_request,
     run_artifact_contract_steps,
 )
-from weiss_rl.workflows.artifact_contract_plan import (
+from weiss_rl.workflows.artifact_contract.artifact_contract_plan import (
     ArtifactContractRequest,
     ArtifactContractStep,
     build_artifact_contract_steps,
@@ -72,14 +72,14 @@ def test_artifact_contract_plan_preserves_public_demo_and_readiness_contract_ste
     assert rendered[6]["command"] == [
         "python.exe",
         "-m",
-        "weiss_rl.eval.paper_readiness_fixture_entrypoint",
+        "weiss_rl.eval.readiness.fixture_entrypoint",
         "--run-dir",
         "runs/paper_readiness_fixture_ci",
     ]
     assert rendered[7]["command"] == [
         "python.exe",
         "-m",
-        "weiss_rl.eval.paper_readiness_check_entrypoint",
+        "weiss_rl.eval.readiness.check_entrypoint",
         "--run-dir",
         "runs/paper_readiness_fixture_ci",
     ]
@@ -169,7 +169,7 @@ def test_artifact_contract_request_runs_and_writes_plan_json(tmp_path: Path) -> 
     assert observed_commands == []
     assert payload[0]["clean_dir"] == "runs/toy_public_demo_ci"
     assert payload[5]["clean_dir"] == "runs/paper_readiness_fixture_ci"
-    assert payload[-1]["command"][2] == "weiss_rl.eval.paper_readiness_check_entrypoint"
+    assert payload[-1]["command"][2] == "weiss_rl.eval.readiness.check_entrypoint"
 
 
 def test_artifact_contract_entrypoint_writes_plan_json_without_running_contract(tmp_path: Path) -> None:
@@ -181,7 +181,7 @@ def test_artifact_contract_entrypoint_writes_plan_json_without_running_contract(
         [
             sys.executable,
             "-m",
-            "weiss_rl.workflows.artifact_contract_entrypoint",
+            "weiss_rl.workflows.artifact_contract.artifact_contract_entrypoint",
             "--repo-root",
             str(repo_root),
             "--toy-run-dir",
@@ -202,12 +202,12 @@ def test_artifact_contract_entrypoint_writes_plan_json_without_running_contract(
     payload = json.loads(plan_json.read_text(encoding="utf-8"))
     assert len(payload) == 8
     assert payload[0]["clean_dir"] == "runs/toy_public_demo_ci"
-    assert payload[-1]["command"][2] == "weiss_rl.eval.paper_readiness_check_entrypoint"
+    assert payload[-1]["command"][2] == "weiss_rl.eval.readiness.check_entrypoint"
 
 
 def test_make_artifact_contract_target_delegates_to_package_workflow() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 
     assert "artifact-contract: sync" in makefile
-    assert "$(PYRUN) -m weiss_rl.workflows.artifact_contract_entrypoint" in makefile
+    assert "$(PYRUN) -m weiss_rl.workflows.artifact_contract.artifact_contract_entrypoint" in makefile
     assert "$(MAKE) artifact-hygiene" not in makefile

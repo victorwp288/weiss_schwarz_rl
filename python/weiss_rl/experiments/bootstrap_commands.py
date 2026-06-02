@@ -205,45 +205,6 @@ def build_b2_disagreement_audit_entrypoint_command(
     ]
 
 
-def build_candidate_selector_command(
-    *,
-    repo_root: Path,
-    stack_config: Path,
-    run_dir: Path,
-    output_json: Path,
-    min_required_anchor_score: float,
-    confirm_paired_seeds: int,
-    required_anchors: Sequence[str],
-    confirm_opponents: Sequence[str],
-    publish_alias: bool,
-    selected_alias_policy_id: str | None = None,
-) -> list[str]:
-    command = [
-        sys.executable,
-        "-m",
-        "weiss_rl.experiments.select_b1_candidate_entrypoint",
-        "--run-dir",
-        repo_relative(run_dir, repo_root=repo_root).as_posix(),
-        "--stack-config",
-        repo_relative(stack_config, repo_root=repo_root).as_posix(),
-        "--min-required-anchor-score",
-        str(float(min_required_anchor_score)),
-        "--confirm-paired-seeds",
-        str(int(confirm_paired_seeds)),
-        "--output-json",
-        repo_relative(output_json, repo_root=repo_root).as_posix(),
-    ]
-    for anchor in required_anchors:
-        command.extend(["--required-anchor", str(anchor)])
-    for opponent in confirm_opponents:
-        command.extend(["--confirm-opponent", str(opponent)])
-    if publish_alias:
-        if not selected_alias_policy_id:
-            raise ValueError("selected_alias_policy_id is required when publish_alias=True")
-        command.extend(["--publish-selected-alias", "--selected-alias-policy-id", str(selected_alias_policy_id)])
-    return command
-
-
 def build_targeted_confirm_entrypoint_command(
     *,
     repo_root: Path | None,
@@ -260,7 +221,7 @@ def build_targeted_confirm_entrypoint_command(
     command = [
         *(list(python_command) if python_command is not None else [sys.executable]),
         "-m",
-        "weiss_rl.eval.targeted_confirm_entrypoint",
+        "weiss_rl.eval.targeted_confirm.entrypoint",
         "--stack-config",
         command_path(stack_config, repo_root=repo_root),
         "--run-dir",

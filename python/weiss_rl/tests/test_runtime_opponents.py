@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
-from weiss_rl.runtime_components.opponents import (
+from weiss_rl.runtime.components.opponents import (
     RuntimeOpponentGroup,
     active_actor_heuristic_fraction,
     active_assigned_opponent_policy_ids,

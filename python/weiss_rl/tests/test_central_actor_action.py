@@ -6,18 +6,18 @@ from typing import Any
 import numpy as np
 import torch
 
-from weiss_rl.runtime_components.central_actor_action import (
+from weiss_rl.runtime.components.central_actor_action import (
     execute_mask_central_actor_action,
     execute_packed_central_actor_action,
 )
-from weiss_rl.runtime_components.central_actor_action_context import (
+from weiss_rl.runtime.components.central_actor_action_context import (
     CentralActorActionInputs,
     MaskCentralActorActionCallbacks,
     PackedCentralActorActionCallbacks,
     PackedCentralActorActionMode,
 )
-from weiss_rl.runtime_components.collector_state import allocate_collector_unroll_state
-from weiss_rl.runtime_components.teacher_labels import teacher_label_arrays
+from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
+from weiss_rl.runtime.components.teacher_labels import teacher_label_arrays
 
 
 class _StepEnv:

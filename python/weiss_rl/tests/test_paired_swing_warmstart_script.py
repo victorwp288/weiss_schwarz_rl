@@ -48,7 +48,7 @@ def test_paired_swing_warmstart_entrypoint_main_delegates_to_runtime(monkeypatch
 
 
 def test_paired_swing_warmstart_parser_preserves_defaults(tmp_path: Path) -> None:
-    from weiss_rl.training.paired_swing_warmstart_cli import build_paired_swing_warmstart_parser
+    from weiss_rl.training.warmstarts.paired_swing_warmstart_cli import build_paired_swing_warmstart_parser
 
     args = build_paired_swing_warmstart_parser().parse_args(
         [
@@ -91,7 +91,7 @@ def test_paired_swing_warmstart_parser_preserves_defaults(tmp_path: Path) -> Non
 
 
 def test_paired_swing_warmstart_parser_validates_numeric_and_source_bounds(tmp_path: Path) -> None:
-    from weiss_rl.training.paired_swing_warmstart_cli import parse_paired_swing_warmstart_args
+    from weiss_rl.training.warmstarts.paired_swing_warmstart_cli import parse_paired_swing_warmstart_args
 
     base_args = [
         "--stack-config",

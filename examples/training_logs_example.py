@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 from weiss_rl.diagnostics.training_logger import TrainingLogger
-from weiss_rl.learners.impala_learner import ImpalaLearner
+from weiss_rl.learners.impala import ImpalaLearner
 
 
 def _example_batch(*, time_steps: int = 8, batch_size: int = 2, action_space: int = 5) -> dict[str, np.ndarray]:

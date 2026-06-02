@@ -1,6 +1,0 @@
-schema_version: 2
-description: "Diagnostic final eval surface: model policies use pinned stochastic sampling with 0.05 temperature."
-extends: final_eval_mainmoveguard_mulliganguard.yaml
-evaluation:
-  eval_sampling_algorithm: pinned_cdf_pcg_v1
-  model_sampling_temperature: 0.05

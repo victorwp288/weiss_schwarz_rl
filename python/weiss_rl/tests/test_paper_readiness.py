@@ -15,7 +15,7 @@ from weiss_rl.eval import (
     paper_readiness_final_eval_summary,
     paper_readiness_guardrails,
 )
-from weiss_rl.eval.policy_set import RANDOM_LEGAL_POLICY_ID
+from weiss_rl.eval.policies.set import RANDOM_LEGAL_POLICY_ID
 
 SeatResultInput = tuple[int, int] | dict[str, int]
 

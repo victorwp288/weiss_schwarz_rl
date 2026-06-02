@@ -8,9 +8,9 @@ import pytest
 import torch
 
 from weiss_rl.league.registry import SNAPSHOT_METADATA_FILENAME, SnapshotRegistry
-from weiss_rl.training.checkpoint_interpolation import interpolate_model_state_dicts
-from weiss_rl.training.checkpoint_interpolation_reporting import checkpoint_interpolation_output_line
-from weiss_rl.training.checkpoint_interpolation_runtime import (
+from weiss_rl.training.checkpointing.interpolation import interpolate_model_state_dicts
+from weiss_rl.training.checkpointing.interpolation_reporting import checkpoint_interpolation_output_line
+from weiss_rl.training.checkpointing.interpolation_runtime import (
     CheckpointInterpolationRunResult,
     run_checkpoint_interpolation,
 )
@@ -48,7 +48,7 @@ def test_checkpoint_interpolation_entrypoint_facade_reexports_cli_runtime_and_co
 
 
 def test_checkpoint_interpolation_parser_preserves_defaults(tmp_path: Path) -> None:
-    from weiss_rl.training.checkpoint_interpolation_cli import build_checkpoint_interpolation_parser
+    from weiss_rl.training.checkpointing.interpolation_cli import build_checkpoint_interpolation_parser
 
     args = build_checkpoint_interpolation_parser().parse_args(
         [

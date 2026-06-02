@@ -9,8 +9,8 @@ import numpy as np
 import torch
 
 from weiss_rl.core.legal_actions import LegalActionBatch
-from weiss_rl.runtime_components.legal_meta import action_catalog_indices, legal_action_meta_from_ids
-from weiss_rl.runtime_components.shared import DEFAULT_ACTION_META_WIDTH
+from weiss_rl.runtime.components.legal_meta import action_catalog_indices, legal_action_meta_from_ids
+from weiss_rl.runtime.components.shared import DEFAULT_ACTION_META_WIDTH
 
 
 def _call_accepts_keyword(callable_obj: Any, keyword: str) -> bool:

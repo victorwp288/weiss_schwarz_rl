@@ -5,7 +5,10 @@ import pytest
 
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset
 from weiss_rl.training.auxiliary_replay_metrics import AuxiliaryReplayMetricAccumulator, emit_finite_aux_metrics
-from weiss_rl.training.trajectory_bc_sampling import TrajectoryBcReplayFocusGroupState, TrajectoryBcReplayState
+from weiss_rl.training.replay_data.trajectory_bc_sampling import (
+    TrajectoryBcReplayFocusGroupState,
+    TrajectoryBcReplayState,
+)
 
 
 def test_auxiliary_replay_metrics_emit_focus_groups_context_and_finite_aux_metrics() -> None:

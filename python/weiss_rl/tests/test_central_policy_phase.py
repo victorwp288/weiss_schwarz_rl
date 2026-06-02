@@ -6,13 +6,13 @@ from typing import Any
 import numpy as np
 import torch
 
-from weiss_rl.runtime_components.central_policy_outputs import CentralPolicyPhaseOutputs as CanonicalOutputs
-from weiss_rl.runtime_components.central_policy_phase import (
+from weiss_rl.runtime.components.central_policy_outputs import CentralPolicyPhaseOutputs as CanonicalOutputs
+from weiss_rl.runtime.components.central_policy_phase import (
     CentralPolicyPhaseOutputs,
     run_central_policy_phase,
 )
-from weiss_rl.runtime_components.collector_state import allocate_collector_unroll_state
-from weiss_rl.runtime_components.policy_ids import MIRROR_OPPONENT_POLICY_ID
+from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
+from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
 
 
 def _state() -> Any:

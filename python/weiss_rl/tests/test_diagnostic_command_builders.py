@@ -43,7 +43,7 @@ def test_heuristic_sanity_scan_preserves_custom_confirm_command_shape() -> None:
         opponent="B2 HeuristicPublic",
     )
 
-    assert command[:3] == [".venv-exp034/bin/python", "-m", "weiss_rl.eval.targeted_confirm_entrypoint"]
+    assert command[:3] == [".venv-exp034/bin/python", "-m", "weiss_rl.eval.targeted_confirm.entrypoint"]
     assert _option(command, "--stack-config") == "configs/presets/eval_gpu_exp031_fast_20260506.yaml"
     assert _option(command, "--run-dir") == "runs/main_thesis_exp034_legacy_oldleague_env8_u4_u340_to800_20260506"
     assert _option(command, "--snapshot-registry-json") == (

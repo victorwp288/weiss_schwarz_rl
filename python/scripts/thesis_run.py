@@ -2,80 +2,12 @@
 
 from __future__ import annotations
 
-from weiss_rl.workflows.thesis_wrapper import (
-    _DEFAULT_EVAL_PRESET,
-    _DEFAULT_EVAL_PRESET_OVERRIDES,
-    _PRESET_PATHS,
-    ThesisWrapperCommands,
-    ThesisWrapperInputs,
-    ThesisWrapperPlan,
-    ThesisWrapperRequest,
-    ThesisWrapperResult,
-    _command_display,
-    _default_eval_preset_for_preset,
-    _resolve_cli_path,
-    _resolve_eval_stack_config,
-    _resolve_stack_config,
-    _run_step,
-    _summary_path,
-    build_thesis_compare_command,
-    build_thesis_eval_command,
-    build_thesis_train_command,
-    build_thesis_wrapper_commands,
-    build_thesis_wrapper_commands_for_request,
-    build_thesis_wrapper_parser,
-    build_thesis_wrapper_plan,
-    build_thesis_wrapper_plan_for_request,
-    main,
-    print_thesis_wrapper_presets,
-    run_thesis_wrapper_cli,
-    run_thesis_wrapper_commands,
-    run_thesis_wrapper_plan,
-    thesis_wrapper_commands_for_plan,
-    thesis_wrapper_inputs_from_args,
-    thesis_wrapper_repo_root,
-    thesis_wrapper_request,
-    thesis_wrapper_summary_payload,
-    write_thesis_wrapper_summary,
-)
+from weiss_rl.workflows import thesis_wrapper as _impl
+from weiss_rl.workflows.script_compat import install_package_entrypoint_exports
 
-__all__ = [
-    "_DEFAULT_EVAL_PRESET",
-    "_DEFAULT_EVAL_PRESET_OVERRIDES",
-    "_PRESET_PATHS",
-    "_command_display",
-    "_default_eval_preset_for_preset",
-    "_resolve_cli_path",
-    "_resolve_eval_stack_config",
-    "_resolve_stack_config",
-    "_run_step",
-    "_summary_path",
-    "build_thesis_wrapper_parser",
-    "ThesisWrapperInputs",
-    "ThesisWrapperCommands",
-    "ThesisWrapperPlan",
-    "ThesisWrapperRequest",
-    "ThesisWrapperResult",
-    "build_thesis_compare_command",
-    "build_thesis_eval_command",
-    "build_thesis_train_command",
-    "build_thesis_wrapper_commands",
-    "build_thesis_wrapper_commands_for_request",
-    "build_thesis_wrapper_plan",
-    "build_thesis_wrapper_plan_for_request",
-    "main",
-    "print_thesis_wrapper_presets",
-    "run_thesis_wrapper_cli",
-    "run_thesis_wrapper_commands",
-    "run_thesis_wrapper_plan",
-    "thesis_wrapper_repo_root",
-    "thesis_wrapper_commands_for_plan",
-    "thesis_wrapper_inputs_from_args",
-    "thesis_wrapper_request",
-    "thesis_wrapper_summary_payload",
-    "write_thesis_wrapper_summary",
-]
+install_package_entrypoint_exports(globals(), _impl)
+__all__ = list(_impl.__all__)
 
 
 if __name__ == "__main__":
-    main()
+    _impl.main()

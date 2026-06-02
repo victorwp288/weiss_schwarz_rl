@@ -103,10 +103,10 @@ else
 endif
 
 artifact-contract: sync
-	@$(PYRUN) -m weiss_rl.workflows.artifact_contract_entrypoint
+	@$(PYRUN) -m weiss_rl.workflows.artifact_contract.artifact_contract_entrypoint
 
 train-min:
-	@$(PYRUN) -m weiss_rl.training.train_entrypoint --stack-config configs/stack_smoke.yaml
+	@$(PYSIMRUN) -m weiss_rl.cli train-b1 --run-label train_min_smoke --profile smoke
 
 train-b1-smoke: sync-sim
 	@$(PYSIMRUN) -m weiss_rl.cli train-b1 --run-label "$(B1_LABEL)" --profile smoke

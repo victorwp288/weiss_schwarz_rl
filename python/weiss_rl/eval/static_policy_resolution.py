@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     RANDOM_LEGAL_POLICY_ID,
     heuristic_public_profile_name_for_policy_id,
 )
-from weiss_rl.eval.policy_types import ResolvedEvalPolicy
+from weiss_rl.eval.policies.types import ResolvedEvalPolicy
 
 
 def resolve_static_eval_policy(

@@ -4,6 +4,8 @@ The canonical training CLI is ``python -m weiss_rl.training.train_entrypoint``.
 The legacy ``python/scripts/train.py`` path remains a compatibility shim.
 """
 
+from importlib import import_module
+
 from .algorithm_contracts import validate_algorithm_model_contract
 from .algorithm_families import (
     IMPALA_ALGORITHMS,
@@ -17,7 +19,7 @@ from .batches import (
     build_learner_batch,
     collect_training_batch,
 )
-from .checkpoint_guard import (
+from .checkpointing.guard import (
     checkpoint_candidate_metric,
     confirmatory_dev_eval_request,
     confirmatory_dev_eval_target_pairs,
@@ -152,6 +154,162 @@ from .torch_threads import (
     torch_num_threads_scope,
 )
 from .warmstart import run_structured_warmstart
+
+_TRAIN_ENTRYPOINT_MODULES = frozenset(
+    {
+        "aliases",
+        "best_checkpoint_wrappers",
+        "checkpoint_hooks",
+        "checkpoint_io_hooks",
+        "checkpoint_io_wrappers",
+        "checkpoint_lifecycle_hooks",
+        "checkpoint_lifecycle_wrappers",
+        "checkpoint_wrappers",
+        "cli_phase",
+        "compat_exports",
+        "core_aliases",
+        "core_exports",
+        "current_checkpoint_wrapper",
+        "dev_eval_wrappers",
+        "eval_aliases",
+        "eval_exports",
+        "execution_phase",
+        "guard_aliases",
+        "learner_hooks",
+        "learner_wrappers",
+        "main",
+        "manifest_phase",
+        "metadata_hooks",
+        "metadata_wrappers",
+        "minimal_wrapper",
+        "namespace",
+        "phases",
+        "promotion_wrapper",
+        "runner_hooks",
+        "runner_wrappers",
+        "runtime_wrappers",
+        "script_wrappers",
+        "snapshot_hooks",
+        "snapshot_wrappers",
+        "startup_phase",
+        "state",
+        "training_aliases",
+        "training_exports",
+        "wrappers",
+    }
+)
+
+_CHECKPOINTING_MODULES = frozenset(
+    {
+        "alias_candidates",
+        "alias_mutation",
+        "alias_publication",
+        "aliases",
+        "finalization",
+        "guard_events",
+        "guard",
+        "interpolation_cli",
+        "interpolation_entrypoint",
+        "interpolation_reporting",
+        "interpolation_runtime",
+        "interpolation",
+        "io",
+        "lifecycle_decisions",
+        "lifecycle_effects",
+        "lifecycle_plans",
+        "lifecycle_transitions",
+        "lifecycle",
+        "load",
+        "periodic_dev_eval_confirmatory",
+        "periodic_dev_eval_guard",
+        "periodic_dev_eval",
+        "publish_cli",
+        "publish_entrypoint",
+        "publish_reporting",
+        "publish_runtime",
+        "publish",
+        "resolution",
+        "restore_state",
+        "restore",
+        "snapshot_promotion",
+        "structured_guard",
+        "tracker",
+        "write",
+    }
+)
+
+_LEGACY_TRAINING_MODULES = {
+    "dev_eval_opponents": "dev_eval.opponents",
+    "dev_eval_runner": "dev_eval.runner",
+    "minimal_dev_eval": "minimal.dev_eval",
+    "minimal_entrypoint_hooks": "minimal.entrypoint_hooks",
+    "minimal_finalization": "minimal.finalization",
+    "minimal_hook_groups": "minimal.hook_groups",
+    "minimal_initialization": "minimal.initialization",
+    "minimal_loop": "minimal.loop",
+    "minimal_promotion": "minimal.promotion",
+    "minimal_runner": "minimal.runner",
+    "minimal_setup": "minimal.setup",
+    "minimal_update": "minimal.update",
+    "paired_auxiliary_replay": "replay_data.paired_auxiliary_replay",
+    "paired_outcome_preference_dataset": "replay_data.paired_outcome_preference_dataset",
+    "paired_outcome_preference_replay": "replay_data.paired_outcome_preference_replay",
+    "paired_outcome_preference_warmstart_cli": "warmstarts.paired_outcome_preference_warmstart_cli",
+    "paired_outcome_preference_warmstart_entrypoint": "warmstarts.paired_outcome_preference_warmstart_entrypoint",
+    "paired_outcome_preference_warmstart_runtime": "warmstarts.paired_outcome_preference_warmstart_runtime",
+    "paired_outcome_preference_warmstart_support": "warmstarts.paired_outcome_preference_warmstart_support",
+    "paired_swing_conflict_filter": "replay_data.paired_swing_conflict_filter",
+    "paired_swing_replay": "replay_data.paired_swing_replay",
+    "paired_swing_warmstart_cli": "warmstarts.paired_swing_warmstart_cli",
+    "paired_swing_warmstart_entrypoint": "warmstarts.paired_swing_warmstart_entrypoint",
+    "paired_swing_warmstart_runtime": "warmstarts.paired_swing_warmstart_runtime",
+    "training_loop_progress": "loop.loop_progress",
+    "training_post_update": "loop.post_update",
+    "training_replay_dispatch": "replay_data.training_replay_dispatch",
+    "training_replay_paths": "replay_data.training_replay_paths",
+    "training_replay_states": "replay_data.training_replay_states",
+    "training_run_contexts": "loop.run_contexts",
+    "training_runner": "loop.runner",
+    "training_setup": "loop.setup",
+    "training_update": "loop.update",
+    "training_update_batch": "loop.update_batch",
+    "training_update_completion": "loop.update_completion",
+    "training_update_phases": "loop.update_phases",
+    "training_update_schedule": "loop.update_schedule",
+    "training_update_stage_pipeline": "loop.update_stage_pipeline",
+    "training_update_step": "loop.update_step",
+    "trajectory_bc_replay": "replay_data.trajectory_bc_replay",
+    "trajectory_bc_sampling": "replay_data.trajectory_bc_sampling",
+    "trajectory_bc_teacher_state": "replay_data.trajectory_bc_teacher_state",
+    "trajectory_bc_warmstart_cli": "warmstarts.trajectory_bc_warmstart_cli",
+    "trajectory_bc_warmstart_entrypoint": "warmstarts.trajectory_bc_warmstart_entrypoint",
+    "trajectory_bc_warmstart_runtime": "warmstarts.trajectory_bc_warmstart_runtime",
+    "warmstart_artifacts": "warmstarts.warmstart_artifacts",
+    "warmstart_replay_support": "warmstarts.warmstart_replay_support",
+}
+
+
+def __getattr__(name: str):
+    train_prefix = "train_entrypoint_"
+    if name.startswith(train_prefix):
+        suffix = name.removeprefix(train_prefix)
+        if suffix in _TRAIN_ENTRYPOINT_MODULES:
+            module = import_module(f".train_entrypoint.{suffix}", __name__)
+            globals()[name] = module
+            return module
+    checkpoint_prefix = "checkpoint_"
+    if name.startswith(checkpoint_prefix):
+        suffix = name.removeprefix(checkpoint_prefix)
+        if suffix in _CHECKPOINTING_MODULES:
+            module = import_module(f".checkpointing.{suffix}", __name__)
+            globals()[name] = module
+            return module
+    if name in _LEGACY_TRAINING_MODULES:
+        module = import_module(f".{_LEGACY_TRAINING_MODULES[name]}", __name__)
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "BEST_CHECKPOINT_FILENAME",

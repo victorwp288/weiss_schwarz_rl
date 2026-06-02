@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from weiss_rl.runtime_components.central_opponent_groups import group_central_opponent_rows
-from weiss_rl.runtime_components.policy_ids import MIRROR_OPPONENT_POLICY_ID
+from weiss_rl.runtime.components.central_opponent_groups import group_central_opponent_rows
+from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
 
 
 def _actor(*, focal: list[int], policies: list[str]) -> SimpleNamespace:

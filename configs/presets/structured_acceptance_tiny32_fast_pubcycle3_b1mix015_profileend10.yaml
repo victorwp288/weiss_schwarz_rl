@@ -1,7 +1,0 @@
-schema_version: 2
-description: structured_acceptance tiny32 fast cyclic public-teacher WSL frontier with persistent B1 mix and teacher profile fallback after update 10
-extends: structured_acceptance_tiny32_fast_pubcycle3_b1mix015.yaml
-training:
-  structured_aux:
-    teacher_public_heuristic_profiles_end_updates: 10
-

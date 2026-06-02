@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from weiss_rl.config import load_stack_config
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     DevEvalPolicySummary,
     deck_id_for_policy_id,
     parse_training_policy_id,

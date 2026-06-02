@@ -1,6 +1,6 @@
 schema_version: 2
 description: "Thesis final evaluation policy set for the selected factorized main/B1-seeded league surface and fixed decks."
-extends: main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml
+extends: main_league.yaml
 league:
   promotion:
     anchor_set_v1:

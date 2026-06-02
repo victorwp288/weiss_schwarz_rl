@@ -9,8 +9,8 @@ import torch
 
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset, save_replay_trajectory_bc_dataset
 from weiss_rl.training import paired_swing_conflict_filter, paired_swing_replay
-from weiss_rl.training.paired_swing_conflict_filter import normalize_paired_swing_action_source
-from weiss_rl.training.paired_swing_replay import (
+from weiss_rl.training.replay_data.paired_swing_conflict_filter import normalize_paired_swing_action_source
+from weiss_rl.training.replay_data.paired_swing_replay import (
     PairedSwingReplayState,
     filter_paired_swing_conflict_rows,
     maybe_run_paired_swing_replay,
@@ -158,7 +158,7 @@ def test_paired_swing_replay_reexports_canonical_conflict_filter_helpers() -> No
     )
     assert (
         paired_swing_conflict_filter.filter_paired_swing_conflict_rows.__module__
-        == "weiss_rl.training.paired_swing_conflict_filter"
+        == "weiss_rl.training.replay_data.paired_swing_conflict_filter"
     )
 
 

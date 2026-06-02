@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from weiss_rl.config import StackConfig
-from weiss_rl.eval.policy_set import LEGACY_NO_LEAGUE_POLICY_ID, NO_LEAGUE_POLICY_ID
-from weiss_rl.eval.policy_types import ResolvedEvalPolicy
+from weiss_rl.eval.policies.set import LEGACY_NO_LEAGUE_POLICY_ID, NO_LEAGUE_POLICY_ID
+from weiss_rl.eval.policies.types import ResolvedEvalPolicy
 from weiss_rl.eval.snapshot_model_loading import load_snapshot_eval_model, observation_spec_from_bundle
 from weiss_rl.eval.snapshot_registry_resolution import unique_paths
 from weiss_rl.experiments.baselines import (

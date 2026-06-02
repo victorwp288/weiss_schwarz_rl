@@ -12,28 +12,24 @@ import pytest
 import torch
 from torch import nn
 
-import weiss_rl.learners.impala_auxiliary_update as impala_auxiliary_update
-import weiss_rl.learners.impala_loss_context_stage as impala_loss_context_stage
-import weiss_rl.learners.impala_loss_metrics_stage as impala_loss_metrics_stage
-import weiss_rl.learners.impala_loss_teacher_stage as impala_loss_teacher_stage
-import weiss_rl.learners.impala_loss_teacher_targets_stage as impala_loss_teacher_targets_stage
-import weiss_rl.learners.impala_loss_vtrace_stage as impala_loss_vtrace_stage
-import weiss_rl.learners.impala_normal_update as impala_normal_update
-import weiss_rl.learners.impala_paired_outcome_update as impala_paired_outcome_update
-import weiss_rl.learners.impala_paired_swing_update as impala_paired_swing_update
-import weiss_rl.learners.impala_teacher_auxiliary_call as impala_teacher_auxiliary_call
-import weiss_rl.learners.impala_update_training_step as impala_update_training_step
+import weiss_rl.learners.impala.auxiliary_update as impala_auxiliary_update
+import weiss_rl.learners.impala.loss_context_stage as impala_loss_context_stage
+import weiss_rl.learners.impala.loss_metrics_stage as impala_loss_metrics_stage
+import weiss_rl.learners.impala.loss_teacher_stage as impala_loss_teacher_stage
+import weiss_rl.learners.impala.loss_teacher_targets_stage as impala_loss_teacher_targets_stage
+import weiss_rl.learners.impala.loss_vtrace_stage as impala_loss_vtrace_stage
+import weiss_rl.learners.impala.normal_update as impala_normal_update
+import weiss_rl.learners.impala.paired_outcome_update as impala_paired_outcome_update
+import weiss_rl.learners.impala.paired_swing_update as impala_paired_swing_update
+import weiss_rl.learners.impala.teacher_auxiliary_call as impala_teacher_auxiliary_call
+import weiss_rl.learners.impala.update_training_step as impala_update_training_step
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.learners.action_logp import (
     packed_scores_action_logp_and_entropy,
     packed_scores_family_entropy,
 )
-from weiss_rl.learners.impala_action_reductions import resolve_impala_action_reductions
-from weiss_rl.learners.impala_batch_support import ImpalaBatchSupportMixin
-from weiss_rl.learners.impala_fault_support import ImpalaFaultSupportMixin
-from weiss_rl.learners.impala_forward_support import ImpalaForwardSupportMixin
-from weiss_rl.learners.impala_learner import (
+from weiss_rl.learners.impala import (
     ImpalaLearner,
     _chosen_action_outcome_metrics,
     _masked_action_logp_and_entropy,
@@ -41,78 +37,82 @@ from weiss_rl.learners.impala_learner import (
     compute_structured_teacher_auxiliary_metrics,
     summarize_structured_policy_metrics,
 )
-from weiss_rl.learners.impala_logging_support import ImpalaLoggingSupportMixin
-from weiss_rl.learners.impala_loss_assembly import assemble_impala_loss_inputs
-from weiss_rl.learners.impala_loss_batch_inputs import ImpalaLossBatchInputs, resolve_impala_loss_batch_inputs
-from weiss_rl.learners.impala_loss_context_stage import finalize_impala_loss_context_stage
-from weiss_rl.learners.impala_loss_core import (
+from weiss_rl.learners.impala.action_reductions import resolve_impala_action_reductions
+from weiss_rl.learners.impala.batch_support import ImpalaBatchSupportMixin
+from weiss_rl.learners.impala.fault_support import ImpalaFaultSupportMixin
+from weiss_rl.learners.impala.forward_support import ImpalaForwardSupportMixin
+from weiss_rl.learners.impala.logging_support import ImpalaLoggingSupportMixin
+from weiss_rl.learners.impala.loss_assembly import assemble_impala_loss_inputs
+from weiss_rl.learners.impala.loss_batch_inputs import ImpalaLossBatchInputs, resolve_impala_loss_batch_inputs
+from weiss_rl.learners.impala.loss_context_stage import finalize_impala_loss_context_stage
+from weiss_rl.learners.impala.loss_core import (
     attach_resolved_vtrace_context,
     compute_impala_loss_core,
     resolve_impala_value_loss_mask,
     resolve_impala_vtrace_clip_config,
 )
-from weiss_rl.learners.impala_loss_finalization import (
+from weiss_rl.learners.impala.loss_finalization import (
     apply_impala_teacher_auxiliary,
     finalize_impala_loss_context,
 )
-from weiss_rl.learners.impala_loss_forward_context import build_impala_forward_context
-from weiss_rl.learners.impala_loss_inputs import (
+from weiss_rl.learners.impala.loss_forward_context import build_impala_forward_context
+from weiss_rl.learners.impala.loss_inputs import (
     prepare_impala_loss_inputs,
     resolve_impala_loss_forward_flags,
     resolve_impala_loss_masks,
 )
-from weiss_rl.learners.impala_loss_legal_mask import resolve_impala_dense_legal_mask
-from weiss_rl.learners.impala_loss_masks import (
+from weiss_rl.learners.impala.loss_legal_mask import resolve_impala_dense_legal_mask
+from weiss_rl.learners.impala.loss_masks import (
     ImpalaLossForwardFlags,
     ImpalaLossMasks,
 )
-from weiss_rl.learners.impala_loss_masks import (
+from weiss_rl.learners.impala.loss_masks import (
     resolve_impala_loss_masks as resolve_impala_loss_masks_stage,
 )
-from weiss_rl.learners.impala_loss_metrics import (
+from weiss_rl.learners.impala.loss_metrics import (
     build_impala_loss_metrics,
 )
-from weiss_rl.learners.impala_loss_metrics import (
+from weiss_rl.learners.impala.loss_metrics import (
     chosen_action_outcome_metrics as chosen_action_outcome_metrics_impl,
 )
-from weiss_rl.learners.impala_loss_metrics_stage import assemble_impala_loss_core_metrics
-from weiss_rl.learners.impala_loss_objective_stage import compute_impala_objective_stage
-from weiss_rl.learners.impala_loss_pipeline import (
+from weiss_rl.learners.impala.loss_metrics_stage import assemble_impala_loss_core_metrics
+from weiss_rl.learners.impala.loss_objective_stage import compute_impala_objective_stage
+from weiss_rl.learners.impala.loss_pipeline import (
     compute_impala_loss_and_metrics_with_context,
     resolve_impala_loss_action_reductions,
 )
-from weiss_rl.learners.impala_loss_policy_anchor_stage import apply_impala_policy_anchor_stage
-from weiss_rl.learners.impala_loss_policy_forward import ImpalaPolicyForwardResult, evaluate_impala_policy_forward
-from weiss_rl.learners.impala_loss_teacher_stage import apply_impala_teacher_auxiliary_stage
-from weiss_rl.learners.impala_loss_teacher_targets_stage import prepare_impala_loss_teacher_target_inputs
-from weiss_rl.learners.impala_loss_vtrace_stage import compute_impala_vtrace_stage
-from weiss_rl.learners.impala_metrics_assembly import (
+from weiss_rl.learners.impala.loss_policy_anchor_stage import apply_impala_policy_anchor_stage
+from weiss_rl.learners.impala.loss_policy_forward import ImpalaPolicyForwardResult, evaluate_impala_policy_forward
+from weiss_rl.learners.impala.loss_teacher_stage import apply_impala_teacher_auxiliary_stage
+from weiss_rl.learners.impala.loss_teacher_targets_stage import prepare_impala_loss_teacher_target_inputs
+from weiss_rl.learners.impala.loss_vtrace_stage import compute_impala_vtrace_stage
+from weiss_rl.learners.impala.metrics_assembly import (
     ImpalaMetricAssemblyRequest,
     assemble_impala_loss_metrics,
 )
-from weiss_rl.learners.impala_objective_loss import compute_impala_objective_losses
-from weiss_rl.learners.impala_optimizer_step import run_impala_optimizer_step
-from weiss_rl.learners.impala_paired_auxiliary_batch import resolve_paired_auxiliary_batch_inputs
-from weiss_rl.learners.impala_paired_outcome_auxiliary import ImpalaPairedOutcomeAuxiliaryMixin
-from weiss_rl.learners.impala_paired_outcome_candidates import (
+from weiss_rl.learners.impala.objective_loss import compute_impala_objective_losses
+from weiss_rl.learners.impala.optimizer_step import run_impala_optimizer_step
+from weiss_rl.learners.impala.paired_auxiliary_batch import resolve_paired_auxiliary_batch_inputs
+from weiss_rl.learners.impala.paired_outcome_auxiliary import ImpalaPairedOutcomeAuxiliaryMixin
+from weiss_rl.learners.impala.paired_outcome_candidates import (
     PairedOutcomeCandidateLogps,
     compute_paired_outcome_candidate_logps,
 )
-from weiss_rl.learners.impala_paired_outcome_outputs import (
+from weiss_rl.learners.impala.paired_outcome_outputs import (
     build_paired_outcome_preference_context,
     build_paired_outcome_preference_metrics,
 )
-from weiss_rl.learners.impala_paired_swing_auxiliary import ImpalaPairedSwingAuxiliaryMixin
-from weiss_rl.learners.impala_paired_swing_candidates import compute_paired_swing_candidate_view
-from weiss_rl.learners.impala_paired_swing_outputs import build_paired_swing_auxiliary_metrics
-from weiss_rl.learners.impala_policy_anchor_support import ImpalaPolicyAnchorSupportMixin
-from weiss_rl.learners.impala_public_heuristic_support import ImpalaPublicHeuristicSupportMixin
-from weiss_rl.learners.impala_structured_summary import (
+from weiss_rl.learners.impala.paired_swing_auxiliary import ImpalaPairedSwingAuxiliaryMixin
+from weiss_rl.learners.impala.paired_swing_candidates import compute_paired_swing_candidate_view
+from weiss_rl.learners.impala.paired_swing_outputs import build_paired_swing_auxiliary_metrics
+from weiss_rl.learners.impala.policy_anchor_support import ImpalaPolicyAnchorSupportMixin
+from weiss_rl.learners.impala.public_heuristic_support import ImpalaPublicHeuristicSupportMixin
+from weiss_rl.learners.impala.structured_summary import (
     ImpalaStructuredSummaryRequest,
     compute_impala_structured_policy_summary,
 )
-from weiss_rl.learners.impala_structured_teacher_auxiliary import ImpalaStructuredTeacherAuxiliaryMixin
-from weiss_rl.learners.impala_teacher_auxiliary_request import (
+from weiss_rl.learners.impala.structured_teacher_auxiliary import ImpalaStructuredTeacherAuxiliaryMixin
+from weiss_rl.learners.impala.teacher_auxiliary_request import (
     compute_impala_teacher_auxiliary,
     resolve_impala_teacher_auxiliary_coefficients,
     resolve_impala_teacher_auxiliary_factorized_inputs,
@@ -120,50 +120,50 @@ from weiss_rl.learners.impala_teacher_auxiliary_request import (
     resolve_impala_teacher_auxiliary_labels,
     resolve_impala_teacher_auxiliary_packed_inputs,
 )
-from weiss_rl.learners.impala_teacher_target_inputs import (
+from weiss_rl.learners.impala.teacher_target_inputs import (
     ImpalaTeacherTargetInputs,
     prepare_impala_teacher_target_inputs,
     resolve_impala_teacher_target_plan,
 )
-from weiss_rl.learners.impala_update_bookkeeping import (
+from weiss_rl.learners.impala.update_bookkeeping import (
     begin_impala_update_scope,
     finalize_impala_update_scope,
     set_impala_model_train_mode,
 )
-from weiss_rl.learners.impala_update_logging import log_impala_update_metrics_if_due
-from weiss_rl.learners.impala_update_loop import (
+from weiss_rl.learners.impala.update_logging import log_impala_update_metrics_if_due
+from weiss_rl.learners.impala.update_loop import (
     ScopedOptimizerUpdateSpec,
     run_scoped_impala_optimizer_update,
 )
-from weiss_rl.learners.impala_update_loss_stage import build_scoped_impala_loss
-from weiss_rl.learners.impala_update_training_inputs import (
+from weiss_rl.learners.impala.update_loss_stage import build_scoped_impala_loss
+from weiss_rl.learners.impala.update_training_inputs import (
     has_impala_training_inputs,
     missing_impala_training_input_fields,
     resolve_impala_update_vtrace_result,
     summarize_precomputed_vtrace_update_metrics,
     validate_impala_training_inputs,
 )
-from weiss_rl.learners.impala_update_training_step import run_impala_training_optimizer_step
-from weiss_rl.learners.impala_vtrace_targets import resolve_impala_vtrace_targets
+from weiss_rl.learners.impala.update_training_step import run_impala_training_optimizer_step
+from weiss_rl.learners.impala.vtrace_targets import resolve_impala_vtrace_targets
 from weiss_rl.learners.structured_auxiliary import structured_catalog_metadata
-from weiss_rl.learners.structured_teacher_auxiliary import (
+from weiss_rl.learners.structured_teacher.auxiliary import (
     compute_structured_teacher_auxiliary_metrics as compute_structured_teacher_auxiliary_metrics_impl,
 )
-from weiss_rl.learners.structured_teacher_auxiliary import (
+from weiss_rl.learners.structured_teacher.auxiliary import (
     resolve_structured_teacher_branch,
     resolve_structured_teacher_dispatch,
     resolve_structured_teacher_required_labels,
     resolve_structured_teacher_zero_context,
 )
-from weiss_rl.learners.structured_teacher_common import empty_structured_teacher_metrics
-from weiss_rl.learners.structured_teacher_factorized_actions import compute_factorized_teacher_action_supervision
-from weiss_rl.learners.structured_teacher_factorized_groups import compute_factorized_teacher_group_supervision
-from weiss_rl.learners.structured_teacher_factorized_hand import compute_factorized_teacher_hand_supervision
-from weiss_rl.learners.structured_teacher_packed import compute_packed_structured_teacher_auxiliary_metrics
-from weiss_rl.learners.structured_teacher_packed_actions import compute_packed_teacher_action_supervision
-from weiss_rl.learners.structured_teacher_packed_groups import compute_packed_teacher_group_supervision
-from weiss_rl.learners.structured_teacher_packed_margins import compute_packed_teacher_margin_supervision
-from weiss_rl.learners.structured_teacher_packed_public import compute_packed_teacher_public_supervision
+from weiss_rl.learners.structured_teacher.common import empty_structured_teacher_metrics
+from weiss_rl.learners.structured_teacher.factorized_actions import compute_factorized_teacher_action_supervision
+from weiss_rl.learners.structured_teacher.factorized_groups import compute_factorized_teacher_group_supervision
+from weiss_rl.learners.structured_teacher.factorized_hand import compute_factorized_teacher_hand_supervision
+from weiss_rl.learners.structured_teacher.packed import compute_packed_structured_teacher_auxiliary_metrics
+from weiss_rl.learners.structured_teacher.packed_actions import compute_packed_teacher_action_supervision
+from weiss_rl.learners.structured_teacher.packed_groups import compute_packed_teacher_group_supervision
+from weiss_rl.learners.structured_teacher.packed_margins import compute_packed_teacher_margin_supervision
+from weiss_rl.learners.structured_teacher.packed_public import compute_packed_teacher_public_supervision
 from weiss_rl.learners.vtrace import VTraceTargets
 
 

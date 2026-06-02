@@ -21,12 +21,12 @@ from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.models.observation_contract import header_field_index
-from weiss_rl.runtime_components.action_surface import (
+from weiss_rl.runtime.components.action_surface import (
     filter_batch_main_move_only_rows_to_pass,
     filter_batch_mulligan_select_after_select,
     filter_batch_pass_when_attack_available,
 )
-from weiss_rl.runtime_components.legal_meta import action_catalog_indices
+from weiss_rl.runtime.components.legal_meta import action_catalog_indices
 from weiss_rl.training.dev_eval import legal_ids_for_env_row, promotion_gate_rng_seed
 
 

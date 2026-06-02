@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any
 
-from weiss_rl.eval.final_eval_worker import load_json_object, run_final_eval_worker, worker_output_dir
+from weiss_rl.eval.final.worker import load_json_object, run_final_eval_worker, worker_output_dir
 from weiss_rl.eval.parallel_final_eval_plan import (
     ParallelFinalEvalPlan,
     parse_args,

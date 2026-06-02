@@ -9,13 +9,13 @@ import pytest
 
 from weiss_rl import runtime as runtime_module
 from weiss_rl.runtime import QueueRuntime
-from weiss_rl.runtime_components.batch_collection import (
+from weiss_rl.runtime.components.batch_collection import (
     collect_pending_runtime_batch,
     pending_unroll_key,
     pending_unroll_selection,
     remaining_pending_unrolls,
 )
-from weiss_rl.runtime_components.types import RuntimeBatch
+from weiss_rl.runtime.components.types import RuntimeBatch
 
 
 def _unroll(actor_id: int, unroll_seq: int) -> SimpleNamespace:

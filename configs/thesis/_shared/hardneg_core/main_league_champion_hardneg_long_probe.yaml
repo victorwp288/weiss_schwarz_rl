@@ -1,6 +1,6 @@
 schema_version: 2
 description: "Longer main-league probe from the current selected main checkpoint with real learned champion sampling, emergent hard-negative sampling, B1 residency, and B0-B4+B1 guardrails. Imported seed snapshots are training-pool opponents only; thesis promotion still requires paired confirmation."
-extends: ../main_b1only_p2/main_b1only_p2_trust_region_probe.yaml
+extends: ../../main_league.yaml
 league:
   pool:
     recent_size: 24
@@ -34,6 +34,13 @@ training:
     actor_sampling_temperature: 0.95
   fixed_model_opponent_action_selection: argmax
   structured_aux:
+    teacher_supervised_start_updates: 0
+    teacher_supervised_end_updates: 0
+    teacher_supervised_final_scale: 0.0
+    teacher_public_heuristic_coef: 0.0
+    teacher_public_heuristic_end_updates: 0
+    teacher_public_heuristic_final_coef: 0.0
+    teacher_public_heuristic_profiles_end_updates: 0
     policy_anchor_coef: 0.12
     policy_anchor_top_action_coef: 0.01
     policy_anchor_temperature: 0.75

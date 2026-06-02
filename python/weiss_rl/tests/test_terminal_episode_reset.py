@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import numpy as np
 
-import weiss_rl.runtime_components.terminal_episode_reset as terminal_reset_module
-from weiss_rl.runtime_components.counters import collector_counter_template
-from weiss_rl.runtime_components.terminal_episode_reset import reset_terminal_episode_rows
+import weiss_rl.runtime.components.terminal_episode_reset as terminal_reset_module
+from weiss_rl.runtime.components.counters import collector_counter_template
+from weiss_rl.runtime.components.terminal_episode_reset import reset_terminal_episode_rows
 
 
 def test_reset_terminal_episode_rows_preserves_terminal_flow_order(monkeypatch) -> None:

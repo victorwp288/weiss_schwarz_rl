@@ -1,6 +1,0 @@
-schema_version: 2
-description: "B1 guided ablation: B2-exact argmax-gated run with model-only attack-over-pass action-surface guard."
-extends: public_teacher_b2exact_argmaxdev_mainmoveguard_mulliganguard_reward.yaml
-training:
-  action_surface:
-    force_attack_over_pass_when_attack_legal: true

@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-from weiss_rl.runtime_components.config import QueueRuntimeConfig, build_runtime_config
+from weiss_rl.runtime.components.config import QueueRuntimeConfig, build_runtime_config
 
 
 def _stack() -> Any:

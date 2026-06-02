@@ -6,8 +6,8 @@ from __future__ import annotations
 import sys
 
 from weiss_rl.training import train_entrypoint as _impl
-from weiss_rl.training.train_entrypoint_dev_eval_wrappers import install_dev_eval_wrappers
-from weiss_rl.training.train_entrypoint_snapshot_wrappers import install_snapshot_wrappers
+from weiss_rl.training.train_entrypoint.dev_eval_wrappers import install_dev_eval_wrappers
+from weiss_rl.training.train_entrypoint.snapshot_wrappers import install_snapshot_wrappers
 from weiss_rl.workflows.script_compat import bind_package_script_api, install_package_entrypoint_exports
 
 install_package_entrypoint_exports(globals(), _impl)

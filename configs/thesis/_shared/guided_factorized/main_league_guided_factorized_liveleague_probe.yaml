@@ -1,9 +1,0 @@
-schema_version: 2
-description: "Main league probe: teacherfade continuation with early live PFSP/promotion pressure, used only to test whether actual league dynamics stabilize the post-50 B1-guided bootstrap."
-extends: main_league_guided_factorized_continuation_teacherfade_probe.yaml
-league:
-  warmup:
-    first_updates: 5
-    initial_window_episodes: 512
-    ramp_target_updates: 20
-    ramp_target_window_episodes: 4096

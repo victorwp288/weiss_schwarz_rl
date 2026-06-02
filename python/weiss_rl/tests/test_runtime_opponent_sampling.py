@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,
@@ -19,8 +19,8 @@ from weiss_rl.runtime import (
     _NOLEAGUE_BASELINE_POLICY_ID,
     QueueRuntime,
 )
-from weiss_rl.runtime_components.counters import collector_counter_template
-from weiss_rl.runtime_components.episode_roles import (
+from weiss_rl.runtime.components.counters import collector_counter_template
+from weiss_rl.runtime.components.episode_roles import (
     accumulate_last_pfsp_exposure_counters,
     nondiverse_opponent_role_assignment,
     resolve_fixed_opponent_role_assignment,

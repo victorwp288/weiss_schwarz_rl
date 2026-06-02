@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from weiss_rl.runtime_components.reward_shaping import (
+from weiss_rl.runtime.components.reward_shaping import (
     apply_collector_reward_shaping,
     apply_mulligan_select_with_confirm_penalty,
     apply_pass_with_nonpass_penalty,

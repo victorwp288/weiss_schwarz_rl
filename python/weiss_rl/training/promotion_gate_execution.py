@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, cast
 
-from weiss_rl.eval.policy_set import heuristic_public_profile_name_for_policy_id
+from weiss_rl.eval.policies.set import heuristic_public_profile_name_for_policy_id
 from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotRegistry
 from weiss_rl.training.promotion import PROMOTION_GATE_RANDOMLEGAL_POLICY_ID
 

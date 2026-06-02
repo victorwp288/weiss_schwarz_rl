@@ -1,8 +1,0 @@
-schema_version: 2
-description: "Stability probe for the no-public B4-win trajectory-BC continuation. Keeps the strong frozen anchor/replay-BC setup, lowers learner update pressure, and uses actor temperature 1.0 to reduce actor/learner policy mismatch during post-BC league updates."
-extends: main_league_guided_bootstrap_selected_trajbc_b4win_anchor_nopublic.yaml
-training:
-  optimizer:
-    learning_rate: 0.00005
-  exploration:
-    actor_sampling_temperature: 1.0

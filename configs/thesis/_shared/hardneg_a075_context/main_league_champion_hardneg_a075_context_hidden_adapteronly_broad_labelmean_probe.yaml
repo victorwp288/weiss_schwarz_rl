@@ -1,9 +1,0 @@
-schema_version: 2
-description: "Base-frozen hidden opponent-context adapter probe from a075. Uses the broad current-state conflict-filtered label_mean paired-swing objective, but trains only the zero-initialized hidden context adapter so offline movement cannot be bought by drifting the shared trunk. Must pass the mechanistic gate before sentinel eval."
-extends: main_league_champion_hardneg_a075_context_broad_conflictfilter_labelmean_probe.yaml
-model:
-  opponent_context_adapter_train_only: true
-  opponent_context_adapter_lr_multiplier: 2000.0
-training:
-  optimizer:
-    learning_rate: 0.0000001

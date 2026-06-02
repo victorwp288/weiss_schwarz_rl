@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from weiss_rl.runtime_components.collector_step_legal import (
+from weiss_rl.runtime.components.collector_step_legal import (
     MaskLegalStorage,
     MaskLegalSurface,
     PackedLegalStorage,

@@ -5,10 +5,10 @@ This repository is a behavior-sensitive thesis RL pipeline for Weiss Schwarz. Th
 ## Top-Level Flow
 
 1. The package CLI (`python -m weiss_rl.cli`) selects a standard thesis workflow and stack config.
-2. The compatibility training entrypoint creates a run manifest, verifies simulator/config hashes, builds the model and learner, and drives `QueueRuntime`.
+2. The package training entrypoint creates a run manifest, verifies simulator/config hashes, builds the model and learner, and drives `QueueRuntime`.
 3. `QueueRuntime` collects decision-boundary rollouts from simulator-backed environments and packages learner batches.
 4. Learners update policy/value models and write checkpoints, metrics, snapshots, and TensorBoard logs.
-5. `python/scripts/eval.py` resolves deterministic policy sets, runs pinned final evaluation, writes summaries, and optionally drives metagame/readiness reporting.
+5. `python -m weiss_rl.workflows.eval_entrypoint` resolves deterministic policy sets, runs pinned final evaluation, writes summaries, and optionally drives metagame/readiness reporting.
 
 ## Main Packages
 
@@ -26,11 +26,10 @@ This repository is a behavior-sensitive thesis RL pipeline for Weiss Schwarz. Th
 - `weiss_rl.core`: simulator/domain contracts, legal-action batches, action catalog decoding, masking, observation layout, schedules, and termination classification.
 - `weiss_rl.artifacts`: run artifact layout, manifest writing, and reproducibility/hash helpers.
 - `weiss_rl.diagnostics`: action diagnostics, artifact hygiene, job telemetry, TensorBoard and JSONL training log helpers, and CLI startup banner formatting.
-- `weiss_rl.experiments`: no-league baseline helpers, experiment launch plans, sweep presets, structured-acceptance helpers, and public-demo scaffolding.
+- `weiss_rl.experiments`: retained no-league baseline IDs and public-demo scaffolding.
 - `weiss_rl.envs`: simulator pool construction and `DecisionBoundaryEnv` wrappers.
-- `weiss_rl.runtime`: compatibility facade for the training collection runtime and learner-batch assembly.
-- `weiss_rl.runtime_components`: runtime internals used by `weiss_rl.runtime`, including actor state/model helpers, batching, collector commands, counters, IPC, metrics, opponent sampling, process collectors, shared transport, topology, and thread setup.
-- `weiss_rl.learners`: IMPALA/V-trace and PPO-lite learner implementations.
+- `weiss_rl.runtime`: queue runtime package for training collection and learner-batch assembly. Internals are grouped under `weiss_rl.runtime.components`, including actor state/model helpers, batching, collector commands, counters, IPC, metrics, opponent sampling, process collectors, shared transport, topology, and thread setup.
+- `weiss_rl.learners`: learner-side math plus IMPALA/V-trace and PPO-lite implementations. The main IMPALA learner lives in `weiss_rl.learners.impala`.
 - `weiss_rl.learners.action_logp`: dense masked and packed learner action log-probability/entropy helpers used by the IMPALA learner.
 - `weiss_rl.learners.batch_fields`: model-device batch field conversion and validation helpers used by the IMPALA learner.
 - `weiss_rl.learners.faults`: numeric fault bundle payload, finite tensor, and gradient diagnostic helpers used by the IMPALA learner.
@@ -45,9 +44,9 @@ This repository is a behavior-sensitive thesis RL pipeline for Weiss Schwarz. Th
 - `weiss_rl.models`: model internals used by `weiss_rl.model`, including typed encoders, observation contracts, action plans/tables, dense/factorized/packed scoring, public heuristic scoring, deterministic sampling, tensor helpers, and snapshot loading.
 - `weiss_rl.eval`: deterministic evaluation, policy resolution, payoff folding, uncertainty, diagnostics, and paper readiness.
 - `weiss_rl.league`: snapshot registry, PFSP sampling, promotion gates, and opponent outcomes.
-- `weiss_rl.training`: reusable training orchestration helpers extracted from public scripts, including CLI parsing, startup checks, paths, input validation, checkpoint/snapshot helpers, guidance schedules, environment builders, and minimal-batch utilities.
+- `weiss_rl.training`: reusable training orchestration helpers, including CLI parsing, startup checks, paths, input validation, checkpoint/snapshot helpers, guidance schedules, environment builders, minimal-batch utilities, and the package train entrypoint.
 - `weiss_rl.training.manifest_layout`: training manifest actor-device layout helpers used by the package and compatibility training entrypoints.
-- `weiss_rl.workflows`: package-CLI parser construction, workflow profiles, small command router, training/eval/bootstrap workflow handlers, dry-run plans, snapshot resolution, and deterministic command builders for the standard thesis train/eval/figure/guard surfaces.
+- `weiss_rl.workflows`: package-CLI parser construction, workflow profiles, small command router, training/eval workflow handlers, dry-run plans, snapshot resolution, artifact-contract checks, verification, and deterministic command builders for the standard thesis train/eval/figure surfaces.
 - `python/scripts`: path-based public CLI entrypoints. These paths are compatibility surfaces.
 
 ## Behavior-Sensitive Boundaries
@@ -60,15 +59,15 @@ This repository is a behavior-sensitive thesis RL pipeline for Weiss Schwarz. Th
 
 ## Compatibility Quarantine
 
-The package CLI in `weiss_rl.cli` is the standard thesis surface. The
-path-based `python/scripts/*` commands remain as compatibility wrappers,
-diagnostic tools, or lower-level implementation entrypoints. Dated campaign,
-rescue, sweep, and targeted-confirm scripts are quarantined from the thesis
-workflow: do not use them for primary claims unless the reason and resulting
-artifacts are recorded in `docs/rebuild_log.md`.
+The package CLI in `weiss_rl.cli` is the standard thesis surface. The remaining
+path-based `python/scripts/*` commands are compatibility wrappers, diagnostic
+tools, or lower-level implementation entrypoints for the retained workflow.
+Dated campaign, rescue, sweep, guided-bootstrap, and paired-probe scripts were
+removed from the active checkout.
 
 The current rebuild moved stale top-level facades into domain packages such as
 `weiss_rl.core`, `weiss_rl.artifacts`, `weiss_rl.diagnostics`,
-`weiss_rl.experiments`, `weiss_rl.models`, and `weiss_rl.runtime_components`.
-Future extractions should stay small, preserve behavior with tests, and keep the
-public thesis commands unchanged.
+`weiss_rl.experiments`, `weiss_rl.models`, `weiss_rl.runtime`,
+`weiss_rl.learners.impala`, and workflow subpackages. Future extractions should
+stay small, preserve behavior with tests, and keep the public thesis commands
+unchanged.

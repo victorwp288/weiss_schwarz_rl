@@ -100,7 +100,7 @@ def test_thesis_run_script_is_thin_workflow_facade() -> None:
 
 
 def test_thesis_wrapper_cli_parser_preserves_defaults_and_repeatable_args(tmp_path: Path) -> None:
-    from weiss_rl.workflows.thesis_wrapper_cli import build_thesis_wrapper_parser, thesis_wrapper_repo_root
+    from weiss_rl.workflows.thesis_wrapper_support.cli import build_thesis_wrapper_parser, thesis_wrapper_repo_root
 
     parser = build_thesis_wrapper_parser()
     args = parser.parse_args(
@@ -131,7 +131,7 @@ def test_thesis_wrapper_cli_parser_preserves_defaults_and_repeatable_args(tmp_pa
 
 
 def test_thesis_wrapper_cli_lists_presets_without_requiring_run_label(tmp_path: Path, capsys) -> None:
-    from weiss_rl.workflows.thesis_wrapper_cli import build_thesis_wrapper_parser, run_thesis_wrapper_cli
+    from weiss_rl.workflows.thesis_wrapper_support.cli import build_thesis_wrapper_parser, run_thesis_wrapper_cli
 
     repo_root = tmp_path / "repo"
     parser = build_thesis_wrapper_parser()
@@ -143,11 +143,11 @@ def test_thesis_wrapper_cli_lists_presets_without_requiring_run_label(tmp_path: 
     output = capsys.readouterr().out
     assert f"standard: {(repo_root / 'configs/presets/structured_acceptance_standard.yaml').as_posix()}" in output
     assert "standard-auto-gpu:" in output
-    assert "ablate-no-tactical-bias:" in output
+    assert "ablate-no-gru:" in output
 
 
 def test_thesis_wrapper_input_boundary_normalizes_argparse_namespace(tmp_path: Path) -> None:
-    from weiss_rl.workflows.thesis_wrapper_inputs import ThesisWrapperInputs, thesis_wrapper_inputs_from_args
+    from weiss_rl.workflows.thesis_wrapper_support.inputs import ThesisWrapperInputs, thesis_wrapper_inputs_from_args
 
     args = SimpleNamespace(
         run_label="demo_run",
@@ -193,8 +193,8 @@ def test_thesis_wrapper_input_boundary_normalizes_argparse_namespace(tmp_path: P
 def test_thesis_wrapper_command_selection_preserves_optional_steps(tmp_path: Path) -> None:
     from dataclasses import replace
 
-    from weiss_rl.workflows.thesis_wrapper_inputs import ThesisWrapperInputs
-    from weiss_rl.workflows.thesis_wrapper_plan_commands import (
+    from weiss_rl.workflows.thesis_wrapper_support.inputs import ThesisWrapperInputs
+    from weiss_rl.workflows.thesis_wrapper_support.plan_commands import (
         ThesisWrapperCommands,
         build_thesis_wrapper_commands,
     )
@@ -241,7 +241,11 @@ def test_thesis_wrapper_command_selection_preserves_optional_steps(tmp_path: Pat
     assert commands.eval_command[:3] == ["python.exe", "-m", "weiss_rl.workflows.eval_entrypoint"]
     assert commands.eval_command[-2:] == ["--paired-seed-limit", "4"]
     assert commands.compare_command is not None
-    assert commands.compare_command[:3] == ["python.exe", "-m", "weiss_rl.workflows.compare_runs_entrypoint"]
+    assert commands.compare_command[:3] == [
+        "python.exe",
+        "-m",
+        "weiss_rl.workflows.compare_runs.compare_runs_entrypoint",
+    ]
     assert commands.compare_command[-2:] == ["--format", "md"]
 
     skip_inputs = replace(inputs, skip_eval=True, skip_compare=True)
@@ -261,11 +265,11 @@ def test_thesis_wrapper_command_selection_preserves_optional_steps(tmp_path: Pat
 def test_thesis_wrapper_plan_execution_runs_selected_commands_in_order(tmp_path: Path) -> None:
     from dataclasses import replace
 
-    from weiss_rl.workflows.thesis_wrapper_plan_execution import (
+    from weiss_rl.workflows.thesis_wrapper_support.plan_execution import (
         run_thesis_wrapper_commands,
         thesis_wrapper_commands_for_plan,
     )
-    from weiss_rl.workflows.thesis_wrapper_state import ThesisWrapperPlan, ThesisWrapperResult
+    from weiss_rl.workflows.thesis_wrapper_support.state import ThesisWrapperPlan, ThesisWrapperResult
 
     plan = ThesisWrapperPlan(
         repo_root=tmp_path / "repo",
@@ -278,7 +282,7 @@ def test_thesis_wrapper_plan_execution_runs_selected_commands_in_order(tmp_path:
         eval_preset="standard-thesis-eval",
         train_command=["python.exe", "-m", "weiss_rl.training.train_entrypoint"],
         eval_command=["python.exe", "-m", "weiss_rl.workflows.eval_entrypoint"],
-        compare_command=["python.exe", "-m", "weiss_rl.workflows.compare_runs_entrypoint"],
+        compare_command=["python.exe", "-m", "weiss_rl.workflows.compare_runs.compare_runs_entrypoint"],
         b1_baseline_run_dir=None,
         dry_run=True,
     )
@@ -302,8 +306,8 @@ def test_thesis_wrapper_plan_execution_runs_selected_commands_in_order(tmp_path:
 
 
 def test_thesis_wrapper_plan_execution_records_failure_without_running_remaining_commands(tmp_path: Path) -> None:
-    from weiss_rl.workflows.thesis_wrapper_plan_execution import run_thesis_wrapper_commands
-    from weiss_rl.workflows.thesis_wrapper_state import ThesisWrapperPlan
+    from weiss_rl.workflows.thesis_wrapper_support.plan_execution import run_thesis_wrapper_commands
+    from weiss_rl.workflows.thesis_wrapper_support.state import ThesisWrapperPlan
 
     plan = ThesisWrapperPlan(
         repo_root=tmp_path / "repo",
@@ -316,7 +320,7 @@ def test_thesis_wrapper_plan_execution_records_failure_without_running_remaining
         eval_preset="standard-thesis-eval",
         train_command=["python.exe", "-m", "weiss_rl.training.train_entrypoint"],
         eval_command=["python.exe", "-m", "weiss_rl.workflows.eval_entrypoint"],
-        compare_command=["python.exe", "-m", "weiss_rl.workflows.compare_runs_entrypoint"],
+        compare_command=["python.exe", "-m", "weiss_rl.workflows.compare_runs.compare_runs_entrypoint"],
         b1_baseline_run_dir=None,
         dry_run=False,
     )
@@ -337,7 +341,7 @@ def test_thesis_wrapper_plan_execution_records_failure_without_running_remaining
 
 
 def test_thesis_wrapper_plan_builder_preserves_default_eval_and_optional_commands(tmp_path: Path) -> None:
-    from weiss_rl.workflows.thesis_wrapper_plan import (
+    from weiss_rl.workflows.thesis_wrapper_support.plan import (
         ThesisWrapperRequest,
         build_thesis_wrapper_commands_for_request,
         build_thesis_wrapper_plan,
@@ -401,7 +405,7 @@ def test_thesis_wrapper_plan_builder_preserves_default_eval_and_optional_command
     assert plan.eval_command[:3] == ["python.exe", "-m", "weiss_rl.workflows.eval_entrypoint"]
     assert plan.eval_command[-2:] == ["--paired-seed-limit", "4"]
     assert plan.compare_command is not None
-    assert plan.compare_command[:3] == ["python.exe", "-m", "weiss_rl.workflows.compare_runs_entrypoint"]
+    assert plan.compare_command[:3] == ["python.exe", "-m", "weiss_rl.workflows.compare_runs.compare_runs_entrypoint"]
     assert payload["status"] == "planned"
     assert payload["b1_baseline_run_dir"] == b1_run.resolve().as_posix()
 
@@ -410,7 +414,7 @@ def test_thesis_wrapper_plan_runner_records_failed_step_and_summary(tmp_path: Pa
     import subprocess
 
     from weiss_rl.workflows import thesis_wrapper_plan
-    from weiss_rl.workflows.thesis_wrapper_plan import (
+    from weiss_rl.workflows.thesis_wrapper_support.plan import (
         ThesisWrapperPlan,
         run_thesis_wrapper_plan,
         write_thesis_wrapper_summary,
@@ -461,16 +465,16 @@ def test_thesis_wrapper_command_builders_preserve_train_eval_compare_shapes(tmp_
         build_eval_entrypoint_command,
         build_train_entrypoint_command,
     )
-    from weiss_rl.workflows.thesis_wrapper_command_builders import (
+    from weiss_rl.workflows.thesis_wrapper_support.command_builders import (
         build_eval_entrypoint_command as wrapper_eval_entrypoint_command,
     )
-    from weiss_rl.workflows.thesis_wrapper_command_builders import (
+    from weiss_rl.workflows.thesis_wrapper_support.command_builders import (
         build_thesis_compare_command as package_build_compare,
     )
-    from weiss_rl.workflows.thesis_wrapper_command_builders import (
+    from weiss_rl.workflows.thesis_wrapper_support.command_builders import (
         build_train_entrypoint_command as wrapper_train_entrypoint_command,
     )
-    from weiss_rl.workflows.thesis_wrapper_commands import (
+    from weiss_rl.workflows.thesis_wrapper_support.commands import (
         build_thesis_compare_command,
         build_thesis_eval_command,
         build_thesis_train_command,
@@ -532,7 +536,7 @@ def test_thesis_wrapper_command_builders_preserve_train_eval_compare_shapes(tmp_
     assert str(b1_run) in eval_command
     assert eval_command[-2:] == ["--paired-seed-limit", "2"]
 
-    assert compare[:3] == ["python.exe", "-m", "weiss_rl.workflows.compare_runs_entrypoint"]
+    assert compare[:3] == ["python.exe", "-m", "weiss_rl.workflows.compare_runs.compare_runs_entrypoint"]
     assert compare.count("--run-dir") == 2
     assert str(tmp_path / "repo" / "runs" / "baseline_a") in compare
     assert "--launch-group-summary" in compare
@@ -575,7 +579,7 @@ def test_thesis_run_wrapper_dry_run_writes_plan(tmp_path: Path) -> None:
     assert len(payload["steps"]) == 3
     assert payload["steps"][0]["command"][1:3] == ["-m", "weiss_rl.training.train_entrypoint"]
     assert payload["steps"][1]["command"][1:3] == ["-m", "weiss_rl.workflows.eval_entrypoint"]
-    assert payload["steps"][2]["command"][1:3] == ["-m", "weiss_rl.workflows.compare_runs_entrypoint"]
+    assert payload["steps"][2]["command"][1:3] == ["-m", "weiss_rl.workflows.compare_runs.compare_runs_entrypoint"]
 
 
 def test_thesis_run_package_module_dry_run_writes_plan(tmp_path: Path) -> None:
@@ -768,8 +772,8 @@ def test_thesis_run_wrapper_lists_named_presets_without_run_label(tmp_path: Path
     assert result.returncode == 0, result.stderr
     assert "standard:" in result.stdout
     assert "standard-auto-gpu:" in result.stdout
-    assert "ablate-teacher-fade:" in result.stdout
-    assert "ablate-no-tactical-bias:" in result.stdout
+    assert "ablate-ppo-lite:" in result.stdout
+    assert "ablate-terminal-only:" in result.stdout
 
 
 def test_thesis_run_wrapper_passes_b1_baseline_run_dir_to_train_and_eval(tmp_path: Path) -> None:

@@ -9,14 +9,14 @@ import pytest
 
 from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.runtime import QueueRuntime, RuntimeUnroll
-from weiss_rl.runtime_components import impala_learner_batch, ppo_learner_batch
-from weiss_rl.runtime_components.batching import (
+from weiss_rl.runtime.components import impala_learner_batch, ppo_learner_batch
+from weiss_rl.runtime.components.batching import (
     actor_perspective_discounts,
     build_impala_learner_batch,
     build_ppo_learner_batch,
     gae_advantages,
 )
-from weiss_rl.runtime_components.legal_batching import (
+from weiss_rl.runtime.components.legal_batching import (
     concatenate_batch_legal_actions,
     concatenate_legal_actions,
     require_ids_offsets,
@@ -61,8 +61,8 @@ def _make_runtime_unroll(
 def test_runtime_batching_facade_reexports_algorithm_payload_builders() -> None:
     assert build_impala_learner_batch is impala_learner_batch.build_impala_learner_batch
     assert build_ppo_learner_batch is ppo_learner_batch.build_ppo_learner_batch
-    assert build_impala_learner_batch.__module__ == "weiss_rl.runtime_components.impala_learner_batch"
-    assert build_ppo_learner_batch.__module__ == "weiss_rl.runtime_components.ppo_learner_batch"
+    assert build_impala_learner_batch.__module__ == "weiss_rl.runtime.components.impala_learner_batch"
+    assert build_ppo_learner_batch.__module__ == "weiss_rl.runtime.components.ppo_learner_batch"
 
 
 def test_build_impala_batch_exposes_stable_learner_payload_contract() -> None:

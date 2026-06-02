@@ -46,18 +46,6 @@ uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label mai
 initializes from that checkpoint. It does not use chronological `latest` as a
 substitute for an explicit B1 baseline alias.
 
-Locked selected-seed smoke:
-
-```powershell
-uv run --extra dev --extra sim python -m weiss_rl.cli train-main-guided-bootstrap `
-  --run-label main_from_locked_seed_smoke `
-  --init-from-run-dir runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01 `
-  --init-policy-id selected_candidate `
-  --seed-run runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01 `
-  --selected-seed-champion `
-  --profile smoke
-```
-
 Main league thesis launch:
 
 ```powershell
@@ -66,74 +54,9 @@ uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label mai
 
 The public main league stack is `configs/thesis/main_league.yaml`. It uses the
 same packed medium64 model surface as B1, imports the explicit B1 baseline
-anchor, and keeps the fixed-deck thesis policy visible. Guided selected-seed
-continuations remain available through `train-main-guided-bootstrap` and the
-guarded bootstrap controller, where the factorized selected-B1 contract is
-explicit.
-
-Guarded selected main-league segment:
-
-```powershell
-uv run --extra dev --extra sim python python/scripts/guarded_league_bootstrap.py `
-  --init-from-checkpoint runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/training/checkpoints/checkpoint_15.pt `
-  --seed-snapshot-run-dir runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01 `
-  --run-prefix guarded_main_selected_seed1 `
-  --stack-config configs/thesis/main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml `
-  --segments 1 `
-  --segment-updates 10 `
-  --confirm-paired-seeds 64 `
-  --first-init-schedule-offset-updates 0
-```
-
-The guarded controller records chronological latest, but advances only from the
-published `main_league_selected` alias after targeted confirmation. Do not
-extend a segment because loss improved or because it wrote a newer checkpoint.
-
-Guarded guided-bootstrap league launch:
-
-```powershell
-uv run --extra dev --extra sim python -m weiss_rl.cli train-main-guided-bootstrap `
-  --run-label main_guided_bootstrap_seed1 `
-  --seed-run runs/b1_guided_seed_playstrong_factorized_auxfixed_clean_seed20260514_probe100_hashseed_20260515 `
-  --init-from-checkpoint runs/main_guided_factorized_continuation_teacherfade_b2mix020_u50_20260515/training/checkpoints/best.pt `
-  --profile league-probe
-```
-
-Use this only while the strict B1 NoLeague candidate gate is not cleared. It
-starts from the best confirmed guided seed checkpoint, imports guided seed
-snapshots at local update `0`, keeps the explicit mirror lane, and intentionally
-does not require a strict `--b1-run` anchor. The `league-probe` profile stops
-at update `50`, where the current failure mode is visible, instead of requiring
-manual interruption of a 200-update run. Run `guard-run` after it completes,
-then run `select_b1_candidate.py` or targeted confirmation before promoting any
-checkpoint.
-
-If the first guided-bootstrap probe shows large V-trace tails, use the
-conservative V-trace-clipped stack instead of editing the generated command by
-hand:
-
-```powershell
-uv run --extra dev --extra sim python -m weiss_rl.cli train-main-guided-bootstrap `
-  --run-label main_guided_bootstrap_vtrace_seed1 `
-  --seed-run runs/b1_guided_seed_playstrong_factorized_auxfixed_clean_seed20260514_probe100_hashseed_20260515 `
-  --init-from-checkpoint runs/main_guided_factorized_continuation_teacherfade_b2mix020_u50_20260515/training/checkpoints/best.pt `
-  --profile league-probe `
-  --vtrace-clamp
-```
-
-If the first guided-bootstrap probe is off-policy healthy but drifts because no
-trained snapshot passes the strict promotion gate, use the seed-champion
-bootstrap probe. This marks imported seed snapshots as training-pool champions
-only; it does not mark them as thesis champions or bypass `promotion_gate.json`.
-
-```powershell
-uv run --extra dev --extra sim python -m weiss_rl.cli train-main-guided-bootstrap `
-  --run-label main_guided_bootstrap_seedchampion_seed1 `
-  --seed-run runs/b1_guided_seed_playstrong_factorized_auxfixed_clean_seed20260514_probe100_hashseed_20260515 `
-  --init-from-checkpoint runs/main_guided_factorized_continuation_teacherfade_b2mix020_u50_20260515/training/checkpoints/best.pt `
-  --profile league-probe `
-  --seed-champions
-```
+anchor, and keeps the fixed-deck thesis policy visible. The earlier guided
+bootstrap/controller probes have been removed from the active workflow; their
+historical results remain only in archived logs and report-retained artifacts.
 
 Smoke eval:
 
@@ -154,7 +77,7 @@ uv run --extra dev --extra sim python -m weiss_rl.cli eval-final --run-dir runs/
 Current selected-main final eval reproduction:
 
 ```powershell
-$env:PYTHONHASHSEED='0'; uv run --extra dev --extra sim python python/scripts/eval.py `
+$env:PYTHONHASHSEED='0'; uv run --extra dev --extra sim python -m weiss_rl.workflows.eval_entrypoint `
   --stack-config configs/thesis/final_eval.yaml `
   --run-dir runs/main_champion_hardneg_interp_u10_repair_a015_20260517 `
   --snapshot-registry-json runs/main_champion_hardneg_interp_u10_repair_a015_20260517/training/snapshots/registry.json `
@@ -218,22 +141,6 @@ summarizes reward scale, V-trace/off-policy health, route purity, checkpoint
 selection, and periodic dev-eval trend so a run that peaked at update 50 and
 stalled by update 100 is visible without manual log inspection.
 
-Guarded league probe check:
-
-```powershell
-uv run --extra dev python -m weiss_rl.cli guard-run `
-  --run-dir runs/main_league_probe `
-  --max-vtrace-rho-p99 25
-```
-
-Use this after the first 25-50 updates of a main-league or guided-bootstrap
-league probe. It wraps `learning_progress_diagnostic.py --league-guard`, writes
-the same diagnostic JSON plus a `league_guard` section, and exits nonzero when
-B2/B3/B4 latest periodic anchors collapse, promotion
-gates repeatedly fail, no trained champion is admitted after enough attempts,
-or the configured V-trace tail ceiling is exceeded. This is an experiment gate,
-not a thesis result by itself.
-
 B1 candidate selection:
 
 ```powershell
@@ -283,7 +190,8 @@ Locked B1 NoLeague seed:
 - source policy id: `policy_000003`
 - update: `15`
 - weights hash: `66767c1e70c70d1706c058bfd38a7b20cb902c9740d96b6fb1ba664a2b65a685`
-- report: `docs/archive/reports/202605/b1_learning_rebuild_report_20260517.md`
+- supporting artifacts: final-eval outputs and paper-readiness summary inside
+  the run directory.
 
 Selected main fixed-deck model:
 
@@ -292,7 +200,9 @@ Selected main fixed-deck model:
 - source policy id: `main_interp_repair_a015`
 - update: `5`
 - weights hash: `1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26`
-- report: `docs/archive/reports/202605/main_league_rebuild_report_20260518.md`
+- provenance runs:
+  `runs/main_champion_hardneg_long_v1_u10_20260517_seg01` and
+  `runs/main_champion_hardneg_rehearsal_from_u20_u5_20260517_seg01`.
 
 Targeted confirm256 evidence for the selected main source checkpoint:
 

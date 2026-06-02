@@ -1,50 +1,40 @@
 # Configuration
 
-The repository uses grouped stack configs. Config files are behavior: defaults, override paths, inheritance, and hashes must remain stable unless a confirmed bug is documented.
+The active config surface is small by design.
 
-## Loading
+## Public Thesis Configs
 
-Use `load_stack_config(path)` from `weiss_rl.config`. The parser rejects unknown keys and resolves `extends` relative to repo-root config paths.
+- `configs/thesis/b1_noleague.yaml`
+- `configs/thesis/main_league.yaml`
+- `configs/thesis/main_league_auto_gpu.yaml`
+- `configs/thesis/final_eval.yaml`
+- `configs/thesis/final_eval_gpu.yaml`
+- `configs/thesis/multideck_exploratory.yaml`
+- `configs/thesis/ablations/no_gru.yaml`
+- `configs/thesis/ablations/ppo_lite.yaml`
+- `configs/thesis/ablations/terminal_only_reward.yaml`
 
-Common config roots:
+## Compatibility Presets
 
-- `configs/stack_smoke.yaml`: scaffold-only manifest smoke.
-- `configs/thesis/b1_noleague.yaml`: canonical fixed-deck B1 NoLeague training lane.
-- `configs/thesis/main_league.yaml`: canonical fixed-deck main league training lane.
-- `configs/thesis/main_league_auto_gpu.yaml`: server-oriented main league lane with process collectors.
-- `configs/thesis/final_eval.yaml`: canonical fixed-deck final evaluation companion.
-- `configs/thesis/ablations/`: named thesis ablation surfaces.
-- `configs/presets/`: lower-level compatibility and implementation presets.
-- `configs/archive/`: historical dated probes kept for provenance, not current workflow entrypoints.
-- `configs/seeds/`: committed deterministic seed sets.
+- `configs/presets/structured_acceptance_standard.yaml`
+- `configs/presets/structured_acceptance_standard_auto_gpu.yaml`
+- `configs/presets/structured_acceptance_standard_thesis_eval.yaml`
+- `configs/presets/structured_acceptance_standard_multideck.yaml`
+- `configs/presets/typed_thesis_locked.yaml`
+- `configs/presets/typed_local.yaml`
+- `configs/presets/typed_structured_v2.yaml`
+
+## Seeds
+
+Seed files under `configs/seeds/` define deterministic evaluation and promotion
+surfaces. Do not casually edit them.
 
 ## Overrides
 
-The package CLI is the canonical thesis surface and keeps detailed tuning in
-configs:
-
-```powershell
-uv run --extra dev --extra sim python -m weiss_rl.cli train-b1 --run-label b1_smoke --profile smoke
-uv run --extra dev --extra sim python -m weiss_rl.cli train-main --run-label main_smoke --b1-run runs/b1_smoke --profile smoke
-```
-
-The lower-level compatibility training script still accepts grouped dotted
-overrides for debugging and ablation work:
+Lower-level script entrypoints still accept grouped dotted overrides:
 
 ```powershell
 uv run python python/scripts/train.py `
   --stack-config configs/thesis/main_league.yaml `
   --override training.optimizer.learning_rate=0.0001
 ```
-
-Override values are parsed as JSON. This keeps booleans, numbers, lists, and strings unambiguous.
-
-## Hashes
-
-`compute_config_hash256(stack)` hashes the canonical config dictionary. Refactors must preserve the hash for the same loaded config unless a behavior change is intentionally documented as a bug fix.
-
-## Compatibility Notes
-
-- Historical `config_canonical.json` payloads are compatibility inputs.
-- Seed files are not casual tuning knobs; they define deterministic evaluation and promotion surfaces.
-- CLI flag defaults can override or complement YAML values. Treat those defaults as public behavior.

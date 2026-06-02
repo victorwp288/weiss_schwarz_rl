@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from weiss_rl.eval.policy_set import LEGACY_NO_LEAGUE_POLICY_ID, NO_LEAGUE_POLICY_ID
+from weiss_rl.eval.policies.set import LEGACY_NO_LEAGUE_POLICY_ID, NO_LEAGUE_POLICY_ID
 from weiss_rl.league.registry import SnapshotMeta, SnapshotRegistry
 
 

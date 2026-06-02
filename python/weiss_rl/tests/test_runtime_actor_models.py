@@ -6,7 +6,7 @@ from typing import Any, cast
 import torch
 
 from weiss_rl.runtime import _actor_inference_model, _maybe_compile_runtime_actor_model
-from weiss_rl.runtime_components.actor_models import actor_inference_model, maybe_compile_runtime_actor_model
+from weiss_rl.runtime.components.actor_models import actor_inference_model, maybe_compile_runtime_actor_model
 
 
 class _CompileStructuredActorModel(torch.nn.Module):

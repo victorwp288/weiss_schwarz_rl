@@ -1,6 +1,0 @@
-schema_version: 2
-description: "B1 NoLeague probe: tight actor reloads plus colder model-actor sampling to test self-play noise."
-extends: b1_noleague_tight_sync20.yaml
-training:
-  exploration:
-    actor_sampling_temperature: 0.5

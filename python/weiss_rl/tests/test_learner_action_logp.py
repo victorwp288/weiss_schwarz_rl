@@ -14,14 +14,14 @@ from weiss_rl.learners.action_logp import (
     packed_selected_action_logp,
     packed_subset_action_logp_and_top_action,
 )
-from weiss_rl.learners.impala_learner import (
+from weiss_rl.learners.impala import (
     _masked_action_logp_and_entropy,
     _packed_selected_action_logp,
 )
-from weiss_rl.learners.impala_learner import (
+from weiss_rl.learners.impala import (
     learner_logp_from_legal_ids as impala_learner_logp_from_legal_ids,
 )
-from weiss_rl.learners.impala_learner import (
+from weiss_rl.learners.impala import (
     learner_logp_from_mask as impala_learner_logp_from_mask,
 )
 from weiss_rl.learners.structured_auxiliary import PackedStructuredLegalView

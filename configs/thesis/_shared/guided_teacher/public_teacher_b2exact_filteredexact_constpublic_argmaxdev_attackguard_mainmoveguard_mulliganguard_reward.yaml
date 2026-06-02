@@ -1,8 +1,0 @@
-schema_version: 2
-description: "B1 guided ablation: filtered exact-action B2-exact run with non-decaying public teacher through the 100-update probe."
-extends: public_teacher_b2exact_filteredexact_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
-training:
-  structured_aux:
-    teacher_public_heuristic_end_updates: 300
-    teacher_public_heuristic_final_coef: 0.10
-    teacher_public_heuristic_profiles_end_updates: 300

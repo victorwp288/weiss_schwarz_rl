@@ -10,7 +10,7 @@ import torch
 
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
 from weiss_rl.diagnostics.training_logger import TrainingLogger
-from weiss_rl.learners.impala_learner import ImpalaLearner, summarize_vtrace_diagnostics
+from weiss_rl.learners.impala import ImpalaLearner, summarize_vtrace_diagnostics
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
 from weiss_rl.model import PolicyValueModel
 

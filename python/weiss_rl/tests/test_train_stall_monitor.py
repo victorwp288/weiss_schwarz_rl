@@ -22,7 +22,7 @@ from scripts.train import (
     _update_stall_monitor,
 )
 
-from weiss_rl.config import load_stack_config
+from weiss_rl.config import apply_stack_overrides, load_stack_config
 from weiss_rl.league.registry import SnapshotRegistry, snapshot_weights_relpath
 from weiss_rl.training import checkpoint_guard
 
@@ -468,9 +468,9 @@ def test_dev_eval_assessment_collects_timeout_rates_and_confidence() -> None:
 
 
 def test_dev_eval_ineligibility_reasons_apply_checkpoint_confidence_when_stall_monitor_disabled() -> None:
-    stack = load_stack_config(
-        _repo_root()
-        / "configs/thesis/_shared/guided_teacher/public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_choiceexactmargin_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
+    stack = apply_stack_overrides(
+        load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml"),
+        {"curriculum.stall_monitor.enabled": False},
     )
     assert stack.config.curriculum is not None
     assert stack.config.curriculum.stall_monitor.enabled is False
@@ -538,12 +538,16 @@ def test_confirmatory_dev_eval_request_targets_score_improving_borderline_candid
 
 
 def test_confirmatory_dev_eval_request_targets_multianchor_near_miss_candidate() -> None:
-    stack = load_stack_config(
-        _repo_root()
-        / (
-            "configs/thesis/_shared/guided_teacher/"
-            "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
-        )
+    stack = apply_stack_overrides(
+        load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml"),
+        {
+            "league.promotion.anchor_set_v1.required": [
+                "B0 RandomLegal",
+                "B2 HeuristicPublic",
+                "B3 HeuristicPublicAggro",
+                "B4 HeuristicPublicControl",
+            ]
+        },
     )
 
     request = _confirmatory_dev_eval_request(
@@ -573,12 +577,16 @@ def test_confirmatory_dev_eval_request_targets_multianchor_near_miss_candidate()
 
 
 def test_confirmatory_dev_eval_request_rejects_multianchor_clear_anchor_failure() -> None:
-    stack = load_stack_config(
-        _repo_root()
-        / (
-            "configs/thesis/_shared/guided_teacher/"
-            "public_teacher_b2exact_margin_multianchor_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml"
-        )
+    stack = apply_stack_overrides(
+        load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml"),
+        {
+            "league.promotion.anchor_set_v1.required": [
+                "B0 RandomLegal",
+                "B2 HeuristicPublic",
+                "B3 HeuristicPublicAggro",
+                "B4 HeuristicPublicControl",
+            ]
+        },
     )
 
     request = _confirmatory_dev_eval_request(

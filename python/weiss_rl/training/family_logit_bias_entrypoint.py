@@ -19,7 +19,7 @@ from weiss_rl.league.registry import (
     SnapshotRegistry,
     snapshot_weights_relpath,
 )
-from weiss_rl.runtime_components.legal_meta import action_catalog_indices
+from weiss_rl.runtime.components.legal_meta import action_catalog_indices
 
 _FAMILY_BIAS_KEY = "policy_head.family_bias"
 

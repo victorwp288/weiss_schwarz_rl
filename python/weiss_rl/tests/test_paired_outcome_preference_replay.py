@@ -9,8 +9,8 @@ import torch
 
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset, save_replay_trajectory_bc_dataset
 from weiss_rl.training import paired_outcome_preference_dataset, paired_outcome_preference_replay
-from weiss_rl.training.paired_outcome_preference_dataset import preference_group_indices_for_episodes
-from weiss_rl.training.paired_outcome_preference_replay import (
+from weiss_rl.training.replay_data.paired_outcome_preference_dataset import preference_group_indices_for_episodes
+from weiss_rl.training.replay_data.paired_outcome_preference_replay import (
     PairedOutcomePreferenceReplayState,
     maybe_run_paired_outcome_preference_replay,
     paired_outcome_preference_complete_pair_count,
@@ -35,7 +35,7 @@ def test_paired_outcome_preference_replay_reexports_canonical_dataset_helpers() 
     )
     assert (
         paired_outcome_preference_dataset.paired_outcome_preference_complete_pair_count.__module__
-        == "weiss_rl.training.paired_outcome_preference_dataset"
+        == "weiss_rl.training.replay_data.paired_outcome_preference_dataset"
     )
 
 

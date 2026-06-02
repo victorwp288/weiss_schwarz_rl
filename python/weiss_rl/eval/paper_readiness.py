@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Any, cast
 
 from weiss_rl.artifacts import ArtifactLayout
-from weiss_rl.eval import paper_readiness_contracts as _contracts
-from weiss_rl.eval.paper_readiness_guardrails import (
+from weiss_rl.eval.policies.set import RANDOM_LEGAL_POLICY_ID
+from weiss_rl.eval.readiness import contracts as _contracts
+from weiss_rl.eval.readiness.guardrails import (
     build_final_eval_guardrail_summary as _build_final_eval_guardrail_summary,
 )
-from weiss_rl.eval.policy_set import RANDOM_LEGAL_POLICY_ID
 
 DEFAULT_BASELINE_POLICY_ID = RANDOM_LEGAL_POLICY_ID
 DEFAULT_BASELINE_POSTERIOR_MIN = 0.95

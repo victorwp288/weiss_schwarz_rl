@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from weiss_rl.config import load_stack_config
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,

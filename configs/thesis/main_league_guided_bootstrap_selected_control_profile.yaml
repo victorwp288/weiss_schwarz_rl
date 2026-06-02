@@ -1,8 +1,0 @@
-schema_version: 2
-description: "Selected guided-bootstrap continuation using the control public-heuristic profile during early reset-offset transfer. This is the current best short guarded transfer probe, but still requires B2/B3/B4 confirmation before extension."
-extends: main_league_guided_bootstrap_selected.yaml
-training:
-  structured_aux:
-    teacher_public_heuristic_profiles:
-      - control
-    teacher_public_heuristic_profile_mode: mixture

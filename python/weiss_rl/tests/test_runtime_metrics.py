@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from weiss_rl.runtime_components.metrics import build_runtime_metrics, runtime_counter_totals, runtime_outcome_metrics
+from weiss_rl.runtime.components.metrics import build_runtime_metrics, runtime_counter_totals, runtime_outcome_metrics
 
 
 def _unroll(

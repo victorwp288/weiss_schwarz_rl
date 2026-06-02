@@ -17,7 +17,6 @@ from .models import (
     TrainingStructuredMetricsConfig,
     TrainingStructuredWarmstartConfig,
     TrainingTeacherAuxConfig,
-    TrainingTrajectoryBcFocusGroupConfig,
     TrainingVTraceConfig,
 )
 from .parsing_utils import (
@@ -29,6 +28,17 @@ from .parsing_utils import (
     require_mapping,
     require_str_list,
     require_text,
+)
+from .sections_training_focus import (
+    paired_swing_action_source,
+    paired_swing_focus_fraction,
+    paired_swing_focus_groups,
+    paired_swing_focus_source_labels,
+    trajectory_bc_focus_fraction,
+    trajectory_bc_focus_groups,
+    trajectory_bc_focus_source_labels,
+    validate_paired_swing_focus_contract,
+    validate_trajectory_bc_focus_contract,
 )
 
 TRAINING_ALGORITHMS = frozenset(
@@ -49,166 +59,6 @@ TRAINING_PAIRED_OUTCOME_PREFERENCE_AGGREGATIONS = frozenset({"mean", "sum", "edg
 TRAINING_TRAJECTORY_RETENTION_SOURCES = frozenset(
     {"all_model", "champions", "hard_negatives", "recent", "warmup_snapshots"}
 )
-
-
-def _trajectory_bc_focus_fraction(structured_aux: dict[str, Any]) -> float:
-    fraction = require_float(
-        structured_aux.get("trajectory_bc_focus_fraction", 0.0),
-        field_name="training.structured_aux.trajectory_bc_focus_fraction",
-    )
-    if fraction < 0.0 or fraction > 1.0:
-        raise ValueError("training.structured_aux.trajectory_bc_focus_fraction must be between 0.0 and 1.0")
-    return fraction
-
-
-def _trajectory_bc_focus_groups(structured_aux: dict[str, Any]) -> tuple[TrainingTrajectoryBcFocusGroupConfig, ...]:
-    raw_groups = structured_aux.get("trajectory_bc_focus_groups", [])
-    if not isinstance(raw_groups, list):
-        raise ValueError("training.structured_aux.trajectory_bc_focus_groups must be a list")
-    groups: list[TrainingTrajectoryBcFocusGroupConfig] = []
-    total_fraction = 0.0
-    seen_names: set[str] = set()
-    seen_labels: set[str] = set()
-    for index, raw_group in enumerate(raw_groups):
-        context = f"training.structured_aux.trajectory_bc_focus_groups[{index}]"
-        group = require_mapping(raw_group, context=context)
-        reject_unknown_keys(group, allowed={"name", "source_labels", "fraction"}, context=context)
-        name = str(group.get("name", f"group_{index}")).strip()
-        if not name:
-            raise ValueError(f"{context}.name must be a non-empty string")
-        if name in seen_names:
-            raise ValueError(f"training.structured_aux.trajectory_bc_focus_groups contains duplicate name: {name}")
-        labels = tuple(
-            label.strip()
-            for label in require_str_list(
-                group.get("source_labels", []),
-                field_name=f"{context}.source_labels",
-            )
-            if label.strip()
-        )
-        if not labels:
-            raise ValueError(f"{context}.source_labels must contain at least one label")
-        duplicate_labels = sorted(label for label in labels if label in seen_labels)
-        if duplicate_labels:
-            raise ValueError(
-                "training.structured_aux.trajectory_bc_focus_groups contains labels in multiple groups: "
-                + ", ".join(duplicate_labels)
-            )
-        fraction = require_float(group.get("fraction", 0.0), field_name=f"{context}.fraction")
-        if fraction < 0.0 or fraction > 1.0:
-            raise ValueError(f"{context}.fraction must be between 0.0 and 1.0")
-        total_fraction += fraction
-        if total_fraction > 1.0 + 1e-9:
-            raise ValueError("training.structured_aux.trajectory_bc_focus_groups fractions must sum to <= 1.0")
-        seen_names.add(name)
-        seen_labels.update(labels)
-        groups.append(TrainingTrajectoryBcFocusGroupConfig(name=name, source_labels=labels, fraction=fraction))
-    return tuple(groups)
-
-
-def _trajectory_bc_focus_source_labels(structured_aux: dict[str, Any]) -> tuple[str, ...]:
-    return require_str_list(
-        structured_aux.get("trajectory_bc_focus_source_labels", []),
-        field_name="training.structured_aux.trajectory_bc_focus_source_labels",
-    )
-
-
-def _validate_trajectory_bc_focus_contract(
-    *,
-    source_labels: tuple[str, ...],
-    fraction: float,
-    groups: tuple[TrainingTrajectoryBcFocusGroupConfig, ...],
-) -> None:
-    if groups and (source_labels or fraction > 0.0):
-        raise ValueError(
-            "training.structured_aux.trajectory_bc_focus_groups cannot be combined with "
-            "trajectory_bc_focus_source_labels or trajectory_bc_focus_fraction"
-        )
-
-
-def _paired_swing_focus_fraction(structured_aux: dict[str, Any]) -> float:
-    fraction = require_float(
-        structured_aux.get("paired_swing_focus_fraction", 0.0),
-        field_name="training.structured_aux.paired_swing_focus_fraction",
-    )
-    if fraction < 0.0 or fraction > 1.0:
-        raise ValueError("training.structured_aux.paired_swing_focus_fraction must be between 0.0 and 1.0")
-    return fraction
-
-
-def _paired_swing_focus_groups(structured_aux: dict[str, Any]) -> tuple[TrainingTrajectoryBcFocusGroupConfig, ...]:
-    raw_groups = structured_aux.get("paired_swing_focus_groups", [])
-    if not isinstance(raw_groups, list):
-        raise ValueError("training.structured_aux.paired_swing_focus_groups must be a list")
-    groups: list[TrainingTrajectoryBcFocusGroupConfig] = []
-    total_fraction = 0.0
-    seen_names: set[str] = set()
-    seen_labels: set[str] = set()
-    for index, raw_group in enumerate(raw_groups):
-        context = f"training.structured_aux.paired_swing_focus_groups[{index}]"
-        group = require_mapping(raw_group, context=context)
-        reject_unknown_keys(group, allowed={"name", "source_labels", "fraction"}, context=context)
-        name = str(group.get("name", f"group_{index}")).strip()
-        if not name:
-            raise ValueError(f"{context}.name must be a non-empty string")
-        if name in seen_names:
-            raise ValueError(f"training.structured_aux.paired_swing_focus_groups contains duplicate name: {name}")
-        labels = tuple(
-            label.strip()
-            for label in require_str_list(
-                group.get("source_labels", []),
-                field_name=f"{context}.source_labels",
-            )
-            if label.strip()
-        )
-        if not labels:
-            raise ValueError(f"{context}.source_labels must contain at least one label")
-        duplicate_labels = sorted(label for label in labels if label in seen_labels)
-        if duplicate_labels:
-            raise ValueError(
-                "training.structured_aux.paired_swing_focus_groups contains labels in multiple groups: "
-                + ", ".join(duplicate_labels)
-            )
-        fraction = require_float(group.get("fraction", 0.0), field_name=f"{context}.fraction")
-        if fraction < 0.0 or fraction > 1.0:
-            raise ValueError(f"{context}.fraction must be between 0.0 and 1.0")
-        total_fraction += fraction
-        if total_fraction > 1.0 + 1e-9:
-            raise ValueError("training.structured_aux.paired_swing_focus_groups fractions must sum to <= 1.0")
-        seen_names.add(name)
-        seen_labels.update(labels)
-        groups.append(TrainingTrajectoryBcFocusGroupConfig(name=name, source_labels=labels, fraction=fraction))
-    return tuple(groups)
-
-
-def _paired_swing_focus_source_labels(structured_aux: dict[str, Any]) -> tuple[str, ...]:
-    return require_str_list(
-        structured_aux.get("paired_swing_focus_source_labels", []),
-        field_name="training.structured_aux.paired_swing_focus_source_labels",
-    )
-
-
-def _validate_paired_swing_focus_contract(
-    *,
-    source_labels: tuple[str, ...],
-    fraction: float,
-    groups: tuple[TrainingTrajectoryBcFocusGroupConfig, ...],
-) -> None:
-    if groups and (source_labels or fraction > 0.0):
-        raise ValueError(
-            "training.structured_aux.paired_swing_focus_groups cannot be combined with "
-            "paired_swing_focus_source_labels or paired_swing_focus_fraction"
-        )
-
-
-def _paired_swing_action_source(structured_aux: dict[str, Any], *, key: str, default: str) -> str:
-    value = require_text(
-        structured_aux.get(key, default),
-        field_name=f"training.structured_aux.{key}",
-    ).strip()
-    if value not in {"actions", "teacher_action"}:
-        raise ValueError(f"training.structured_aux.{key} must be one of: actions, teacher_action")
-    return value
 
 
 def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
@@ -682,18 +532,18 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
             "training.structured_aux.trajectory_retention_sources contains unsupported sources: "
             + ", ".join(invalid_retention_sources)
         )
-    structured_aux_trajectory_bc_focus_source_labels = _trajectory_bc_focus_source_labels(structured_aux)
-    structured_aux_trajectory_bc_focus_fraction = _trajectory_bc_focus_fraction(structured_aux)
-    structured_aux_trajectory_bc_focus_groups = _trajectory_bc_focus_groups(structured_aux)
-    _validate_trajectory_bc_focus_contract(
+    structured_aux_trajectory_bc_focus_source_labels = trajectory_bc_focus_source_labels(structured_aux)
+    structured_aux_trajectory_bc_focus_fraction = trajectory_bc_focus_fraction(structured_aux)
+    structured_aux_trajectory_bc_focus_groups = trajectory_bc_focus_groups(structured_aux)
+    validate_trajectory_bc_focus_contract(
         source_labels=structured_aux_trajectory_bc_focus_source_labels,
         fraction=structured_aux_trajectory_bc_focus_fraction,
         groups=structured_aux_trajectory_bc_focus_groups,
     )
-    structured_aux_paired_swing_focus_source_labels = _paired_swing_focus_source_labels(structured_aux)
-    structured_aux_paired_swing_focus_fraction = _paired_swing_focus_fraction(structured_aux)
-    structured_aux_paired_swing_focus_groups = _paired_swing_focus_groups(structured_aux)
-    _validate_paired_swing_focus_contract(
+    structured_aux_paired_swing_focus_source_labels = paired_swing_focus_source_labels(structured_aux)
+    structured_aux_paired_swing_focus_fraction = paired_swing_focus_fraction(structured_aux)
+    structured_aux_paired_swing_focus_groups = paired_swing_focus_groups(structured_aux)
+    validate_paired_swing_focus_contract(
         source_labels=structured_aux_paired_swing_focus_source_labels,
         fraction=structured_aux_paired_swing_focus_fraction,
         groups=structured_aux_paired_swing_focus_groups,
@@ -710,12 +560,12 @@ def parse_training_config(body: dict[str, Any]) -> TrainingConfig:
     )
     if structured_aux_paired_swing_coef < 0.0:
         raise ValueError("training.structured_aux.paired_swing_coef must be >= 0.0")
-    structured_aux_paired_swing_positive_source = _paired_swing_action_source(
+    structured_aux_paired_swing_positive_source = paired_swing_action_source(
         structured_aux,
         key="paired_swing_positive_action_source",
         default="teacher_action",
     )
-    structured_aux_paired_swing_negative_source = _paired_swing_action_source(
+    structured_aux_paired_swing_negative_source = paired_swing_action_source(
         structured_aux,
         key="paired_swing_negative_action_source",
         default="actions",

@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 import torch
 
-from weiss_rl.runtime_components.central_opponent_groups import CentralOpponentEntry
-from weiss_rl.runtime_components.central_snapshot_opponents import (
+from weiss_rl.runtime.components.central_opponent_groups import CentralOpponentEntry
+from weiss_rl.runtime.components.central_snapshot_opponents import (
     CentralSnapshotModelOutputs,
     apply_central_snapshot_opponent_policy,
     apply_central_snapshot_outputs,

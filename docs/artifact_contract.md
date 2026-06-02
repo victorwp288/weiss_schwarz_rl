@@ -79,7 +79,7 @@ The repo may keep short-lived compatibility aliases while paths migrate, but pap
 ## Quality bar
 
 - demo runs may be synthetic, but they must still be labeled clearly
-- `stack_smoke.yaml` is scaffold-only and must not be confused with a thesis-grade train/eval run
+- smoke profiles are plumbing checks and must not be confused with thesis-grade train/eval runs
 - simulator-backed canonical runs are validated against the published `weiss-sim` package and should record the runtime spec bundle verbatim
 - paper-grade runs must have resolved policy selection, stable ordering, and explicit provenance
 - readiness should fail if it has to reconstruct missing canonical outputs from fallback paths

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from weiss_rl.runtime_components.collector_unroll_storage import (
+from weiss_rl.runtime.components.collector_unroll_storage import (
     CollectorStepPayload,
     CollectorStepStorage,
     build_collector_runtime_unroll,

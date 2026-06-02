@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.training.trajectory_bc_sampling import TrajectoryBcReplayState, metric_key_fragment
+from weiss_rl.training.replay_data.trajectory_bc_sampling import TrajectoryBcReplayState, metric_key_fragment
 
 
 @dataclass(slots=True)

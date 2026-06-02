@@ -1,9 +1,0 @@
-schema_version: 2
-description: "B1 guided ablation: low-entropy light anti-pass run with stronger public-stable structured group supervision."
-extends: public_teacher_b2exact_filteredexact_constpublic_antipass02_lowentropy_argmaxdev_attackguard_mainmoveguard_mulliganguard_reward.yaml
-training:
-  structured_aux:
-    teacher_family_coef: 0.06
-    teacher_slot_coef: 0.16
-    teacher_move_source_coef: 0.06
-    teacher_attack_type_coef: 0.06

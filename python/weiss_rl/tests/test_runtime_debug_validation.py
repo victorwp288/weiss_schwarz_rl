@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from weiss_rl.runtime_components.debug_validation import (
+from weiss_rl.runtime.components.debug_validation import (
     validate_env_step_packed_actions,
     validate_sampled_packed_actions,
 )

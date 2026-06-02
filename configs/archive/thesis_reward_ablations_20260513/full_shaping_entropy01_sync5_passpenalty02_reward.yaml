@@ -1,6 +1,0 @@
-schema_version: 2
-description: "B1 reward ablation: full shaping, sync5 actor reloads, and RL-side pass-with-alternatives penalty."
-extends: full_shaping_entropy01_sync5_reward.yaml
-rewards:
-  shaping:
-    pass_with_nonpass_penalty: 0.02

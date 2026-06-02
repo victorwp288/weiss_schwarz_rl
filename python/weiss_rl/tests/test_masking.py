@@ -28,7 +28,7 @@ from weiss_rl.core.masking import (
     select_argmax_from_mask,
 )
 from weiss_rl.eval.harness import eval_sampler_logp_from_mask
-from weiss_rl.learners.impala_learner import learner_logp_from_mask
+from weiss_rl.learners.impala import learner_logp_from_mask
 
 TOY_PASS_ACTION_ID = 4
 

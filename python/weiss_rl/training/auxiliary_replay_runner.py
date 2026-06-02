@@ -12,7 +12,7 @@ import torch
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset, replay_trajectory_bc_batch
 from weiss_rl.training.auxiliary_replay_metrics import AuxiliaryReplayMetricAccumulator, emit_finite_aux_metrics
 from weiss_rl.training.auxiliary_replay_support import initial_hidden_state, opponent_context_indices_for_episodes
-from weiss_rl.training.trajectory_bc_sampling import TrajectoryBcReplayState
+from weiss_rl.training.replay_data.trajectory_bc_sampling import TrajectoryBcReplayState
 
 ReplayBatchFactory = Callable[..., dict[str, Any]]
 

@@ -1,6 +1,0 @@
-schema_version: 2
-description: "Champion/hard-negative continuation with online learned-opponent retention plus a fixed-heavy merged replay BC dataset. This balances B2/B3/B4 anchor wins with focal wins against imported learned champions; promotion still requires the fixed plus learned multi-objective gate."
-extends: main_league_champion_hardneg_multiobjective_retention_probe.yaml
-training:
-  structured_aux:
-    trajectory_bc_dataset_path: runs/trajectory_bc_balanced_fixed_b2b3b4_and_learned_a015_win8_20260518/trajectory_bc_balanced_fixed_b2b3b4_and_learned_a015_win8.npz

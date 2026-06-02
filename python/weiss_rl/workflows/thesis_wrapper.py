@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from weiss_rl.workflows.thesis_wrapper_cli import (
+from weiss_rl.workflows.thesis_wrapper_support.cli import (
     build_thesis_wrapper_parser,
     main,
     print_thesis_wrapper_presets,
     run_thesis_wrapper_cli,
     thesis_wrapper_repo_root,
 )
-from weiss_rl.workflows.thesis_wrapper_commands import (
+from weiss_rl.workflows.thesis_wrapper_support.commands import (
     _DEFAULT_EVAL_PRESET,
     _DEFAULT_EVAL_PRESET_OVERRIDES,
     _PRESET_PATHS,
@@ -22,8 +22,8 @@ from weiss_rl.workflows.thesis_wrapper_commands import (
     build_thesis_eval_command,
     build_thesis_train_command,
 )
-from weiss_rl.workflows.thesis_wrapper_inputs import ThesisWrapperInputs, thesis_wrapper_inputs_from_args
-from weiss_rl.workflows.thesis_wrapper_plan import (
+from weiss_rl.workflows.thesis_wrapper_support.inputs import ThesisWrapperInputs, thesis_wrapper_inputs_from_args
+from weiss_rl.workflows.thesis_wrapper_support.plan import (
     ThesisWrapperCommands,
     ThesisWrapperPlan,
     ThesisWrapperRequest,

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from weiss_rl.training.checkpoint_lifecycle_effects import (
+from weiss_rl.training.checkpointing.lifecycle_effects import (
     apply_finalize_to_best_effects,
     apply_rollback_to_best_effects,
 )
@@ -47,7 +47,9 @@ def test_rollback_to_best_effects_restore_demote_publish_then_refresh(
         events.append(("demote", update_count))
         return ["policy_000220"]
 
-    monkeypatch.setattr("weiss_rl.training.checkpoint_lifecycle_effects.demote_registry_champions_newer_than", demote)
+    monkeypatch.setattr(
+        "weiss_rl.training.checkpointing.lifecycle_effects.demote_registry_champions_newer_than", demote
+    )
 
     effects = apply_rollback_to_best_effects(
         training_paths=paths,
@@ -88,7 +90,9 @@ def test_finalize_to_best_effects_restore_demote_then_refresh_without_publish(
         events.append(("demote", update_count))
         return []
 
-    monkeypatch.setattr("weiss_rl.training.checkpoint_lifecycle_effects.demote_registry_champions_newer_than", demote)
+    monkeypatch.setattr(
+        "weiss_rl.training.checkpointing.lifecycle_effects.demote_registry_champions_newer_than", demote
+    )
 
     effects = apply_finalize_to_best_effects(
         training_paths=paths,

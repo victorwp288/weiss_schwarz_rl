@@ -324,6 +324,24 @@ def _copy_repo_configs(tmp_path: Path) -> Path:
     return tmp_path / "configs" / "presets" / "typed_thesis_locked.yaml"
 
 
+def _write_manifest_only_stack_config(tmp_path: Path) -> Path:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    stack_config = configs_dir / "manifest_only.yaml"
+    stack_config.write_text(
+        "\n".join(
+            (
+                "schema_version: 1",
+                "description: Minimal manifest-only scaffold preset.",
+                "experiment:",
+                "  role: main",
+            )
+        ),
+        encoding="utf-8",
+    )
+    return stack_config
+
+
 def _write_eval_only_stack_config(tmp_path: Path) -> Path:
     configs_dir = tmp_path / "configs"
     configs_dir.mkdir(parents=True, exist_ok=True)
@@ -589,8 +607,7 @@ def test_train_entrypoint_rejects_invalid_runtime_spec_bundle_before_claiming_ve
 
 def test_train_entrypoint_persists_runtime_spec_bundle(tmp_path: Path) -> None:
     bundle = _write_stub_weiss_sim(tmp_path, spec_hash=123)
-    _copy_repo_configs(tmp_path)
-    stack_config = tmp_path / "configs" / "stack_smoke.yaml"
+    stack_config = _write_manifest_only_stack_config(tmp_path)
 
     result = _run_entrypoint(
         tmp_path,
@@ -967,7 +984,7 @@ def test_eval_report_facade_reexports_split_module_owners() -> None:
 
 
 def test_eval_policy_selection_results_build_explicit_cli_details() -> None:
-    from weiss_rl.workflows.eval_policy_selection_results import _explicit_policy_selection
+    from weiss_rl.workflows.eval_support.eval_policy_selection_results import _explicit_policy_selection
 
     assert _explicit_policy_selection([" B0 RandomLegal ", "", "policy_000100"]) == (
         ["B0 RandomLegal", "policy_000100"],
@@ -977,7 +994,7 @@ def test_eval_policy_selection_results_build_explicit_cli_details() -> None:
 
 
 def test_eval_policy_selection_results_build_manifest_fallback_details() -> None:
-    from weiss_rl.workflows.eval_policy_selection_results import _manifest_policy_selection_fallback
+    from weiss_rl.workflows.eval_support.eval_policy_selection_results import _manifest_policy_selection_fallback
 
     assert _manifest_policy_selection_fallback({"policy_set_selection": [" B0 RandomLegal ", "", 123]}) == (
         ["B0 RandomLegal", "123"],
@@ -988,7 +1005,7 @@ def test_eval_policy_selection_results_build_manifest_fallback_details() -> None
 
 
 def test_eval_policy_final_set_resolution_uses_available_source_paths(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_policy_final_set_resolution import _resolve_available_policy_source_paths
+    from weiss_rl.workflows.eval_support.eval_policy_final_set_resolution import _resolve_available_policy_source_paths
 
     layout = ArtifactLayout.from_run_dir(tmp_path / "run")
     layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
@@ -1030,7 +1047,7 @@ def test_eval_policy_final_set_resolution_uses_available_source_paths(tmp_path: 
 def test_eval_policy_final_set_resolution_builds_deterministic_selection_details(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_policy_final_set_resolution import _resolve_deterministic_final_policy_set
+    from weiss_rl.workflows.eval_support.eval_policy_final_set_resolution import _resolve_deterministic_final_policy_set
 
     observed: dict[str, object] = {}
     registry_path = tmp_path / "registry.json"
@@ -1074,7 +1091,7 @@ def test_eval_policy_final_set_resolution_builds_deterministic_selection_details
 
 
 def test_eval_policy_final_set_resolution_reports_missing_inputs(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_policy_final_set_resolution import _raise_missing_final_policy_inputs
+    from weiss_rl.workflows.eval_support.eval_policy_final_set_resolution import _raise_missing_final_policy_inputs
 
     layout = ArtifactLayout.from_run_dir(tmp_path / "run")
 
@@ -1108,7 +1125,7 @@ def test_eval_policy_final_set_resolution_reports_missing_inputs(tmp_path: Path)
 
 
 def test_eval_policy_manifest_selection_resolves_source_paths_from_manifest(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_policy_manifest_selection import _resolve_selection_inputs_from_manifest
+    from weiss_rl.workflows.eval_support.eval_policy_manifest_selection import _resolve_selection_inputs_from_manifest
 
     absolute_dev_eval = tmp_path / "external" / "dev_eval.json"
     snapshot_registry, dev_eval = _resolve_selection_inputs_from_manifest(
@@ -1128,7 +1145,7 @@ def test_eval_policy_manifest_selection_resolves_source_paths_from_manifest(tmp_
 
 
 def test_eval_policy_manifest_selection_requires_completed_artifacts(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_policy_manifest_selection import _authoritative_manifest_policy_selection
+    from weiss_rl.workflows.eval_support.eval_policy_manifest_selection import _authoritative_manifest_policy_selection
 
     layout = ArtifactLayout.from_run_dir(tmp_path / "run")
     layout.run_dir.mkdir(parents=True, exist_ok=True)
@@ -1175,7 +1192,7 @@ def test_eval_policy_manifest_selection_requires_completed_artifacts(tmp_path: P
 
 
 def test_eval_report_update_payloads_preserve_summary_and_determinism_fields(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_report_update_payloads import (
+    from weiss_rl.workflows.eval_support.eval_report_update_payloads import (
         RunLevelReportUpdateInputs,
         build_determinism_report_update_fields,
         build_run_summary_update_fields,
@@ -1237,7 +1254,7 @@ def test_eval_report_update_payloads_preserve_summary_and_determinism_fields(tmp
 
 
 def test_eval_report_update_writes_summary_and_determinism_artifacts(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_report_updates import _update_run_level_reports
+    from weiss_rl.workflows.eval_support.eval_report_updates import _update_run_level_reports
 
     layout = ArtifactLayout.from_run_dir(tmp_path / "run")
     layout.ensure_directories()
@@ -1367,7 +1384,7 @@ def test_eval_startup_dependency_builder_preserves_monkeypatch_surface(monkeypat
 def test_eval_entrypoint_main_runner_threads_startup_and_dispatch() -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_entrypoint_main import run_eval_entrypoint_main
+    from weiss_rl.workflows.eval_entrypoint_support.main import run_eval_entrypoint_main
 
     calls: list[str] = []
     parsed_args = SimpleNamespace(kind="args")
@@ -1558,7 +1575,7 @@ def test_eval_entrypoint_runtime_canonical_wrapper_uses_facade_globals(monkeypat
 def test_eval_entrypoint_compat_canonical_wrapper_forwards_callables(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_entrypoint_compat import run_entrypoint_canonical_eval_pipeline
+    from weiss_rl.workflows.eval_entrypoint_support.compat import run_entrypoint_canonical_eval_pipeline
 
     observed: dict[str, object] = {}
     dependencies = object()
@@ -1650,7 +1667,7 @@ def test_canonical_eval_entrypoint_request_preserves_flat_kwargs(tmp_path: Path)
     import argparse
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_entrypoint_request import (
+    from weiss_rl.workflows.canonical_eval.entrypoint_request import (
         canonical_eval_entrypoint_request,
         run_canonical_entrypoint_request_adapter,
         run_canonical_entrypoint_request_pipeline,
@@ -1732,7 +1749,7 @@ def test_canonical_eval_entrypoint_adapter_injects_dependencies(tmp_path: Path) 
     import argparse
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_entrypoint_adapter import run_canonical_eval_entrypoint_pipeline
+    from weiss_rl.workflows.canonical_eval.entrypoint_adapter import run_canonical_eval_entrypoint_pipeline
 
     observed: dict[str, object] = {}
     dependencies = object()
@@ -1785,7 +1802,7 @@ def test_canonical_eval_entrypoint_adapter_injects_dependencies(tmp_path: Path) 
 def test_canonical_eval_runtime_phase_persists_selection_before_loading_policies(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_phases import (
+    from weiss_rl.workflows.canonical_eval.phases import (
         CanonicalEvalRunState,
         resolve_canonical_eval_runtime_state,
     )
@@ -1893,7 +1910,7 @@ def test_canonical_eval_runtime_phase_persists_selection_before_loading_policies
 def test_canonical_eval_seed_budget_preserves_limit_defaults_and_errors(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_seed_budget import resolve_canonical_eval_seed_budget
+    from weiss_rl.workflows.canonical_eval.seed_budget import resolve_canonical_eval_seed_budget
 
     seed_path = tmp_path / "report_eval_seeds.txt"
     stack = SimpleNamespace(seed_sets={"report_eval": seed_path})
@@ -1943,7 +1960,7 @@ def test_canonical_eval_seed_budget_preserves_limit_defaults_and_errors(tmp_path
 def test_canonical_eval_output_phase_preserves_final_eval_metadata(tmp_path: Path, capsys) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_phases import (
+    from weiss_rl.workflows.canonical_eval.phases import (
         CanonicalEvalRunState,
         CanonicalEvalRuntimeState,
         write_canonical_eval_outputs,
@@ -2035,8 +2052,8 @@ def test_canonical_eval_output_phase_preserves_final_eval_metadata(tmp_path: Pat
 def test_canonical_supplemental_outputs_builds_thesis_artifacts_in_order(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_state import CanonicalEvalRunState, CanonicalEvalRuntimeState
-    from weiss_rl.workflows.eval_canonical_supplemental_outputs import build_canonical_supplemental_outputs
+    from weiss_rl.workflows.canonical_eval.state import CanonicalEvalRunState, CanonicalEvalRuntimeState
+    from weiss_rl.workflows.canonical_eval.supplemental_outputs import build_canonical_supplemental_outputs
 
     calls: list[str] = []
     observed: dict[str, object] = {}
@@ -2130,9 +2147,9 @@ def test_canonical_output_bundle_builds_final_eval_before_supplemental_outputs(
 ) -> None:
     from types import SimpleNamespace
 
-    import weiss_rl.workflows.eval_canonical_output_bundle as output_bundle_module
-    from weiss_rl.workflows.eval_canonical_state import CanonicalEvalRunState, CanonicalEvalRuntimeState
-    from weiss_rl.workflows.eval_canonical_supplemental_outputs import CanonicalEvalSupplementalOutputs
+    import weiss_rl.workflows.canonical_eval.output_bundle as output_bundle_module
+    from weiss_rl.workflows.canonical_eval.state import CanonicalEvalRunState, CanonicalEvalRuntimeState
+    from weiss_rl.workflows.canonical_eval.supplemental_outputs import CanonicalEvalSupplementalOutputs
 
     calls: list[str] = []
     run_state = CanonicalEvalRunState(
@@ -2200,7 +2217,7 @@ def test_canonical_output_bundle_builds_final_eval_before_supplemental_outputs(
 def test_canonical_metagame_output_forwards_study_configs(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_metagame_outputs import build_canonical_metagame_output
+    from weiss_rl.workflows.canonical_eval.metagame_outputs import build_canonical_metagame_output
 
     observed: dict[str, object] = {}
     layout = SimpleNamespace(
@@ -2231,7 +2248,7 @@ def test_canonical_metagame_output_forwards_study_configs(tmp_path: Path) -> Non
 def test_canonical_figure_outputs_forward_run_dir(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_figure_outputs import build_canonical_figure_outputs
+    from weiss_rl.workflows.canonical_eval.figure_outputs import build_canonical_figure_outputs
 
     observed: dict[str, object] = {}
 
@@ -2251,8 +2268,8 @@ def test_canonical_figure_outputs_forward_run_dir(tmp_path: Path) -> None:
 def test_canonical_readiness_output_writes_focal_policy_summary(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_readiness_outputs import build_canonical_readiness_output
-    from weiss_rl.workflows.eval_canonical_state import CanonicalEvalRuntimeState
+    from weiss_rl.workflows.canonical_eval.readiness_outputs import build_canonical_readiness_output
+    from weiss_rl.workflows.canonical_eval.state import CanonicalEvalRuntimeState
 
     observed: dict[str, object] = {}
     layout = SimpleNamespace(paper_readiness_summary_path=tmp_path / "run" / "paper_readiness_summary.json")
@@ -2295,9 +2312,9 @@ def test_canonical_readiness_output_writes_focal_policy_summary(tmp_path: Path) 
 def test_canonical_output_message_renderer_handles_optional_outputs(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_cli_messages import render_canonical_eval_output_messages
-    from weiss_rl.workflows.eval_canonical_state import CanonicalEvalRuntimeState
-    from weiss_rl.workflows.eval_canonical_supplemental_outputs import CanonicalEvalSupplementalOutputs
+    from weiss_rl.workflows.canonical_eval.cli_messages import render_canonical_eval_output_messages
+    from weiss_rl.workflows.canonical_eval.state import CanonicalEvalRuntimeState
+    from weiss_rl.workflows.canonical_eval.supplemental_outputs import CanonicalEvalSupplementalOutputs
 
     layout = SimpleNamespace(
         metagame_dir=tmp_path / "run" / "eval" / "metagame",
@@ -2363,9 +2380,9 @@ def test_canonical_output_message_renderer_handles_optional_outputs(tmp_path: Pa
 def test_canonical_tensorboard_publication_handles_enabled_and_disabled(tmp_path: Path, capsys) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_state import CanonicalEvalRunState
-    from weiss_rl.workflows.eval_canonical_supplemental_outputs import CanonicalEvalSupplementalOutputs
-    from weiss_rl.workflows.eval_canonical_tensorboard_publication import (
+    from weiss_rl.workflows.canonical_eval.state import CanonicalEvalRunState
+    from weiss_rl.workflows.canonical_eval.supplemental_outputs import CanonicalEvalSupplementalOutputs
+    from weiss_rl.workflows.canonical_eval.tensorboard_publication import (
         begin_canonical_eval_tensorboard_logging,
         publish_canonical_eval_tensorboard_summaries,
     )
@@ -2447,9 +2464,9 @@ def test_canonical_tensorboard_publication_handles_enabled_and_disabled(tmp_path
 def test_canonical_report_publication_updates_run_level_reports(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_report_publication import publish_canonical_eval_run_reports
-    from weiss_rl.workflows.eval_canonical_state import CanonicalEvalRunState, CanonicalEvalRuntimeState
-    from weiss_rl.workflows.eval_canonical_supplemental_outputs import CanonicalEvalSupplementalOutputs
+    from weiss_rl.workflows.canonical_eval.report_publication import publish_canonical_eval_run_reports
+    from weiss_rl.workflows.canonical_eval.state import CanonicalEvalRunState, CanonicalEvalRuntimeState
+    from weiss_rl.workflows.canonical_eval.supplemental_outputs import CanonicalEvalSupplementalOutputs
 
     layout = SimpleNamespace()
     run_state = CanonicalEvalRunState(
@@ -2506,12 +2523,12 @@ def test_canonical_report_publication_updates_run_level_reports(tmp_path: Path) 
 def test_canonical_output_publisher_updates_reports_tensorboard_and_cli(tmp_path: Path, capsys) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_canonical_publisher import (
+    from weiss_rl.workflows.canonical_eval.publisher import (
         begin_canonical_eval_output_logging,
         publish_canonical_eval_outputs,
     )
-    from weiss_rl.workflows.eval_canonical_state import CanonicalEvalRunState, CanonicalEvalRuntimeState
-    from weiss_rl.workflows.eval_canonical_supplemental_outputs import CanonicalEvalSupplementalOutputs
+    from weiss_rl.workflows.canonical_eval.state import CanonicalEvalRunState, CanonicalEvalRuntimeState
+    from weiss_rl.workflows.canonical_eval.supplemental_outputs import CanonicalEvalSupplementalOutputs
 
     class FakeTensorBoardLogger:
         enabled = True
@@ -2603,8 +2620,8 @@ def test_canonical_output_publisher_updates_reports_tensorboard_and_cli(tmp_path
 
 
 def test_eval_startup_validation_preserves_mode_errors() -> None:
-    from weiss_rl.workflows.eval_parser import build_eval_parser
-    from weiss_rl.workflows.eval_startup import validate_eval_args
+    from weiss_rl.workflows.eval_support.eval_parser import build_eval_parser
+    from weiss_rl.workflows.eval_support.eval_startup import validate_eval_args
 
     parser = build_eval_parser()
     args = parser.parse_args(
@@ -2625,7 +2642,7 @@ def test_eval_startup_validation_preserves_mode_errors() -> None:
 def test_eval_startup_preparation_uses_public_demo_contract_and_banner() -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_startup import EvalStartupDependencies, prepare_eval_startup
+    from weiss_rl.workflows.eval_support.eval_startup import EvalStartupDependencies, prepare_eval_startup
 
     observed: dict[str, object] = {}
     stack = SimpleNamespace(root=Path("repo"))
@@ -2675,7 +2692,7 @@ def test_eval_startup_preparation_uses_public_demo_contract_and_banner() -> None
 def test_eval_startup_preparation_uses_verified_simulator_contract() -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_startup import EvalStartupDependencies, prepare_eval_startup
+    from weiss_rl.workflows.eval_support.eval_startup import EvalStartupDependencies, prepare_eval_startup
 
     observed: dict[str, object] = {}
     stack = SimpleNamespace(root=Path("repo"))
@@ -2728,9 +2745,9 @@ def test_eval_startup_preparation_uses_verified_simulator_contract() -> None:
 def test_eval_dispatch_routes_public_demo_with_resolved_paths(tmp_path: Path, capsys) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_dispatch import run_eval_dispatch
-    from weiss_rl.workflows.eval_dispatch_dependencies import EvalDispatchDependencies
-    from weiss_rl.workflows.eval_startup import EvalStartup, EvalValidatedArgs
+    from weiss_rl.workflows.eval_support.eval_dispatch import run_eval_dispatch
+    from weiss_rl.workflows.eval_support.eval_dispatch_dependencies import EvalDispatchDependencies
+    from weiss_rl.workflows.eval_support.eval_startup import EvalStartup, EvalValidatedArgs
 
     observed: dict[str, object] = {}
     stack = SimpleNamespace(seed_sets={"report_eval": tmp_path / "seeds.txt"})
@@ -2792,9 +2809,9 @@ def test_eval_dispatch_routes_public_demo_with_resolved_paths(tmp_path: Path, ca
 def test_eval_dispatch_request_preserves_route_payloads(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_dispatch_dependencies import EvalDispatchDependencies
-    from weiss_rl.workflows.eval_dispatch_request import eval_dispatch_request
-    from weiss_rl.workflows.eval_startup import EvalStartup, EvalValidatedArgs
+    from weiss_rl.workflows.eval_support.eval_dispatch_dependencies import EvalDispatchDependencies
+    from weiss_rl.workflows.eval_support.eval_dispatch_request import eval_dispatch_request
+    from weiss_rl.workflows.eval_support.eval_startup import EvalStartup, EvalValidatedArgs
 
     parser = argparse.ArgumentParser()
     stack = SimpleNamespace(seed_sets={"report_eval": tmp_path / "seeds.txt"})
@@ -2908,9 +2925,9 @@ def test_eval_dispatch_request_preserves_route_payloads(tmp_path: Path) -> None:
 def test_eval_dispatch_routes_canonical_with_normalized_args(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_dispatch import run_eval_dispatch
-    from weiss_rl.workflows.eval_dispatch_dependencies import EvalDispatchDependencies
-    from weiss_rl.workflows.eval_startup import EvalStartup, EvalValidatedArgs
+    from weiss_rl.workflows.eval_support.eval_dispatch import run_eval_dispatch
+    from weiss_rl.workflows.eval_support.eval_dispatch_dependencies import EvalDispatchDependencies
+    from weiss_rl.workflows.eval_support.eval_startup import EvalStartup, EvalValidatedArgs
 
     observed: dict[str, object] = {}
     stack = SimpleNamespace(seed_sets={"report_eval": tmp_path / "seeds.txt"})
@@ -2998,9 +3015,9 @@ def test_eval_dispatch_routes_canonical_with_normalized_args(tmp_path: Path) -> 
 def test_eval_dispatch_routes_summary_only_with_dependency_bundle(tmp_path: Path, capsys) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_dispatch import run_eval_dispatch
-    from weiss_rl.workflows.eval_dispatch_dependencies import EvalDispatchDependencies
-    from weiss_rl.workflows.eval_startup import EvalStartup, EvalValidatedArgs
+    from weiss_rl.workflows.eval_support.eval_dispatch import run_eval_dispatch
+    from weiss_rl.workflows.eval_support.eval_dispatch_dependencies import EvalDispatchDependencies
+    from weiss_rl.workflows.eval_support.eval_startup import EvalStartup, EvalValidatedArgs
 
     observed: dict[str, object] = {}
     stack = SimpleNamespace(seed_sets={"report_eval": tmp_path / "seeds.txt"})
@@ -3076,9 +3093,9 @@ def test_eval_dispatch_routes_summary_only_with_dependency_bundle(tmp_path: Path
 def test_eval_dispatch_contract_check_only_skips_route_adapters(tmp_path: Path, capsys) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_dispatch import run_eval_dispatch
-    from weiss_rl.workflows.eval_dispatch_dependencies import EvalDispatchDependencies
-    from weiss_rl.workflows.eval_startup import EvalStartup, EvalValidatedArgs
+    from weiss_rl.workflows.eval_support.eval_dispatch import run_eval_dispatch
+    from weiss_rl.workflows.eval_support.eval_dispatch_dependencies import EvalDispatchDependencies
+    from weiss_rl.workflows.eval_support.eval_startup import EvalStartup, EvalValidatedArgs
 
     stack = SimpleNamespace(seed_sets={"report_eval": tmp_path / "report_eval.txt", "dev_eval": tmp_path / "dev.txt"})
     args = SimpleNamespace(
@@ -3463,8 +3480,7 @@ def test_eval_git_commit_override_does_not_mutate_manifest_payload() -> None:
 
 def test_train_entrypoint_uses_default_run_dir_when_no_label_override(tmp_path: Path) -> None:
     _write_stub_weiss_sim(tmp_path, spec_hash=123)
-    _copy_repo_configs(tmp_path)
-    stack_config = tmp_path / "configs" / "stack_smoke.yaml"
+    stack_config = _write_manifest_only_stack_config(tmp_path)
 
     result = _run_entrypoint(
         tmp_path,
@@ -3484,8 +3500,7 @@ def test_train_entrypoint_uses_default_run_dir_when_no_label_override(tmp_path: 
 
 def test_train_entrypoint_accepts_deprecated_run_id_alias(tmp_path: Path) -> None:
     _write_stub_weiss_sim(tmp_path, spec_hash=123)
-    _copy_repo_configs(tmp_path)
-    stack_config = tmp_path / "configs" / "stack_smoke.yaml"
+    stack_config = _write_manifest_only_stack_config(tmp_path)
 
     result = _run_entrypoint(
         tmp_path,
@@ -3502,8 +3517,7 @@ def test_train_entrypoint_accepts_deprecated_run_id_alias(tmp_path: Path) -> Non
 
 def test_eval_entrypoint_honors_explicit_spec_hash_without_reproducibility_config(tmp_path: Path) -> None:
     bundle = _write_stub_weiss_sim(tmp_path, spec_hash=123)
-    _copy_repo_configs(tmp_path)
-    stack_config = tmp_path / "configs" / "stack_smoke.yaml"
+    stack_config = _write_manifest_only_stack_config(tmp_path)
 
     result = _run_entrypoint(
         tmp_path,
@@ -4595,7 +4609,7 @@ def test_make_figures_entrypoint_public_demo_writes_clearly_labeled_bundle(tmp_p
 
 
 def test_figure_mode_helpers_preserve_messages_and_default_paths(tmp_path: Path) -> None:
-    from weiss_rl.workflows.figure_modes import (
+    from weiss_rl.workflows.figures.figure_modes import (
         run_paper_figure_mode,
         run_placeholder_figure_mode,
         run_public_demo_figure_mode,

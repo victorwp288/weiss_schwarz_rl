@@ -1,9 +1,0 @@
-schema_version: 2
-description: "Higher-pressure opponent-context micro-probe from the a075 frontier. It keeps the full confirm256 pair205 conflict set, doubles the paired-swing auxiliary passes, and increases the hidden context scale to test whether the context channel has enough capacity before any longer training."
-extends: main_league_champion_hardneg_a075_context_conflict_probe.yaml
-model:
-  opponent_context_hidden_scale: 1.50
-training:
-  structured_aux:
-    paired_swing_aux_updates: 2
-    paired_swing_coef: 0.08

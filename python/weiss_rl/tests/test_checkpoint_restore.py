@@ -5,18 +5,18 @@ from pathlib import Path
 import pytest
 import torch
 
-from weiss_rl.training.checkpoint_load import (
+from weiss_rl.training.checkpointing.load import (
     load_initialization_checkpoint_contract,
     load_resume_checkpoint_contract,
 )
-from weiss_rl.training.checkpoint_restore import (
+from weiss_rl.training.checkpointing.restore import (
     CheckpointPayloadContract,
     apply_minimal_checkpoint_initialization,
     apply_minimal_checkpoint_resume_state,
     validate_checkpoint_payload_contract,
     warn_if_config_hash_mismatch_allowed,
 )
-from weiss_rl.training.checkpoint_restore_state import (
+from weiss_rl.training.checkpointing.restore_state import (
     apply_checkpoint_resume_counters,
     checkpoint_counter_state_from_payload,
 )
@@ -228,7 +228,7 @@ def test_apply_checkpoint_resume_counters_restores_counters_and_start_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     learner = _ResumeLearner()
-    monkeypatch.setattr("weiss_rl.training.checkpoint_restore_state.time.time", lambda: 123.5)
+    monkeypatch.setattr("weiss_rl.training.checkpointing.restore_state.time.time", lambda: 123.5)
 
     counters = apply_checkpoint_resume_counters(
         learner=learner,
@@ -311,7 +311,7 @@ def test_load_resume_checkpoint_contract_uses_unsafe_torch_load_and_warns_on_all
         calls.append((path, map_location, weights_only))
         return payload
 
-    monkeypatch.setattr("weiss_rl.training.checkpoint_load.torch.load", fake_torch_load)
+    monkeypatch.setattr("weiss_rl.training.checkpointing.load.torch.load", fake_torch_load)
 
     contract = load_resume_checkpoint_contract(
         checkpoint_path=checkpoint_path,
@@ -340,7 +340,7 @@ def test_load_initialization_checkpoint_contract_allows_config_mismatch_without_
         "algorithm": "impala_vtrace_ff",
         "model_state_dict": {"weight": torch.tensor([1.0])},
     }
-    monkeypatch.setattr("weiss_rl.training.checkpoint_load.torch.load", lambda *_args, **_kwargs: payload)
+    monkeypatch.setattr("weiss_rl.training.checkpointing.load.torch.load", lambda *_args, **_kwargs: payload)
 
     contract = load_initialization_checkpoint_contract(
         checkpoint_path=tmp_path / "checkpoint.pt",

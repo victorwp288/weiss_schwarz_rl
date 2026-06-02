@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
-from weiss_rl.eval.policy_set import heuristic_public_profile_name_for_policy_id
+from weiss_rl.eval.policies.set import heuristic_public_profile_name_for_policy_id
 from weiss_rl.experiments.baselines import (
     NOLEAGUE_BASELINE_NAME,
     NOLEAGUE_BASELINE_POLICY_ID,

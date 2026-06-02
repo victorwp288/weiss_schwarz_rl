@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from weiss_rl.runtime_components.hashing import hash_state_dict, hash_unroll
+from weiss_rl.runtime.components.hashing import hash_state_dict, hash_unroll
 
 
 def _manual_state_dict_hash(state_dict: dict[str, Any]) -> str:

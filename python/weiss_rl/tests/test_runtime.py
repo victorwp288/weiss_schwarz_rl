@@ -15,7 +15,7 @@ import weiss_rl.model as model_module
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_POLICY_ID,
 )
 from weiss_rl.runtime import (
@@ -1912,13 +1912,7 @@ def test_central_structured_unroll_snapshots_replay_behavior_logp() -> None:
     from weiss_rl.training.environments import spec_dimensions
 
     repo_root = Path(__file__).resolve().parents[3]
-    stack = load_stack_config(
-        repo_root
-        / "configs"
-        / "archive"
-        / "thesis_reward_ablations_20260513"
-        / "full_shaping_entropy01_sync1_reward.yaml"
-    )
+    stack = load_stack_config(repo_root / "configs" / "presets" / "typed_structured_v2.yaml")
     stack = apply_stack_overrides(
         stack,
         parse_override_tokens(

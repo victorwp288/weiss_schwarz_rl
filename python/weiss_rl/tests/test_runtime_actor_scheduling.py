@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from weiss_rl.runtime import QueueRuntime
-from weiss_rl.runtime_components.actor_scheduling import next_actor_batch
+from weiss_rl.runtime.components.actor_scheduling import next_actor_batch
 
 
 def _actor(actor_id: int) -> SimpleNamespace:

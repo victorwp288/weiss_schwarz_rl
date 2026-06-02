@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from weiss_rl.learners.impala_learner import _compute_vtrace_targets_torch
+from weiss_rl.learners.impala import _compute_vtrace_targets_torch
 from weiss_rl.learners.vtrace import compute_vtrace_targets
 from weiss_rl.learners.vtrace_torch import compute_vtrace_targets_torch
 

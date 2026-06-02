@@ -4,11 +4,11 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from weiss_rl.workflows.eval_canonical_dependencies import CanonicalEvalDependencies
-from weiss_rl.workflows.eval_canonical_outputs import write_canonical_eval_outputs
-from weiss_rl.workflows.eval_canonical_runtime import resolve_canonical_eval_runtime_state
-from weiss_rl.workflows.eval_canonical_setup import prepare_canonical_eval_run_state
-from weiss_rl.workflows.eval_canonical_state import CanonicalEvalRunState, CanonicalEvalRuntimeState
+from weiss_rl.workflows.canonical_eval.dependencies import CanonicalEvalDependencies
+from weiss_rl.workflows.canonical_eval.outputs import write_canonical_eval_outputs
+from weiss_rl.workflows.canonical_eval.runtime import resolve_canonical_eval_runtime_state
+from weiss_rl.workflows.canonical_eval.setup import prepare_canonical_eval_run_state
+from weiss_rl.workflows.canonical_eval.state import CanonicalEvalRunState, CanonicalEvalRuntimeState
 
 __all__ = [
     "CanonicalEvalDependencies",

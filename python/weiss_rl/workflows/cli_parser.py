@@ -1,7 +1,7 @@
 """Compatibility facade for the package workflow parser.
 
 The canonical parser lives in `weiss_rl.workflows.parsers` and is assembled from
-training/evaluation/controller parser modules. This module keeps the old import
+the retained training and evaluation parser modules. This module keeps the old import
 path alive without carrying a second copy of the full command tree.
 """
 

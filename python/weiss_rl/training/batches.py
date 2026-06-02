@@ -8,7 +8,7 @@ import torch
 
 from weiss_rl.core.masking import masked_logp_from_mask
 from weiss_rl.learners.vtrace import VTraceTargets, compute_vtrace_targets
-from weiss_rl.runtime_components.batching import actor_perspective_discounts
+from weiss_rl.runtime.components.batching import actor_perspective_discounts
 from weiss_rl.training.algorithm_families import (
     IMPALA_ALGORITHMS as IMPALA_ALGORITHMS,
 )

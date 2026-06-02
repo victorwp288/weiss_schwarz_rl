@@ -1,6 +1,0 @@
-schema_version: 2
-description: "B1 guided ablation: pass-aware tactical teacher plus action-surface guard that collapses pass-vs-main-move-only rows."
-extends: public_teacher_passaware_mulliganguard_reward.yaml
-training:
-  action_surface:
-    force_pass_over_main_move_only: true

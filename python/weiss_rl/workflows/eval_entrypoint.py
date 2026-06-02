@@ -5,10 +5,10 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from weiss_rl.workflows.eval_entrypoint_compat import (
+from weiss_rl.workflows.eval_entrypoint_support.compat import (
     run_entrypoint_canonical_eval_pipeline,
 )
-from weiss_rl.workflows.eval_entrypoint_exports import (
+from weiss_rl.workflows.eval_entrypoint_support.exports import (
     EVAL_ENTRYPOINT_EXPORTS,
     ArtifactLayout,
     CanonicalEvalDependencies,
@@ -73,8 +73,8 @@ from weiss_rl.workflows.eval_entrypoint_exports import (
     write_matchup_summary_json,
     write_paper_readiness_json,
 )
-from weiss_rl.workflows.eval_entrypoint_main import run_eval_entrypoint_main
-from weiss_rl.workflows.eval_entrypoint_runtime import (
+from weiss_rl.workflows.eval_entrypoint_support.main import run_eval_entrypoint_main
+from weiss_rl.workflows.eval_entrypoint_support.runtime import (
     build_eval_entrypoint_canonical_dependencies,
     build_eval_entrypoint_dispatch_dependencies,
     build_eval_entrypoint_startup_dependencies,

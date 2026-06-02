@@ -4,12 +4,10 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
-from weiss_rl.workflows.controller_dispatch import dispatch_controller_request
-from weiss_rl.workflows.controller_plan_state import ControllerWorkflowRequest, controller_workflow_request
-from weiss_rl.workflows.evaluation_dispatch import dispatch_evaluation_request
-from weiss_rl.workflows.evaluation_plan_state import EvaluationWorkflowRequest, evaluation_workflow_request
-from weiss_rl.workflows.training_dispatch import dispatch_training_request
-from weiss_rl.workflows.training_plan_state import TrainingWorkflowRequest, training_workflow_request
+from weiss_rl.workflows.evaluation_workflow.dispatch import dispatch_evaluation_request
+from weiss_rl.workflows.evaluation_workflow.plan_state import EvaluationWorkflowRequest, evaluation_workflow_request
+from weiss_rl.workflows.training_workflow.dispatch import dispatch_training_request
+from weiss_rl.workflows.training_workflow.plan_state import TrainingWorkflowRequest, training_workflow_request
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,9 +30,6 @@ class WorkflowDispatchRequest:
     def evaluation_request(self) -> EvaluationWorkflowRequest:
         return evaluation_workflow_request(args=self.args, repo_root=self.repo_root, python_exe=self.python_exe)
 
-    def controller_request(self) -> ControllerWorkflowRequest:
-        return controller_workflow_request(args=self.args, repo_root=self.repo_root, python_exe=self.python_exe)
-
 
 def workflow_dispatch_request(
     *,
@@ -49,8 +44,6 @@ def dispatch_workflow_request(request: WorkflowDispatchRequest) -> bool:
     if dispatch_training_request(request.training_request()):
         return True
     if dispatch_evaluation_request(request.evaluation_request()):
-        return True
-    if dispatch_controller_request(request.controller_request()):
         return True
     return False
 

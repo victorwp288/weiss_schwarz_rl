@@ -1,6 +1,6 @@
 """Backward-compatible re-export for the deterministic policy-set selector."""
 
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_POLICY_ID,
     NO_LEAGUE_POLICY_ID,
     RANDOM_LEGAL_POLICY_ID,

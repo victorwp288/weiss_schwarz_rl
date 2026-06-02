@@ -7,15 +7,15 @@ import numpy as np
 import pytest
 import torch
 
-from weiss_rl.runtime_components.central_actor_step import execute_central_actor_step
-from weiss_rl.runtime_components.central_actor_step_context import (
+from weiss_rl.runtime.components.central_actor_step import execute_central_actor_step
+from weiss_rl.runtime.components.central_actor_step_context import (
     CentralActorStepCallbacks,
     CentralActorStepInputs,
     CentralActorStepPolicyInputs,
     CentralActorStepRuntimeContext,
 )
-from weiss_rl.runtime_components.collector_state import allocate_collector_unroll_state
-from weiss_rl.runtime_components.teacher_labels import teacher_label_arrays
+from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
+from weiss_rl.runtime.components.teacher_labels import teacher_label_arrays
 
 
 class _StepEnv:

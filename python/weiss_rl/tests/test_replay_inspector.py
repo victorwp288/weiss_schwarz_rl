@@ -12,7 +12,7 @@ import torch
 from weiss_rl.config import StackConfig, compute_config_hash256, load_stack_config
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.eval.policy_set import (
+from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
     HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
     HEURISTIC_PUBLIC_POLICY_ID,
@@ -46,7 +46,7 @@ from weiss_rl.replay.inspector_report import (
 from weiss_rl.replay.inspector_report import (
     write_replay_inspection_report,
 )
-from weiss_rl.runtime_components.legal_meta import action_catalog_indices
+from weiss_rl.runtime.components.legal_meta import action_catalog_indices
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -782,9 +782,7 @@ def test_inspect_replay_bundle_supports_all_heuristic_public_policy_ids(tmp_path
 
 
 def test_replay_policy_surface_guard_filters_model_only_main_move_rows() -> None:
-    stack = load_stack_config(
-        REPO_ROOT / "configs" / "thesis" / "ablations" / "final_eval_mainmoveguard_mulliganguard.yaml"
-    )
+    stack = load_stack_config(REPO_ROOT / "configs" / "thesis" / "b1_noleague.yaml")
 
     class FakeModel:
         action_catalog = ActionCatalog.from_spec_bundle(_heuristic_spec_bundle())
@@ -838,9 +836,7 @@ def test_replay_policy_surface_guard_filters_model_only_main_move_rows() -> None
 
 
 def test_replay_policy_surface_guard_filters_model_only_pass_when_attack_is_available() -> None:
-    stack = load_stack_config(
-        REPO_ROOT / "configs" / "thesis" / "ablations" / "final_eval_attackguard_mainmoveguard_mulliganguard.yaml"
-    )
+    stack = load_stack_config(REPO_ROOT / "configs" / "thesis" / "b1_noleague.yaml")
 
     class FakeModel:
         action_catalog = ActionCatalog.from_spec_bundle(_heuristic_spec_bundle())

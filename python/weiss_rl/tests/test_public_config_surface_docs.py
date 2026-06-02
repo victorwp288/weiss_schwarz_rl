@@ -10,8 +10,6 @@ PUBLIC_DOCS = (
     REPO_ROOT / "configs" / "README.md",
     REPO_ROOT / "configs" / "thesis" / "ablations" / "README.md",
     REPO_ROOT / "docs" / "README.md",
-    REPO_ROOT / "docs" / "experiments.md",
-    REPO_ROOT / "docs" / "standard_recipe.md",
     REPO_ROOT / "docs" / "thesis_workflow.md",
     REPO_ROOT / "python" / "scripts" / "README.md",
 )

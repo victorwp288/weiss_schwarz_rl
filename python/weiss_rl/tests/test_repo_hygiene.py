@@ -25,7 +25,7 @@ def test_current_repo_passes_repo_hygiene_check() -> None:
     summary = run_repo_hygiene_check(repo_root=REPO_ROOT)
 
     assert summary.passed
-    assert summary.script_shim_count >= 70
+    assert summary.script_shim_count >= 30
     assert summary_payload(summary)["findings"] == []
 
 

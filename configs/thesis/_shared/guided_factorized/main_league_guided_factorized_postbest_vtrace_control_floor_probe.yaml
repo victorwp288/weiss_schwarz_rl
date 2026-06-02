@@ -1,9 +1,0 @@
-schema_version: 2
-description: "Main league probe: conservative V-trace clipping plus a persistent control-profile public-teacher floor, testing whether the B4 near-miss is a control-specific target gap rather than a generic profile-cycling problem."
-extends: main_league_guided_factorized_postbest_vtrace_clamp_probe.yaml
-training:
-  structured_aux:
-    teacher_public_heuristic_profiles:
-      - control
-    teacher_public_heuristic_profile_mode: mixture
-    teacher_public_heuristic_profiles_end_updates: -1

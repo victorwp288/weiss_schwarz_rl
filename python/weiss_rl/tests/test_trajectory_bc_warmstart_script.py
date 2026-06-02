@@ -45,7 +45,7 @@ def test_trajectory_bc_warmstart_entrypoint_main_delegates_to_runtime(monkeypatc
 
 
 def test_trajectory_bc_warmstart_parser_preserves_defaults(tmp_path: Path) -> None:
-    from weiss_rl.training.trajectory_bc_warmstart_cli import build_trajectory_bc_warmstart_parser
+    from weiss_rl.training.warmstarts.trajectory_bc_warmstart_cli import build_trajectory_bc_warmstart_parser
 
     args = build_trajectory_bc_warmstart_parser().parse_args(
         [
@@ -83,7 +83,7 @@ def test_trajectory_bc_warmstart_parser_preserves_defaults(tmp_path: Path) -> No
 
 
 def test_trajectory_bc_warmstart_parser_validates_positive_counts(tmp_path: Path) -> None:
-    from weiss_rl.training.trajectory_bc_warmstart_cli import parse_trajectory_bc_warmstart_args
+    from weiss_rl.training.warmstarts.trajectory_bc_warmstart_cli import parse_trajectory_bc_warmstart_args
 
     base_args = [
         "--stack-config",

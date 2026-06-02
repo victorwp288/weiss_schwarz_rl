@@ -3,21 +3,21 @@ from __future__ import annotations
 import pytest
 import torch
 
-from weiss_rl.learners.paired_swing_comparison import paired_swing_margin_comparison_rows
-from weiss_rl.learners.paired_swing_inputs import prepare_paired_swing_loss_inputs
-from weiss_rl.learners.paired_swing_loss import (
+from weiss_rl.learners.paired_swing.comparison import paired_swing_margin_comparison_rows
+from weiss_rl.learners.paired_swing.inputs import prepare_paired_swing_loss_inputs
+from weiss_rl.learners.paired_swing.loss import (
     packed_paired_swing_margin_loss,
     packed_target_action_retention_loss,
     packed_top_action_retention_loss,
 )
-from weiss_rl.learners.paired_swing_margin_retention import paired_swing_margin_retention_loss_and_metrics
-from weiss_rl.learners.paired_swing_metrics import (
+from weiss_rl.learners.paired_swing.margin_retention import paired_swing_margin_retention_loss_and_metrics
+from weiss_rl.learners.paired_swing.metrics import (
     paired_swing_final_metrics,
     paired_swing_supported_rows,
 )
-from weiss_rl.learners.paired_swing_rows import positive_vs_top_other_margin_by_row
-from weiss_rl.learners.paired_swing_scope import paired_swing_scoped_margin_loss
-from weiss_rl.learners.paired_swing_top_retention import paired_swing_top_action_retention_rows
+from weiss_rl.learners.paired_swing.rows import positive_vs_top_other_margin_by_row
+from weiss_rl.learners.paired_swing.scope import paired_swing_scoped_margin_loss
+from weiss_rl.learners.paired_swing.top_retention import paired_swing_top_action_retention_rows
 
 
 def test_prepare_paired_swing_loss_inputs_normalizes_options_and_counts_active_rows() -> None:

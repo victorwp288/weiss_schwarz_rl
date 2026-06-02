@@ -13,23 +13,23 @@ from weiss_rl.config import load_stack_config
 from weiss_rl.config.models import StopRulesConfig
 from weiss_rl.eval import final_eval as final_eval_module
 from weiss_rl.eval import resolve_final_policy_set, run_final_eval
-from weiss_rl.eval.final_eval_artifacts import (
+from weiss_rl.eval.final.artifacts import (
     final_eval_matchup_manifest_rows,
     write_final_eval_artifacts,
 )
-from weiss_rl.eval.final_eval_matchups import (
+from weiss_rl.eval.final.matchups import (
     matchup_dir_name,
     run_final_eval_matchup,
     scheduled_game,
 )
-from weiss_rl.eval.final_eval_payload import build_final_eval_payload
-from weiss_rl.eval.final_eval_policy_selection import (
+from weiss_rl.eval.final.payload import build_final_eval_payload
+from weiss_rl.eval.final.policy_selection import (
     load_dev_eval_summaries,
     resolve_final_eval_policy_ids,
     validate_final_eval_seed_budget,
 )
 from weiss_rl.eval.harness import GameResult, ReplaySampleResult, ScheduledGame
-from weiss_rl.eval.policy_set import DevEvalPolicySummary
+from weiss_rl.eval.policies.set import DevEvalPolicySummary
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 
 _RUN_ID256 = "ab" * 32

@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from weiss_rl.artifacts.reproducibility import derive_actor_seed
-from weiss_rl.runtime_components.actor_state import (
+from weiss_rl.runtime.components.actor_state import (
     MIRROR_OPPONENT_POLICY_ID,
     _ActorState,
     actor_seed,

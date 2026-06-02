@@ -1,29 +1,32 @@
 # Artifacts
 
-Existing historical outputs under `runs/`, `run_logs/`, `vast_artifacts/`, and
-`thesis_figures_final/` are protected. Do not migrate or delete them during the
-rebuild unless explicitly asked.
+Retained thesis evidence lives in:
 
-Canonical new run outputs live under `runs/<run_label>/` and include:
+- `runs/`
+- `diagnostics/`
+- `vast_artifacts/`
+- `thesis_figures_final/`
 
-- `manifest.json`
-- `environment.json`
-- `run_summary.json`
-- `determinism_report.json`
-- `config_canonical.json`
-- `spec_bundle.json`
-- `spec_hash256.txt`
-- `training/checkpoints/`
-- `training/snapshots/registry.json`
-- `training/logs/training_metrics.jsonl`
-- `training/logs/performance.jsonl`
-- `eval/final_eval/`
-- `eval/diagnostics/`
-- `eval/metagame/` for thesis eval
-- `eval/b2_disagreement/` when B2 diagnosis is run
-- `replays/`
-- `figures/paper/`
-- `figures/data/` when figure data exports are produced
+Treat retained outputs as read-only unless deliberately replacing a thesis
+artifact.
 
-Smoke/demo artifacts must stay clearly labeled and must not be cited as thesis
-evidence.
+## Current Retained Runs
+
+- `runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01`
+- `runs/main_champion_hardneg_interp_u10_repair_a015_20260517`
+- `runs/main_champion_hardneg_long_v1_u10_20260517_seg01`
+- `runs/main_champion_hardneg_rehearsal_from_u20_u5_20260517_seg01`
+
+The referenced trajectory-BC dataset run
+`runs/trajectory_bc_direct_b2_b3_b4_win_64_20260516/` is still missing from
+this checkout and should be restored from backup if full provenance recreation
+is needed.
+
+## Current Diagnostics
+
+`diagnostics/` is intentionally limited to the report/search sidecars used by
+the thesis discussion and figure checks.
+
+## Ablation Summaries
+
+`vast_artifacts/` keeps `exp028`, `exp029`, `main`, `nogru`, and `ppo`.

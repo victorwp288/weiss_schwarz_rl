@@ -61,7 +61,7 @@ def test_preference_warmstart_entrypoint_main_delegates_to_runtime(monkeypatch: 
 
 
 def test_preference_warmstart_parser_preserves_defaults(tmp_path: Path) -> None:
-    from weiss_rl.training.paired_outcome_preference_warmstart_cli import (
+    from weiss_rl.training.warmstarts.paired_outcome_preference_warmstart_cli import (
         build_paired_outcome_preference_warmstart_parser,
     )
 
@@ -105,7 +105,7 @@ def test_preference_warmstart_parser_preserves_defaults(tmp_path: Path) -> None:
 
 
 def test_preference_warmstart_parser_validates_numeric_and_selector_bounds(tmp_path: Path) -> None:
-    from weiss_rl.training.paired_outcome_preference_warmstart_cli import (
+    from weiss_rl.training.warmstarts.paired_outcome_preference_warmstart_cli import (
         parse_paired_outcome_preference_warmstart_args,
     )
 

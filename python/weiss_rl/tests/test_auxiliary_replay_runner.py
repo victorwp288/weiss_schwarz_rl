@@ -18,16 +18,16 @@ from weiss_rl.training.auxiliary_replay_runner import (
     emit_auxiliary_replay_sampled_metrics,
     run_auxiliary_replay_updates,
 )
-from weiss_rl.training.paired_auxiliary_replay import (
+from weiss_rl.training.replay_data.paired_auxiliary_replay import (
     emit_paired_auxiliary_replay_metrics,
     run_due_paired_auxiliary_replay,
 )
-from weiss_rl.training.paired_outcome_preference_replay import (
+from weiss_rl.training.replay_data.paired_outcome_preference_replay import (
     PairedOutcomePreferenceReplayState,
     maybe_run_paired_outcome_preference_replay,
 )
-from weiss_rl.training.paired_swing_replay import PairedSwingReplayState, maybe_run_paired_swing_replay
-from weiss_rl.training.trajectory_bc_sampling import TrajectoryBcReplayState
+from weiss_rl.training.replay_data.paired_swing_replay import PairedSwingReplayState, maybe_run_paired_swing_replay
+from weiss_rl.training.replay_data.trajectory_bc_sampling import TrajectoryBcReplayState
 
 
 def test_auxiliary_replay_due_preserves_positive_modulo_cadence() -> None:

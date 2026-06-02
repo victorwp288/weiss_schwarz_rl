@@ -10,8 +10,8 @@ from typing import Any, cast
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.artifacts.reproducibility import parse_seed_file, require_fixed_python_hash_seed
 from weiss_rl.config import load_stack_config
-from weiss_rl.eval.final_eval_artifacts import write_final_eval_artifacts
-from weiss_rl.eval.final_eval_payload import build_final_eval_payload
+from weiss_rl.eval.final.artifacts import write_final_eval_artifacts
+from weiss_rl.eval.final.payload import build_final_eval_payload
 from weiss_rl.eval.payoff_folding import PayoffFoldScheme
 
 

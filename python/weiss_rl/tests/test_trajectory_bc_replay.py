@@ -9,13 +9,13 @@ import torch
 
 from weiss_rl.replay.trajectory_bc import ReplayTrajectoryDataset, save_replay_trajectory_bc_dataset
 from weiss_rl.training import trajectory_bc_replay
-from weiss_rl.training.trajectory_bc_replay import maybe_run_trajectory_bc_replay
-from weiss_rl.training.trajectory_bc_sampling import (
+from weiss_rl.training.replay_data.trajectory_bc_replay import maybe_run_trajectory_bc_replay
+from weiss_rl.training.replay_data.trajectory_bc_sampling import (
     TrajectoryBcReplayState,
     focus_group_counts,
     source_labels_by_episode,
 )
-from weiss_rl.training.trajectory_bc_teacher_state import (
+from weiss_rl.training.replay_data.trajectory_bc_teacher_state import (
     apply_trajectory_bc_teacher_aux_state,
     capture_teacher_aux_state,
     restore_teacher_aux_state,

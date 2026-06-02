@@ -8,12 +8,12 @@ import pytest
 import torch
 
 from weiss_rl.league.registry import SNAPSHOT_METADATA_FILENAME, SnapshotRegistry, snapshot_weights_relpath
-from weiss_rl.training.checkpoint_publish import (
+from weiss_rl.training.checkpointing.publish import (
     CHECKPOINT_SNAPSHOT_METADATA_FORMAT,
     publish_checkpoint_snapshot,
 )
-from weiss_rl.training.checkpoint_publish_reporting import checkpoint_publish_output_text
-from weiss_rl.training.checkpoint_publish_runtime import run_checkpoint_publish
+from weiss_rl.training.checkpointing.publish_reporting import checkpoint_publish_output_text
+from weiss_rl.training.checkpointing.publish_runtime import run_checkpoint_publish
 
 
 def test_checkpoint_publish_entrypoint_facade_reexports_cli_runtime_and_core_helpers() -> None:
@@ -30,7 +30,7 @@ def test_checkpoint_publish_entrypoint_facade_reexports_cli_runtime_and_core_hel
 
 
 def test_checkpoint_publish_parser_preserves_defaults(tmp_path: Path) -> None:
-    from weiss_rl.training.checkpoint_publish_cli import build_checkpoint_publish_parser
+    from weiss_rl.training.checkpointing.publish_cli import build_checkpoint_publish_parser
 
     args = build_checkpoint_publish_parser().parse_args(
         [

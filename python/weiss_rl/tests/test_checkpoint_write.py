@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from weiss_rl.training.checkpoint_write import (
+from weiss_rl.training.checkpointing.write import (
     build_minimal_train_checkpoint_payload,
     minimal_train_checkpoint_payload_from_learner,
 )

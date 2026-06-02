@@ -28,33 +28,34 @@ from weiss_rl.training import (
     training_update_stage_pipeline,
     training_update_step,
 )
-from weiss_rl.training.minimal_dev_eval import (
+from weiss_rl.training.loop.runner import MinimalTrainingRunHooks, run_minimal_training_updates
+from weiss_rl.training.minimal.dev_eval import (
     PeriodicDevEvalGuardResult,
     TrainingPeriodicDevEvalHooks,
     _maybe_run_periodic_dev_eval_and_checkpoint_guard,
 )
-from weiss_rl.training.minimal_finalization import (
+from weiss_rl.training.minimal.finalization import (
     TrainingFinalCheckpointHooks,
     _final_dev_eval_summary_for_update,
     _finalize_training_checkpoint_selection,
 )
-from weiss_rl.training.minimal_hook_groups import minimal_training_hook_groups
-from weiss_rl.training.minimal_initialization import (
+from weiss_rl.training.minimal.hook_groups import minimal_training_hook_groups
+from weiss_rl.training.minimal.initialization import (
     _effective_init_schedule_offset_from_checkpoint,
     _infer_init_schedule_offset_from_scalars,
     _publish_initial_runtime_snapshot_after_resume,
 )
-from weiss_rl.training.minimal_promotion import (
+from weiss_rl.training.minimal.promotion import (
     TrainingCheckpointPromotionHooks,
     _league_reference_update_from_metrics,
     _maybe_checkpoint_and_promote_snapshot,
 )
-from weiss_rl.training.minimal_setup import (
+from weiss_rl.training.minimal.setup import (
     MinimalTrainingSetupHooks,
     _require_training_stack_components,
     build_minimal_training_setup,
 )
-from weiss_rl.training.minimal_update import (
+from weiss_rl.training.minimal.update import (
     _POST_UPDATE_TRAINING_LOG_METRIC_PREFIXES,
     TrainingReplayStates,
     _merge_post_update_auxiliary_metrics_into_training_log,
@@ -63,8 +64,8 @@ from weiss_rl.training.minimal_update import (
     _run_training_update_step,
     _schedule_update_count_for_next_update,
 )
-from weiss_rl.training.train_entrypoint_main import _require_explicit_resume_geometry
-from weiss_rl.training.train_entrypoint_phases import (
+from weiss_rl.training.train_entrypoint.main import _require_explicit_resume_geometry
+from weiss_rl.training.train_entrypoint.phases import (
     TrainCliState,
     TrainStartupState,
     execute_train_run,
@@ -72,7 +73,6 @@ from weiss_rl.training.train_entrypoint_phases import (
     prepare_train_startup_state,
     resolve_train_cli_state,
 )
-from weiss_rl.training.training_runner import MinimalTrainingRunHooks, run_minimal_training_updates
 
 
 def test_train_entrypoint_phases_facade_reexports_split_phase_modules() -> None:
@@ -102,7 +102,7 @@ def test_train_entrypoint_phases_facade_reexports_split_phase_modules() -> None:
 
 
 def test_minimal_promotion_reexports_checkpoint_snapshot_promotion_boundary() -> None:
-    import weiss_rl.training.minimal_promotion as minimal_promotion
+    import weiss_rl.training.minimal.promotion as minimal_promotion
 
     assert (
         minimal_promotion.TrainingCheckpointPromotionHooks
@@ -117,12 +117,12 @@ def test_minimal_promotion_reexports_checkpoint_snapshot_promotion_boundary() ->
         is checkpoint_snapshot_promotion.maybe_checkpoint_and_promote_snapshot
     )
     assert checkpoint_snapshot_promotion.maybe_checkpoint_and_promote_snapshot.__module__ == (
-        "weiss_rl.training.checkpoint_snapshot_promotion"
+        "weiss_rl.training.checkpointing.snapshot_promotion"
     )
 
 
 def test_minimal_dev_eval_reexports_checkpoint_periodic_dev_eval_boundary() -> None:
-    import weiss_rl.training.minimal_dev_eval as minimal_dev_eval
+    import weiss_rl.training.minimal.dev_eval as minimal_dev_eval
 
     assert minimal_dev_eval.PeriodicDevEvalGuardResult is checkpoint_periodic_dev_eval.PeriodicDevEvalGuardResult
     assert minimal_dev_eval.TrainingPeriodicDevEvalHooks is checkpoint_periodic_dev_eval.TrainingPeriodicDevEvalHooks
@@ -131,7 +131,7 @@ def test_minimal_dev_eval_reexports_checkpoint_periodic_dev_eval_boundary() -> N
         is checkpoint_periodic_dev_eval.maybe_run_periodic_dev_eval_and_checkpoint_guard
     )
     assert checkpoint_periodic_dev_eval.maybe_run_periodic_dev_eval_and_checkpoint_guard.__module__ == (
-        "weiss_rl.training.checkpoint_periodic_dev_eval"
+        "weiss_rl.training.checkpointing.periodic_dev_eval"
     )
 
 
@@ -157,15 +157,15 @@ def test_checkpoint_periodic_dev_eval_reexports_guard_application_boundary() -> 
         is checkpoint_periodic_dev_eval_guard.apply_periodic_dev_eval_checkpoint_guard
     )
     assert checkpoint_periodic_dev_eval_guard.apply_periodic_dev_eval_checkpoint_guard.__module__ == (
-        "weiss_rl.training.checkpoint_periodic_dev_eval_guard"
+        "weiss_rl.training.checkpointing.periodic_dev_eval_guard"
     )
     assert checkpoint_periodic_dev_eval_confirmatory.maybe_run_confirmatory_dev_eval.__module__ == (
-        "weiss_rl.training.checkpoint_periodic_dev_eval_confirmatory"
+        "weiss_rl.training.checkpointing.periodic_dev_eval_confirmatory"
     )
 
 
 def test_minimal_finalization_reexports_checkpoint_finalization_boundary() -> None:
-    import weiss_rl.training.minimal_finalization as minimal_finalization
+    import weiss_rl.training.minimal.finalization as minimal_finalization
 
     assert minimal_finalization.TrainingFinalCheckpointHooks is checkpoint_finalization.TrainingFinalCheckpointHooks
     assert (
@@ -177,13 +177,13 @@ def test_minimal_finalization_reexports_checkpoint_finalization_boundary() -> No
         is checkpoint_finalization.finalize_training_checkpoint_selection
     )
     assert checkpoint_finalization.finalize_training_checkpoint_selection.__module__ == (
-        "weiss_rl.training.checkpoint_finalization"
+        "weiss_rl.training.checkpointing.finalization"
     )
 
 
 def test_minimal_setup_reexports_canonical_training_setup_boundary() -> None:
-    import weiss_rl.training.minimal_initialization as minimal_initialization
-    import weiss_rl.training.minimal_setup as minimal_setup
+    import weiss_rl.training.minimal.initialization as minimal_initialization
+    import weiss_rl.training.minimal.setup as minimal_setup
 
     assert minimal_setup.MinimalTrainingSetup is training_setup.MinimalTrainingSetup
     assert minimal_setup.MinimalTrainingSetupHooks is training_setup.MinimalTrainingSetupHooks
@@ -200,11 +200,11 @@ def test_minimal_setup_reexports_canonical_training_setup_boundary() -> None:
     assert minimal_initialization._infer_init_schedule_offset_from_scalars is (
         training_setup.infer_init_schedule_offset_from_scalars
     )
-    assert training_setup.build_minimal_training_setup.__module__ == "weiss_rl.training.training_setup"
+    assert training_setup.build_minimal_training_setup.__module__ == "weiss_rl.training.loop.setup"
 
 
 def test_minimal_update_reexports_canonical_training_update_boundary() -> None:
-    import weiss_rl.training.minimal_update as minimal_update
+    import weiss_rl.training.minimal.update as minimal_update
 
     assert minimal_update.TrainingReplayStates is training_update.TrainingReplayStates
     assert (
@@ -227,7 +227,7 @@ def test_minimal_update_reexports_canonical_training_update_boundary() -> None:
     )
     assert minimal_update._run_post_update_replay is training_update.run_post_update_replay
     assert minimal_update._run_training_update_step is training_update.run_training_update_step
-    assert training_update.run_training_update_step.__module__ == "weiss_rl.training.training_update"
+    assert training_update.run_training_update_step.__module__ == "weiss_rl.training.loop.update"
 
 
 def test_training_update_reexports_canonical_replay_dispatch_helpers() -> None:
@@ -358,7 +358,7 @@ def test_training_update_reexports_canonical_step_context_helpers() -> None:
         is training_update_step.run_training_update_step_from_context
     )
     assert training_update_step.run_training_update_step_from_context.__module__ == (
-        "weiss_rl.training.training_update_step"
+        "weiss_rl.training.loop.update_step"
     )
 
 
@@ -371,7 +371,7 @@ def test_training_update_step_uses_canonical_stage_pipeline_boundary() -> None:
         is training_update_stage_pipeline.run_training_update_stage_pipeline
     )
     assert training_update_stage_pipeline.run_training_update_stage_pipeline.__module__ == (
-        "weiss_rl.training.training_update_stage_pipeline"
+        "weiss_rl.training.loop.update_stage_pipeline"
     )
 
 
@@ -495,16 +495,16 @@ def test_training_update_stage_pipeline_preserves_stage_order_and_payloads() -> 
 
 
 def test_minimal_runner_reexports_canonical_training_runner_boundary() -> None:
-    import weiss_rl.training.minimal_runner as minimal_runner
+    import weiss_rl.training.minimal.runner as minimal_runner
 
     assert minimal_runner.MinimalTrainingRunHooks is training_runner.MinimalTrainingRunHooks
     assert minimal_runner.run_minimal_training_updates is training_runner.run_minimal_training_updates
-    assert training_runner.run_minimal_training_updates.__module__ == "weiss_rl.training.training_runner"
+    assert training_runner.run_minimal_training_updates.__module__ == "weiss_rl.training.loop.runner"
 
 
 def test_training_runner_uses_canonical_context_builder_boundary() -> None:
     assert training_runner.build_training_run_contexts is training_run_contexts.build_training_run_contexts
-    assert training_run_contexts.build_training_run_contexts.__module__ == "weiss_rl.training.training_run_contexts"
+    assert training_run_contexts.build_training_run_contexts.__module__ == "weiss_rl.training.loop.run_contexts"
 
 
 def test_training_run_context_builder_preserves_update_and_checkpoint_payloads(tmp_path: Path) -> None:
@@ -638,7 +638,7 @@ def test_training_loop_progress_reexports_canonical_post_update_boundary() -> No
         is training_post_update.finalize_training_loop_progress_from_context
     )
     assert training_post_update.run_post_update_checkpoint_and_dev_eval_from_context.__module__ == (
-        "weiss_rl.training.training_post_update"
+        "weiss_rl.training.loop.post_update"
     )
 
 

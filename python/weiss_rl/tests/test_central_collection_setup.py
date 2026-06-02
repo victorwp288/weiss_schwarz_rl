@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 import torch
 
-from weiss_rl.runtime_components import central_collection as central_collection_module
-from weiss_rl.runtime_components.central_collection import QueueRuntimeCentralCollectionMixin
-from weiss_rl.runtime_components.central_collection_setup import (
+from weiss_rl.runtime.components import central_collection as central_collection_module
+from weiss_rl.runtime.components.central_collection import QueueRuntimeCentralCollectionMixin
+from weiss_rl.runtime.components.central_collection_setup import (
     actors_have_single_layout,
     build_central_actor_collection_setup,
     supports_structured_central_packed,

@@ -19,7 +19,7 @@ from weiss_rl.training import (
     checkpoint_structured_guard,
     checkpoint_tracker,
 )
-from weiss_rl.training.checkpoint_alias_mutation import (
+from weiss_rl.training.checkpointing.alias_mutation import (
     CheckpointAliasMutation,
     alias_record_for_mutation,
     apply_checkpoint_alias_mutation,
@@ -50,7 +50,7 @@ def test_checkpoints_reexports_canonical_checkpoint_alias_boundary() -> None:
     assert checkpoints.publish_checkpoint_aliases is checkpoint_aliases.publish_checkpoint_aliases
     assert checkpoints.observed_best_checkpoint_path is checkpoint_aliases.observed_best_checkpoint_path
     assert checkpoints.CHECKPOINT_TRACKER_FILENAME == checkpoint_aliases.CHECKPOINT_TRACKER_FILENAME
-    assert checkpoint_aliases.publish_checkpoint_aliases.__module__ == "weiss_rl.training.checkpoint_aliases"
+    assert checkpoint_aliases.publish_checkpoint_aliases.__module__ == "weiss_rl.training.checkpointing.aliases"
 
 
 def test_checkpoint_aliases_reexport_canonical_candidate_boundary() -> None:
@@ -61,7 +61,7 @@ def test_checkpoint_aliases_reexport_canonical_candidate_boundary() -> None:
     )
     assert checkpoint_aliases.should_update_observed_best is checkpoint_alias_candidates.should_update_observed_best
     assert checkpoint_alias_candidates.checkpoint_alias_candidate.__module__ == (
-        "weiss_rl.training.checkpoint_alias_candidates"
+        "weiss_rl.training.checkpointing.alias_candidates"
     )
 
 
@@ -95,7 +95,7 @@ def test_checkpoint_aliases_reexport_canonical_publication_boundary() -> None:
         checkpoint_aliases.observed_best_checkpoint_path is checkpoint_alias_publication.observed_best_checkpoint_path
     )
     assert checkpoint_alias_publication.apply_checkpoint_alias_publication.__module__ == (
-        "weiss_rl.training.checkpoint_alias_publication"
+        "weiss_rl.training.checkpointing.alias_publication"
     )
 
 
@@ -109,7 +109,7 @@ def test_checkpoint_aliases_reexport_canonical_tracker_boundary() -> None:
     assert checkpoint_aliases.CheckpointTrainingPaths is checkpoint_tracker.CheckpointTrainingPaths
     assert checkpoint_aliases.CHECKPOINT_TRACKER_FILENAME == checkpoint_tracker.CHECKPOINT_TRACKER_FILENAME
     assert checkpoint_aliases.CHECKPOINT_TRACKER_FORMAT == checkpoint_tracker.CHECKPOINT_TRACKER_FORMAT
-    assert checkpoint_tracker.load_checkpoint_tracker.__module__ == "weiss_rl.training.checkpoint_tracker"
+    assert checkpoint_tracker.load_checkpoint_tracker.__module__ == "weiss_rl.training.checkpointing.tracker"
 
 
 def test_checkpoint_tracker_loads_defaults_and_rejects_non_object(tmp_path: Path) -> None:
@@ -254,7 +254,7 @@ def test_checkpoints_reexports_canonical_checkpoint_lifecycle_boundary() -> None
     assert checkpoints.maybe_rollback_to_best_checkpoint is checkpoint_lifecycle.maybe_rollback_to_best_checkpoint
     assert checkpoints.maybe_finalize_from_best_checkpoint is checkpoint_lifecycle.maybe_finalize_from_best_checkpoint
     assert checkpoint_lifecycle.maybe_rollback_to_best_checkpoint.__module__ == (
-        "weiss_rl.training.checkpoint_lifecycle"
+        "weiss_rl.training.checkpointing.lifecycle"
     )
 
 
@@ -307,10 +307,10 @@ def test_checkpoint_lifecycle_reexports_canonical_decision_boundary() -> None:
         checkpoint_lifecycle_decisions.finalize_to_best_event_payload
     )
     assert checkpoint_lifecycle_decisions.rollback_to_best_decision.__module__ == (
-        "weiss_rl.training.checkpoint_lifecycle_decisions"
+        "weiss_rl.training.checkpointing.lifecycle_decisions"
     )
     assert checkpoint_lifecycle_plans.rollback_lifecycle_decision.__module__ == (
-        "weiss_rl.training.checkpoint_lifecycle_plans"
+        "weiss_rl.training.checkpointing.lifecycle_plans"
     )
 
 
@@ -636,7 +636,7 @@ def test_checkpoints_reexports_canonical_checkpoint_io_boundary() -> None:
     assert checkpoints.write_minimal_train_checkpoint is checkpoint_io.write_minimal_train_checkpoint
     assert checkpoints.restore_minimal_train_checkpoint is checkpoint_io.restore_minimal_train_checkpoint
     assert checkpoints.initialize_model_from_checkpoint is checkpoint_io.initialize_model_from_checkpoint
-    assert checkpoint_io.write_minimal_train_checkpoint.__module__ == "weiss_rl.training.checkpoint_io"
+    assert checkpoint_io.write_minimal_train_checkpoint.__module__ == "weiss_rl.training.checkpointing.io"
 
 
 def test_checkpoint_alias_mutation_copies_checkpoint_and_updates_tracker(tmp_path: Path) -> None:
@@ -924,7 +924,7 @@ class _TrainingPaths:
 
 
 def test_write_scalars_record_appends_stable_json_line(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("weiss_rl.training.checkpoint_io.time.time", lambda: 105.25)
+    monkeypatch.setattr("weiss_rl.training.checkpointing.io.time.time", lambda: 105.25)
     scalars_path = tmp_path / "scalars.jsonl"
 
     record = write_scalars_record(
@@ -1403,7 +1403,7 @@ def test_structured_mainmove_guard_reexports_canonical_payload_boundary() -> Non
         checkpoint_structured_guard.extract_structured_guard_b2_anchor_score
     )
     assert checkpoint_structured_guard.structured_mainmove_guard_warning_payload.__module__ == (
-        "weiss_rl.training.checkpoint_structured_guard"
+        "weiss_rl.training.checkpointing.structured_guard"
     )
 
 

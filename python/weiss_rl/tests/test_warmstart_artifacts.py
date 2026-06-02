@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from weiss_rl.artifacts import ArtifactLayout
@@ -91,3 +92,47 @@ def test_publish_warmstart_snapshot_writes_weights_metadata_and_registry(tmp_pat
     assert registry["snapshots"][0]["policy_id"] == "unit_latest"
     assert registry["snapshots"][0]["path"] == "training/snapshots/unit_latest/weights.pt"
     assert registry["snapshots"][0]["weights_sha256"] == expected_sha
+
+
+def test_warmstart_artifact_factories_specialize_contract_and_snapshot_helpers(tmp_path, monkeypatch) -> None:
+    layout = ArtifactLayout.from_run_dir(tmp_path / "factory_run")
+    layout.ensure_directories()
+    stack = SimpleNamespace(name="factory-stack")
+    checkpoint_path = tmp_path / "checkpoint.pt"
+    checkpoint_path.write_bytes(b"factory weights")
+
+    monkeypatch.setattr(warmstart_artifacts, "compute_config_hash256", lambda _stack: "factory-config")
+    monkeypatch.setattr(warmstart_artifacts, "canonical_config_dict", lambda _stack: {"factory": True})
+
+    write_contract = warmstart_artifacts.warmstart_run_contract_writer(
+        manifest_format="factory_manifest_v1",
+        run_kind="factory_warmstart",
+    )
+    publish_snapshot = warmstart_artifacts.warmstart_snapshot_publisher(
+        policy_id="factory_latest",
+        metadata_format="factory_snapshot_v1",
+    )
+
+    write_contract(output_layout=layout, stack=stack, source_run_dir=None, spec_hash="cd" * 32)
+    payload = publish_snapshot(output_run_dir=layout.run_dir, checkpoint_path=checkpoint_path, update_count=7)
+
+    manifest = json.loads(layout.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["format"] == "factory_manifest_v1"
+    assert (
+        manifest["run_id256"]
+        == hashlib.sha256(
+            json.dumps(
+                {
+                    "kind": "factory_warmstart",
+                    "run_dir": layout.run_dir.resolve().as_posix(),
+                    "config_hash256": "factory-config",
+                    "spec_hash256": "cd" * 32,
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    metadata = json.loads(Path(payload["metadata_path"]).read_text(encoding="utf-8"))
+    assert metadata["format"] == "factory_snapshot_v1"
+    assert metadata["policy_id"] == "factory_latest"
+    assert metadata["update"] == 7

@@ -28,7 +28,7 @@ from weiss_rl.league.registry import (
     normalize_snapshot_references,
     snapshot_weights_relpath,
 )
-from weiss_rl.learners.impala_learner import ImpalaLearner
+from weiss_rl.learners.impala import ImpalaLearner
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.tests._config_paths import canonical_stack_config_path
 from weiss_rl.training.snapshots import demote_registry_champions_newer_than, seed_snapshot_policy_id
@@ -764,12 +764,7 @@ def test_ensure_noleague_baseline_anchor_imports_explicit_b1_run_when_required_b
     tmp_path: Path,
 ) -> None:
     train_script = _load_train_script_module()
-    stack_path = (
-        REPO_ROOT
-        / "configs"
-        / "thesis"
-        / ("main_league_guided_bootstrap_selected_trajbc_direct_b2b3b4_anchor_nopublic.yaml")
-    )
+    stack_path = REPO_ROOT / "configs" / "thesis" / "main_league.yaml"
     stack = load_stack_config(stack_path)
     league_config = stack.config.league
     assert league_config is not None

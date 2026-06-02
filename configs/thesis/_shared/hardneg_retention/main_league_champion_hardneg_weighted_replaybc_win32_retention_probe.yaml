@@ -1,6 +1,0 @@
-schema_version: 2
-description: "Champion/hard-negative continuation with online learned-opponent retention plus a weighted replay BC dataset: two fixed B2/B3/B4 focal-win copies and one broader 32-paired-seed focal-win imported-champion dataset. This tests stronger champion rehearsal while retaining fixed thesis anchors."
-extends: main_league_champion_hardneg_multiobjective_retention_probe.yaml
-training:
-  structured_aux:
-    trajectory_bc_dataset_path: runs/trajectory_bc_weighted_fixed2x_b2b3b4_and_learned_a015_win32_20260518/trajectory_bc_weighted_fixed2x_b2b3b4_and_learned_a015_win32.npz

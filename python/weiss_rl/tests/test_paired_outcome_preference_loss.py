@@ -3,17 +3,17 @@ from __future__ import annotations
 import pytest
 import torch
 
-from weiss_rl.learners.paired_outcome_preference_edge_pairs import edge_mean_preference_pair_components
-from weiss_rl.learners.paired_outcome_preference_inputs import (
+from weiss_rl.learners.paired_outcome_preference.edge_pairs import edge_mean_preference_pair_components
+from weiss_rl.learners.paired_outcome_preference.inputs import (
     prepare_paired_outcome_preference_loss_inputs,
 )
-from weiss_rl.learners.paired_outcome_preference_loss import paired_outcome_preference_loss
-from weiss_rl.learners.paired_outcome_preference_metrics import empty_paired_outcome_preference_metrics
-from weiss_rl.learners.paired_outcome_preference_pairs import preference_pair_components
-from weiss_rl.learners.paired_outcome_preference_retention import (
+from weiss_rl.learners.paired_outcome_preference.loss import paired_outcome_preference_loss
+from weiss_rl.learners.paired_outcome_preference.metrics import empty_paired_outcome_preference_metrics
+from weiss_rl.learners.paired_outcome_preference.pairs import preference_pair_components
+from weiss_rl.learners.paired_outcome_preference.retention import (
     preference_top_action_retention_loss_and_metrics,
 )
-from weiss_rl.learners.paired_outcome_preference_span_pairs import span_preference_pair_components
+from weiss_rl.learners.paired_outcome_preference.span_pairs import span_preference_pair_components
 
 
 def test_empty_paired_outcome_preference_metrics_preserve_aggregation_and_retention_defaults() -> None:

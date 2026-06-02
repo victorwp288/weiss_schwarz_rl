@@ -1,0 +1,107 @@
+{
+  "kind": "thesis_final_result_trace_v1",
+  "created": "2026-05-28",
+  "purpose": "Compact machine-readable trace for the final thesis result tables and figures. Full run directories, raw episodes, checkpoints, and posterior samples remain on origin/final/progress or in local archived artifacts.",
+  "source_branch": "origin/final/progress",
+  "thesis_source": "Kandidatspeciale/Main/Results.tex",
+  "locked_main_model": {
+    "run": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517",
+    "published_alias": "main_league_selected",
+    "selected_source_policy_id": "main_interp_repair_a015",
+    "update": 5,
+    "weights_hash": "1a13b49b73ed71af0914c97fede5b30703eb576a5e85c4c636310c2d76897b26",
+    "lock_note": "docs/main_league_model_lock_20260521.md"
+  },
+  "b1_noleague_baseline": {
+    "run": "runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01",
+    "policy_id": "selected_candidate",
+    "artifact_summary": "runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01/eval/final_eval/summary.json",
+    "paired_seeds": 256,
+    "rows": [
+      {"opponent": "B0 RandomLegal", "wins": 512, "games": 512, "win_rate": 1.0, "ci95": [1.0, 1.0], "prob_gt_half": 1.0},
+      {"opponent": "B2 HeuristicPublic", "wins": 341, "games": 512, "win_rate": 0.666015625, "ci95": [0.6272, 0.7044], "prob_gt_half": 1.0},
+      {"opponent": "B3 HeuristicPublicAggro", "wins": 330, "games": 512, "win_rate": 0.64453125, "ci95": [0.6032, 0.6851], "prob_gt_half": 1.0},
+      {"opponent": "B4 HeuristicPublicControl", "wins": 321, "games": 512, "win_rate": 0.626953125, "ci95": [0.5843, 0.6705], "prob_gt_half": 1.0}
+    ]
+  },
+  "no_search_main_league_selected": {
+    "fixed_artifact_summary": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm256_b0_b4/targeted_confirm256_summary.json",
+    "learned_artifact_summary": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/targeted_confirm256_imported_champions/targeted_confirm256_summary.json",
+    "paper_readiness": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/paper_readiness_summary.json",
+    "paired_seeds": 256,
+    "groups": {
+      "fixed": {"wins": 1980, "games": 2560, "win_rate": 0.7734375},
+      "learned": {"wins": 2317, "games": 4096, "win_rate": 0.565673828125},
+      "all": {"wins": 4297, "games": 6656, "win_rate": 0.6455829326923077}
+    },
+    "rows": [
+      {"group": "fixed", "opponent": "B0 RandomLegal", "wins": 512, "games": 512, "win_rate": 1.0},
+      {"group": "fixed", "opponent": "B1 NoLeague baseline", "wins": 322, "games": 512, "win_rate": 0.62890625},
+      {"group": "fixed", "opponent": "B2 HeuristicPublic", "wins": 399, "games": 512, "win_rate": 0.779296875},
+      {"group": "fixed", "opponent": "B3 HeuristicPublicAggro", "wins": 365, "games": 512, "win_rate": 0.712890625},
+      {"group": "fixed", "opponent": "B4 HeuristicPublicControl", "wins": 382, "games": 512, "win_rate": 0.74609375},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000001", "display_name": "League policy 1", "wins": 328, "games": 512, "win_rate": 0.640625},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000002", "display_name": "League policy 2", "wins": 299, "games": 512, "win_rate": 0.583984375},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_checkpoint_000025", "display_name": "Checkpoint u25", "wins": 289, "games": 512, "win_rate": 0.564453125},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_main_bestresponse_u25_devbest", "display_name": "Best response u25", "wins": 289, "games": 512, "win_rate": 0.564453125},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_main_league_selected", "display_name": "Imported main selected", "wins": 274, "games": 512, "win_rate": 0.53515625},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000003", "display_name": "League policy 3", "wins": 274, "games": 512, "win_rate": 0.53515625},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000004", "display_name": "League policy 4", "wins": 291, "games": 512, "win_rate": 0.568359375},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000005", "display_name": "League policy 5", "wins": 273, "games": 512, "win_rate": 0.533203125}
+    ]
+  },
+  "k4_same_world_search": {
+    "artifact_summary": "runs/main_champion_hardneg_interp_u10_repair_a015_20260517/eval/god_search_confirm256_k4_r1_terminal_s1_c3_20260521/targeted_confirm256_summary.json",
+    "comparison_artifact": "diagnostics/god_search_confirm256_k4_r1_terminal_vs_selected_a015_shared256_20260521.json",
+    "scorecard_artifact": "diagnostics/god_search_scorecard_confirm256_k4_r1_terminal_strict_20260521.json",
+    "search_readiness": "diagnostics/main_search_readiness_summary_20260521.json",
+    "lock_note": "docs/god_search_k4_lock_20260521.md",
+    "contract": {
+      "mode": "same_world_prefix_rollout",
+      "top_k": 4,
+      "rollouts_per_action": 1,
+      "max_rollout_decisions": 0,
+      "max_search_decisions_per_game": 1,
+      "rollout_policy": "argmax"
+    },
+    "groups": {
+      "fixed": {"wins": 2420, "games": 2560, "win_rate": 0.9453125, "delta_wins_vs_no_search": 440},
+      "learned": {"wins": 3469, "games": 4096, "win_rate": 0.846923828125, "delta_wins_vs_no_search": 1152},
+      "all": {"wins": 5889, "games": 6656, "win_rate": 0.884765625, "delta_wins_vs_no_search": 1592}
+    },
+    "rows": [
+      {"group": "fixed", "opponent": "B0 RandomLegal", "no_search_wins": 512, "k4_wins": 512, "games": 512, "delta_wins": 0, "k4_win_rate": 1.0},
+      {"group": "fixed", "opponent": "B1 NoLeague baseline", "no_search_wins": 322, "k4_wins": 455, "games": 512, "delta_wins": 133, "k4_win_rate": 0.888671875},
+      {"group": "fixed", "opponent": "B2 HeuristicPublic", "no_search_wins": 399, "k4_wins": 498, "games": 512, "delta_wins": 99, "k4_win_rate": 0.97265625},
+      {"group": "fixed", "opponent": "B3 HeuristicPublicAggro", "no_search_wins": 365, "k4_wins": 480, "games": 512, "delta_wins": 115, "k4_win_rate": 0.9375},
+      {"group": "fixed", "opponent": "B4 HeuristicPublicControl", "no_search_wins": 382, "k4_wins": 475, "games": 512, "delta_wins": 93, "k4_win_rate": 0.927734375},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000001", "display_name": "League policy 1", "no_search_wins": 328, "k4_wins": 454, "games": 512, "delta_wins": 126, "k4_win_rate": 0.88671875},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000002", "display_name": "League policy 2", "no_search_wins": 299, "k4_wins": 447, "games": 512, "delta_wins": 148, "k4_win_rate": 0.873046875},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_checkpoint_000025", "display_name": "Checkpoint u25", "no_search_wins": 289, "k4_wins": 431, "games": 512, "delta_wins": 142, "k4_win_rate": 0.841796875},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_main_bestresponse_u25_devbest", "display_name": "Best response u25", "no_search_wins": 289, "k4_wins": 431, "games": 512, "delta_wins": 142, "k4_win_rate": 0.841796875},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_main_league_selected", "display_name": "Imported main selected", "no_search_wins": 274, "k4_wins": 424, "games": 512, "delta_wins": 150, "k4_win_rate": 0.828125},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000003", "display_name": "League policy 3", "no_search_wins": 274, "k4_wins": 424, "games": 512, "delta_wins": 150, "k4_win_rate": 0.828125},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000004", "display_name": "League policy 4", "no_search_wins": 291, "k4_wins": 433, "games": 512, "delta_wins": 142, "k4_win_rate": 0.845703125},
+      {"group": "learned", "opponent": "seed_c3aac2f9dc_policy_000005", "display_name": "League policy 5", "no_search_wins": 273, "k4_wins": 425, "games": 512, "delta_wins": 152, "k4_win_rate": 0.830078125}
+    ],
+    "diagnostics": {
+      "searched_decisions": 6656,
+      "changed_decisions": 1592,
+      "candidate_evaluations": 26624,
+      "terminal_rollouts": 26624,
+      "prefix_replay_failures": 0,
+      "horizon_cutoffs": 0,
+      "truncated_rollouts": 0
+    },
+    "turn_order": {
+      "artifact": "diagnostics/main_search_first_second_balance_20260521.json",
+      "first_wins": 2896,
+      "first_games": 3328,
+      "first_win_rate": 0.8701923076923077,
+      "second_wins": 2993,
+      "second_games": 3328,
+      "second_win_rate": 0.8993389423076923,
+      "first_minus_second_pp": -2.914663461538458
+    }
+  }
+}

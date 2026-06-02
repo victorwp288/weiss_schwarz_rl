@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.eval.policy_alignment import PolicyAlignmentAccumulator
+from weiss_rl.eval.policies.alignment import PolicyAlignmentAccumulator
 
 
 def _catalog() -> ActionCatalog:

@@ -22,10 +22,10 @@ uv run --extra dev --extra sim python -m weiss_rl.cli eval-final --run-dir runs/
 The final wrapper uses `configs/thesis/final_eval.yaml`, the selected
 factorized final-eval contract for thesis reproduction.
 
-Compatibility script path:
+Low-level package entrypoint:
 
 ```powershell
-uv run python python/scripts/eval.py `
+uv run python -m weiss_rl.workflows.eval_entrypoint `
   --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml `
   --run-dir runs/<run_dir>
 ```
@@ -33,7 +33,7 @@ uv run python python/scripts/eval.py `
 ## Public Demo
 
 ```powershell
-uv run python python/scripts/eval.py `
+uv run python -m weiss_rl.workflows.eval_entrypoint `
   --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml `
   --public-demo `
   --run-dir runs/toy_public_demo

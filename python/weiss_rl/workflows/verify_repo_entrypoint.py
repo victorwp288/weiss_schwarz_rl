@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from weiss_rl.workflows.step_execution import CommandRunner, run_command_steps, run_labeled_command
-from weiss_rl.workflows.verify_repo_plan import (
+from weiss_rl.workflows.verification.verify_repo_plan import (
     VerificationRequest,
     VerificationStep,
     build_release_verification_steps,

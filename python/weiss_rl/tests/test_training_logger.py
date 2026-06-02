@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from weiss_rl.diagnostics.training_logger import TrainingLogger, TrainingMetrics
-from weiss_rl.learners.impala_learner import ImpalaLearner
+from weiss_rl.learners.impala import ImpalaLearner
 from weiss_rl.learners.vtrace import VtraceMetrics, compute_vtrace_metrics
 
 

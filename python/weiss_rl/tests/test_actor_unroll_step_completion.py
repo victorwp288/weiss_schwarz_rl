@@ -6,17 +6,17 @@ from typing import Any
 import numpy as np
 import torch
 
-from weiss_rl.runtime_components.actor_unroll_policy_execution import ActorPolicyExecutionResult
-from weiss_rl.runtime_components.actor_unroll_step_completion import (
+from weiss_rl.runtime.components.actor_unroll_policy_execution import ActorPolicyExecutionResult
+from weiss_rl.runtime.components.actor_unroll_step_completion import (
     ActorUnrollStepCompletionCallbacks,
     ActorUnrollStepCompletionInputs,
     complete_generic_actor_unroll_step,
     shaped_generic_actor_step_rewards,
 )
-from weiss_rl.runtime_components.actor_unroll_step_inputs import ActorUnrollStepInputs
-from weiss_rl.runtime_components.collector_state import allocate_collector_unroll_state
-from weiss_rl.runtime_components.counters import collector_counter_template
-from weiss_rl.runtime_components.teacher_labels import teacher_label_arrays
+from weiss_rl.runtime.components.actor_unroll_step_inputs import ActorUnrollStepInputs
+from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
+from weiss_rl.runtime.components.counters import collector_counter_template
+from weiss_rl.runtime.components.teacher_labels import teacher_label_arrays
 
 
 class _ContextModel:

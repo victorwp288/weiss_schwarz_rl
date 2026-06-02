@@ -211,7 +211,7 @@ def test_final_eval_worker_facade_reexports_runtime_helpers() -> None:
 
 
 def test_final_eval_worker_uses_unique_policy_resolution_ids_for_diagonal_jobs() -> None:
-    from weiss_rl.eval.final_eval_worker import unique_policy_resolution_ids
+    from weiss_rl.eval.final.worker import unique_policy_resolution_ids
 
     assert unique_policy_resolution_ids(
         {
@@ -228,7 +228,7 @@ def test_final_eval_worker_uses_unique_policy_resolution_ids_for_diagonal_jobs()
 
 
 def test_final_eval_worker_policy_resolution_kwargs_preserve_registry_inputs(monkeypatch) -> None:
-    from weiss_rl.eval.final_eval_worker_runtime import (
+    from weiss_rl.eval.final.worker_runtime import (
         final_eval_worker_policy_resolution_kwargs,
         optional_job_path,
         resolve_final_eval_worker_policies,
@@ -553,7 +553,7 @@ def test_targeted_confirm_summary_helpers_preserve_worker_and_summary_payloads(t
 
 
 def test_targeted_confirm_plan_builds_ordered_jobs_with_shared_output_dir() -> None:
-    from weiss_rl.eval.targeted_confirm_plan import build_targeted_confirm_jobs
+    from weiss_rl.eval.targeted_confirm.plan import build_targeted_confirm_jobs
 
     args = SimpleNamespace(
         stack_config=Path("configs/thesis/final_eval.yaml"),
