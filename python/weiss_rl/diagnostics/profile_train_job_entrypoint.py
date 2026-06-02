@@ -17,7 +17,7 @@ from weiss_rl.experiments.bootstrap_commands import build_training_entrypoint_co
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def build_profile_train_command(

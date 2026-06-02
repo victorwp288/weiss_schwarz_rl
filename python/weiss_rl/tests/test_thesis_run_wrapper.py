@@ -78,6 +78,7 @@ def test_thesis_wrapper_cli_parser_preserves_defaults_and_repeatable_args(tmp_pa
     from weiss_rl.workflows.thesis_wrapper_support.cli import build_thesis_wrapper_parser, thesis_wrapper_repo_root
 
     parser = build_thesis_wrapper_parser()
+    default_args = parser.parse_args(["--run-label", "demo_run"])
     args = parser.parse_args(
         [
             "--repo-root",
@@ -102,6 +103,7 @@ def test_thesis_wrapper_cli_parser_preserves_defaults_and_repeatable_args(tmp_pa
     assert args.runtime_mode == "train_ordered"
     assert args.compare_run_dir == ["runs/a", "runs/b"]
     assert args.train_arg == ["--override", "training.profile_timers=true"]
+    assert thesis_wrapper_repo_root(default_args) == REPO_ROOT
     assert thesis_wrapper_repo_root(args) == (tmp_path / "repo").resolve()
 
 

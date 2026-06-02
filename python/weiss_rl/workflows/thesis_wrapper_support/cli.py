@@ -47,7 +47,7 @@ def build_thesis_wrapper_parser() -> argparse.ArgumentParser:
 
 def thesis_wrapper_repo_root(args: argparse.Namespace) -> Path:
     if args.repo_root is None:
-        return Path(__file__).resolve().parents[3]
+        return Path(__file__).resolve().parents[4]
     return Path(args.repo_root).resolve()
 
 

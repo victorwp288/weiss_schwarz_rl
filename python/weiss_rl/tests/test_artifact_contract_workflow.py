@@ -7,6 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from weiss_rl.workflows.artifact_contract.artifact_contract_entrypoint import (
+    _repo_root as artifact_contract_repo_root,
+)
+from weiss_rl.workflows.artifact_contract.artifact_contract_entrypoint import (
     artifact_contract_request,
     run_artifact_contract_request,
     run_artifact_contract_steps,
@@ -21,6 +24,10 @@ from weiss_rl.workflows.artifact_contract.artifact_contract_plan import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_artifact_contract_entrypoint_default_repo_root_is_project_root() -> None:
+    assert artifact_contract_repo_root() == REPO_ROOT
 
 
 def test_artifact_contract_plan_preserves_public_demo_and_readiness_contract_steps() -> None:

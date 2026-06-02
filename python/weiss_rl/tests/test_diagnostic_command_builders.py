@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from weiss_rl.diagnostics.heuristic_sanity_scan_entrypoint import build_heuristic_sanity_command
-from weiss_rl.diagnostics.profile_train_job_entrypoint import build_profile_train_command
+from weiss_rl.diagnostics.profile_train_job_entrypoint import _repo_root, build_profile_train_command
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _option(command: list[str], flag: str) -> str:
@@ -35,6 +37,10 @@ def test_profile_train_job_uses_shared_package_train_command_builder(tmp_path: P
     assert _option(command, "--runtime-mode") == "train_async_fast"
     assert "training.profile_timers=true" in command
     assert command[-2:] == ["--checkpoint-interval-updates", "5"]
+
+
+def test_profile_train_job_default_repo_root_is_project_root() -> None:
+    assert _repo_root() == REPO_ROOT
 
 
 def test_heuristic_sanity_scan_preserves_custom_confirm_command_shape() -> None:

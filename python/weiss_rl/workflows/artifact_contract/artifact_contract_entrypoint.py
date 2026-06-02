@@ -26,7 +26,7 @@ from weiss_rl.workflows.step_execution import (
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[4]
 
 
 def _display_command(command: tuple[str, ...]) -> str:

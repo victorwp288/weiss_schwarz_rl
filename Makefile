@@ -129,7 +129,7 @@ toy-public-e2e:
 	@rm -rf runs/toy_public_demo_ci
 	@$(PYRUN) -m weiss_rl.training.train_entrypoint --stack-config configs/presets/structured_acceptance_standard.yaml --public-demo --run-label toy_public_demo_ci
 	@$(PYRUN) -m weiss_rl.workflows.eval_entrypoint --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml --public-demo --run-dir runs/toy_public_demo_ci
-	@$(PYRUN) -m weiss_rl.workflows.figures_entrypoint --public-demo --final-eval-dir runs/toy_public_demo_ci/eval/final_eval --out-dir runs/toy_public_demo_ci/figures
+	@$(PYRUN) -m weiss_rl.workflows.figures.figures_entrypoint --public-demo --final-eval-dir runs/toy_public_demo_ci/eval/final_eval --out-dir runs/toy_public_demo_ci/figures
 
 artifact-hygiene:
 	@$(MAKE) toy-public-e2e
@@ -140,7 +140,7 @@ eval-dev:
 
 figures:
 	@test -n "$(RUN_DIR)" || { echo "Usage: make figures RUN_DIR=runs/<run_dir> [FIG_ID=seat_bias] [FORMATS=\"pdf png\"]" >&2; exit 1; }
-	@$(PYRUN) -m weiss_rl.workflows.figures_entrypoint --run-dir "$(RUN_DIR)" $(strip $(FIGURE_ID_ARG)) $(strip $(FIGURE_FORMAT_ARGS))
+	@$(PYRUN) -m weiss_rl.workflows.figures.figures_entrypoint --run-dir "$(RUN_DIR)" $(strip $(FIGURE_ID_ARG)) $(strip $(FIGURE_FORMAT_ARGS))
 
 clean:
 	@find . -type d -name '__pycache__' -prune -exec rm -rf {} +
