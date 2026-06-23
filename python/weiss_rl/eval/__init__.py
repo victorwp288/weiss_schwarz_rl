@@ -1,7 +1,5 @@
 """Evaluation harness entry points."""
 
-from importlib import import_module
-
 from weiss_rl.eval.diagnostics import (
     HiddenInfoLeakagePair,
     build_hidden_info_leakage_diagnostics,
@@ -60,51 +58,6 @@ from weiss_rl.eval.uncertainty import (
     paired_seed_uncertainty_summary,
     posterior_samples,
 )
-
-_LEGACY_EVAL_MODULES = {
-    "final_eval_artifacts": "final.artifacts",
-    "final_eval_matchup_outputs": "final.matchup_outputs",
-    "final_eval_matchup_schedule": "final.matchup_schedule",
-    "final_eval_matchups": "final.matchups",
-    "final_eval_matrices": "final.matrices",
-    "final_eval_payload": "final.payload",
-    "final_eval_policy_selection": "final.policy_selection",
-    "final_eval_run": "final.run",
-    "final_eval_worker": "final.worker",
-    "final_eval_worker_runtime": "final.worker_runtime",
-    "paper_readiness_check_cli": "readiness.check_cli",
-    "paper_readiness_check_entrypoint": "readiness.check_entrypoint",
-    "paper_readiness_check_reporting": "readiness.check_reporting",
-    "paper_readiness_check_runtime": "readiness.check_runtime",
-    "paper_readiness_contracts": "readiness.contracts",
-    "paper_readiness_fields": "readiness.fields",
-    "paper_readiness_final_eval_summary": "readiness.final_eval_summary",
-    "paper_readiness_fixture": "readiness.fixture",
-    "paper_readiness_fixture_cli": "readiness.fixture_cli",
-    "paper_readiness_fixture_entrypoint": "readiness.fixture_entrypoint",
-    "paper_readiness_fixture_writer": "readiness.fixture_writer",
-    "paper_readiness_guardrails": "readiness.guardrails",
-    "policy_alignment": "policies.alignment",
-    "policy_resolution": "policies.resolution",
-    "policy_resolution_context": "policies.resolution_context",
-    "policy_set": "policies.set",
-    "policy_types": "policies.types",
-    "targeted_confirm_core": "targeted_confirm.core",
-    "targeted_confirm_entrypoint": "targeted_confirm.entrypoint",
-    "targeted_confirm_jobs": "targeted_confirm.jobs",
-    "targeted_confirm_opponents": "targeted_confirm.opponents",
-    "targeted_confirm_plan": "targeted_confirm.plan",
-    "targeted_confirm_summary": "targeted_confirm.summary",
-}
-
-
-def __getattr__(name: str):
-    if name in _LEGACY_EVAL_MODULES:
-        module = import_module(f".{_LEGACY_EVAL_MODULES[name]}", __name__)
-        globals()[name] = module
-        return module
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
 
 __all__ = [
     "DevEvalPolicySummary",

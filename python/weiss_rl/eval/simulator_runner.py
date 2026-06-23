@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -26,93 +24,42 @@ from weiss_rl.eval.god_search import GodSearchConfig, GodSearchStats
 from weiss_rl.eval.harness import (
     EvalGameRunner,
     GameResult,
-    ReplaySampleResult,
     ScheduledGame,
     abort_on_engine_fault_eval,
     game_result_from_step,
     sample_action_pinned,
     select_action_argmax_pinned,
 )
+from weiss_rl.eval.model_action_surface import (
+    ModelActionSurfaceSettings,
+    model_action_surface_batch_and_ids,
+)
 from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
 from weiss_rl.eval.policies.resolution import (
     ResolvedEvalPolicy,
-    _candidate_b1_run_dirs,
-    _common_search_root,
-    _config_marks_noleague_baseline,
-    _find_b1_snapshot,
-    _is_recursive_registry_search_root,
-    _load_snapshot_eval_model,
-    _observation_spec_from_bundle,
-    _resolve_b1_policy,
-    _resolve_snapshot_registry_policy,
-    _resolve_snapshot_registry_run_dir,
-    _resolve_static_eval_policy,
-    _sha256_file,
-    _should_include_common_search_root,
-    _snapshot_by_policy_id_or_imported_seed_suffix,
-    _unique_paths,
     resolve_eval_policies,
 )
 from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
 from weiss_rl.eval.simulator_god_search import SimulatorGodSearchMixin
+from weiss_rl.eval.simulator_replay import SimulatorReplayRecorder
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.models.loading import (
     restore_model_guidance_from_payload as _shared_restore_model_guidance_from_payload,
 )
-from weiss_rl.models.observation_contract import header_field_index
-from weiss_rl.replay.bundles import (
-    ReplayRerunContract,
-    ReplayStep,
-    compute_legal_fingerprint64,
-    make_replay_bundle_meta,
-    write_replay_bundle,
-)
-from weiss_rl.replay.runner import verify_replay_bundle
-from weiss_rl.runtime.components.action_surface import (
-    filter_batch_main_move_only_rows_to_pass,
-    filter_batch_mulligan_select_after_select,
-    filter_batch_pass_when_attack_available,
-)
-from weiss_rl.runtime.components.legal_meta import action_catalog_indices
 from weiss_rl.runtime.components.opponent_context import (
     eval_policy_uses_opponent_context,
     initial_seat_hidden_for_opponents,
 )
 
-_U64_DENOMINATOR = float(1 << 64)
-
 __all__ = [
     "ResolvedEvalPolicy",
     "SimulatorEvalRunner",
-    "_candidate_b1_run_dirs",
-    "_common_search_root",
-    "_config_marks_noleague_baseline",
-    "_find_b1_snapshot",
-    "_is_recursive_registry_search_root",
-    "_load_snapshot_eval_model",
-    "_observation_spec_from_bundle",
-    "_resolve_b1_policy",
-    "_resolve_snapshot_registry_policy",
-    "_resolve_snapshot_registry_run_dir",
-    "_resolve_static_eval_policy",
-    "_sha256_file",
-    "_should_include_common_search_root",
-    "_snapshot_by_policy_id_or_imported_seed_suffix",
-    "_unique_paths",
     "resolve_eval_policies",
 ]
 
 
 def _restore_model_guidance_from_payload(model: PolicyValueModel | None, payload: Mapping[str, object]) -> None:
     _shared_restore_model_guidance_from_payload(model, payload)
-
-
-@dataclass(slots=True)
-class _ReplayCaptureState:
-    raw_dir: Path
-    before_raw_paths: set[Path]
-    simulator_episode_key: int | bytes | None = None
-    steps: list[ReplayStep] | None = None
 
 
 class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
@@ -139,9 +86,14 @@ class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
         self.action_dim = int(action_dim)
         self.pass_action_id = int(pass_action_id)
         self.require_sorted_legal_ids = bool(require_sorted_legal_ids)
-        self.replay_capture_rate = float(replay_capture_rate)
-        self.regression_capture_count = int(regression_capture_count)
-        self._capture_count = 0
+        self._replay_recorder = SimulatorReplayRecorder(
+            stack=self.stack,
+            artifact_layout=self.artifact_layout,
+            run_id256_bytes=self.run_id256_bytes,
+            spec_hash256_bytes=self.spec_hash256_bytes,
+            capture_rate=replay_capture_rate,
+            capture_limit=regression_capture_count,
+        )
         self._god_search_config = god_search_config or GodSearchConfig()
         self._god_search_stats = GodSearchStats(trace_limit=int(self._god_search_config.trace_limit))
         evaluation_config = getattr(self.stack.config, "evaluation", None)
@@ -168,18 +120,14 @@ class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
                     policy.model.eval()
         self._baseline_logits = np.zeros((self.action_dim,), dtype=np.float32)
         training_config = getattr(getattr(self.stack, "config", None), "training", None)
-        self._mulligan_force_confirm_after_select = bool(
-            getattr(training_config, "mulligan_force_confirm_after_select", False)
-        )
-        self._force_pass_over_main_move_only = bool(getattr(training_config, "force_pass_over_main_move_only", False))
-        self._main_move_only_max_consecutive = int(getattr(training_config, "main_move_only_max_consecutive", 0))
-        self._force_attack_over_pass_when_attack_legal = bool(
-            getattr(training_config, "force_attack_over_pass_when_attack_legal", False)
+        self._model_action_surface = ModelActionSurfaceSettings.from_training_config(
+            training_config,
+            pass_action_id=self.pass_action_id,
         )
 
     def run_game(self, scheduled_game: ScheduledGame) -> GameResult:
         env = self._build_ids_eval_env(seed=scheduled_game.episode_seed, scheduled_game=scheduled_game)
-        replay_capture = self._maybe_enable_replay_capture(env=env, scheduled_game=scheduled_game)
+        replay_capture = self._replay_recorder.maybe_start(env=env, scheduled_game=scheduled_game)
         seat_hidden = {
             seat: self._initial_hidden(
                 scheduled_game.seat0_policy_id if seat == 0 else scheduled_game.seat1_policy_id,
@@ -198,7 +146,7 @@ class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
             batch = env.reset(seed=scheduled_game.episode_seed)
             self._abort_on_fault(batch=batch, scheduled_game=scheduled_game)
             if replay_capture is not None:
-                replay_capture.simulator_episode_key = self._simulator_episode_key(batch)
+                self._replay_recorder.record_initial_batch(replay_capture, batch=batch)
             while True:
                 if bool(batch.terminated[0]) or bool(batch.truncated[0]):
                     result = game_result_from_step(
@@ -211,45 +159,11 @@ class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
                         max_no_progress_decisions=getattr(env, "max_no_progress_decisions", None),
                     )
                     action_summary = summarize_eval_action_counters(action_counters)
-                    if replay_capture is None:
-                        return GameResult(
-                            episode_seed=result.episode_seed,
-                            terminated=result.terminated,
-                            truncated=result.truncated,
-                            winner_seat=result.winner_seat,
-                            engine_status=result.engine_status,
-                            decision_count=result.decision_count,
-                            tick_count=result.tick_count,
-                            no_progress_count=result.no_progress_count,
-                            termination_reason=result.termination_reason,
-                            simulator_episode_key=result.simulator_episode_key,
-                            total_actions=action_summary["total_actions"],
-                            pass_actions=action_summary["pass_actions"],
-                            main_move_actions=action_summary["main_move_actions"],
-                            pass_with_nonpass_available=action_summary["pass_with_nonpass_available"],
-                            max_consecutive_main_moves=action_summary["max_consecutive_main_moves"],
-                        )
-                    replay_sample = self._finalize_replay_capture(
+                    return self._finalize_game_result(
+                        result=result,
+                        action_summary=action_summary,
                         scheduled_game=scheduled_game,
                         replay_capture=replay_capture,
-                    )
-                    return GameResult(
-                        episode_seed=result.episode_seed,
-                        terminated=result.terminated,
-                        truncated=result.truncated,
-                        winner_seat=result.winner_seat,
-                        engine_status=result.engine_status,
-                        decision_count=result.decision_count,
-                        tick_count=result.tick_count,
-                        no_progress_count=result.no_progress_count,
-                        termination_reason=result.termination_reason,
-                        simulator_episode_key=result.simulator_episode_key,
-                        total_actions=action_summary["total_actions"],
-                        pass_actions=action_summary["pass_actions"],
-                        main_move_actions=action_summary["main_move_actions"],
-                        pass_with_nonpass_available=action_summary["pass_with_nonpass_available"],
-                        max_consecutive_main_moves=action_summary["max_consecutive_main_moves"],
-                        replay_sample=replay_sample,
                     )
 
                 current_seat = int(batch.actor[0])
@@ -285,29 +199,54 @@ class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
                 next_batch = env.step(np.asarray([action], dtype=np.uint32))
                 self._abort_on_fault(batch=next_batch, scheduled_game=scheduled_game)
                 if replay_capture is not None:
-                    replay_capture.steps = replay_capture.steps or []
-                    replay_capture.steps.append(
-                        ReplayStep(
-                            t=len(replay_capture.steps),
-                            decision_id=decision_id,
-                            actor=current_seat,
-                            action=int(action),
-                            reward=float(np.asarray(next_batch.reward, dtype=np.float32)[0]),
-                            terminated=bool(np.asarray(next_batch.terminated, dtype=np.bool_)[0]),
-                            truncated=bool(np.asarray(next_batch.truncated, dtype=np.bool_)[0]),
-                            engine_status=int(np.asarray(next_batch.engine_status, dtype=np.int64)[0]),
-                            legal_fingerprint64=compute_legal_fingerprint64(
-                                spec_hash256=self.spec_hash256_bytes,
-                                decision_id=decision_id,
-                                legal_ids=legal_ids,
-                            ),
-                        )
+                    self._replay_recorder.record_step(
+                        replay_capture,
+                        decision_id=decision_id,
+                        actor=current_seat,
+                        action=int(action),
+                        next_batch=next_batch,
+                        legal_ids=legal_ids,
                     )
                 seat_hidden[current_seat] = next_hidden
                 action_history.append(int(action))
                 batch = next_batch
         finally:
             env.close()
+
+    def _finalize_game_result(
+        self,
+        *,
+        result: GameResult,
+        action_summary: Mapping[str, int],
+        scheduled_game: ScheduledGame,
+        replay_capture: Any | None,
+    ) -> GameResult:
+        replay_sample = (
+            None
+            if replay_capture is None
+            else self._replay_recorder.finish(
+                scheduled_game=scheduled_game,
+                capture=replay_capture,
+            )
+        )
+        return GameResult(
+            episode_seed=result.episode_seed,
+            terminated=result.terminated,
+            truncated=result.truncated,
+            winner_seat=result.winner_seat,
+            engine_status=result.engine_status,
+            decision_count=result.decision_count,
+            tick_count=result.tick_count,
+            no_progress_count=result.no_progress_count,
+            termination_reason=result.termination_reason,
+            simulator_episode_key=result.simulator_episode_key,
+            total_actions=action_summary["total_actions"],
+            pass_actions=action_summary["pass_actions"],
+            main_move_actions=action_summary["main_move_actions"],
+            pass_with_nonpass_available=action_summary["pass_with_nonpass_available"],
+            max_consecutive_main_moves=action_summary["max_consecutive_main_moves"],
+            replay_sample=replay_sample,
+        )
 
     def _build_ids_eval_env(self, *, seed: int, scheduled_game: ScheduledGame | None = None) -> DecisionBoundaryEnv:
         env_config = build_env_config_from_stack(
@@ -429,10 +368,11 @@ class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
         legal_ids: np.ndarray,
         action_sequence_state: Any | None = None,
     ) -> tuple[np.ndarray, torch.Tensor | None, np.ndarray]:
-        batch_for_model, legal_ids_for_model = self._model_action_surface_batch_and_ids(
-            policy=policy,
+        batch_for_model, legal_ids_for_model = model_action_surface_batch_and_ids(
+            model=policy.model,
             batch=batch,
             legal_ids=legal_ids,
+            settings=self._model_action_surface,
             action_sequence_state=action_sequence_state,
         )
         if policy.model is None:
@@ -527,62 +467,6 @@ class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
         )
         return action, next_seat_hidden
 
-    def _model_action_surface_batch_and_ids(
-        self,
-        *,
-        policy: ResolvedEvalPolicy,
-        batch: DecisionBoundaryBatch,
-        legal_ids: np.ndarray,
-        action_sequence_state: Any | None = None,
-    ) -> tuple[DecisionBoundaryBatch, np.ndarray]:
-        if (
-            not self._mulligan_force_confirm_after_select
-            and not self._force_pass_over_main_move_only
-            and not self._force_attack_over_pass_when_attack_legal
-        ) or policy.model is None:
-            return batch, legal_ids
-        action_catalog = getattr(policy.model, "action_catalog", None)
-        if action_catalog is None:
-            return batch, legal_ids
-        filtered_batch = batch
-        contract = getattr(policy.model, "_structured_observation_contract", None)
-        layout = getattr(contract, "layout", None)
-        field_index = None if layout is None else header_field_index(layout, "last_action_arg0")
-        last_action_arg0_index = -1 if field_index is None else int(field_index)
-        family_index, _attack_type_index = action_catalog_indices(action_catalog)
-        if self._mulligan_force_confirm_after_select:
-            filtered_batch, _result = filter_batch_mulligan_select_after_select(
-                filtered_batch,
-                last_action_arg0_index=last_action_arg0_index,
-                mulligan_select_family_id=int(family_index.get("mulligan_select", -1)),
-                mulligan_confirm_family_id=int(family_index.get("mulligan_confirm", -1)),
-            )
-        if self._force_pass_over_main_move_only:
-            allow_main_move_only_rows = None
-            if self._main_move_only_max_consecutive > 0 and action_sequence_state is not None:
-                consecutive = np.asarray(action_sequence_state.consecutive_main_moves_by_env, dtype=np.int32)
-                if consecutive.shape == (1,):
-                    allow_main_move_only_rows = consecutive < self._main_move_only_max_consecutive
-            filtered_batch, _result = filter_batch_main_move_only_rows_to_pass(
-                filtered_batch,
-                pass_action_id=int(self.pass_action_id),
-                main_move_family_id=int(family_index.get("main_move", -1)),
-                allow_main_move_only_rows=allow_main_move_only_rows,
-            )
-        if self._force_attack_over_pass_when_attack_legal:
-            filtered_batch, _result = filter_batch_pass_when_attack_available(
-                filtered_batch,
-                pass_action_id=int(self.pass_action_id),
-                attack_family_id=int(family_index.get("attack", -1)),
-            )
-        if filtered_batch.ids_offsets is None:
-            return batch, legal_ids
-        filtered_ids, filtered_offsets = filtered_batch.ids_offsets
-        return (
-            filtered_batch,
-            np.asarray(filtered_ids[int(filtered_offsets[0]) : int(filtered_offsets[1])], dtype=np.uint32),
-        )
-
     def _initial_hidden(self, policy_id: str, *, opponent_policy_id: str | None = None) -> torch.Tensor | None:
         policy = self.policies.get(policy_id)
         if policy is None or policy.model is None:
@@ -635,109 +519,6 @@ class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
             assert_strictly_increasing_legal_ids(row)
         return row
 
-    def _maybe_enable_replay_capture(
-        self,
-        *,
-        env: DecisionBoundaryEnv,
-        scheduled_game: ScheduledGame,
-    ) -> _ReplayCaptureState | None:
-        if not self._should_capture_replay(scheduled_game=scheduled_game):
-            return None
-        raw_dir = self.artifact_layout.replays_raw_dir / self._replay_sample_dir_name(scheduled_game=scheduled_game)
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        enable_replay_sampling = getattr(env.pool, "enable_replay_sampling", None)
-        before_paths = set(raw_dir.glob("*.wsr"))
-        if callable(enable_replay_sampling):
-            enable_replay_sampling(
-                sample_rate=1.0,
-                out_dir=raw_dir.as_posix(),
-                compress=False,
-                visibility_mode=self._replay_visibility_mode(),
-                store_actions=True,
-            )
-        self._capture_count += 1
-        return _ReplayCaptureState(raw_dir=raw_dir, before_raw_paths=before_paths, steps=[])
-
-    def _finalize_replay_capture(
-        self,
-        *,
-        scheduled_game: ScheduledGame,
-        replay_capture: _ReplayCaptureState,
-    ) -> ReplaySampleResult:
-        raw_replay_path = self._discover_raw_replay_path(replay_capture=replay_capture)
-        rerun_contract = self._replay_rerun_contract(scheduled_game=scheduled_game)
-        meta = make_replay_bundle_meta(
-            simulator_episode_key=replay_capture.simulator_episode_key,
-            run_id256=self.run_id256_bytes,
-            spec_hash256=self.spec_hash256_bytes,
-            actor_id=0,
-            env_id=0,
-            episode_index=int(scheduled_game.episode_index),
-            episode_seed64=int(scheduled_game.episode_seed),
-            rerun_contract=rerun_contract,
-        )
-        bundle_path = write_replay_bundle(
-            out_dir=self.artifact_layout.replays_bundles_dir,
-            meta=meta,
-            steps=list(replay_capture.steps or ()),
-        )
-        report_path = self.artifact_layout.replays_verification_dir / f"replay_{meta.replay_key64:016x}.json"
-        error: str | None = None
-        matched = False
-        verification_status = "pending"
-        try:
-            report = verify_replay_bundle(bundle_path=bundle_path, report_path=report_path)
-            matched = bool(report.get("matched", False))
-            verification_status = str(report.get("status", "unknown"))
-            error = None if report.get("error") is None else str(report.get("error"))
-        except Exception as exc:
-            error = str(exc)
-            verification_status = "failed"
-            matched = False
-        return ReplaySampleResult(
-            pair_index=int(scheduled_game.pair_index),
-            swap_index=int(scheduled_game.swap_index),
-            episode_index=int(scheduled_game.episode_index),
-            focal_policy_id=scheduled_game.focal_policy_id,
-            opponent_policy_id=scheduled_game.opponent_policy_id,
-            raw_replay_path=None if raw_replay_path is None else self.artifact_layout.relative(raw_replay_path),
-            bundle_path=self.artifact_layout.relative(bundle_path),
-            verification_report_path=self.artifact_layout.relative(report_path),
-            verification_status=verification_status,
-            replay_key64=f"{meta.replay_key64:016x}",
-            matched=matched,
-            error=error,
-        )
-
-    def _discover_raw_replay_path(self, *, replay_capture: _ReplayCaptureState) -> Path | None:
-        after_paths = set(replay_capture.raw_dir.glob("*.wsr"))
-        new_paths = sorted(after_paths - replay_capture.before_raw_paths)
-        if len(new_paths) == 1:
-            return new_paths[0]
-        if len(after_paths) == 1:
-            return sorted(after_paths)[0]
-        return None
-
-    def _replay_rerun_contract(self, *, scheduled_game: ScheduledGame | None = None) -> ReplayRerunContract:
-        if self.stack.config.environment is None:
-            raise RuntimeError("stack config is missing environment config")
-        env_config = build_env_config_from_stack(
-            self.stack,
-            seed=0,
-            deck=None if scheduled_game is None else scheduled_game.seat0_deck,
-            opponent_deck=None if scheduled_game is None else scheduled_game.seat1_deck,
-        )
-        return ReplayRerunContract(
-            version=2,
-            observation_visibility=str(env_config["observation_visibility"]),
-            max_decisions=int(env_config["max_decisions"]),
-            max_ticks=int(env_config["max_ticks"]),
-            reward_json=None if "reward_json" not in env_config else str(env_config["reward_json"]),
-            curriculum_json=None if "curriculum_json" not in env_config else str(env_config["curriculum_json"]),
-            deck=None if "deck" not in env_config else str(env_config["deck"]),
-            opponent_deck=None if "opponent_deck" not in env_config else str(env_config["opponent_deck"]),
-        )
-
     def _rng_seed(self, *, scheduled_game: ScheduledGame, seat: int) -> int:
         payload = canonical_json_bytes(
             {
@@ -750,45 +531,3 @@ class SimulatorEvalRunner(SimulatorGodSearchMixin, EvalGameRunner):
             }
         )
         return stable_hash64(payload)
-
-    def _should_capture_replay(self, *, scheduled_game: ScheduledGame) -> bool:
-        if self.replay_capture_rate <= 0.0:
-            return False
-        if self._capture_count >= self.regression_capture_count:
-            return False
-        capture_u64 = stable_hash64(
-            canonical_json_bytes(
-                {
-                    "kind": "final_eval_replay_capture_v1",
-                    "pair_index": int(scheduled_game.pair_index),
-                    "swap_index": int(scheduled_game.swap_index),
-                    "episode_index": int(scheduled_game.episode_index),
-                    "episode_seed": int(scheduled_game.episode_seed),
-                    "focal_policy_id": scheduled_game.focal_policy_id,
-                    "opponent_policy_id": scheduled_game.opponent_policy_id,
-                }
-            )
-        )
-        return (capture_u64 / _U64_DENOMINATOR) < self.replay_capture_rate
-
-    def _replay_visibility_mode(self) -> str:
-        environment_config = self.stack.config.environment
-        if environment_config is None:
-            return "full"
-        return "public" if str(environment_config.observation_visibility).strip().lower() == "public" else "full"
-
-    def _replay_sample_dir_name(self, *, scheduled_game: ScheduledGame) -> str:
-        payload = canonical_json_bytes(
-            {
-                "pair_index": int(scheduled_game.pair_index),
-                "swap_index": int(scheduled_game.swap_index),
-                "episode_index": int(scheduled_game.episode_index),
-                "episode_seed": int(scheduled_game.episode_seed),
-                "focal_policy_id": scheduled_game.focal_policy_id,
-                "opponent_policy_id": scheduled_game.opponent_policy_id,
-            }
-        )
-        return f"{scheduled_game.pair_index:04d}_{scheduled_game.swap_index:01d}_{stable_hash64(payload):016x}"
-
-    def _simulator_episode_key(self, batch: DecisionBoundaryBatch) -> int | None:
-        return int(np.asarray(batch.episode_key, dtype=np.uint64)[0])

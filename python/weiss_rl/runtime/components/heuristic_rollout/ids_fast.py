@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -13,7 +12,6 @@ from weiss_rl.diagnostics.action_diagnostics import (
     reset_action_sequence_state,
     update_action_summary_from_ids,
 )
-from weiss_rl.envs.decision_env import _pack_batch
 from weiss_rl.runtime.components.bootstrap import bootstrap_fields_from_batch, collector_bootstrap_fields_for_actor
 from weiss_rl.runtime.components.collector_step_legal import capture_packed_array_step_legal
 from weiss_rl.runtime.components.collector_unroll_storage import build_collector_runtime_unroll, store_collector_step
@@ -33,21 +31,16 @@ from weiss_rl.runtime.components.counters import (
     timeout_limits_for_env as _timeout_limits_for_env,
 )
 from weiss_rl.runtime.components.done_resets import reset_actor_hidden_for_done as _reset_actor_hidden_for_done
+from weiss_rl.runtime.components.heuristic_rollout.ids_fast_simulator import HeuristicIdsFastSimulator
 from weiss_rl.runtime.components.legal_batching import optional_legal_action_meta as _optional_legal_action_meta
 from weiss_rl.runtime.components.legal_batching import require_ids_offsets as _require_ids_offsets
 from weiss_rl.runtime.components.opponent_context import opponent_context_indices_for_model
+from weiss_rl.runtime.components.policy_inference.actor_models import actor_inference_model
 from weiss_rl.runtime.components.reward_shaping import apply_collector_reward_shaping as _apply_reward_shaping
 from weiss_rl.runtime.components.types import RuntimeUnroll
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState
-
-
-def _actor_inference_model(actor: _ActorState) -> Any:
-    # Resolve lazily through weiss_rl.runtime so tests keep the private wrapper hook.
-    from weiss_rl import runtime as runtime_module
-
-    return runtime_module._actor_inference_model(actor)
 
 
 class QueueRuntimeHeuristicIdsFastRolloutMixin:
@@ -82,19 +75,9 @@ class QueueRuntimeHeuristicIdsFastRolloutMixin:
         timeout_limits = _timeout_limits_for_env(actor.env)
         initial_hidden_state = actor.seat_hidden.detach().cpu().numpy().copy()
 
-        pool = getattr(actor.env, "pool", None)
-        if pool is None:
-            raise RuntimeError("heuristic ids fast path requires a pooled simulator env")
-        step_into = getattr(pool, "step_into_i16_legal_ids", None)
-        reset_done_into = getattr(pool, "reset_done_into_i16_legal_ids", None)
-        if not callable(step_into) or not callable(reset_done_into):
-            raise RuntimeError(
-                "heuristic ids fast path requires pool.step_into_i16_legal_ids(...) "
-                "and pool.reset_done_into_i16_legal_ids(...)"
-            )
-        step_out = getattr(actor.env, "_step_out", None)
-        if step_out is None:
-            step_out = actor.env._require_step_out(__import__("weiss_sim"))
+        simulator = HeuristicIdsFastSimulator.from_env(actor.env)
+        pool = simulator.pool
+        step_out = simulator.step_out
 
         batch = actor.current_batch
 
@@ -166,7 +149,7 @@ class QueueRuntimeHeuristicIdsFastRolloutMixin:
             policy_started = time.perf_counter()
             if bool(getattr(self, "_actor_behavior_values_required", True)):
                 self._value_and_advance_rows(
-                    model=_actor_inference_model(actor),
+                    model=actor_inference_model(actor),
                     hidden_state=actor.seat_hidden,
                     row_indices=all_rows,
                     obs_step=current_obs,
@@ -176,7 +159,7 @@ class QueueRuntimeHeuristicIdsFastRolloutMixin:
             else:
                 if self._should_track_heuristic_actor_hidden_state():
                     self._advance_hidden_only(
-                        model=_actor_inference_model(actor),
+                        model=actor_inference_model(actor),
                         hidden_state=actor.seat_hidden,
                         row_indices=all_rows,
                         obs_step=current_obs,
@@ -205,10 +188,9 @@ class QueueRuntimeHeuristicIdsFastRolloutMixin:
             counters["actor_policy_forward_ms"] += int((time.perf_counter() - policy_started) * 1000.0)
 
             env_started = time.perf_counter()
-            step_into(np.asarray(action_step, dtype=np.uint32), step_out)
+            simulator.step(actor.env, action_step)
             step_elapsed = time.perf_counter() - env_started
             actor.env._record_python_timing("python_step", int(step_elapsed * 1_000_000_000.0))
-            actor.env._handle_engine_status(step_out, weiss_sim=None)
             counters["actor_env_step_ms"] += int(step_elapsed * 1000.0)
 
             summary_started = time.perf_counter()
@@ -276,12 +258,7 @@ class QueueRuntimeHeuristicIdsFastRolloutMixin:
             )
 
             if np.any(done):
-                terminal_batch = _pack_batch(
-                    step_out,
-                    legality="ids_offsets",
-                    pool=pool,
-                    copy_arrays=True,
-                )
+                terminal_batch = simulator.pack_terminal_batch()
                 _accumulate_timeout_counters(
                     counters=counters,
                     batch=terminal_batch,
@@ -300,26 +277,12 @@ class QueueRuntimeHeuristicIdsFastRolloutMixin:
                 self._assign_episode_roles(actor, done_array, counters=counters)
                 reset_result = _reset_actor_hidden_for_done(actor=actor, done=done_array, device=self._device)
                 reset_action_sequence_state(action_sequence_state, reset_result.done)
-                reset_done_into(np.ascontiguousarray(reset_result.done, dtype=np.bool_), step_out)
+                simulator.reset_done(actor.env, reset_result.done)
                 reset_elapsed = time.perf_counter() - reset_started
                 actor.env._record_python_timing("python_reset_done", int(reset_elapsed * 1_000_000_000.0))
-                actor.env._handle_engine_status(step_out, weiss_sim=None)
                 counters["actor_done_reset_ms"] += int(reset_elapsed * 1000.0)
 
-            next_batch = _pack_batch(
-                step_out,
-                legality="ids_offsets",
-                pool=pool,
-                copy_arrays=False,
-            )
-            if next_batch.ids_offsets is not None and next_batch.legal_action_meta is None:
-                legal_meta_builder = getattr(self, "_legal_action_meta_from_ids", None)
-                next_legal_action_meta = (
-                    legal_meta_builder(next_batch.ids_offsets[0]) if callable(legal_meta_builder) else None
-                )
-                if next_legal_action_meta is not None:
-                    next_batch = replace(next_batch, legal_action_meta=next_legal_action_meta)
-            batch = next_batch
+            batch = simulator.pack_next_batch(self)
 
         batch = self._sync_actor_batch_from_step_out(
             actor=actor,
@@ -331,7 +294,7 @@ class QueueRuntimeHeuristicIdsFastRolloutMixin:
             bootstrap = collector_bootstrap_fields_for_actor(
                 batch=batch,
                 actor=actor,
-                actor_model=_actor_inference_model(actor),
+                actor_model=actor_inference_model(actor),
                 bootstrap_device=self._device,
                 actor_amp_enabled=self._actor_amp_enabled,
                 values_required=True,

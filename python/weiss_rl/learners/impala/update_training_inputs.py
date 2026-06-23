@@ -4,28 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from weiss_rl.learners.impala.batch_access import batch_value as _batch_value
 from weiss_rl.learners.vtrace import VTraceTargets
+from weiss_rl.learners.vtrace_diagnostics import summarize_vtrace_diagnostics
 
 _MISSING_TRAINING_INPUTS_MESSAGE = (
     "batch must include obs, actions, legality, and either vtrace_result or raw vtrace inputs for learner updates"
 )
-
-
-def _batch_value(batch: Any, key: str) -> Any:
-    from weiss_rl.learners import impala_learner as learner_module
-
-    return learner_module._batch_value(batch, key)
-
-
-def _summarize_vtrace_diagnostics(
-    result: VTraceTargets,
-    *,
-    rho_bar: float,
-    c_bar: float,
-) -> dict[str, float]:
-    from weiss_rl.learners import impala_learner as learner_module
-
-    return learner_module.summarize_vtrace_diagnostics(result, rho_bar=rho_bar, c_bar=c_bar)
 
 
 def has_impala_training_inputs(batch: Any) -> bool:
@@ -66,7 +51,7 @@ def summarize_precomputed_vtrace_update_metrics(
     c_bar_value = _batch_value(batch, "vtrace_c_bar")
     rho_bar = learner.vtrace_rho_bar if rho_bar_value is None else float(rho_bar_value)
     c_bar = learner.vtrace_c_bar if c_bar_value is None else float(c_bar_value)
-    return _summarize_vtrace_diagnostics(vtrace_result, rho_bar=rho_bar, c_bar=c_bar)
+    return summarize_vtrace_diagnostics(vtrace_result, rho_bar=rho_bar, c_bar=c_bar)
 
 
 __all__ = [

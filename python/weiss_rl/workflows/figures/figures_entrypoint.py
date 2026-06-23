@@ -3,17 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from weiss_rl.plotting.paper_figures import (
-    PAPER_FIGURE_IDS,
-    render_paper_figures,
-    render_placeholder_figure,
-    render_public_demo_figures,
-)
-from weiss_rl.workflows.figures.figure_modes import (
-    run_paper_figure_mode,
-    run_placeholder_figure_mode,
-    run_public_demo_figure_mode,
-)
+from weiss_rl.plotting import paper_figures as _paper_figures
+from weiss_rl.workflows.figures import figure_modes as _figure_modes
+
+__all__ = ["main"]
 
 
 def main() -> None:
@@ -26,7 +19,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--fig-id",
-        choices=PAPER_FIGURE_IDS,
+        choices=_paper_figures.PAPER_FIGURE_IDS,
         help="Stable figure ID to render. Defaults to rendering all paper figures.",
     )
     parser.add_argument(
@@ -68,10 +61,10 @@ def main() -> None:
             parser.error("--public-demo cannot be combined with --out")
 
         print(
-            run_public_demo_figure_mode(
+            _figure_modes.run_public_demo_figure_mode(
                 final_eval_dir=args.final_eval_dir,
                 out_dir=args.out_dir,
-                render_public_demo_figures_fn=render_public_demo_figures,
+                render_public_demo_figures_fn=_paper_figures.render_public_demo_figures,
             )
         )
         return
@@ -86,9 +79,9 @@ def main() -> None:
         if args.final_eval_dir is not None or args.out_dir is not None:
             parser.error("--out cannot be combined with --final-eval-dir or --out-dir")
         print(
-            run_placeholder_figure_mode(
+            _figure_modes.run_placeholder_figure_mode(
                 out=args.out,
-                render_placeholder_figure_fn=render_placeholder_figure,
+                render_placeholder_figure_fn=_paper_figures.render_placeholder_figure,
             )
         )
         return
@@ -99,11 +92,11 @@ def main() -> None:
         parser.error("--final-eval-dir and --out-dir require --public-demo")
 
     print(
-        run_paper_figure_mode(
+        _figure_modes.run_paper_figure_mode(
             run_dir=args.run_dir,
             formats=tuple(args.format or ()),
             fig_id=args.fig_id,
-            render_paper_figures_fn=render_paper_figures,
+            render_paper_figures_fn=_paper_figures.render_paper_figures,
         )
     )
 

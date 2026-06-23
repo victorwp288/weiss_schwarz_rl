@@ -42,6 +42,17 @@ export type PolicySummary = {
   selected_by_default: boolean;
 };
 
+export type CardRef = {
+  card?: CardView;
+  card_ref?: string;
+  ref_id?: string;
+  index?: number;
+  owner_seat?: number;
+  relative_owner?: string;
+  visibility?: string;
+  zone?: string;
+};
+
 export type LegalAction = {
   action_id: number;
   index?: number;
@@ -50,8 +61,8 @@ export type LegalAction = {
   description?: string;
   family?: string | null;
   params?: Record<string, unknown>;
-  source_refs?: unknown[];
-  target_refs?: unknown[];
+  source_refs?: CardRef[];
+  target_refs?: CardRef[];
   is_attack?: boolean;
   is_move?: boolean;
   is_pass?: boolean;
@@ -64,6 +75,8 @@ export type PlayerZone = {
   hidden?: boolean;
   redacted?: boolean;
 };
+
+export type CardColor = "yellow" | "green" | "red" | "blue" | string;
 
 export type CardView = {
   id?: string;
@@ -79,6 +92,11 @@ export type CardView = {
   level?: number | string;
   cost?: number | string;
   power?: number | string;
+  soul?: number | string;
+  color?: CardColor;
+  card_type?: string;
+  triggers?: string[];
+  traits?: Array<number | string>;
 };
 
 export type PlayerView = {
@@ -91,12 +109,22 @@ export type PlayerView = {
 
 export type StageSlot = {
   seat?: number;
+  owner_seat?: number;
+  relative_owner?: string;
   row?: string;
   lane?: number;
+  slot?: number;
+  slot_ref?: string;
+  card_ref?: string;
   label?: string;
   card?: CardView | null;
   cards?: CardView[];
   occupied?: boolean;
+  empty?: boolean;
+  rested?: boolean;
+  has_attacked?: boolean;
+  cannot_attack?: boolean;
+  marker_count?: number;
 };
 
 export type HumanDecisionView = {
@@ -126,6 +154,37 @@ export type HumanDecisionView = {
   };
 };
 
+/** Reference text + engine-implementation flags for one card. */
+export type CardInfo = {
+  card_no: string;
+  name?: string | null;
+  text?: string | null;
+  rarity?: string | null;
+  traits?: string[] | null;
+  expansion?: string | null;
+  approx_ok?: boolean;
+  strict_ok?: boolean;
+};
+
+export type PublicHistoryEntry = {
+  decision_index: number;
+  actor_seat: number;
+  actor_kind: "human" | "model" | string;
+  label: string;
+  family?: string | null;
+  phase?: string | null;
+  elapsed_ms?: number | null;
+};
+
+/** A card the user has "armed": the subset of legal actions it can perform. */
+export type ActionFocus = {
+  title: string;
+  cardRef?: string | null;
+  handIndex?: number | null;
+  slotRef?: string | null;
+  actions: LegalAction[];
+};
+
 export type RankedModelAction = {
   action_id: number;
   label: string;
@@ -150,8 +209,10 @@ export type SessionState = {
   model_seat: number;
   policy_id: string;
   human_turn: boolean;
+  spectate?: boolean;
   terminal: boolean;
   view: HumanDecisionView;
+  history?: PublicHistoryEntry[];
   model?: {
     recent_actions?: RecentModelAction[];
     god_search?: GodSearchDiagnostics | null;
@@ -181,6 +242,7 @@ export type CreateSessionPayload = {
   human_deck: string;
   model_deck: string;
   mode: "study" | "freeplay";
+  spectate?: boolean;
   model_sampling_algorithm: string;
   top_k: number;
   search_rollout_opponent_policy_id: string;

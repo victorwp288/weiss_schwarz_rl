@@ -7,8 +7,8 @@ Canonical thesis ablations:
   original config path.
 - `ppo_lite.yaml`: masked PPO-lite baseline.
 - `terminal_only_reward.yaml`: terminal-reward-only B1 reward ablation. Older
-  May 13 reward-shaping probes live in
-  `../../archive/thesis_reward_ablations_20260513/`.
+  May 13 reward-shaping probes are historical artifacts and are not restored in
+  this checkout.
 
 `norecurrence_impala.yaml` remains as a legacy compatibility name for historical
 artifact reproduction. Do not present it as an additional public ablation; use

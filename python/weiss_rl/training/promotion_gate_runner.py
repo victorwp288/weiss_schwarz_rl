@@ -18,16 +18,14 @@ from weiss_rl.envs.decision_env import DecisionBoundaryBatch
 from weiss_rl.eval import Pcg32XshRrV1, game_result_from_step, sample_action_pinned, select_action_argmax_pinned
 from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.model_action_surface import (
+    ModelActionSurfaceSettings,
+    model_action_surface_batch_and_ids,
+)
 from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
 from weiss_rl.model import PolicyValueModel
-from weiss_rl.models.observation_contract import header_field_index
-from weiss_rl.runtime.components.action_surface import (
-    filter_batch_main_move_only_rows_to_pass,
-    filter_batch_mulligan_select_after_select,
-    filter_batch_pass_when_attack_available,
-)
-from weiss_rl.runtime.components.legal_meta import action_catalog_indices
-from weiss_rl.training.dev_eval import legal_ids_for_env_row, promotion_gate_rng_seed
+from weiss_rl.training.dev_eval.runtime_contracts import legal_ids_for_env_row
+from weiss_rl.training.dev_eval.seed_schedule import promotion_gate_rng_seed
 
 
 class PromotionGateRunner:
@@ -66,13 +64,9 @@ class PromotionGateRunner:
         ).strip()
         self._model_sampling_temperature = float(getattr(evaluation_config, "model_sampling_temperature", 1.0) or 1.0)
         training_config = getattr(getattr(self.stack, "config", None), "training", None)
-        self._mulligan_force_confirm_after_select = bool(
-            getattr(training_config, "mulligan_force_confirm_after_select", False)
-        )
-        self._force_pass_over_main_move_only = bool(getattr(training_config, "force_pass_over_main_move_only", False))
-        self._main_move_only_max_consecutive = int(getattr(training_config, "main_move_only_max_consecutive", 0))
-        self._force_attack_over_pass_when_attack_legal = bool(
-            getattr(training_config, "force_attack_over_pass_when_attack_legal", False)
+        self._model_action_surface = ModelActionSurfaceSettings.from_training_config(
+            training_config,
+            pass_action_id=self.pass_action_id,
         )
 
     def run_game(self, scheduled_game: ScheduledGame):
@@ -175,10 +169,11 @@ class PromotionGateRunner:
         if seat_hidden is None:
             raise RuntimeError(f"Missing hidden state for promotion-gate policy_id: {current_policy_id}")
 
-        batch_for_model, legal_ids_for_model = self._model_action_surface_batch_and_ids(
+        batch_for_model, legal_ids_for_model = model_action_surface_batch_and_ids(
             model=model,
             batch=batch,
             legal_ids=legal_ids,
+            settings=self._model_action_surface,
             action_sequence_state=action_sequence_state,
         )
         with torch.inference_mode():
@@ -206,62 +201,6 @@ class PromotionGateRunner:
                 temperature=self._model_sampling_temperature,
             )
         return action, next_seat_hidden
-
-    def _model_action_surface_batch_and_ids(
-        self,
-        *,
-        model: PolicyValueModel,
-        batch: DecisionBoundaryBatch,
-        legal_ids: np.ndarray,
-        action_sequence_state: Any | None = None,
-    ) -> tuple[DecisionBoundaryBatch, np.ndarray]:
-        if (
-            not self._mulligan_force_confirm_after_select
-            and not self._force_pass_over_main_move_only
-            and not self._force_attack_over_pass_when_attack_legal
-        ):
-            return batch, legal_ids
-        action_catalog = getattr(model, "action_catalog", None)
-        if action_catalog is None:
-            return batch, legal_ids
-        filtered_batch = batch
-        contract = getattr(model, "_structured_observation_contract", None)
-        layout = getattr(contract, "layout", None)
-        field_index = None if layout is None else header_field_index(layout, "last_action_arg0")
-        last_action_arg0_index = -1 if field_index is None else int(field_index)
-        family_index, _attack_type_index = action_catalog_indices(action_catalog)
-        if self._mulligan_force_confirm_after_select:
-            filtered_batch, _result = filter_batch_mulligan_select_after_select(
-                filtered_batch,
-                last_action_arg0_index=last_action_arg0_index,
-                mulligan_select_family_id=int(family_index.get("mulligan_select", -1)),
-                mulligan_confirm_family_id=int(family_index.get("mulligan_confirm", -1)),
-            )
-        if self._force_pass_over_main_move_only:
-            allow_main_move_only_rows = None
-            if self._main_move_only_max_consecutive > 0 and action_sequence_state is not None:
-                consecutive = np.asarray(action_sequence_state.consecutive_main_moves_by_env, dtype=np.int32)
-                if consecutive.shape == (1,):
-                    allow_main_move_only_rows = consecutive < self._main_move_only_max_consecutive
-            filtered_batch, _result = filter_batch_main_move_only_rows_to_pass(
-                filtered_batch,
-                pass_action_id=int(self.pass_action_id),
-                main_move_family_id=int(family_index.get("main_move", -1)),
-                allow_main_move_only_rows=allow_main_move_only_rows,
-            )
-        if self._force_attack_over_pass_when_attack_legal:
-            filtered_batch, _result = filter_batch_pass_when_attack_available(
-                filtered_batch,
-                pass_action_id=int(self.pass_action_id),
-                attack_family_id=int(family_index.get("attack", -1)),
-            )
-        if filtered_batch.ids_offsets is None:
-            return batch, legal_ids
-        filtered_ids, filtered_offsets = filtered_batch.ids_offsets
-        return (
-            filtered_batch,
-            np.asarray(filtered_ids[int(filtered_offsets[0]) : int(filtered_offsets[1])], dtype=np.uint32),
-        )
 
     def _abort_on_fault(self, batch: DecisionBoundaryBatch) -> None:
         abort_on_engine_fault_eval(

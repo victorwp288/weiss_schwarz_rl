@@ -1,5 +1,6 @@
 import type {
   ApiHealth,
+  CardInfo,
   CreateSessionPayload,
   DeckSummary,
   PolicySummary,
@@ -8,6 +9,14 @@ import type {
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
+
+export function apiUrl(path: string): string {
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+export function cardArtUrl(cardNo: string): string {
+  return apiUrl(`/api/card-art/${encodeURIComponent(cardNo)}`);
+}
 
 export class ApiError extends Error {
   status: number;
@@ -62,6 +71,28 @@ export async function submitAction(
   });
 }
 
+export async function stepSession(sessionId: string): Promise<SessionState> {
+  return requestJson<SessionState>(`/api/sessions/${sessionId}/step`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+const cardInfoCache = new Map<string, Promise<CardInfo>>();
+
+/** Card reference text + engine flags; cached per card number for the session. */
+export function getCardInfo(cardNo: string, cardId?: string | number | null): Promise<CardInfo> {
+  const key = cardNo;
+  let cached = cardInfoCache.get(key);
+  if (!cached) {
+    const query = cardId != null && `${cardId}`.match(/^\d+$/) ? `?card_id=${cardId}` : "";
+    cached = requestJson<CardInfo>(`/api/card-info/${encodeURIComponent(cardNo)}${query}`);
+    cardInfoCache.set(key, cached);
+    cached.catch(() => cardInfoCache.delete(key));
+  }
+  return cached;
+}
+
 export async function closeSession(sessionId: string): Promise<void> {
   await requestJson<{ closed: boolean }>(`/api/sessions/${sessionId}/close`, {
     method: "POST",
@@ -70,7 +101,7 @@ export async function closeSession(sessionId: string): Promise<void> {
 }
 
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...init,
     headers: {
       "Content-Type": "application/json",

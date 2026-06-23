@@ -15,7 +15,6 @@ describe("EvidenceRail", () => {
           terminal: true,
           result: { decision_count: 122, status: "complete", winner_seat: 1 },
         }}
-        onRefresh={vi.fn()}
         onClose={vi.fn()}
       />,
     );

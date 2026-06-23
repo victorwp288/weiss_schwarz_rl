@@ -1,29 +1,28 @@
+"""Dispatch the small public thesis workflow surface."""
+
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 
-from weiss_rl.workflows.evaluation_workflow.dispatch import dispatch_evaluation_command
-from weiss_rl.workflows.parsers import _add_common, _parse_args, build_parser
+from weiss_rl.workflows.parsers import _parse_args, build_parser
 from weiss_rl.workflows.planning import _repo_root
-from weiss_rl.workflows.public_api import PUBLIC_WORKFLOW_EXPORTS, export_public_workflow_symbols
-from weiss_rl.workflows.training_workflow.dispatch import dispatch_training_command
 from weiss_rl.workflows.workflow_dispatch import dispatch_workflow_command
 
-__all__ = [
-    *PUBLIC_WORKFLOW_EXPORTS,
-    "_add_common",
-    "_parse_args",
-    "build_parser",
-    "dispatch_evaluation_command",
-    "dispatch_training_command",
-    "main",
-]
+PUBLIC_THESIS_COMMANDS = (
+    "train-b1",
+    "train-main",
+    "smoke-eval",
+    "eval-final",
+    "figures",
+    "b2-audit",
+)
 
-export_public_workflow_symbols(globals())
+__all__ = ["PUBLIC_THESIS_COMMANDS", "build_parser", "main"]
 
 
-def main() -> None:
-    args = _parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = _parse_args(argv)
     repo_root = _repo_root(args.repo_root)
     python_exe = sys.executable
 

@@ -31,17 +31,11 @@ from weiss_rl.runtime.components.collector_state import allocate_collector_unrol
 from weiss_rl.runtime.components.counters import (
     timeout_limits_for_env as _timeout_limits_for_env,
 )
+from weiss_rl.runtime.components.policy_inference.actor_models import actor_inference_model
 from weiss_rl.runtime.components.types import RuntimeUnroll
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState
-
-
-def _actor_inference_model(actor: _ActorState) -> Any:
-    # Resolve lazily through weiss_rl.runtime so tests keep the private wrapper hook.
-    from weiss_rl import runtime as runtime_module
-
-    return runtime_module._actor_inference_model(actor)
 
 
 class QueueRuntimeActorUnrollMixin:
@@ -169,6 +163,6 @@ class QueueRuntimeActorUnrollMixin:
                 bootstrap_device=self._device,
             ),
             callbacks=ActorUnrollFinalizationCallbacks(
-                actor_inference_model=_actor_inference_model,
+                actor_inference_model=actor_inference_model,
             ),
         )

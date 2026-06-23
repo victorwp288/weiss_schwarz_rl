@@ -13,7 +13,7 @@ from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.core.card_table import card_feature_table
 from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.core.observation_layout import ObservationSlice
-from weiss_rl.eval.heuristic_public import heuristic_public_scoring_profile
+from weiss_rl.eval.heuristic_public_profiles import heuristic_public_scoring_profile
 from weiss_rl.models.action_tables import (
     build_factorized_action_lookup_tables,
     build_structured_action_component_tables,

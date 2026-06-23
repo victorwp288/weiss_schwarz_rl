@@ -234,9 +234,6 @@ class SnapshotRegistry:
         self.pinned_snapshots = _move_ref_to_end(self.pinned_snapshots, normalized_snapshot_id)
         self.normalize()
 
-    def add(self, snapshot_id: str, *, is_champion: bool = False) -> None:
-        self.add_champion(snapshot_id) if is_champion else None
-
     def remove_champion(self, snapshot_id: str) -> bool:
         normalized_snapshot_id = str(snapshot_id).strip()
         if not normalized_snapshot_id:

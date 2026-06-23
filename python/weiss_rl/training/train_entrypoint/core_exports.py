@@ -36,7 +36,7 @@ from weiss_rl.experiments.toy_public_demo import (
     stage_public_demo_run,
 )
 from weiss_rl.league import run_promotion_gate as run_promotion_gate
-from weiss_rl.learners.impala import ImpalaLearner
+from weiss_rl.learners.impala.learner import ImpalaLearner
 from weiss_rl.learners.ppo_lite_learner import PpoLiteLearner
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.model import build_policy_value_model as build_policy_value_model

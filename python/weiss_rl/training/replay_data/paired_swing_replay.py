@@ -15,20 +15,14 @@ from weiss_rl.training.auxiliary_replay_runner import (
 from weiss_rl.training.auxiliary_replay_support import (
     trajectory_bc_compatible_training_config,
 )
+from weiss_rl.training.replay_data import paired_swing_conflict_filter as _conflict_filter
 from weiss_rl.training.replay_data.paired_auxiliary_replay import (
     emit_paired_auxiliary_replay_metrics,
     run_due_paired_auxiliary_replay,
 )
-from weiss_rl.training.replay_data.paired_swing_conflict_filter import (
-    PAIRED_SWING_CONFLICT_FILTERS,
-    filter_paired_swing_conflict_rows,
-    normalize_paired_swing_action_source,
-    paired_swing_distinct_train_row_count,
-)
 from weiss_rl.training.replay_data.trajectory_bc_sampling import TrajectoryBcReplayState
 
 _COMPARE_TO_CHOICES = frozenset({"negative", "top_other"})
-_normalize_action_source = normalize_paired_swing_action_source
 
 
 @dataclass(slots=True)
@@ -50,11 +44,11 @@ class PairedSwingReplayState:
         every_updates = int(getattr(structured_aux, "paired_swing_every_updates", 0))
         if not dataset_path_text or every_updates <= 0:
             return None
-        positive_action_source = normalize_paired_swing_action_source(
+        positive_action_source = _conflict_filter.normalize_paired_swing_action_source(
             getattr(structured_aux, "paired_swing_positive_action_source", "teacher_action"),
             field_name="paired_swing_positive_action_source",
         )
-        negative_action_source = normalize_paired_swing_action_source(
+        negative_action_source = _conflict_filter.normalize_paired_swing_action_source(
             getattr(structured_aux, "paired_swing_negative_action_source", "actions"),
             field_name="paired_swing_negative_action_source",
         )
@@ -67,7 +61,7 @@ class PairedSwingReplayState:
         if compare_to not in _COMPARE_TO_CHOICES:
             raise ValueError("paired_swing_compare_to must be one of: negative, top_other")
         conflict_filter = str(getattr(structured_aux, "paired_swing_conflict_filter", "none")).strip().lower()
-        if conflict_filter not in PAIRED_SWING_CONFLICT_FILTERS:
+        if conflict_filter not in _conflict_filter.PAIRED_SWING_CONFLICT_FILTERS:
             raise ValueError("paired_swing_conflict_filter must be one of: current_state, history, none")
         margin = float(getattr(structured_aux, "paired_swing_margin", 0.35))
         if margin < 0.0:
@@ -91,7 +85,7 @@ class PairedSwingReplayState:
             return None
         conflict_filter_summary: dict[str, Any] | None = None
         if conflict_filter != "none":
-            filtered_dataset, conflict_filter_summary = filter_paired_swing_conflict_rows(
+            filtered_dataset, conflict_filter_summary = _conflict_filter.filter_paired_swing_conflict_rows(
                 sampler.dataset,
                 mode=conflict_filter,
                 positive_action_source=positive_action_source,
@@ -102,7 +96,7 @@ class PairedSwingReplayState:
             sampler.cursor = 0
             sampler.focus_cursor = 0
             sampler.nonfocus_cursor = 0
-        distinct_train_rows = paired_swing_distinct_train_row_count(
+        distinct_train_rows = _conflict_filter.paired_swing_distinct_train_row_count(
             sampler.dataset,
             positive_action_source=positive_action_source,
             negative_action_source=negative_action_source,
@@ -206,9 +200,5 @@ def _paired_swing_replay_static_metrics(state: PairedSwingReplayState) -> dict[s
 
 __all__ = [
     "PairedSwingReplayState",
-    "_normalize_action_source",
-    "filter_paired_swing_conflict_rows",
     "maybe_run_paired_swing_replay",
-    "normalize_paired_swing_action_source",
-    "paired_swing_distinct_train_row_count",
 ]

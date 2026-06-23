@@ -6,7 +6,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from weiss_rl.training import checkpoint_guard as _checkpoint_guard_helpers
 from weiss_rl.training.algorithm_contracts import validate_algorithm_model_contract
 from weiss_rl.training.algorithm_families import (
     IMPALA_ALGORITHMS,
@@ -24,6 +23,7 @@ from weiss_rl.training.batches import (
 from weiss_rl.training.batches import (
     collect_training_batch as collect_training_batch,
 )
+from weiss_rl.training.checkpointing import guard as _checkpoint_guard_helpers
 from weiss_rl.training.checkpointing.resolution import (
     BEST_CHECKPOINT_FILENAME,
     LATEST_CHECKPOINT_FILENAME,

@@ -33,6 +33,17 @@ class ImpalaResolvedVTraceTargets:
     rewards_for_metrics: Tensor
 
 
+def _policy_logp_for_training_rows(
+    *,
+    action_logp: Tensor,
+    behavior_logp: Tensor | None,
+    loss_mask: Tensor,
+) -> Tensor:
+    if behavior_logp is None or not bool((loss_mask <= 0.0).any().item()):
+        return action_logp
+    return torch.where(loss_mask > 0.0, action_logp, behavior_logp)
+
+
 def resolve_impala_vtrace_targets(
     *,
     batch: Any,
@@ -55,8 +66,11 @@ def resolve_impala_vtrace_targets(
             like=values,
         )
 
-    if behavior_logp_for_mask is not None and bool((loss_mask <= 0.0).any().item()):
-        action_logp = torch.where(loss_mask > 0.0, action_logp, behavior_logp_for_mask)
+    action_logp = _policy_logp_for_training_rows(
+        action_logp=action_logp,
+        behavior_logp=behavior_logp_for_mask,
+        loss_mask=loss_mask,
+    )
 
     if isinstance(vtrace_result, VTraceTargets):
         targets = float_target(vtrace_result.vs, expected_shape=values.shape, like=values)

@@ -9,7 +9,7 @@ import torch
 from torch import Tensor
 
 from weiss_rl.core.legal_actions import LegalActionBatch
-from weiss_rl.eval.heuristic_public import heuristic_public_scoring_profile
+from weiss_rl.eval.heuristic_public_profiles import heuristic_public_scoring_profile
 from weiss_rl.models.action_plans import (
     FactorizedConditionalLogProbs,
     FactorizedEvaluationResult,

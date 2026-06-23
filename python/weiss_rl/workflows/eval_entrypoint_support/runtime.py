@@ -5,25 +5,26 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from weiss_rl.workflows.eval_entrypoint_support.compat import (
-    build_entrypoint_canonical_eval_dependencies,
-    build_entrypoint_eval_dispatch_dependencies,
-    build_entrypoint_eval_startup_dependencies,
-    run_entrypoint_canonical_eval_pipeline,
+from weiss_rl.workflows.canonical_eval.entrypoint_request import (
+    canonical_eval_entrypoint_request,
+    run_canonical_entrypoint_request_adapter,
 )
 from weiss_rl.workflows.eval_entrypoint_support.main import run_eval_entrypoint_main
+from weiss_rl.workflows.eval_support.eval_dependencies import build_canonical_eval_dependencies
+from weiss_rl.workflows.eval_support.eval_dispatch_dependencies import build_eval_dispatch_dependencies
+from weiss_rl.workflows.eval_support.eval_startup_dependencies import build_eval_startup_dependencies
 
 
 def build_eval_entrypoint_canonical_dependencies(entrypoint_globals: Mapping[str, Any]) -> Any:
-    return build_entrypoint_canonical_eval_dependencies(entrypoint_globals)
+    return build_canonical_eval_dependencies(entrypoint_globals)
 
 
 def build_eval_entrypoint_dispatch_dependencies(entrypoint_globals: Mapping[str, Any]) -> Any:
-    return build_entrypoint_eval_dispatch_dependencies(entrypoint_globals)
+    return build_eval_dispatch_dependencies(entrypoint_globals)
 
 
 def build_eval_entrypoint_startup_dependencies(entrypoint_globals: Mapping[str, Any]) -> Any:
-    return build_entrypoint_eval_startup_dependencies(entrypoint_globals)
+    return build_eval_startup_dependencies(entrypoint_globals)
 
 
 def run_eval_entrypoint_canonical_pipeline(
@@ -47,7 +48,7 @@ def run_eval_entrypoint_canonical_pipeline(
     skip_readiness: bool,
     git_commit_override: str,
 ) -> int:
-    return run_entrypoint_canonical_eval_pipeline(
+    request = canonical_eval_entrypoint_request(
         parser=parser,
         stack=stack,
         run_dir=run_dir,
@@ -65,6 +66,9 @@ def run_eval_entrypoint_canonical_pipeline(
         skip_figures=skip_figures,
         skip_readiness=skip_readiness,
         git_commit_override=git_commit_override,
+    )
+    return run_canonical_entrypoint_request_adapter(
+        request=request,
         canonical_dependencies_fn=lambda: build_eval_entrypoint_canonical_dependencies(entrypoint_globals),
         run_canonical_eval_pipeline_fn=entrypoint_globals["run_canonical_eval_pipeline"],
         run_canonical_eval_entrypoint_pipeline_fn=entrypoint_globals["run_canonical_eval_entrypoint_pipeline"],

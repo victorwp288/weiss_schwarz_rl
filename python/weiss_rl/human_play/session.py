@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -61,6 +62,7 @@ class HumanPlayConfig:
     human_deck: str = MAIN_DECK_ID
     model_deck: str = MAIN_DECK_ID
     mode: str = "study"
+    spectate: bool = False
     model_sampling_algorithm: str = "model_argmax_pinned_v1"
     artifact_root: Path | None = None
     top_k: int = 5
@@ -120,21 +122,33 @@ class HumanPlaySession:
         self.batch = self.env.reset(seed=int(config.seed))
         self.rng = Pcg32XshRrV1(int(config.seed) ^ 0xC0DEC0DE)
         self.runner = self._build_eval_runner()
-        self.model_hidden = self.runner._initial_hidden(  # noqa: SLF001 - shared eval helper until public API exists.
-            self.policy_id,
-            opponent_policy_id=self.search_rollout_opponent_policy_id,
-        )
+        self.spectate = bool(config.spectate)
+        self.seat_hidden = self._initial_seat_hidden_by_seat()
         self.action_sequence_state = make_action_sequence_state(1)
         self.action_counters = ActionSummaryCounters()
         self.action_history: list[int] = []
         self.game_search_state: dict[str, int] = {"searched": 0}
         self.recent_model_actions: list[dict[str, Any]] = []
+        self.public_history: list[dict[str, Any]] = []
         self.decision_count = 0
         self.last_acting_seat: int | None = None
         self.started_at = time.time()
         self.transcript = self._create_transcript()
         self.transcript.append_event({"event": "session_started", "session_id": self.session_id})
-        self.advance_until_human_or_terminal()
+        if not self.spectate:
+            self.advance_until_human_or_terminal()
+
+    def _initial_seat_hidden_by_seat(self) -> dict[int, torch.Tensor | None]:
+        hidden_by_seat = {int(self.model_seat): self._initial_policy_hidden()}
+        if self.spectate:
+            hidden_by_seat[int(self.config.human_seat)] = self._initial_policy_hidden()
+        return hidden_by_seat
+
+    def _initial_policy_hidden(self) -> torch.Tensor | None:
+        return self.runner._initial_hidden(  # noqa: SLF001 - shared eval helper until public API exists.
+            self.policy_id,
+            opponent_policy_id=self.search_rollout_opponent_policy_id,
+        )
 
     def close(self) -> None:
         self.env.close()
@@ -142,17 +156,23 @@ class HumanPlaySession:
     def current_state(self) -> dict[str, Any]:
         view = self.current_view()
         terminal = self._is_terminal()
+        recent_actions = list(self.recent_model_actions)
+        if self.config.mode == "freeplay":
+            # Freeplay hides the model's "thoughts": keep what it did, drop its ranked preferences.
+            recent_actions = [{**item, "ranked_actions": []} for item in recent_actions]
         payload = {
             "session_id": self.session_id,
             "mode": self.config.mode,
             "human_seat": int(self.config.human_seat),
             "model_seat": int(self.model_seat),
             "policy_id": self.policy_id,
-            "human_turn": self._current_actor() == int(self.config.human_seat) and not terminal,
+            "human_turn": not self.spectate and self._current_actor() == int(self.config.human_seat) and not terminal,
+            "spectate": self.spectate,
             "terminal": terminal,
             "view": view,
+            "history": list(self.public_history[-40:]),
             "model": {
-                "recent_actions": list(self.recent_model_actions),
+                "recent_actions": recent_actions,
                 "god_search": self.runner.god_search_diagnostics(),
             },
             "artifacts": {
@@ -167,16 +187,21 @@ class HumanPlaySession:
         return payload
 
     def current_view(self) -> dict[str, Any]:
+        return self._view_for_seat(int(self.config.human_seat))
+
+    def _view_for_seat(self, seat: int) -> dict[str, Any]:
         raw_view = self.weiss_sim.human_decision_view(
             self.env.pool,
             env_index=0,
-            perspective_seat=int(self.config.human_seat),
+            perspective_seat=int(seat),
         )
         if not isinstance(raw_view, dict):
             raise HumanPlaySessionError("weiss_sim.human_decision_view() must return a dict")
         return _enrich_card_labels(_normalize_view(raw_view), self.weiss_sim)
 
     def submit_human_action(self, action_id: int, *, client_view_hash64: str | None = None) -> dict[str, Any]:
+        if self.spectate:
+            raise HumanPlaySessionError("this is a spectate session; the model plays both seats")
         if self._is_terminal():
             raise HumanPlaySessionError("cannot submit an action after the game is terminal")
         current_actor = self._current_actor()
@@ -203,46 +228,71 @@ class HumanPlaySession:
 
     def advance_until_human_or_terminal(self) -> None:
         while not self._is_terminal() and self._current_actor() != int(self.config.human_seat):
-            before = self.current_view()
-            legal_ids = self._legal_ids_for_row()
-            started = time.perf_counter()
-            action, next_hidden, ranked = self._select_model_action(legal_ids=legal_ids)
-            elapsed_ms = (time.perf_counter() - started) * 1000.0
-            self.model_hidden = next_hidden
-            self._step_and_record(
-                action=action,
-                actor_kind="model",
-                before_view=before,
-                ranked_actions=ranked,
-                elapsed_ms=elapsed_ms,
-            )
+            self._step_model_once(seat=int(self.model_seat), use_search=self.config.god_search.enabled)
+
+    def step_model_decision(self) -> dict[str, Any]:
+        """Spectate mode: advance exactly one decision with the policy acting for the current seat."""
+        if not self.spectate:
+            raise HumanPlaySessionError("step is only available in spectate sessions")
+        if self._is_terminal():
+            raise HumanPlaySessionError("the game is already terminal")
+        # God search is tuned for a single focal seat; spectate steps both seats plainly.
+        self._step_model_once(seat=self._current_actor(), use_search=False)
+        if self._is_terminal():
+            self.transcript.write_postgame_report(self._terminal_summary())
+        return self.current_state()
+
+    def _step_model_once(self, *, seat: int, use_search: bool) -> None:
+        before = self.current_view()
+        # The acting seat's own perspective carries real labels for its actions;
+        # other perspectives redact them to "Action N".
+        actor_view = self._view_for_seat(int(seat))
+        legal_ids = self._legal_ids_for_row()
+        started = time.perf_counter()
+        action, next_hidden, ranked = self._select_model_action(
+            legal_ids=legal_ids, actor_view=actor_view, seat=int(seat), use_search=use_search
+        )
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        self.seat_hidden[int(seat)] = next_hidden
+        self._step_and_record(
+            action=action,
+            actor_kind="model",
+            before_view=before,
+            label_view=actor_view,
+            ranked_actions=ranked,
+            elapsed_ms=elapsed_ms,
+        )
 
     def _select_model_action(
-        self, *, legal_ids: np.ndarray
+        self, *, legal_ids: np.ndarray, actor_view: dict[str, Any], seat: int, use_search: bool
     ) -> tuple[int, torch.Tensor | None, tuple[ActionOption, ...]]:
-        ranked = self._rank_model_actions(legal_ids=legal_ids)
-        if self.config.god_search.enabled:
+        seat_hidden = self.seat_hidden.get(int(seat))
+        ranked = self._rank_model_actions(legal_ids=legal_ids, actor_view=actor_view, seat=int(seat))
+        if use_search:
             action, next_hidden = self.runner._select_action(  # noqa: SLF001
                 batch=self.batch,
-                current_seat=int(self.model_seat),
+                current_seat=int(seat),
                 current_policy_id=self.policy_id,
                 opponent_policy_id=self.search_rollout_opponent_policy_id,
-                seat_hidden=self.model_hidden,
+                seat_hidden=seat_hidden,
                 rng=self.rng,
                 legal_ids=legal_ids,
                 action_sequence_state=self.action_sequence_state,
                 scheduled_game=self._scheduled_game(),
                 action_history=tuple(self.action_history),
-                seat_hidden_by_seat={int(self.model_seat): self.model_hidden, int(self.config.human_seat): None},
+                seat_hidden_by_seat={
+                    int(self.model_seat): self.seat_hidden.get(int(self.model_seat)),
+                    int(self.config.human_seat): self.seat_hidden.get(int(self.config.human_seat)),
+                },
                 game_search_state=self.game_search_state,
             )
         else:
             action, next_hidden = self.runner._select_action_without_god_search(  # noqa: SLF001
                 batch=self.batch,
-                current_seat=int(self.model_seat),
+                current_seat=int(seat),
                 current_policy_id=self.policy_id,
                 opponent_policy_id=self.search_rollout_opponent_policy_id,
-                seat_hidden=self.model_hidden,
+                seat_hidden=seat_hidden,
                 rng=self.rng,
                 legal_ids=legal_ids,
                 action_sequence_state=self.action_sequence_state,
@@ -250,17 +300,20 @@ class HumanPlaySession:
             )
         return int(action), next_hidden, ranked
 
-    def _rank_model_actions(self, *, legal_ids: np.ndarray) -> tuple[ActionOption, ...]:
+    def _rank_model_actions(
+        self, *, legal_ids: np.ndarray, actor_view: dict[str, Any], seat: int
+    ) -> tuple[ActionOption, ...]:
         policy = self.runner.policies[self.policy_id]
-        if policy.model is None or self.model_hidden is None:
+        seat_hidden = self.seat_hidden.get(int(seat))
+        if policy.model is None or seat_hidden is None:
             return ()
         logits, _next_hidden, legal_ids_for_model = self.runner._model_logits_for_eval(  # noqa: SLF001
             policy=policy,
             current_policy_id=self.policy_id,
             opponent_policy_id=self.search_rollout_opponent_policy_id,
             batch=self.batch,
-            current_seat=int(self.model_seat),
-            seat_hidden=self.model_hidden,
+            current_seat=int(seat),
+            seat_hidden=seat_hidden,
             legal_ids=legal_ids,
             action_sequence_state=self.action_sequence_state,
         )
@@ -272,7 +325,7 @@ class HumanPlaySession:
         probs = np.exp(shifted)
         probs = probs / float(np.sum(probs))
         order = np.argsort(probs)[::-1][: max(1, int(self.config.top_k))]
-        view_by_action = {int(item.get("action_id")): item for item in self.current_view()["legal_actions"]}
+        view_by_action = {int(item.get("action_id")): item for item in actor_view["legal_actions"]}
         ranked = []
         for idx in order:
             action_id = int(legal_ids_array[int(idx)])
@@ -280,7 +333,7 @@ class HumanPlaySession:
             ranked.append(
                 ActionOption(
                     action_id=action_id,
-                    label=str(view_action.get("label") or f"Action {action_id}"),
+                    label=_friendly_action_label(view_action, action_id),
                     family=None if view_action.get("family") is None else str(view_action.get("family")),
                     probability=float(probs[int(idx)]),
                     logit=float(logits[action_id]),
@@ -296,11 +349,14 @@ class HumanPlaySession:
         before_view: dict[str, Any],
         ranked_actions: tuple[ActionOption, ...],
         elapsed_ms: float | None,
+        label_view: dict[str, Any] | None = None,
     ) -> None:
         legal_ids = tuple(int(item) for item in before_view["legal_action_ids"])
         actor_seat = int(before_view.get("summary", {}).get("actor_seat", self._current_actor()))
         self.last_acting_seat = actor_seat
-        label = _label_for_action(before_view, action)
+        labelled_view = label_view or before_view
+        label = _label_for_action(labelled_view, action)
+        chosen_item = _action_item(labelled_view, action)
         ranked_payload = tuple(item.to_json_dict() for item in ranked_actions)
         self.transcript.append_decision(
             DecisionRecord(
@@ -337,6 +393,18 @@ class HumanPlaySession:
                 }
             )
             self.recent_model_actions = self.recent_model_actions[-8:]
+        self.public_history.append(
+            {
+                "decision_index": int(self.decision_count),
+                "actor_seat": actor_seat,
+                "actor_kind": actor_kind,
+                "label": label,
+                "family": None if chosen_item.get("family") is None else str(chosen_item.get("family")),
+                "phase": _optional_str(before_view.get("summary", {}).get("phase")),
+                "elapsed_ms": elapsed_ms,
+            }
+        )
+        self.public_history = self.public_history[-120:]
         self.batch = self.env.step(np.asarray([int(action)], dtype=np.uint32))
         self.decision_count += 1
         self.action_history.append(int(action))
@@ -611,11 +679,45 @@ def _deck_for_seat(*, config: HumanPlayConfig, seat: int) -> str:
     return config.model_deck or deck_id_for_policy_id(config.policy_id)
 
 
-def _label_for_action(view: dict[str, Any], action_id: int) -> str:
+_HAND_CARD_LABEL_RE = re.compile(r"hand card \d+", re.IGNORECASE)
+
+
+def _action_item(view: dict[str, Any], action_id: int) -> dict[str, Any]:
     for item in view.get("legal_actions", []):
         if isinstance(item, dict) and int(item.get("action_id", -1)) == int(action_id):
-            return str(item.get("label") or item.get("short_label") or f"Action {action_id}")
-    return f"Action {action_id}"
+            return item
+    return {}
+
+
+def _label_for_action(view: dict[str, Any], action_id: int) -> str:
+    return _friendly_action_label(_action_item(view, action_id), action_id)
+
+
+def _friendly_action_label(action_item: dict[str, Any], action_id: int) -> str:
+    """Human-readable label: prefer real card names over "hand card N" indices."""
+    label = str(action_item.get("label") or action_item.get("short_label") or f"Action {action_id}")
+    name = _first_ref_card_name(action_item)
+    if not name:
+        return label
+    replaced = _HAND_CARD_LABEL_RE.sub(name, label, count=1)
+    if replaced != label:
+        return replaced
+    if name.lower() not in label.lower():
+        return f"{label} ({name})"
+    return label
+
+
+def _first_ref_card_name(action_item: dict[str, Any]) -> str | None:
+    refs = list(action_item.get("source_refs") or []) + list(action_item.get("target_refs") or [])
+    for ref in refs:
+        if not isinstance(ref, dict):
+            continue
+        card = ref.get("card")
+        if isinstance(card, dict):
+            name = str(card.get("name") or "").strip()
+            if name:
+                return name
+    return None
 
 
 def _load_json(path: Path) -> dict[str, Any]:

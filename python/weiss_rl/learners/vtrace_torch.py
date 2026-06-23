@@ -9,6 +9,17 @@ from torch import Tensor
 _MAX_LOG_RHO_TORCH = float(np.log(np.finfo(np.float32).max))
 
 
+def _importance_weights_from_logp(behavior_logp: Tensor, target_logp: Tensor) -> Tensor:
+    log_rhos = torch.clamp(target_logp - behavior_logp, max=_MAX_LOG_RHO_TORCH)
+    return torch.exp(log_rhos).clamp(max=torch.finfo(torch.float32).max)
+
+
+def _clip_importance_weights(rhos: Tensor, *, rho_bar: float, c_bar: float) -> tuple[Tensor, Tensor]:
+    rho_bar_tensor = torch.full((), float(rho_bar), dtype=rhos.dtype, device=rhos.device)
+    c_bar_tensor = torch.full((), float(c_bar), dtype=rhos.dtype, device=rhos.device)
+    return torch.minimum(rho_bar_tensor, rhos), torch.minimum(c_bar_tensor, rhos)
+
+
 def compute_vtrace_targets_torch(
     rewards: Tensor,
     values: Tensor,
@@ -24,12 +35,8 @@ def compute_vtrace_targets_torch(
     discounts = discounts.detach()
     behavior_logp = behavior_logp.detach()
     target_logp = target_logp.detach()
-    log_rhos = torch.clamp(target_logp - behavior_logp, max=_MAX_LOG_RHO_TORCH)
-    rhos = torch.exp(log_rhos).clamp(max=torch.finfo(torch.float32).max)
-    rho_bar_tensor = torch.full((), float(rho_bar), dtype=rhos.dtype, device=rhos.device)
-    c_bar_tensor = torch.full((), float(c_bar), dtype=rhos.dtype, device=rhos.device)
-    clipped_rhos = torch.minimum(rho_bar_tensor, rhos)
-    clipped_cs = torch.minimum(c_bar_tensor, rhos)
+    rhos = _importance_weights_from_logp(behavior_logp=behavior_logp, target_logp=target_logp)
+    clipped_rhos, clipped_cs = _clip_importance_weights(rhos, rho_bar=rho_bar, c_bar=c_bar)
 
     acc = torch.zeros_like(values[-1])
     vs_minus_v_xs = torch.zeros_like(rewards)

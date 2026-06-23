@@ -26,6 +26,7 @@ from weiss_rl.learners.bootstrap import (
     has_raw_vtrace_inputs,
     resolve_vtrace_bootstrap_value,
 )
+from weiss_rl.learners.impala.batch_access import batch_value as _batch_value
 from weiss_rl.learners.legal_fields import (
     has_legal_actions,
     require_actions,
@@ -41,13 +42,6 @@ from weiss_rl.learners.packed_rows import (
     slice_packed_legal_rows_with_meta,
     subset_observation_context_rows,
 )
-
-
-def _batch_value(batch: Any, key: str) -> Any:
-    # Resolve through impala_learner so the historical helper remains the compatibility hook.
-    from weiss_rl.learners import impala_learner as learner_module
-
-    return learner_module._batch_value(batch, key)
 
 
 class ImpalaBatchSupportMixin:

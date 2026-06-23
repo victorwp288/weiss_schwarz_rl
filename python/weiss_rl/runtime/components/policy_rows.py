@@ -15,7 +15,6 @@ from weiss_rl.core.masking import (
     select_argmax_from_mask,
 )
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch, _pack_batch
-from weiss_rl.runtime.components import shared as runtime_shared
 from weiss_rl.runtime.components.legal_batching import (
     slice_packed_rows,
     structured_legal_batch_from_mask,
@@ -28,8 +27,9 @@ from weiss_rl.runtime.components.policy_inference.debug_validation import (
     validate_sampled_packed_actions,
 )
 from weiss_rl.runtime.components.policy_inference.deterministic_logits import write_deterministic_logits_from_packed
+from weiss_rl.runtime.components.shared_memory.config import DEFAULT_ACTION_META_WIDTH
 
-_DEFAULT_ACTION_META_WIDTH = runtime_shared.DEFAULT_ACTION_META_WIDTH
+_DEFAULT_ACTION_META_WIDTH = DEFAULT_ACTION_META_WIDTH
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState

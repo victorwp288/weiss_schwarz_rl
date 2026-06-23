@@ -5,9 +5,6 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from weiss_rl.workflows.eval_entrypoint_support.compat import (
-    run_entrypoint_canonical_eval_pipeline,
-)
 from weiss_rl.workflows.eval_entrypoint_support.exports import (
     EVAL_ENTRYPOINT_EXPORTS,
     ArtifactLayout,

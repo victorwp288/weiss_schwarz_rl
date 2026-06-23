@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -68,6 +69,9 @@ class PolicySummary:
 
 
 def default_repo_root() -> Path:
+    override = os.environ.get("WEISS_HUMAN_PLAY_REPO_ROOT", "").strip()
+    if override:
+        return Path(override).resolve()
     return Path(__file__).resolve().parents[3]
 
 

@@ -1,4 +1,4 @@
-import { AlertTriangle, Gamepad2, Play, RefreshCw, Search, XCircle } from "lucide-react";
+import { Play, RefreshCw, Search } from "lucide-react";
 
 import type { ApiHealth, DeckSummary, PolicySummary, RunSummary } from "../types";
 
@@ -13,7 +13,7 @@ type SetupRailProps = {
   modelDeck: string;
   humanSeat: number;
   seed: number;
-  mode: "study" | "freeplay";
+  mode: "study" | "freeplay" | "spectate";
   searchEnabled: boolean;
   busy: boolean;
   error: string | null;
@@ -23,59 +23,85 @@ type SetupRailProps = {
   onModelDeckChange: (value: string) => void;
   onHumanSeatChange: (value: number) => void;
   onSeedChange: (value: number) => void;
-  onModeChange: (value: "study" | "freeplay") => void;
+  onModeChange: (value: "study" | "freeplay" | "spectate") => void;
   onSearchEnabledChange: (value: boolean) => void;
   onCreate: () => void;
   onRefreshCatalog: () => void;
 };
 
-export function SetupRail({
-  health,
-  decks,
-  runs,
-  policies,
-  runDir,
-  policyId,
-  humanDeck,
-  modelDeck,
-  humanSeat,
-  seed,
-  mode,
-  searchEnabled,
-  busy,
-  error,
-  onRunDirChange,
-  onPolicyIdChange,
-  onHumanDeckChange,
-  onModelDeckChange,
-  onHumanSeatChange,
-  onSeedChange,
-  onModeChange,
-  onSearchEnabledChange,
-  onCreate,
-  onRefreshCatalog,
-}: SetupRailProps) {
+export function SetupRail(props: SetupRailProps) {
+  const {
+    health,
+    decks,
+    runs,
+    policies,
+    runDir,
+    policyId,
+    humanDeck,
+    modelDeck,
+    humanSeat,
+    seed,
+    mode,
+    searchEnabled,
+    busy,
+    error,
+    onRunDirChange,
+    onPolicyIdChange,
+    onHumanDeckChange,
+    onModelDeckChange,
+    onHumanSeatChange,
+    onSeedChange,
+    onModeChange,
+    onSearchEnabledChange,
+    onCreate,
+    onRefreshCatalog,
+  } = props;
+
+  const apiReady = Boolean(health?.ok);
+  const displayPolicies = policies.filter((policy) => policy.policy_id !== "main_league_selected");
+
   return (
-    <aside className="setup-rail" aria-label="Match setup">
-      <div className="brand-lockup">
-        <div className="brand-mark">
-          <Gamepad2 size={18} aria-hidden />
-        </div>
+    <form
+      className="setup"
+      aria-label="Match setup"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!busy && runDir) {
+          onCreate();
+        }
+      }}
+    >
+      <div className="setup__hero">
+        <span className="stamp" aria-hidden>
+          勝
+        </span>
         <div>
-          <h1>Weiss Human Play</h1>
-          <p>Study match against a trained policy</p>
+          <h1 className="setup__title">
+            Shōbu<span className="tilde">。</span>
+          </h1>
+          <p className="setup__sub">Sit down at the table — Weiss Schwarz against your trained policy.</p>
         </div>
       </div>
 
-      <div className={health?.ok ? "system-chip is-ok" : "system-chip is-warn"}>
-        {health?.ok ? <span className="status-dot" /> : <AlertTriangle size={14} aria-hidden />}
-        <span>{health?.ok ? `Simulator ${health.weiss_sim?.version ?? "ready"}` : "Simulator API unavailable"}</span>
-      </div>
+      {apiReady ? (
+        <span className="status-pill ok">
+          <span className="dot" /> Simulator {health?.weiss_sim?.version ?? "ready"}
+        </span>
+      ) : (
+        <div className="alert" role="alert">
+          <strong>Simulator API unavailable.</strong>
+          <span>
+            Start the API with the project virtualenv (so <code>weiss_sim</code> is importable):
+          </span>
+          <code>.venv\Scripts\python -m weiss_rl.human_play.web_server</code>
+          <span>The dev server proxies <code>/api</code> to it on port 8765. Then refresh the catalog.</span>
+        </div>
+      )}
 
-      <section className="rail-section">
-        <div className="section-title-row">
+      <section className="setup__section">
+        <div className="row-between">
           <h2>Model</h2>
-          <button className="icon-button" type="button" onClick={onRefreshCatalog} aria-label="Refresh catalog">
+          <button className="btn btn--icon" type="button" onClick={onRefreshCatalog} aria-label="Refresh catalog">
             <RefreshCw size={15} aria-hidden />
           </button>
         </div>
@@ -93,17 +119,13 @@ export function SetupRail({
         </label>
         <label className="field">
           <span>Run path</span>
-          <input
-            value={runDir}
-            onChange={(event) => onRunDirChange(event.target.value)}
-            placeholder="C:\\path\\to\\run"
-          />
+          <input value={runDir} onChange={(event) => onRunDirChange(event.target.value)} placeholder="C:\\path\\to\\run" />
         </label>
         <label className="field">
           <span>Policy</span>
           <select value={policyId} onChange={(event) => onPolicyIdChange(event.target.value)}>
             <option value="main_league_selected">Auto-select strongest main model</option>
-            {policies.map((policy) => (
+            {displayPolicies.map((policy) => (
               <option key={policy.policy_id} value={policy.policy_id}>
                 {policy.label}
               </option>
@@ -112,62 +134,52 @@ export function SetupRail({
         </label>
       </section>
 
-      <section className="rail-section">
-        <h2>Seats and Decks</h2>
-        <div className="segmented" role="group" aria-label="Human seat">
-          <button
-            type="button"
-            className={humanSeat === 0 ? "is-selected" : ""}
-            onClick={() => onHumanSeatChange(0)}
-          >
-            Seat 0
-          </button>
-          <button
-            type="button"
-            className={humanSeat === 1 ? "is-selected" : ""}
-            onClick={() => onHumanSeatChange(1)}
-          >
-            Seat 1
-          </button>
-        </div>
-        <DeckSelect
-          label="Human deck"
-          decks={decks}
-          value={humanDeck}
-          onChange={onHumanDeckChange}
-        />
-        <DeckSelect
-          label="Model deck"
-          decks={decks}
-          value={modelDeck}
-          onChange={onModelDeckChange}
-        />
+      <section className="setup__section">
+        <h2>Seats &amp; decks</h2>
+        <label className="field">
+          <span>Your seat</span>
+          <div className="seg" role="group" aria-label="Human seat">
+            <button type="button" className={humanSeat === 0 ? "is-on" : ""} onClick={() => onHumanSeatChange(0)}>
+              Seat 0
+            </button>
+            <button type="button" className={humanSeat === 1 ? "is-on" : ""} onClick={() => onHumanSeatChange(1)}>
+              Seat 1
+            </button>
+          </div>
+        </label>
+        <DeckSelect label="Your deck" decks={decks} value={humanDeck} onChange={onHumanDeckChange} />
+        <DeckSelect label="Opponent deck" decks={decks} value={modelDeck} onChange={onModelDeckChange} />
       </section>
 
-      <section className="rail-section">
-        <h2>Study Options</h2>
-        <label className="field">
-          <span>Seed</span>
-          <input
-            type="number"
-            value={seed}
-            onChange={(event) => onSeedChange(Number(event.target.value))}
-          />
-        </label>
-        <div className="segmented" role="group" aria-label="Mode">
-          <button type="button" className={mode === "study" ? "is-selected" : ""} onClick={() => onModeChange("study")}>
-            Study
-          </button>
-          <button
-            type="button"
-            className={mode === "freeplay" ? "is-selected" : ""}
-            onClick={() => onModeChange("freeplay")}
-          >
-            Freeplay
-          </button>
+      <section className="setup__section">
+        <h2>Match options</h2>
+        <div className="grid-2">
+          <label className="field">
+            <span>Seed</span>
+            <input type="number" value={seed} onChange={(event) => onSeedChange(Number(event.target.value))} />
+          </label>
+          <label className="field">
+            <span>Mode</span>
+            <div className="seg" role="group" aria-label="Mode">
+              <button type="button" className={mode === "study" ? "is-on" : ""} onClick={() => onModeChange("study")}>
+                Study
+              </button>
+              <button type="button" className={mode === "freeplay" ? "is-on" : ""} onClick={() => onModeChange("freeplay")}>
+                Freeplay
+              </button>
+              <button
+                type="button"
+                className={mode === "spectate" ? "is-on" : ""}
+                onClick={() => onModeChange("spectate")}
+                title="The model plays both seats; you watch."
+              >
+                Spectate
+              </button>
+            </div>
+          </label>
         </div>
         <button
-          className={searchEnabled ? "toggle-row is-selected" : "toggle-row"}
+          className={searchEnabled ? "toggle is-on" : "toggle"}
           type="button"
           onClick={() => onSearchEnabledChange(!searchEnabled)}
           aria-pressed={searchEnabled}
@@ -179,17 +191,17 @@ export function SetupRail({
       </section>
 
       {error ? (
-        <div className="error-banner" role="alert">
-          <XCircle size={15} aria-hidden />
+        <div className="alert" role="alert">
+          <strong>Could not start</strong>
           <span>{error}</span>
         </div>
       ) : null}
 
-      <button className="primary-action" type="button" onClick={onCreate} disabled={busy || !runDir}>
-        <Play size={17} aria-hidden />
-        {busy ? "Starting..." : "Start match"}
+      <button className="start-btn" type="submit" disabled={busy || !runDir}>
+        {busy ? <RefreshCw size={18} aria-hidden /> : <Play size={18} aria-hidden />}
+        {busy ? "Dealing…" : "Start match"}
       </button>
-    </aside>
+    </form>
   );
 }
 

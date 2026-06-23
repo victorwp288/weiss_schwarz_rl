@@ -17,13 +17,7 @@ from weiss_rl.learners.faults import (
     raise_for_nonfinite_gradients,
     write_numeric_fault_bundle,
 )
-
-
-def _batch_value(batch: Any, key: str) -> Any:
-    # Resolve through impala_learner so the historical helper remains the compatibility hook.
-    from weiss_rl.learners import impala_learner as learner_module
-
-    return learner_module._batch_value(batch, key)
+from weiss_rl.learners.impala.batch_access import batch_value as _batch_value
 
 
 class ImpalaFaultSupportMixin:

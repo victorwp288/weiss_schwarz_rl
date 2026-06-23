@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.runtime.components.shared import DEFAULT_ACTION_META_WIDTH
+from weiss_rl.runtime.components.shared_memory.config import DEFAULT_ACTION_META_WIDTH
 
 
 def action_catalog_indices(action_catalog: ActionCatalog) -> tuple[dict[str, int], dict[str, int]]:

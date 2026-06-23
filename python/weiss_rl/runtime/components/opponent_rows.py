@@ -8,16 +8,10 @@ import numpy as np
 
 from weiss_rl.eval.policies.set import heuristic_public_profile_name_for_policy_id
 from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
+from weiss_rl.runtime.components.policy_inference.actor_models import actor_inference_model
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState
-
-
-def _actor_inference_model(actor: _ActorState) -> Any:
-    # Resolve lazily through weiss_rl.runtime so tests keep the private wrapper hook.
-    from weiss_rl import runtime as runtime_module
-
-    return runtime_module._actor_inference_model(actor)
 
 
 class QueueRuntimeOpponentRowsMixin:
@@ -45,7 +39,7 @@ class QueueRuntimeOpponentRowsMixin:
                 continue
             if policy_id == MIRROR_OPPONENT_POLICY_ID:
                 self._apply_policy_rows_mask(
-                    model=_actor_inference_model(actor),
+                    model=actor_inference_model(actor),
                     hidden_state=actor.seat_hidden,
                     row_indices=policy_rows,
                     obs_step=obs_step,
@@ -64,7 +58,7 @@ class QueueRuntimeOpponentRowsMixin:
             if heuristic_policy is not None:
                 if self._should_track_heuristic_actor_hidden_state():
                     self._advance_hidden_only(
-                        model=_actor_inference_model(actor),
+                        model=actor_inference_model(actor),
                         hidden_state=actor.seat_hidden,
                         row_indices=policy_rows,
                         obs_step=obs_step,
@@ -98,7 +92,7 @@ class QueueRuntimeOpponentRowsMixin:
             if model is None:
                 raise RuntimeError(f"missing opponent snapshot model for policy_id {policy_id!r}")
             self._advance_hidden_only(
-                model=_actor_inference_model(actor),
+                model=actor_inference_model(actor),
                 hidden_state=actor.seat_hidden,
                 row_indices=policy_rows,
                 obs_step=obs_step,
@@ -146,7 +140,7 @@ class QueueRuntimeOpponentRowsMixin:
                 continue
             if policy_id == MIRROR_OPPONENT_POLICY_ID:
                 self._apply_policy_rows_ids(
-                    model=_actor_inference_model(actor),
+                    model=actor_inference_model(actor),
                     hidden_state=actor.seat_hidden,
                     row_indices=policy_rows,
                     obs_step=obs_step,
@@ -169,7 +163,7 @@ class QueueRuntimeOpponentRowsMixin:
                     and self._should_track_heuristic_actor_hidden_state()
                 ):
                     self._advance_hidden_only(
-                        model=_actor_inference_model(actor),
+                        model=actor_inference_model(actor),
                         hidden_state=actor.seat_hidden,
                         row_indices=policy_rows,
                         obs_step=obs_step,
@@ -209,7 +203,7 @@ class QueueRuntimeOpponentRowsMixin:
             if model is None:
                 raise RuntimeError(f"missing opponent snapshot model for policy_id {policy_id!r}")
             self._advance_hidden_only(
-                model=_actor_inference_model(actor),
+                model=actor_inference_model(actor),
                 hidden_state=actor.seat_hidden,
                 row_indices=policy_rows,
                 obs_step=obs_step,

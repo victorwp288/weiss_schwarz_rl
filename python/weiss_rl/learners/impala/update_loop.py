@@ -6,15 +6,12 @@ from typing import Any
 
 from weiss_rl.learners.impala.auxiliary_update import run_impala_auxiliary_optimizer_update
 from weiss_rl.learners.impala.normal_update import run_impala_normal_update
-from weiss_rl.learners.impala.optimizer_step import optimizer_has_gradients
 from weiss_rl.learners.impala.paired_outcome_update import run_impala_paired_outcome_preference_optimizer_update
 from weiss_rl.learners.impala.paired_swing_update import run_impala_paired_swing_optimizer_update
 from weiss_rl.learners.impala.scoped_optimizer_update import (
     ScopedOptimizerUpdateSpec,
     run_scoped_impala_optimizer_update,
 )
-
-_optimizer_has_gradients = optimizer_has_gradients
 
 
 class ImpalaUpdateLoopMixin:
@@ -104,7 +101,5 @@ class ImpalaUpdateLoopMixin:
 __all__ = [
     "ImpalaUpdateLoopMixin",
     "ScopedOptimizerUpdateSpec",
-    "_optimizer_has_gradients",
-    "optimizer_has_gradients",
     "run_scoped_impala_optimizer_update",
 ]

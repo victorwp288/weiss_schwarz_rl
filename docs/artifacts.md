@@ -5,18 +5,16 @@ Retained thesis evidence lives in these top-level directories:
 - `runs/`
 - `diagnostics/`
 - `vast_artifacts/`
-- `thesis_figures_final/`
+- `run_logs/`
 
 Treat retained outputs as read-only unless deliberately replacing a thesis
 artifact. Run-tree requirements are defined in
-[artifact_contract.md](artifact_contract.md).
+[thesis_workflow.md](thesis_workflow.md).
 
-This page records current evidence. Put commands in
-[thesis_workflow.md](thesis_workflow.md), layout rules in
-[artifact_contract.md](artifact_contract.md), and validation commands in
-[testing.md](testing.md).
+This page records selected evidence retained in this checkout. Commands, layout
+rules, and validation commands live in [thesis_workflow.md](thesis_workflow.md).
 
-## Current Retained Runs
+## Retained Runs
 
 - `runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01`
 - `runs/main_champion_hardneg_interp_u10_repair_a015_20260517`
@@ -28,7 +26,7 @@ The referenced trajectory-BC dataset run
 this checkout and should be restored from backup if full provenance recreation
 is needed.
 
-## Current Paper-Ready Artifacts
+## Selected Paper-Ready Artifacts
 
 Locked B1 NoLeague seed:
 
@@ -61,17 +59,17 @@ Targeted confirm256 evidence for the selected main source checkpoint:
 | B3 HeuristicPublicAggro | 365 | 512 | 0.712891 |
 | B4 HeuristicPublicControl | 382 | 512 | 0.746094 |
 
-The canonical final eval for `main_league_selected` writes B0-B4 plus B1
+The selected final eval for `main_league_selected` writes B0-B4 plus B1
 matrix artifacts, metagame summaries, replay verification, paper figures, and a
 passing `paper_readiness_summary.json` in the selected main run directory.
 
-The current selected main checkpoint is an explicit interpolation between the
+The selected main checkpoint is an explicit interpolation between the
 first champion/hard-negative u10 league checkpoint and a later rehearsal repair
 checkpoint. It is positive against every imported learned champion/hard-negative
 candidate in the 128-paired-seed panel, but that panel is supporting robustness
 evidence rather than the headline selection criterion.
 
-## Current Diagnostics
+## Diagnostics
 
 `diagnostics/` is intentionally limited to the report/search sidecars used by
 the thesis discussion and figure checks.
@@ -82,13 +80,14 @@ the thesis discussion and figure checks.
 
 ## Figure Trace
 
-`thesis_figures_final/` contains compact thesis-facing figure exports. The
-May 21 final result surface is summarized by
-[thesis_figures_final/main_search_20260521/RESULTS_TRACE.md](../thesis_figures_final/main_search_20260521/RESULTS_TRACE.md).
+Restored thesis figure bundles are not part of every checkout. When present,
+treat them as read-only evidence bundles and keep commands for regenerating
+figures in [thesis_workflow.md](thesis_workflow.md).
 
-## Current Smoke Evidence
+## Historical Smoke Evidence
 
-On 2026-05-12:
+These 2026-05-12 smoke/probe runs are historical rebuild evidence. The named
+run directories are not all present in this checkout.
 
 - `rebuild_smoke_b1_20260512_v5` completed 1 B1 update at 547.05 samples/sec.
 - `rebuild_smoke_main_20260512_v2` completed 1 main league update at 446.58

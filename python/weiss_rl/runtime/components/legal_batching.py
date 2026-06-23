@@ -6,9 +6,9 @@ from typing import Any
 import numpy as np
 
 from weiss_rl.core.legal_actions import LegalActionBatch
-from weiss_rl.runtime.components import shared as runtime_shared
+from weiss_rl.runtime.components.shared_memory.config import DEFAULT_ACTION_META_WIDTH
 
-_DEFAULT_ACTION_META_WIDTH = runtime_shared.DEFAULT_ACTION_META_WIDTH
+_DEFAULT_ACTION_META_WIDTH = DEFAULT_ACTION_META_WIDTH
 
 
 def infer_packed_meta_width(unrolls: Sequence[Any]) -> int:

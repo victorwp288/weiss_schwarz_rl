@@ -16,13 +16,10 @@ from weiss_rl.training.auxiliary_replay_runner import (
 from weiss_rl.training.auxiliary_replay_support import (
     trajectory_bc_compatible_training_config,
 )
+from weiss_rl.training.replay_data import paired_outcome_preference_dataset as _preference_dataset
 from weiss_rl.training.replay_data.paired_auxiliary_replay import (
     emit_paired_auxiliary_replay_metrics,
     run_due_paired_auxiliary_replay,
-)
-from weiss_rl.training.replay_data.paired_outcome_preference_dataset import (
-    paired_outcome_preference_complete_pair_count,
-    preference_group_indices_for_episodes,
 )
 from weiss_rl.training.replay_data.trajectory_bc_sampling import TrajectoryBcReplayState
 
@@ -71,7 +68,7 @@ class PairedOutcomePreferenceReplayState:
         )
         if sampler is None:
             return None
-        complete_pair_count = paired_outcome_preference_complete_pair_count(sampler.dataset)
+        complete_pair_count = _preference_dataset.paired_outcome_preference_complete_pair_count(sampler.dataset)
         if complete_pair_count <= 0:
             raise ValueError(
                 f"paired outcome preference dataset has no complete preferred/rejected pairs: {dataset_path_text}"
@@ -99,7 +96,7 @@ def maybe_run_paired_outcome_preference_replay(
     def make_update_batch(updater: Any) -> Any:
         def update_batch(batch: dict[str, Any], context: AuxiliaryReplayBatchContext) -> dict[str, float]:
             assert state is not None
-            preference_group_indices = preference_group_indices_for_episodes(
+            preference_group_indices = _preference_dataset.preference_group_indices_for_episodes(
                 state.sampler.dataset,
                 episode_indices=context.episode_indices,
             )
@@ -157,5 +154,4 @@ def _paired_outcome_preference_replay_static_metrics(state: PairedOutcomePrefere
 __all__ = [
     "PairedOutcomePreferenceReplayState",
     "maybe_run_paired_outcome_preference_replay",
-    "paired_outcome_preference_complete_pair_count",
 ]

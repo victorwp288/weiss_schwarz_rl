@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from torch import nn
 
-from weiss_rl.learners.impala import ImpalaLearner
+from weiss_rl.learners.impala.learner import ImpalaLearner
 from weiss_rl.learners.ppo_lite_learner import PpoLiteLearner
 from weiss_rl.training.algorithm_families import training_algorithm_family
 from weiss_rl.training.learner_kwargs import (

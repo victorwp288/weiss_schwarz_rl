@@ -163,6 +163,8 @@ def _sample_packed_action_scores(
 
 
 class PolicyValueModel(PolicyValueModelBaseMixin, nn.Module):
+    """Dense recurrent actor-critic used when actions are scored as one flat catalog."""
+
     def __init__(
         self,
         *,
@@ -182,6 +184,18 @@ class PolicyValueModel(PolicyValueModelBaseMixin, nn.Module):
         self.hidden_size = config.gru_hidden_size
         self.action_dim = action_dim
         self.recurrent_core = str(config.recurrent_core).strip().lower()
+        self._configure_opponent_context(config=config, action_dim=action_dim)
+
+        encoder_dropout = config.dropout.family_a if dropout_p is None else dropout_p
+        self.encoder = self._build_observation_encoder(
+            observation_dim=observation_dim,
+            config=config,
+            observation_spec=observation_spec,
+            dropout_p=encoder_dropout,
+        )
+        self._install_recurrent_trunk_and_heads(config=config, action_dim=action_dim)
+
+    def _configure_opponent_context(self, *, config: ModelConfig, action_dim: int) -> None:
         self.opponent_context_policy_ids = tuple(
             str(policy_id).strip() for policy_id in config.opponent_context_policy_ids if str(policy_id).strip()
         )
@@ -227,13 +241,7 @@ class PolicyValueModel(PolicyValueModelBaseMixin, nn.Module):
                 torch.zeros((len(self.opponent_context_policy_ids) + 1, int(action_dim)))
             )
 
-        encoder_dropout = config.dropout.family_a if dropout_p is None else dropout_p
-        self.encoder = self._build_observation_encoder(
-            observation_dim=observation_dim,
-            config=config,
-            observation_spec=observation_spec,
-            dropout_p=encoder_dropout,
-        )
+    def _install_recurrent_trunk_and_heads(self, *, config: ModelConfig, action_dim: int) -> None:
         self.gru = (
             nn.GRU(input_size=config.encoder_mlp_width, hidden_size=config.gru_hidden_size, batch_first=True)
             if self.recurrent_core == "gru"
@@ -249,6 +257,8 @@ class PolicyValueModel(PolicyValueModelBaseMixin, nn.Module):
 
 
 class StructuredLegalPolicyValueModel(StructuredLegalPolicyValueFacadeMixin, PolicyValueModel):
+    """Structured actor-critic that scores simulator-provided legal candidates."""
+
     def __init__(
         self,
         *,
@@ -321,6 +331,9 @@ class StructuredLegalPolicyValueModel(StructuredLegalPolicyValueFacadeMixin, Pol
         self._compiled_trunk_packed_core: Any | None = None
         self._compiled_trunk_sequence_core: Any | None = None
         self._trunk_compile_last_error: str | None = None
+        self._install_candidate_residual_adapter(config=config)
+
+    def _install_candidate_residual_adapter(self, *, config: ModelConfig) -> None:
         if self.opponent_context_policy_ids and self.opponent_context_trainable_candidate_residual_scale > 0.0:
             state_width = int(self.policy_head.state_projection[0].out_features)
             residual_width = max(1, int(config.opponent_context_candidate_residual_width))
@@ -350,6 +363,8 @@ def build_policy_value_model(
     spec_bundle: Mapping[str, Any] | None = None,
     card_table: Mapping[str, Any] | None = None,
 ) -> PolicyValueModel:
+    """Build the dense or structured policy/value model from the model config."""
+
     encoder_kind = str(config.encoder_kind).strip().lower()
     if encoder_kind == STRUCTURED_V2_ENCODER_KIND:
         return StructuredLegalPolicyValueModel(

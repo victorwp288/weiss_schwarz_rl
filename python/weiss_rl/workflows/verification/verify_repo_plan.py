@@ -81,7 +81,7 @@ def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationSt
                 "80",
             ),
         ),
-        VerificationStep("Pytest", _module_command(python_exe, "pytest", "-q", "python/weiss_rl/tests")),
+        VerificationStep("Pytest", _module_command(python_exe, "pytest", "-q", "tests/weiss_rl")),
         VerificationStep(
             "Standard wrapper dry-run",
             _wrapper_dry_run_command(

@@ -77,6 +77,17 @@ def _validate_time_major_inputs(
         raise ValueError("values must have one extra bootstrap step on the time axis")
 
 
+def _importance_weights_from_logp(behavior_logp: np.ndarray, target_logp: np.ndarray) -> np.ndarray:
+    log_rhos = np.asarray(target_logp, dtype=np.float64) - np.asarray(behavior_logp, dtype=np.float64)
+    safe_log_rhos = np.minimum(log_rhos, _MAX_LOG_RHO)
+    return np.minimum(np.exp(safe_log_rhos), np.finfo(np.float32).max)
+
+
+def _clip_importance_weights(rhos: np.ndarray, *, rho_bar: float, c_bar: float) -> tuple[np.ndarray, np.ndarray]:
+    rhos64 = np.asarray(rhos, dtype=np.float64)
+    return np.minimum(rho_bar, rhos64), np.minimum(c_bar, rhos64)
+
+
 def _compute_vtrace_from_rhos(
     rewards: np.ndarray,
     values: np.ndarray,
@@ -89,10 +100,7 @@ def _compute_vtrace_from_rhos(
     rewards64 = np.asarray(rewards, dtype=np.float64)
     values64 = np.asarray(values, dtype=np.float64)
     discounts64 = np.asarray(discounts, dtype=np.float64)
-    rhos64 = np.asarray(rhos, dtype=np.float64)
-
-    clipped_rhos = np.minimum(rho_bar, rhos64)
-    clipped_cs = np.minimum(c_bar, rhos64)
+    clipped_rhos, clipped_cs = _clip_importance_weights(rhos, rho_bar=rho_bar, c_bar=c_bar)
 
     vs_minus_v_xs = np.zeros_like(rewards64, dtype=np.float64)
     acc = np.zeros_like(values64[-1], dtype=np.float64)
@@ -125,9 +133,7 @@ def compute_vtrace_targets(
 
     _validate_time_major_inputs(rewards, values, discounts, behavior_logp, target_logp)
 
-    log_rhos = np.asarray(target_logp, dtype=np.float64) - np.asarray(behavior_logp, dtype=np.float64)
-    safe_log_rhos = np.minimum(log_rhos, _MAX_LOG_RHO)
-    rhos = np.minimum(np.exp(safe_log_rhos), np.finfo(np.float32).max)
+    rhos = _importance_weights_from_logp(behavior_logp=behavior_logp, target_logp=target_logp)
     vs, pg_advantages = _compute_vtrace_from_rhos(
         rewards,
         values,

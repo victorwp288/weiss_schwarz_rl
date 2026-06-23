@@ -48,6 +48,7 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["python"]
+exclude = ["weiss_rl.tests", "weiss_rl.tests.*"]
 
 [tool.setuptools.package-data]
 weiss_rl = ["py.typed"]
@@ -61,7 +62,7 @@ select = ["E", "F", "B", "I", "UP"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
-testpaths = ["python/weiss_rl/tests"]
+testpaths = ["tests/weiss_rl"]
 norecursedirs = [
     ".git",
     ".mypy_cache",

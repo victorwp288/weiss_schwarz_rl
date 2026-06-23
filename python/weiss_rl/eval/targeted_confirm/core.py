@@ -13,30 +13,11 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any
 
-from weiss_rl.eval.final.worker import run_final_eval_worker
+from weiss_rl.eval.final.worker_runtime import run_final_eval_worker
+from weiss_rl.eval.targeted_confirm import jobs as _jobs
 from weiss_rl.eval.targeted_confirm import plan as _plan
+from weiss_rl.eval.targeted_confirm import summary as _summary
 from weiss_rl.eval.targeted_confirm.summary import targeted_worker_summary_from_result
-
-DEFAULT_OPPONENTS = _plan.DEFAULT_OPPONENTS
-FAST_LOOP_EXACT_PAIRED_SEEDS = _plan.FAST_LOOP_EXACT_PAIRED_SEEDS
-MAIN_LEAGUE_FULL13_OPPONENTS = _plan.MAIN_LEAGUE_FULL13_OPPONENTS
-MAIN_LEAGUE_SENTINEL_OPPONENTS = _plan.MAIN_LEAGUE_SENTINEL_OPPONENTS
-OPPONENT_SETS = _plan.OPPONENT_SETS
-TargetedConfirmPlan = _plan.TargetedConfirmPlan
-_god_search_payload_from_args = _plan._god_search_payload_from_args
-_require_exact_opponent_panel = _plan._require_exact_opponent_panel
-_require_fast_loop_gate = _plan._require_fast_loop_gate
-_resolve_opponents = _plan._resolve_opponents
-_resolve_paired_seed_file = _plan._resolve_paired_seed_file
-_targeted_eval_job = _plan._targeted_eval_job
-_validate_fast_loop_eval_request = _plan._validate_fast_loop_eval_request
-build_arg_parser = _plan.build_arg_parser
-build_targeted_confirm_jobs = _plan.build_targeted_confirm_jobs
-build_targeted_confirm_summary = _plan.build_targeted_confirm_summary
-parse_args = _plan.parse_args
-prepare_targeted_confirm_plan = _plan.prepare_targeted_confirm_plan
-validate_targeted_confirm_request = _plan.validate_targeted_confirm_request
-write_targeted_confirm_summary = _plan.write_targeted_confirm_summary
 
 
 def _targeted_worker(job: dict[str, Any]) -> dict[str, Any]:
@@ -44,7 +25,7 @@ def _targeted_worker(job: dict[str, Any]) -> dict[str, Any]:
     return targeted_worker_summary_from_result(result)
 
 
-def _run_targeted_jobs(plan: TargetedConfirmPlan) -> dict[str, dict[str, Any]]:
+def _run_targeted_jobs(plan: _jobs.TargetedConfirmPlan) -> dict[str, dict[str, Any]]:
     args = plan.args
     results_by_opp: dict[str, dict[str, Any]] = {}
     if int(args.workers) <= 1:
@@ -102,8 +83,8 @@ def _print_targeted_progress(
 
 
 def main() -> None:
-    args = parse_args()
-    plan = prepare_targeted_confirm_plan(args)
+    args = _plan.parse_args()
+    plan = _jobs.prepare_targeted_confirm_plan(args)
     started = time.time()
     print(
         f"targeted confirm start: focal={args.focal_policy_id} rows={len(plan.opponents)} "
@@ -111,7 +92,7 @@ def main() -> None:
         flush=True,
     )
     results_by_opp = _run_targeted_jobs(plan)
-    summary_path, summary = write_targeted_confirm_summary(
+    summary_path, summary = _summary.write_targeted_confirm_summary(
         plan=plan,
         results_by_opp=results_by_opp,
         started_unix=started,

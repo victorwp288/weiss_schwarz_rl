@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from weiss_rl.core.legal_actions import LegalActionBatch
-from weiss_rl.runtime.components.shared import SharedPendingUnroll
+from weiss_rl.runtime.components.shared_memory.slots import SharedPendingUnroll
 
 
 @dataclass(frozen=True, slots=True)

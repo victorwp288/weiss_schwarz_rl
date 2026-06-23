@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "human-play-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "web/human-play", "run", "dev", "--", "--port", "5173", "--strictPort"],
+      "port": 5173
+    }
+  ]
+}

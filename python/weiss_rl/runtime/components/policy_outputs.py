@@ -7,16 +7,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from weiss_rl.runtime.components.opponent_context import opponent_context_indices_for_model
+from weiss_rl.runtime.components.policy_inference.actor_models import actor_inference_model
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState
-
-
-def _actor_inference_model(actor: _ActorState) -> Any:
-    # Resolve lazily through weiss_rl.runtime so tests keep the private wrapper hook.
-    from weiss_rl import runtime as runtime_module
-
-    return runtime_module._actor_inference_model(actor)
 
 
 class QueueRuntimePolicyOutputMixin:
@@ -48,7 +42,7 @@ class QueueRuntimePolicyOutputMixin:
         )
         if model_focal_indices.size:
             self._apply_policy_rows_mask(
-                model=_actor_inference_model(actor),
+                model=actor_inference_model(actor),
                 hidden_state=actor.seat_hidden,
                 row_indices=model_focal_indices,
                 obs_step=obs_step,
@@ -114,7 +108,7 @@ class QueueRuntimePolicyOutputMixin:
             rng=rng,
         )
         if model_focal_indices.size:
-            focal_model = _actor_inference_model(actor)
+            focal_model = actor_inference_model(actor)
             opponent_context_index = opponent_context_indices_for_model(
                 focal_model,
                 actor.opponent_policy_id_by_env.tolist(),

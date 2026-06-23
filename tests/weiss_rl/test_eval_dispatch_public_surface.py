@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+
+def test_eval_dispatch_startup_and_mode_reexports_split_module_owners() -> None:
+    import weiss_rl.workflows.eval_support.eval_dispatch as eval_dispatch
+    import weiss_rl.workflows.eval_support.eval_dispatch_dependencies as eval_dispatch_dependencies
+    import weiss_rl.workflows.eval_support.eval_dispatch_request as eval_dispatch_request
+    import weiss_rl.workflows.eval_support.eval_dispatch_route_adapters as eval_dispatch_route_adapters
+    import weiss_rl.workflows.eval_support.eval_dispatch_routes as eval_dispatch_routes
+    import weiss_rl.workflows.eval_support.eval_modes as eval_modes
+    import weiss_rl.workflows.eval_support.eval_public_demo_mode as eval_public_demo_mode
+    import weiss_rl.workflows.eval_support.eval_reports as eval_reports
+    import weiss_rl.workflows.eval_support.eval_startup as eval_startup
+    import weiss_rl.workflows.eval_support.eval_startup_dependencies as eval_startup_dependencies
+    import weiss_rl.workflows.eval_support.eval_startup_prepare as eval_startup_prepare
+    import weiss_rl.workflows.eval_support.eval_startup_state as eval_startup_state
+    import weiss_rl.workflows.eval_support.eval_startup_validation as eval_startup_validation
+    import weiss_rl.workflows.eval_support.eval_summary_mode as eval_summary_mode
+    from weiss_rl.workflows import eval_entrypoint as eval_script
+
+    assert eval_script.run_eval_dispatch is eval_dispatch_routes.run_eval_dispatch
+    assert eval_dispatch.run_eval_dispatch is eval_dispatch_routes.run_eval_dispatch
+    assert eval_script.EvalDispatchDependencies is eval_dispatch_dependencies.EvalDispatchDependencies
+    assert eval_dispatch.EvalDispatchDependencies is eval_dispatch_dependencies.EvalDispatchDependencies
+    assert eval_dispatch.EvalDispatchRequest is eval_dispatch_request.EvalDispatchRequest
+    assert "EvalDispatchRequest" in eval_dispatch_request.__all__
+    assert "run_canonical_eval_request" in eval_dispatch_route_adapters.__all__
+    assert eval_script.build_eval_dispatch_dependencies is eval_dispatch_dependencies.build_eval_dispatch_dependencies
+    assert eval_dispatch.build_eval_dispatch_dependencies is eval_dispatch_dependencies.build_eval_dispatch_dependencies
+    assert eval_dispatch._print_startup_verification is eval_dispatch_route_adapters._print_startup_verification
+    assert eval_dispatch.run_public_demo_eval_route is eval_dispatch_route_adapters.run_public_demo_eval_route
+    assert eval_dispatch.run_canonical_eval_route is eval_dispatch_route_adapters.run_canonical_eval_route
+    assert eval_dispatch.run_summary_only_eval_route is eval_dispatch_route_adapters.run_summary_only_eval_route
+    assert eval_script.EvalStartup is eval_startup_state.EvalStartup
+    assert eval_script.EvalStartupDependencies is eval_startup_dependencies.EvalStartupDependencies
+    assert eval_startup.EvalStartupDependencies is eval_startup_dependencies.EvalStartupDependencies
+    assert eval_script.build_eval_startup_dependencies is eval_startup_dependencies.build_eval_startup_dependencies
+    assert eval_startup.build_eval_startup_dependencies is eval_startup_dependencies.build_eval_startup_dependencies
+    assert eval_script.EvalValidatedArgs is eval_startup_state.EvalValidatedArgs
+    assert eval_startup.EvalStartup is eval_startup_state.EvalStartup
+    assert eval_startup.EvalValidatedArgs is eval_startup_state.EvalValidatedArgs
+    assert eval_script.prepare_eval_startup is eval_startup_prepare.prepare_eval_startup
+    assert eval_startup.prepare_eval_startup is eval_startup_prepare.prepare_eval_startup
+    assert eval_script.validate_eval_args is eval_startup_validation.validate_eval_args
+    assert eval_startup.validate_eval_args is eval_startup_validation.validate_eval_args
+    assert eval_script.run_public_demo_eval_mode is eval_public_demo_mode.run_public_demo_eval_mode
+    assert eval_modes.run_public_demo_eval_mode is eval_public_demo_mode.run_public_demo_eval_mode
+    assert eval_script.run_summary_only_eval_mode is eval_summary_mode.run_summary_only_eval_mode
+    assert eval_modes.run_summary_only_eval_mode is eval_summary_mode.run_summary_only_eval_mode
+    assert eval_script._resolve_policy_ids_for_run is eval_reports._resolve_policy_ids_for_run
+    assert eval_script._load_run_summary_or_default is eval_reports._load_run_summary_or_default

@@ -52,4 +52,58 @@ describe("ActionInspector", () => {
     expect(screen.getByText("No further actions. The match is complete.")).toBeInTheDocument();
     expect(screen.queryByText("Waiting for the model.")).not.toBeInTheDocument();
   });
+
+  it("uses the action label as the accessible name even when a thumbnail is shown", () => {
+    render(
+      <ActionInspector
+        state={{
+          ...sampleSession,
+          view: {
+            ...sampleSession.view,
+            legal_actions: [
+              {
+                action_id: 33,
+                label: "Play Yotsuba to center",
+                family: "main_play_character",
+                is_play: true,
+                source_refs: [{ card: { name: "Yotsuba Nakano", card_no: "5HY/W90-001", power: 4500 } }],
+              },
+            ],
+          },
+        }}
+        selectedActionId={null}
+        busy={false}
+        onSelectAction={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Play Yotsuba to center" })).toBeEnabled();
+  });
+
+  it("keeps accepted mulligan toggles visibly marked", () => {
+    render(
+      <ActionInspector
+        state={{
+          ...sampleSession,
+          view: {
+            ...sampleSession.view,
+            summary: { ...sampleSession.view.summary, phase: "mulligan" },
+            legal_actions: [
+              {
+                action_id: 11,
+                label: "Toggle Yotsuba Nakano",
+                family: "mulligan_select",
+              },
+            ],
+          },
+        }}
+        selectedActionId={null}
+        markedActionIds={new Set([11])}
+        busy={false}
+        onSelectAction={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Toggle Yotsuba Nakano" })).toHaveAttribute("aria-pressed", "true");
+  });
 });

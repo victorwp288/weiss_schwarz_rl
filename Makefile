@@ -27,9 +27,12 @@ MAIN_LABEL ?= main_smoke
 B1_RUN ?= runs/$(B1_LABEL)
 MAIN_RUN ?= runs/$(MAIN_LABEL)
 SIMULATOR_CHECK_TESTS = \
-	python/weiss_rl/tests/test_simulator_contract.py \
-	python/weiss_rl/tests/test_rl_step_layout_contract_smoke.py \
-	python/weiss_rl/tests/test_heuristic_public.py -k simulator_native_heuristic_pool_matches_python_oracle_across_live_steps
+	tests/weiss_rl/test_simulator_contract.py \
+	tests/weiss_rl/test_rl_step_supported_layouts.py \
+	tests/weiss_rl/test_weiss_sim_contract_surface.py \
+	tests/weiss_rl/test_env_pool_buffers_nometa.py \
+	tests/weiss_rl/test_decision_boundary_env_layout_equivalence.py \
+	tests/weiss_rl/test_heuristic_public_simulator_parity.py
 
 sync:
 	@echo $(SYNC_MSG)
@@ -58,22 +61,22 @@ repo-hygiene:
 	@$(PYRUN) -m weiss_rl.diagnostics.repo_hygiene_check_entrypoint
 
 lint:
-	@$(PYRUN) -m ruff check python tests examples
+	@$(PYRUN) -m ruff check python tests
 
 fmt:
-	@$(PYRUN) -m ruff format python tests examples
+	@$(PYRUN) -m ruff format python tests
 
 fmt-check:
-	@$(PYRUN) -m ruff format --check python tests examples
+	@$(PYRUN) -m ruff format --check python tests
 
 type:
 	@$(PYRUN) -m mypy python/weiss_rl/workflows/thesis_wrapper.py python/weiss_rl/workflows/eval_entrypoint.py python/weiss_rl/human_play/play_vs_model_entrypoint.py
 
 deadcode:
-	@$(PYRUN) -m vulture python/weiss_rl examples --min-confidence 80
+	@$(PYRUN) -m vulture python/weiss_rl --min-confidence 80
 
 test:
-	@$(PYRUN) -m pytest -q python/weiss_rl/tests
+	@$(PYRUN) -m pytest -q tests/weiss_rl
 
 standard-wrapper-smoke:
 	@$(PYRUN) -m weiss_rl.workflows.thesis_wrapper --preset standard --run-label standard_surface_ci --dry-run --skip-compare
@@ -92,7 +95,7 @@ package-smoke: sync
 	$(PY_SYS) -m venv "$$tmpdir"; \
 	"$$tmpdir/bin/python" -m pip install -q --upgrade pip; \
 	"$$tmpdir/bin/python" -m pip install -q dist/*.whl; \
-	"$$tmpdir/bin/python" -c "import weiss_rl; print(weiss_rl.__all__)"; \
+	"$$tmpdir/bin/python" -c "import importlib.util, weiss_rl; print(weiss_rl.__all__); raise SystemExit(importlib.util.find_spec('weiss_rl.tests') is not None)"; \
 	rm -rf "$$tmpdir"
 
 simulator-check: sync-sim
@@ -140,7 +143,7 @@ eval-dev:
 
 figures:
 	@test -n "$(RUN_DIR)" || { echo "Usage: make figures RUN_DIR=runs/<run_dir> [FIG_ID=seat_bias] [FORMATS=\"pdf png\"]" >&2; exit 1; }
-	@$(PYRUN) -m weiss_rl.workflows.figures.figures_entrypoint --run-dir "$(RUN_DIR)" $(strip $(FIGURE_ID_ARG)) $(strip $(FIGURE_FORMAT_ARGS))
+	@$(PYRUN) -m weiss_rl.cli figures --run-dir "$(RUN_DIR)" $(strip $(FIGURE_ID_ARG)) $(strip $(FIGURE_FORMAT_ARGS))
 
 clean:
 	@find . -type d -name '__pycache__' -prune -exec rm -rf {} +

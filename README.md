@@ -9,9 +9,8 @@ from the active tree.
 
 ## Start Here
 
-- [Getting started](docs/getting_started.md) for setup and a tiny smoke run.
 - [Docs hub](docs/README.md) for the ownership map.
-- [Thesis workflow](docs/thesis_workflow.md) for canonical train/eval/figure commands.
+- [Thesis workflow](docs/thesis_workflow.md) for setup, train/eval/figure commands, validation, and troubleshooting.
 - [Artifacts](docs/artifacts.md) for retained thesis evidence and current selected runs.
 
 ## Install
@@ -41,13 +40,13 @@ uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/
 uv run --extra dev python -m weiss_rl.cli figures --run-dir runs/main_smoke --format png
 ```
 
-Configuration details live in [docs/configuration.md](docs/configuration.md)
+Configuration details live in [docs/thesis_workflow.md](docs/thesis_workflow.md)
 and [configs/README.md](configs/README.md).
 
 ## Retained Artifacts
 
-`runs/`, `diagnostics/`, `vast_artifacts/`, and `thesis_figures_final/` contain
-the report-retained evidence and adjacent provenance artifacts. Treat those
+`runs/`, `diagnostics/`, `vast_artifacts/`, and `run_logs/` hold retained
+evidence or provenance when they are present in the checkout. Treat these
 outputs as read-only unless deliberately replacing a thesis artifact.
 
 ## Repo Shape
@@ -55,4 +54,5 @@ outputs as read-only unless deliberately replacing a thesis artifact.
 - `python/weiss_rl/`: package code.
 - `configs/`: small active config surface and seed files.
 - `docs/`: concise thesis workflow, artifact, and validation docs.
-- `runs/`, `diagnostics/`, `vast_artifacts/`, `thesis_figures_final/`: retained thesis evidence.
+- `runs/`, `diagnostics/`, `vast_artifacts/`, `run_logs/`: retained evidence
+  and provenance surfaces.

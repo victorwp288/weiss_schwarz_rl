@@ -9,24 +9,38 @@ import torch
 
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.core.legal_actions import LegalActionBatch
+from weiss_rl.diagnostics.profile_fixtures import (
+    empty_profile_observation,
+    heuristic_profile_spec_bundle,
+    packed_profile_meta,
+    set_profile_stage,
+    structured_profile_model_config,
+    structured_profile_spec_bundle,
+    typed_profile_observation_spec,
+)
 from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.model import StructuredLegalPolicyValueModel, build_policy_value_model
-from weiss_rl.tests.test_contracts import _structured_model_config, _structured_spec_bundle, _typed_observation_spec
-from weiss_rl.tests.test_heuristic_public import _empty_obs, _heuristic_spec_bundle, _packed_meta, _set_stage
 
 
 def _build_heuristic_batch(
     *, rows: int
 ) -> tuple[HeuristicPublicPolicy, np.ndarray, list[np.ndarray], np.ndarray, np.ndarray]:
-    policy = HeuristicPublicPolicy.from_spec_bundle(_heuristic_spec_bundle())
-    obs_rows = np.stack([_empty_obs() for _ in range(rows)], axis=0)
+    policy = HeuristicPublicPolicy.from_spec_bundle(heuristic_profile_spec_bundle())
+    obs_rows = np.stack([empty_profile_observation() for _ in range(rows)], axis=0)
     row_legal_ids: list[np.ndarray] = []
     for row_index in range(rows):
         if row_index % 3 == 0:
-            _set_stage(obs_rows[row_index], player_index=0, slot=0, occupied=True, power=5000, effective_soul=1)
+            set_profile_stage(
+                obs_rows[row_index],
+                player_index=0,
+                slot=0,
+                occupied=True,
+                power=5000,
+                effective_soul=1,
+            )
             row_legal_ids.append(np.array([472, 473, 474, 51, 402], dtype=np.uint32))
         elif row_index % 3 == 1:
-            _set_stage(obs_rows[row_index], player_index=0, slot=1, occupied=True, power=2500)
+            set_profile_stage(obs_rows[row_index], player_index=0, slot=1, occupied=True, power=2500)
             row_legal_ids.append(np.array([102, 103, 104, 105, 106], dtype=np.uint32))
         else:
             obs_rows[row_index][16] = 0
@@ -46,14 +60,16 @@ def _build_heuristic_batch(
 
 def _run_heuristic_benchmark(*, rows: int, iterations: int) -> dict[str, object]:
     policy, obs_rows, row_legal_ids, legal_ids, offsets = _build_heuristic_batch(rows=rows)
-    meta = _packed_meta(legal_ids)
+    meta = packed_profile_meta(legal_ids)
 
     scalar_started = time.perf_counter()
     for _ in range(iterations):
         scalar_actions = np.asarray(
             [
                 policy.choose_action_from_meta(
-                    obs_rows[row_index], row_legal_ids[row_index], _packed_meta(row_legal_ids[row_index])
+                    obs_rows[row_index],
+                    row_legal_ids[row_index],
+                    packed_profile_meta(row_legal_ids[row_index]),
                 )
                 for row_index in range(rows)
             ],
@@ -107,12 +123,12 @@ def _build_structured_fixture(
     time_steps: int,
     batch_size: int,
 ) -> tuple[StructuredLegalPolicyValueModel, torch.Tensor, torch.Tensor, torch.Tensor, LegalActionBatch]:
-    spec_bundle = _structured_spec_bundle()
+    spec_bundle = structured_profile_spec_bundle()
     model = build_policy_value_model(
         observation_dim=18,
-        config=_structured_model_config(),
+        config=structured_profile_model_config(),
         action_dim=9,
-        observation_spec=_typed_observation_spec(),
+        observation_spec=typed_profile_observation_spec(),
         spec_bundle=spec_bundle,
     )
     assert isinstance(model, StructuredLegalPolicyValueModel)

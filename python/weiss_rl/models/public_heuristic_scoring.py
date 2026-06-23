@@ -9,7 +9,7 @@ from collections.abc import Mapping
 import torch
 from torch import Tensor
 
-from weiss_rl.eval.heuristic_public import HeuristicPublicScoringProfile
+from weiss_rl.eval.heuristic_public_profiles import HeuristicPublicScoringProfile
 from weiss_rl.models.action_plans import PackedScoringPlan
 from weiss_rl.models.public_heuristics import (
     PUBLIC_HEURISTIC_CENTER_SLOT,

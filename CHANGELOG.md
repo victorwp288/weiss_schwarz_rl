@@ -1,168 +1,63 @@
 # Changelog
 
-This project has historically been thesis-run driven. New codebase-quality changes should be summarized here when they affect contributors, public commands, docs, or compatibility surfaces.
+This project is thesis-run driven. Summarize changes here when they affect
+contributors, public commands, docs, or compatibility surfaces.
 
 ## Unreleased
 
-- Retired the `python/scripts/*.py` compatibility wrappers; package modules under
-  `python -m weiss_rl...` are now the only maintained Python CLI surface.
-- Consolidated docs navigation, artifact evidence ownership, local README
-  pointers, and contributor guidance.
-- Added refactor documentation and contributor guidance.
-- Extracted the training CLI parser into `weiss_rl.training.cli` while preserving the legacy path-based training facade.
-- Extracted checkpoint tracker/path helpers into `weiss_rl.training.checkpoints` while preserving training facade names.
-- Added checkpoint restore negative tests and extracted checkpoint payload contract validation into `weiss_rl.training.checkpoints`.
-- Extracted snapshot artifact and registry-retention helpers into `weiss_rl.training.snapshots` while preserving training facade names.
-- Extracted shared imported-snapshot artifact writing for B1 and seeded snapshot imports.
-- Added checkpoint payload shape characterization and extracted pure checkpoint payload construction.
-- Extracted pure checkpoint guard dev-eval scoring and best-checkpoint promotion helpers.
-- Extracted confirmatory dev-eval request and deterministic paired-seed expansion helpers.
-- Extracted runtime actor topology and actor seed helpers behind compatibility wrappers.
-- Extracted runtime learner-batch concat and GAE helpers behind compatibility wrappers.
-- Extracted model hidden-state and acting-seat state helpers behind compatibility wrappers.
-- Extracted shared collector transport slot/read/write helpers behind compatibility wrappers.
-- Extracted runtime CUDA/actor device layout helpers behind compatibility wrappers.
-- Extracted training run metadata helpers behind compatibility wrappers.
-- Extracted training manifest actor-device layout helpers behind a compatibility wrapper.
-- Extracted B1 no-league import role/config helpers behind compatibility wrappers.
-- Extracted full B1 imported snapshot contract validation behind a compatibility wrapper.
-- Extracted final policy-set selection loading and resolution helpers behind compatibility wrappers.
-- Extracted training guidance schedule and guidance payload helpers behind compatibility wrappers.
-- Extracted training artifact path layout helpers behind compatibility wrappers.
-- Extracted training startup resolution and simulator prerequisite helpers behind compatibility wrappers.
-- Extracted training torch-thread management helpers behind compatibility wrappers.
-- Extracted training input validation helpers behind compatibility wrappers.
-- Extracted training environment builder helpers behind compatibility wrappers.
-- Extracted minimal training batch helpers behind compatibility wrappers.
-- Extracted scalar and minimal checkpoint writer helpers behind compatibility wrappers.
-- Extracted minimal checkpoint restore helpers behind compatibility wrappers.
-- Extracted checkpoint alias publication helpers behind a compatibility wrapper.
-- Extracted checkpoint-guard event and best-record helpers behind compatibility wrappers.
-- Extracted snapshot champion-demotion helper behind a compatibility wrapper.
-- Added checkpoint-guard rollback characterization coverage.
-- Extracted checkpoint-guard rollback and finalization orchestration behind compatibility wrappers.
-- Extracted structured main-move checkpoint-guard warning helpers behind compatibility wrappers.
-- Extracted periodic-dev-eval support helpers behind compatibility wrappers.
-- Extracted periodic-dev-eval summary persistence and stall-monitor update helpers behind compatibility wrappers.
-- Extracted current-checkpoint path and ensure helpers behind compatibility wrappers.
-- Extracted promotion-anchor resolver helpers behind compatibility wrappers.
-- Extracted algorithm/model compatibility validation behind a compatibility wrapper.
-- Extracted promotion support helpers for heuristic-public policy construction and snapshot metadata indexing.
-- Extracted seeded snapshot policy-id construction behind a compatibility wrapper.
-- Extracted dev-eval legal-id row slicing behind a compatibility wrapper.
-- Extracted B1 baseline snapshot resolution behind a compatibility wrapper.
-- Extracted training profiling-flag override handling behind a compatibility wrapper.
-- Shared B1 no-league baseline role and snapshot resolution between training and evaluation while preserving alias-order behavior.
-- Shared snapshot eval model loading and guidance-payload restoration between training and evaluation.
-- Extracted runtime legal-action batching and packed-row helpers behind compatibility wrappers.
-- Extracted runtime collector counter, timeout accounting, simulator timing, and step-output legality view helpers behind compatibility wrappers.
-- Extracted runtime metric aggregation behind the `QueueRuntime._runtime_metrics` compatibility method.
-- Extracted runtime unroll and state-dict hashing helpers behind compatibility wrappers.
-- Extracted runtime state-dict IPC serialization helpers behind compatibility wrappers.
-- Extracted runtime performance and process debug logging helpers behind compatibility wrappers.
-- Extracted runtime process-collector command handling behind a compatibility wrapper.
-- Extracted runtime actor model compile and inference-selection helpers behind compatibility wrappers.
-- Extracted runtime actor torch-thread setup behind a compatibility wrapper.
-- Extracted `QueueRuntimeConfig` and runtime config construction behind public compatibility imports.
-- Extracted runtime opponent mix scheduling and PFSP bookkeeping helpers behind compatibility wrappers.
-- Extracted runtime shared collector transport facades behind compatibility private aliases.
-- Replaced many runtime one-line compatibility wrappers with explicit private aliases to focused helper modules.
-- Extracted structured model observation contract helpers behind compatibility wrappers.
-- Extracted the shared model MLP-stack builder behind a compatibility alias.
-- Extracted typed observation encoder modules behind compatibility aliases.
-- Extracted deterministic model-side masked and packed sampling helpers behind compatibility wrappers.
-- Extracted model action-scoring container dataclasses behind compatibility aliases.
-- Extracted model tensor masking, pooling, packed-row, and deterministic seed helpers behind compatibility wrappers.
-- Extracted IMPALA learner tensor reduction and diagnostic helpers behind compatibility wrappers.
-- Extracted IMPALA structured auxiliary profile and catalog metadata helpers behind compatibility wrappers.
-- Extracted IMPALA packed structured legal-view construction behind compatibility wrappers.
-- Extracted IMPALA packed structured probability helpers behind compatibility wrappers.
-- Extracted IMPALA batch field conversion and validation helpers behind compatibility wrappers.
-- Extracted IMPALA numeric fault bundle helpers behind compatibility wrappers.
-- Extracted IMPALA checkpoint metadata and training metric logging helpers behind compatibility wrappers.
-- Extracted IMPALA legal field validation and packed legality resolution helpers behind compatibility wrappers.
-- Extracted IMPALA torch V-trace target computation behind a compatibility wrapper.
-- Extracted IMPALA action log-probability and entropy helpers behind compatibility wrappers.
-- Extracted IMPALA structured policy metric summaries behind a compatibility wrapper.
-- Extracted IMPALA NumPy learner logp facades and V-trace diagnostic summaries behind compatibility wrappers.
-- Extracted IMPALA learner update bookkeeping, timer accumulation, throughput calculation, auxiliary-mode gating, structured-metric cadence, and AMP state resolution into `learners/update_bookkeeping.py`.
-- Tightened focused production typing around extracted learner/runtime/eval/checkpoint surfaces while documenting the remaining broad package mypy gap.
-- Removed config section test fixture typing suppressions and reduced the broad package mypy gap.
-- Cleaned additional bounded broad-mypy test/eval surfaces and reduced the remaining broad package mypy gap to the model, learner, and runtime danger zones.
-- Extracted config document parsing and validation helpers behind compatibility wrappers.
-- Extracted experiment and system config section parsers behind compatibility wrappers.
-- Extracted the model config section parser behind compatibility wrappers.
-- Extracted environment and reward config section parsers behind compatibility wrappers.
-- Extracted the curriculum config section parser behind compatibility wrappers.
-- Extracted the reproducibility config section parser behind compatibility wrappers.
-- Extracted config seed-set resolution and canonical artifact seed override parsing behind compatibility wrappers.
-- Extracted the league config section parser behind compatibility wrappers.
-- Extracted the evaluation config section parser behind compatibility wrappers.
-- Extracted the training config section parser behind compatibility wrappers.
-- Added a characterization test for train CLI defaults and compatibility aliases.
-- Fixed local verification failures in lint/format/test compatibility surfaces.
-- Cleaned `model.py` and multiple test-harness typing surfaces, reducing the broad package mypy gap from 229 to 98 error lines while preserving verifier/test behavior.
-- Cleaned runtime and snapshot-registry test fake typing, reducing the broad package mypy gap from 98 to 55 production-only error lines.
-- Closed the remaining production mypy gap in `impala_learner.py` and `runtime.py`; full-package `uv run mypy python/weiss_rl --show-error-codes --no-error-summary` now passes with zero errors.
-- Extracted runtime pending-unroll selection and diverse-lane quota helpers into `runtime_pending.py` with direct tests and compatibility wrappers.
-- Extracted QueueRuntime pending-unroll selection/fill/release adapter methods into `runtime_pending_mixin.py` while preserving shared-slot read monkeypatch compatibility.
-- Extracted the runtime process-collector child loop into `runtime_process.py` while preserving `_collector_process_main` as the multiprocessing target wrapper.
-- Extracted runtime actor environment/state construction into `runtime_actor_state.py` with direct characterization tests and compatibility wrappers.
-- Moved the runtime actor-state container into `runtime_actor_state.py` with direct characterization coverage for defaults and slots while preserving the `runtime._ActorState` compatibility import.
-- Moved the immutable runtime unroll and batch containers into `runtime_types.py` with direct characterization coverage while preserving `RuntimeUnroll` and `RuntimeBatch` imports from `weiss_rl.runtime`.
-- Extracted runtime actor round-robin scheduling into `runtime_actor_scheduling.py` with direct characterization coverage while preserving the `QueueRuntime._next_actor_batch` wrapper.
-- Extracted runtime teacher-guidance activation and teacher-label decoding helpers into `runtime_teacher_labels.py` with direct characterization coverage while preserving runtime wrapper methods.
-- Extracted deterministic runtime logit writing helpers into `runtime_deterministic_logits.py` with direct characterization coverage while preserving runtime wrapper methods.
-- Extracted runtime actor model/heuristic focal-row routing and policy-train-mask helpers into `runtime_actor_routing.py` with direct characterization coverage while preserving runtime wrapper methods.
-- Extracted heuristic actor output scattering for mask and packed legal-action layouts into `runtime_heuristic_actor_outputs.py` with direct characterization coverage.
-- Extracted runtime packed-action debug validators into `runtime_debug_validation.py` with direct characterization tests and compatibility wrappers.
-- Extracted runtime legal-action metadata construction into `runtime_legal_meta.py` with direct characterization tests and compatibility wrappers.
-- Extracted runtime opponent outcome bookkeeping into `runtime_outcomes.py` with direct characterization tests and compatibility wrappers.
-- Extracted runtime bootstrap value computation into `runtime_bootstrap.py` with direct characterization tests and a preserved runtime model-selection wrapper.
-- Extracted structured-model candidate component resolution into `model_candidate_components.py` with direct characterization tests and a preserved model method wrapper.
-- Extracted structured-model action and factorized lookup table construction into `model_action_tables.py` with direct characterization tests.
-- Extracted structured-model stage feature gathering helpers into `model_feature_gathering.py` with direct characterization tests and preserved model method wrappers.
-- Extracted structured-model public-heuristic scoring into `model_public_heuristic_scoring.py` while preserving the structured policy-head private method surface.
-- Replaced another group of pure the legacy path-based training facade compatibility wrappers with explicit aliases while preserving the `MinimalRollout` script import surface.
-- Extracted structured-model public-heuristic tensor utilities into `model_public_heuristics.py` with direct characterization tests and preserved model method wrappers.
-- Extracted public-heuristic slot preference construction and front-row attack profile helpers into `model_public_heuristics.py`.
-- Extracted structured-model candidate family partitioning into `model_candidate_partitioning.py` with direct characterization tests and a preserved model method wrapper.
-- Extracted structured-model candidate projection and joint group scoring into `model_candidate_projection.py` with actor/learner parity tests and preserved model method wrappers.
-- Extracted IMPALA packed-row slicing, scattering, legal-action view, and observation-context subsetting helpers into `learners/packed_rows.py` with direct characterization tests and preserved learner method wrappers.
-- Extracted IMPALA raw V-trace input gating and bootstrap-value resolution into `learners/bootstrap.py` with direct characterization tests and preserved learner method wrappers.
-- Extracted training run summary, determinism report, and environment manifest payload augmentation into `training/report_payloads.py` with direct characterization tests.
-- Extracted new/resumed training run identity and resume manifest hash validation into `training/run_identity.py` with direct characterization tests.
-- Moved the training structured-profiling startup message into `training/report_payloads.py` with direct characterization coverage for the user-facing text.
-- Extracted training execution settings resolution into `training/execution.py` with direct characterization tests for checkpoint interval validation, profiling flags, and resolved import directories.
-- Extracted training profiler block/profiler construction helpers into `training/profiling.py` with direct characterization tests for disabled profiling, named record regions, CPU profiler construction, and CUDA activity selection.
-- Extracted algorithm-specific runtime batch collection into `training/batches.py` with direct characterization tests for IMPALA/V-trace arguments, PPO/GAE arguments, and unsupported algorithm errors.
-- Extracted CPU eval-model cloning for periodic dev eval and promotion gates into `training/dev_eval.py` with direct characterization tests for weights, guidance handoff, eval mode, and missing model config.
-- Extracted the periodic dev-eval runner into `training/dev_eval_runner.py` while preserving the training compatibility class and deterministic script-surface tests.
-- Extracted the promotion-gate runner into `training/promotion_gate_runner.py` while preserving the training compatibility class and deterministic script-surface tests.
-- Extracted periodic dev-eval opponent resolution into `training/dev_eval_opponents.py` while preserving the training compatibility wrapper and monkeypatchable script dependencies.
-- Extracted runtime hard-negative opponent selection into `runtime_opponents.py` with direct characterization of sample/win-rate filtering and registry-update tie breaking.
-- Extracted factorized structured-action legality plan construction into `model_action_plans.py` with direct packed row-order characterization.
-- Extracted runtime structured-warmstart source-mix handling into `runtime_structured_warmstart.py` with restore-on-exception characterization.
-- Extracted IMPALA time-major forward dispatch into `learners/forward_time_major.py` with direct legacy rollout characterization and preserved learner wrapper.
-- Extracted runtime heuristic-public fast-path capability checks into `runtime_heuristic_fast_path.py` with direct predicate characterization and preserved runtime wrappers.
-- Extracted structured-model play/move/attack public-heuristic raw scoring helpers into `model_public_heuristics.py` with direct formula characterization.
-- Extracted structured-model family-gated public-heuristic raw scoring helpers into `model_public_heuristics.py` with direct formula characterization.
-- Extracted training learner compile selection into `training/learner_compile.py` with branch characterization and preserved the `train.py` wrapper.
-- Extracted IMPALA public-heuristic teacher profile selection and packed-logit mixing helpers into `learners/structured_auxiliary.py` with direct row-wise mixture characterization.
-- Extracted runtime PFSP/opponent policy sampling into `runtime_opponents.py` with seeded RNG/counter characterization and preserved runtime wrappers.
-- Extracted runtime active/configured opponent policy-id bookkeeping into `runtime_opponents.py` with direct ordering and deduplication characterization.
-- Extracted QueueRuntime opponent/PFSP adapter methods into `runtime_opponent_mixin.py` while preserving the private `QueueRuntime` method surface.
-- Extracted training learner construction into `training/learner_factory.py` while preserving the training compatibility wrapper.
-- Extracted structured warmstart execution into `training/warmstart.py` while preserving the training compatibility wrapper.
-- Extracted periodic dev-eval seed-usage payload construction into `training/dev_eval.py`.
-- Extracted periodic dev-eval execution orchestration into `training/periodic_dev_eval_run.py` while preserving the training compatibility wrapper.
-- Collapsed pure checkpoint-guard metric forwarding helpers in the training facade into explicit compatibility aliases.
-- Collapsed pure startup/input forwarding helpers in the training facade into explicit compatibility aliases.
-- Extracted runtime teacher-label ID/mask routing into `runtime_teacher_labels.py` while preserving `QueueRuntime` wrappers.
-- Extracted IMPALA public-heuristic target-logit scoring into `learners/structured_auxiliary.py` with direct profile-selection coverage.
-- Extracted IMPALA structured dense group lookup/log-prob helpers into `learners/structured_auxiliary.py`.
-- Extracted IMPALA structured teacher-auxiliary loss computation into `learners/structured_teacher_auxiliary.py` while preserving the `impala_learner.py` compatibility export.
-- Extracted policy/value observation encoder construction into `model_typed_encoder.py` with direct MLP/typed encoder characterization.
-- Collapsed another group of pure IMPALA learner private helper facades into explicit aliases while preserving wrapper functions whose identity is protected by tests.
-- Collapsed pure top-level `model.py` tensor and observation helper facades into explicit aliases while preserving the monkeypatchable private sampling wrappers.
-- Collapsed another bounded group of pure the legacy path-based training facade compatibility wrappers into explicit aliases while preserving monkeypatchable heuristic-policy construction and script-level `DecisionBoundaryBatch`/`ScheduledGame` imports.
+### Public Workflow And Docs
+
+- Kept `python -m weiss_rl.cli` as the public six-command thesis surface:
+  `train-b1`, `train-main`, `smoke-eval`, `eval-final`, `figures`, and
+  `b2-audit`.
+- Retired path-based `python/scripts/*.py` command wrappers. Use package
+  modules under `python -m weiss_rl...`.
+- Removed stale root example and script surfaces in favor of maintained package
+  commands, tests, and Make targets.
+- Consolidated docs navigation, artifact ownership, local README pointers, and
+  contributor guidance around the active docs hub.
+- Split human-play deployment guidance across the high-level deployment doc,
+  the frontend README, and the backend container README.
+
+### Package Surface Cleanup
+
+- Replaced broad lazy aliases and root-level compatibility facades with concrete
+  imports across workflow, training, evaluation, readiness, targeted-confirm,
+  parallel-final-eval, and learner packages.
+- Kept live compatibility only where tests or retained callers still require a
+  stable import surface.
+- Removed orphan smoke/facade modules that no longer owned behavior, including
+  actor-worker smoke wrappers, final-eval worker facades, selection shims, and
+  readiness fixture/check facades.
+
+### Training, Runtime, And Evaluation Refactors
+
+- Split training entrypoint, checkpointing, snapshot registry, periodic
+  dev-eval, promotion gates, warmstarts, replay data, and learner construction
+  into focused modules with characterization tests.
+- Split runtime collection, batching, opponent sampling, legal-action handling,
+  policy inference, shared transport, and debug validation into smaller modules
+  while preserving behavior-sensitive runtime contracts.
+- Split evaluation policy resolution, B1 baseline lookup, snapshot lookup,
+  final-eval planning, targeted confirmation, metagame outputs, and
+  paper-readiness checks into concrete packages.
+- Preserved public behavior around legal-action order, run manifests, snapshot
+  paths, policy ordering, paired seeds, payoff folding, and paper-readiness
+  artifact layout.
+
+### Models And Learners
+
+- Extracted structured-model observation, candidate, scoring, public-heuristic,
+  tensor, and sampling helpers into concrete model modules.
+- Extracted IMPALA/V-trace action log-probability, packed-row, structured
+  teacher, auxiliary metric, optimizer, and update-stage helpers into concrete
+  learner modules.
+- Kept the public policy/value model and learner entry surfaces stable while
+  moving private helper imports to their owner modules.
+
+### Verification And Typing
+
+- Added or tightened characterization tests around refactored runtime,
+  checkpoint, config, evaluation, model, learner, and docs/config surfaces.
+- Reduced broad mypy and lint gaps in several refactor slices. Re-run the
+  verifier before treating the full dirty worktree as release-ready.

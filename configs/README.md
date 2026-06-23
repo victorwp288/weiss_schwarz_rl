@@ -2,7 +2,7 @@
 
 This directory is intentionally small. Public thesis configs live under
 `configs/thesis/`; compatibility wrapper presets live under `configs/presets/`.
-Descriptions and launch context live in [../docs/configuration.md](../docs/configuration.md).
+Descriptions and launch context live in [../docs/thesis_workflow.md](../docs/thesis_workflow.md).
 
 ## Thesis
 

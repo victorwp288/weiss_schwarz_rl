@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from weiss_rl.workflows.eval_support.eval_parser_validation import _require_positive_int, _resolve_run_label
+
 # ruff: noqa: F401
-from weiss_rl.workflows.eval_support.eval_parser import _require_positive_int, _resolve_run_label
 from weiss_rl.workflows.eval_support.eval_reports import (
     _effective_manifest_git_commit,
     _ensure_run_level_report_scaffolding,

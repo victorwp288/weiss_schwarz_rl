@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -18,7 +16,6 @@ try:
 except Exception:  # pragma: no cover
     torch = None
 
-_CHECKPOINT_METADATA_STEM = re.compile(r"(?:checkpoint_metadata|checkpoint)_(\d+)")
 _OPPONENT_ID_FIELDS = (
     "opponent_policy_id_by_env",
     "opponent_policy_ids",
@@ -30,29 +27,6 @@ _OPPONENT_ID_FIELDS = (
     "opponent_snapshot_ids",
     "opponent_snapshot_id",
 )
-
-
-def checkpoint_update_from_path(checkpoint_path: Path) -> int | None:
-    match = _CHECKPOINT_METADATA_STEM.fullmatch(checkpoint_path.stem)
-    if match is None:
-        return None
-    return int(match.group(1))
-
-
-def sampled_opponent_policy_ids(
-    opponent_sampler: Any,
-    *,
-    count: int,
-    rng: np.random.Generator,
-) -> tuple[str, ...]:
-    sampled_policy_ids = opponent_sampler.sample(count=count, rng=rng)
-    if isinstance(sampled_policy_ids, np.ndarray):
-        sampled_items = sampled_policy_ids.tolist()
-    else:
-        sampled_items = list(sampled_policy_ids)
-    if len(sampled_items) != count:
-        raise ValueError(f"opponent_sampler must return {count} policy ids")
-    return tuple(str(policy_id) for policy_id in sampled_items)
 
 
 def actor_behavior_logp_from_legal_ids(
@@ -136,33 +110,6 @@ def episode_identity_or_zeros(identity: np.ndarray | None, *, num_envs: int) -> 
     if identity is None:
         return np.zeros((num_envs,), dtype=np.uint64)
     return identity
-
-
-def batch_legal_mask(batch: Any) -> np.ndarray:
-    if hasattr(batch, "mask"):
-        return np.asarray(batch.mask)
-    if hasattr(batch, "masks"):
-        return np.asarray(batch.masks)
-    raise AttributeError("mask layout batch must expose .mask or .masks")
-
-
-def batch_legal_ids_offsets(batch: Any) -> tuple[np.ndarray, np.ndarray]:
-    ids_offsets = getattr(batch, "ids_offsets", None)
-    if ids_offsets is not None:
-        legal_ids, legal_offsets = ids_offsets
-        return np.asarray(legal_ids), np.asarray(legal_offsets)
-
-    if hasattr(batch, "legal_ids") and hasattr(batch, "legal_offsets"):
-        return np.asarray(batch.legal_ids), np.asarray(batch.legal_offsets)
-
-    raise AttributeError("ids_offsets layout batch must expose .ids_offsets or (.legal_ids, .legal_offsets)")
-
-
-def packed_legal_ids_prefix(legal_ids: np.ndarray, legal_offsets: np.ndarray) -> np.ndarray:
-    used = 0 if legal_offsets.size == 0 else int(legal_offsets[-1])
-    if used < 0 or used > legal_ids.shape[0]:
-        raise ValueError(f"legal_ids prefix out of bounds: used={used}, capacity={legal_ids.shape[0]}")
-    return legal_ids[:used]
 
 
 def refresh_opponent_ids(opponent_id_by_env: np.ndarray, *, batch: Any, env: Any, num_envs: int) -> None:

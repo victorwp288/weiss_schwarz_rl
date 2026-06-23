@@ -12,13 +12,12 @@ from torch import Tensor
 from torch.nn.utils import clip_grad_norm_
 
 from weiss_rl.diagnostics.training_logger import TrainingMetrics
-
-from .impala import (
-    ImpalaLearner,
-    _batch_value,
-    _masked_action_logp_and_entropy,
-    _packed_action_logp_and_entropy,
+from weiss_rl.learners.action_logp import (
+    masked_action_logp_and_entropy,
+    packed_action_logp_and_entropy,
 )
+from weiss_rl.learners.impala.batch_access import batch_value as _batch_value
+from weiss_rl.learners.impala.learner import ImpalaLearner
 
 
 def _masked_mean(values: Tensor, mask: Tensor) -> Tensor:
@@ -165,7 +164,7 @@ class PpoLiteLearner(ImpalaLearner):
 
         if packed_legal is not None:
             packed_ids, packed_offsets = packed_legal
-            action_logp, entropy = _packed_action_logp_and_entropy(
+            action_logp, entropy = packed_action_logp_and_entropy(
                 logits,
                 packed_ids,
                 packed_offsets,
@@ -174,7 +173,7 @@ class PpoLiteLearner(ImpalaLearner):
             )
         else:
             assert legal_mask is not None
-            action_logp, entropy = _masked_action_logp_and_entropy(
+            action_logp, entropy = masked_action_logp_and_entropy(
                 logits,
                 legal_mask,
                 actions,

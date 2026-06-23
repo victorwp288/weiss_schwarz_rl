@@ -13,6 +13,7 @@ from typing import Any
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.artifacts.reproducibility import canonical_json_bytes, require_fixed_python_hash_seed, sha256_hex
 from weiss_rl.config import compute_config_hash256, load_stack_config
+from weiss_rl.core.action_catalog import ActionCatalog, DecodedAction
 from weiss_rl.core.simulator_contract import load_verified_simulator_contract
 from weiss_rl.diagnostics.b2_audit_aggregation import (
     aggregate_audit_summary as _aggregate_audit_summary,
@@ -33,10 +34,10 @@ from weiss_rl.eval.harness import (
     record_completed_game,
     write_episodes_jsonl,
 )
-from weiss_rl.eval.heuristic_public import ActionCatalog, DecodedAction
 from weiss_rl.eval.policies.set import HEURISTIC_PUBLIC_POLICY_ID, LEGACY_NO_LEAGUE_POLICY_ID, NO_LEAGUE_POLICY_ID
 from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
-from weiss_rl.replay.inspector import inspect_replay_bundle, write_replay_inspection_report
+from weiss_rl.replay.inspector import inspect_replay_bundle
+from weiss_rl.replay.inspector_report import write_replay_inspection_report
 
 _DEFAULT_TOP_K = 25
 _DEFAULT_TOP_ACTIONS = 5

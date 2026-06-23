@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any
 
-from weiss_rl.eval.final.worker import load_json_object, run_final_eval_worker, worker_output_dir
+from weiss_rl.eval.final.worker_runtime import run_final_eval_worker
 from weiss_rl.eval.parallel_final_eval_plan import (
     ParallelFinalEvalPlan,
     parse_args,
@@ -11,15 +11,11 @@ from weiss_rl.eval.parallel_final_eval_plan import (
     write_parallel_final_eval_artifacts,
 )
 
-_load_json = load_json_object
-_worker_output_dir = worker_output_dir
-_worker = run_final_eval_worker
-
 
 def _run_jobs(plan: ParallelFinalEvalPlan) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     with ProcessPoolExecutor(max_workers=plan.workers) as executor:
-        futures = {executor.submit(_worker, job): job for job in plan.jobs}
+        futures = {executor.submit(run_final_eval_worker, job): job for job in plan.jobs}
         for future in as_completed(futures):
             job = futures[future]
             result = future.result()

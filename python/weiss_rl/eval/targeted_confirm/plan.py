@@ -4,16 +4,7 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-from weiss_rl.eval.targeted_confirm import jobs as _jobs
 from weiss_rl.eval.targeted_confirm import opponents as _opponents
-from weiss_rl.eval.targeted_confirm import summary as _summary
-
-DEFAULT_OPPONENTS = _opponents.DEFAULT_OPPONENTS
-FAST_LOOP_EXACT_PAIRED_SEEDS = _opponents.FAST_LOOP_EXACT_PAIRED_SEEDS
-MAIN_LEAGUE_FULL13_OPPONENTS = _opponents.MAIN_LEAGUE_FULL13_OPPONENTS
-MAIN_LEAGUE_SENTINEL_OPPONENTS = _opponents.MAIN_LEAGUE_SENTINEL_OPPONENTS
-OPPONENT_SETS = _opponents.OPPONENT_SETS
-TargetedConfirmPlan = _jobs.TargetedConfirmPlan
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -26,7 +17,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--opponent", action="append", default=[])
     parser.add_argument(
         "--opponent-set",
-        choices=sorted(OPPONENT_SETS),
+        choices=sorted(_opponents.OPPONENT_SETS),
         default="default",
         help=(
             "Named opponent set used when --opponent is omitted. "
@@ -129,15 +120,4 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return build_arg_parser().parse_args(argv)
 
 
-validate_targeted_confirm_request = _opponents.validate_targeted_confirm_request
-_resolve_paired_seed_file = _jobs.resolve_paired_seed_file
-_targeted_eval_job = _jobs.targeted_eval_job
-build_targeted_confirm_jobs = _jobs.build_targeted_confirm_jobs
-prepare_targeted_confirm_plan = _jobs.prepare_targeted_confirm_plan
-_resolve_opponents = _opponents.resolve_opponents
-_require_exact_opponent_panel = _opponents.require_exact_opponent_panel
-_require_fast_loop_gate = _opponents.require_fast_loop_gate
-_validate_fast_loop_eval_request = _opponents.validate_fast_loop_eval_request
-_god_search_payload_from_args = _summary.god_search_payload_from_args
-build_targeted_confirm_summary = _summary.build_targeted_confirm_summary
-write_targeted_confirm_summary = _summary.write_targeted_confirm_summary
+__all__ = ["build_arg_parser", "parse_args"]

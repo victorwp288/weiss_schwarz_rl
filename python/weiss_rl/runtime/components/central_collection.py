@@ -21,17 +21,11 @@ from weiss_rl.runtime.components.collection.central_actor_step_context import (
     CentralActorStepRuntimeContext,
 )
 from weiss_rl.runtime.components.collection.central_step_inputs import prepare_central_step_inputs
+from weiss_rl.runtime.components.policy_inference.actor_models import actor_inference_model
 from weiss_rl.runtime.components.types import RuntimeUnroll
 
 if TYPE_CHECKING:
     from weiss_rl.runtime.components.actor_state import _ActorState
-
-
-def _actor_inference_model(actor: _ActorState) -> Any:
-    # Resolve lazily through weiss_rl.runtime so tests keep the private wrapper hook.
-    from weiss_rl import runtime as runtime_module
-
-    return runtime_module._actor_inference_model(actor)
 
 
 class QueueRuntimeCentralCollectionMixin:
@@ -47,7 +41,7 @@ class QueueRuntimeCentralCollectionMixin:
             config=self.config,
             observation_dim=int(self.observation_dim),
             trajectory_retention_enabled=bool(getattr(self, "_trajectory_retention_enabled", False)),
-            actor_inference_model=_actor_inference_model,
+            actor_inference_model=actor_inference_model,
         )
         callbacks = CentralActorStepCallbacks(
             policy_train_mask_for_actor=self._policy_train_mask_for_actor,

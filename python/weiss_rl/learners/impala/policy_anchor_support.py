@@ -9,18 +9,12 @@ from typing import Any, cast
 import torch
 from torch import Tensor, nn
 
+from weiss_rl.learners.impala.batch_access import batch_value as _batch_value
 from weiss_rl.learners.policy_anchor import (
     clone_frozen_policy_anchor,
     packed_candidate_anchor_kl_loss,
     packed_candidate_anchor_top_action_loss,
 )
-
-
-def _batch_value(batch: Any, key: str) -> Any:
-    # Resolve through impala_learner so the historical helper remains the compatibility hook.
-    from weiss_rl.learners import impala_learner as learner_module
-
-    return learner_module._batch_value(batch, key)
 
 
 class ImpalaPolicyAnchorSupportMixin:

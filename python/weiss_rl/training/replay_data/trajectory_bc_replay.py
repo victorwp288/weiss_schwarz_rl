@@ -12,10 +12,7 @@ from weiss_rl.training.auxiliary_replay_runner import (
     emit_auxiliary_replay_run_metrics,
     run_auxiliary_replay_updates,
 )
-from weiss_rl.training.replay_data.trajectory_bc_sampling import (
-    TrajectoryBcReplayFocusGroupState,
-    TrajectoryBcReplayState,
-)
+from weiss_rl.training.replay_data import trajectory_bc_sampling as _trajectory_bc_sampling
 from weiss_rl.training.replay_data.trajectory_bc_teacher_state import (
     apply_trajectory_bc_teacher_aux_state,
     capture_teacher_aux_state,
@@ -25,7 +22,7 @@ from weiss_rl.training.replay_data.trajectory_bc_teacher_state import (
 
 def maybe_run_trajectory_bc_replay(
     *,
-    state: TrajectoryBcReplayState | None,
+    state: _trajectory_bc_sampling.TrajectoryBcReplayState | None,
     learner: Any,
     training_config: Any,
     device: torch.device,
@@ -60,7 +57,5 @@ def maybe_run_trajectory_bc_replay(
 
 
 __all__ = [
-    "TrajectoryBcReplayFocusGroupState",
-    "TrajectoryBcReplayState",
     "maybe_run_trajectory_bc_replay",
 ]

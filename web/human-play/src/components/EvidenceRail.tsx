@@ -1,134 +1,121 @@
-import { Archive, BrainCircuit, Clock3, FileText, ShieldCheck, Trophy } from "lucide-react";
-import type { ReactNode } from "react";
+import { X } from "lucide-react";
 
-import { compactId, formatMs } from "../format";
+import { compactId, cx, formatMs } from "../format";
 import type { ApiHealth, SessionState } from "../types";
 
 type EvidenceRailProps = {
   health: ApiHealth | null;
   state: SessionState | null;
-  onRefresh: () => void;
   onClose: () => void;
 };
 
-export function EvidenceRail({ health, state, onRefresh, onClose }: EvidenceRailProps) {
+export function EvidenceRail({ health, state, onClose }: EvidenceRailProps) {
   const counters = state?.model?.god_search?.counters;
   const recent = state?.model?.recent_actions ?? [];
   const lastModel = recent.length ? recent[recent.length - 1] : undefined;
-  const winnerSeat = terminalNumberResult(state, "winner_seat");
-  const terminalDecisionCount = terminalNumberResult(state, "decision_count");
-  const terminalStatus = terminalStringResult(state, "status");
+  const winnerSeat = terminalNumber(state, "winner_seat");
+  const terminalDecisionCount = terminalNumber(state, "decision_count");
+  const terminalStatus = terminalString(state, "status");
 
   return (
-    <aside className="evidence-rail" aria-label="Evidence and session artifacts">
-      <div className="rail-heading">
-        <div>
-          <h2>Evidence</h2>
-          <p>Session artifacts are written as decisions are made.</p>
-        </div>
-        <ShieldCheck size={18} aria-hidden />
-      </div>
-
-      <div className="evidence-stack">
-        <MetricLine
-          icon={<Clock3 size={15} />}
-          label="Decision"
-          value={String(terminalDecisionCount ?? state?.view.summary?.decision_count ?? state?.view.decision_id ?? "--")}
-        />
-        <MetricLine
-          icon={<BrainCircuit size={15} />}
-          label="Policy"
-          value={state?.policy_id ? compactId(state.policy_id, 12) : "--"}
-        />
-        {state?.terminal ? (
-          <MetricLine
-            icon={<Trophy size={15} />}
-            label="Result"
-            value={winnerSeat === null ? (terminalStatus ?? "complete") : `Winner seat ${winnerSeat}`}
-          />
-        ) : null}
-        <MetricLine
-          icon={<Archive size={15} />}
-          label="Search"
-          value={counters ? `${counters.search_decisions ?? 0} probes` : "disabled"}
-        />
-      </div>
-
-      <div className="artifact-panel">
-        <div className="mini-heading">
-          <FileText size={15} aria-hidden />
-          <span>Artifacts</span>
-        </div>
-        {state?.artifacts ? (
-          <dl className="artifact-list">
-            <div>
-              <dt>Manifest</dt>
-              <dd>{state.artifacts.manifest}</dd>
-            </div>
-            <div>
-              <dt>Decisions</dt>
-              <dd>{state.artifacts.decisions}</dd>
-            </div>
-            <div>
-              <dt>Report</dt>
-              <dd>{state.artifacts.postgame_report}</dd>
-            </div>
-          </dl>
-        ) : (
-          <p className="muted">Start a match to create a transcript.</p>
-        )}
-      </div>
-
-      <div className="artifact-panel">
-        <div className="mini-heading">
-          <BrainCircuit size={15} aria-hidden />
-          <span>Latest model act</span>
-        </div>
-        {lastModel ? (
-          <div className="model-decision">
-            <strong>{lastModel.action_label}</strong>
-            <span>
-              Action #{lastModel.action_id} in {formatMs(lastModel.elapsed_ms)}
-            </span>
+    <>
+      <div className="sheet__scrim" onClick={onClose} aria-hidden />
+      <aside className="sheet" aria-label="Match log and telemetry">
+        <div className="sheet__head">
+          <div>
+            <h2>Match log</h2>
+            <p>Low-level state written as decisions are made.</p>
           </div>
-        ) : (
-          <p className="muted">No model action recorded yet.</p>
-        )}
-      </div>
+          <button className="btn btn--icon" type="button" onClick={onClose} aria-label="Close log">
+            <X size={16} aria-hidden />
+          </button>
+        </div>
 
-      <div className="rail-actions">
-        <button type="button" onClick={onRefresh} disabled={!state}>
-          Refresh
-        </button>
-        <button type="button" onClick={onClose} disabled={!state}>
-          Close
-        </button>
-      </div>
+        <div className="sheet__body">
+          <div className="sheet__group">
+            <h3>State</h3>
+            <Kv label="Decision" value={String(terminalDecisionCount ?? state?.view.summary?.decision_count ?? state?.view.decision_id ?? "—")} />
+            <Kv label="Phase" value={state?.view.summary?.phase ?? "—"} />
+            <Kv label="Policy" value={state?.policy_id ? compactId(state.policy_id, 12) : "—"} />
+            <Kv label="Legal fingerprint" value={compactId(state?.view.legal_fingerprint64, 8) || "—"} />
+            <Kv label="View hash" value={compactId(state?.view.view_hash64, 8) || "—"} />
+            <Kv label="Search" value={counters ? `${counters.search_decisions ?? 0} probes` : "disabled"} />
+            {state?.terminal ? (
+              <Kv
+                label="Result"
+                value={winnerSeat === null ? (terminalStatus ?? "complete") : `Winner seat ${winnerSeat}`}
+              />
+            ) : null}
+          </div>
 
-      <footer className="server-footnote">
-        API {health?.ok ? "ready" : "offline"}
-        {health?.weiss_sim?.file ? <span>{compactId(health.weiss_sim.file, 22)}</span> : null}
-      </footer>
-    </aside>
+          <div className="sheet__group">
+            <h3>Play-by-play</h3>
+            {state?.history?.length ? (
+              <ol className="playbyplay">
+                {[...state.history].reverse().map((entry) => (
+                  <li key={entry.decision_index} className={cx("ply", entry.actor_kind === "model" && "ply--model")}>
+                    <span className="ply__who">{entry.actor_kind === "model" ? "Opp" : "You"}</span>
+                    <span className="ply__label">{entry.label}</span>
+                    {entry.phase ? <span className="ply__phase">{entry.phase}</span> : null}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="muted">Moves appear here as they happen.</p>
+            )}
+          </div>
+
+          <div className="sheet__group">
+            <h3>Latest model act</h3>
+            {lastModel ? (
+              <>
+                <Kv label="Action" value={lastModel.action_label} />
+                <Kv label="Took" value={formatMs(lastModel.elapsed_ms)} />
+              </>
+            ) : (
+              <p className="muted">No model action recorded yet.</p>
+            )}
+          </div>
+
+          <div className="sheet__group">
+            <h3>Artifacts</h3>
+            {state?.artifacts ? (
+              <>
+                <div className="mono">{state.artifacts.manifest}</div>
+                <div className="mono">{state.artifacts.decisions}</div>
+                <div className="mono">{state.artifacts.postgame_report}</div>
+              </>
+            ) : (
+              <p className="muted">Start a match to create a transcript.</p>
+            )}
+          </div>
+
+          <div className="sheet__group">
+            <h3>Server</h3>
+            <Kv label="API" value={health?.ok ? "ready" : "offline"} />
+            {health?.weiss_sim?.version ? <Kv label="weiss-sim" value={health.weiss_sim.version} /> : null}
+          </div>
+        </div>
+      </aside>
+    </>
   );
 }
 
-function MetricLine({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function Kv({ label, value }: { label: string; value: string }) {
   return (
-    <div className="metric-line">
-      <span className="metric-icon">{icon}</span>
+    <div className="kv">
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
   );
 }
 
-function terminalNumberResult(state: SessionState | null, key: string): number | null {
+function terminalNumber(state: SessionState | null, key: string): number | null {
   const value = state?.result?.[key];
   return typeof value === "number" ? value : null;
 }
 
-function terminalStringResult(state: SessionState | null, key: string): string | null {
+function terminalString(state: SessionState | null, key: string): string | null {
   const value = state?.result?.[key];
   return typeof value === "string" ? value : null;
 }
