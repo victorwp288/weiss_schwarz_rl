@@ -67,7 +67,7 @@ WEISS_HUMAN_PLAY_ALLOWED_ORIGINS=https://your-ui.vercel.app \
 python -m weiss_rl.human_play.web_server --host 0.0.0.0 --port 8765
 ```
 
-See `../../docs/human_play_deployment.md` for the split deployment shape and
+See `../../docs/deployment/human_play.md` for the split deployment shape and
 `../../deploy/human-play-api/README.md` for the container/backend side.
 
 ## Test & type-check

@@ -10,8 +10,9 @@ from the active tree.
 ## Start Here
 
 - [Docs hub](docs/README.md) for the ownership map.
-- [Thesis workflow](docs/thesis_workflow.md) for setup, train/eval/figure commands, validation, and troubleshooting.
-- [Artifacts](docs/artifacts.md) for retained thesis evidence and current selected runs.
+- [Thesis workflow](docs/operations/thesis_workflow.md) for setup, train/eval/figure commands, validation, and troubleshooting.
+- [Training](docs/concepts/training.md), [model](docs/concepts/model.md), [rewards](docs/concepts/rewards.md), and [evaluation](docs/concepts/evaluation.md) for the explanation path.
+- [Artifacts](docs/concepts/artifacts.md) for retained thesis evidence and current selected runs.
 
 ## Install
 
@@ -40,7 +41,7 @@ uv run --extra dev --extra sim python -m weiss_rl.cli smoke-eval --run-dir runs/
 uv run --extra dev python -m weiss_rl.cli figures --run-dir runs/main_smoke --format png
 ```
 
-Configuration details live in [docs/thesis_workflow.md](docs/thesis_workflow.md)
+Configuration details live in [docs/operations/thesis_workflow.md](docs/operations/thesis_workflow.md)
 and [configs/README.md](configs/README.md).
 
 ## Retained Artifacts

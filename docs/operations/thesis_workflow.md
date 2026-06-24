@@ -40,7 +40,7 @@ $env:PYTHONHASHSEED='0'; uv run --extra dev --extra sim python -m weiss_rl.cli e
   --b1-run runs/guarded_recontinue2_from_selected_u15_anchor_nopublic_u20_20260516_seg01
 ```
 
-Selected runs, hashes, and evidence are recorded in [artifacts.md](artifacts.md).
+Selected runs, hashes, and evidence are recorded in [artifacts.md](../concepts/artifacts.md).
 
 ## Profiles
 
@@ -54,6 +54,11 @@ Selected runs, hashes, and evidence are recorded in [artifacts.md](artifacts.md)
 
 Long runs should use explicit labels, preserved logs, and saved checkpoints. Do
 not treat smoke results as model-quality evidence.
+`python/weiss_rl/workflows/training_workflow/stages.py` names the stage order
+included in training dry-run payloads: profile selection, stack config, seed
+policy resolution, entrypoint dispatch, and retained evidence.
+Training dry-runs also include `profile_evidence_level`, which separates
+plumbing checks, runtime probes, collapse probes, and retained training runs.
 
 ## Config Surface
 
@@ -100,10 +105,14 @@ uv run --extra dev --extra sim python -m weiss_rl.cli b2-audit `
   --policy-id policy_000200
 ```
 
+The audit summary includes `audit_plan`, defined in
+`python/weiss_rl/diagnostics/b2_audit/b2_audit_reports.py`: source seed reuse,
+policy resolution, matchup rerun, replay inspection, and aggregate findings.
+
 Reward-component probe:
 
 ```powershell
-uv run --extra dev python -m weiss_rl.diagnostics.reward_component_probe_entrypoint `
+uv run --extra dev python -m weiss_rl.diagnostics.probes.reward_component_probe_entrypoint `
   --stack-config configs/thesis/b1_noleague.yaml `
   --num-envs 64 `
   --steps 256 `
@@ -113,7 +122,7 @@ uv run --extra dev python -m weiss_rl.diagnostics.reward_component_probe_entrypo
 Learning-progress diagnostic:
 
 ```powershell
-uv run --extra dev python -m weiss_rl.diagnostics.learning_progress `
+uv run --extra dev python -m weiss_rl.diagnostics.progress.learning_progress `
   --run-dir runs/b1_reward_full_shaping_probe100_20260513
 ```
 
@@ -168,7 +177,7 @@ uv run --extra dev --extra sim python -c "import weiss_sim; print(weiss_sim.__ve
 ```
 
 Verification failure: run the reported command directly from the repository
-root. If a refactor touched a behavior boundary, check [architecture.md](architecture.md)
+root. If a refactor touched a behavior boundary, check [architecture.md](../concepts/architecture.md)
 before treating the failure as incidental.
 
 Artifact or readiness failure: do not use smoke/demo output as a substitute for

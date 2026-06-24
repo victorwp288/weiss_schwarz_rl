@@ -32,11 +32,19 @@ Verifiers, diagnostics, and implementation entrypoints may remain runnable, but
 they are not the main operator interface. Path-based `python/scripts/*.py`
 entrypoints are retired.
 
+`python/weiss_rl/workflows/command_surface.py` owns command names, help text,
+and the training/evaluation command groups.
+`python/weiss_rl/workflows/workflow_route_explanation.py` renders the checked
+command-to-dispatch-to-plan-builder map and the public workflow lifecycle:
+register command, parse arguments, build plan, dispatch, retain outputs. Runtime
+dispatch still lives in `workflow_dispatch.py`; training and evaluation
+workflow packages build the actual plans.
+
 ## Package Map
 
 | Package | Owns |
 | --- | --- |
-| `weiss_rl.cli` and `weiss_rl.workflows` | Public commands, profiles, dry-run plans, verification, and command routing. |
+| `weiss_rl.cli` and `weiss_rl.workflows` | Public command registry, command-group dispatch, profiles, dry-run plans, and verification. |
 | `weiss_rl.config` | Strict config parsing, preset inheritance, overrides, canonical hashes, and seed-file resolution. |
 | `weiss_rl.core` and `weiss_rl.envs` | Simulator-facing contracts, legal-action batches, observation layout, action catalog decoding, and env wrappers. |
 | `weiss_rl.runtime` | Queue runtime, actor collection, learner-batch assembly, opponent sampling, process collectors, IPC/shared transport, and metrics. |
@@ -48,19 +56,26 @@ entrypoints are retired.
 
 ## Runtime Components
 
-`weiss_rl.runtime.components` is grouped by user-level concept:
+`weiss_rl.runtime.components` is grouped by runtime responsibility:
 
-- `collection/`: actor scheduling, pending queues, and central collection
-  step/action contexts.
-- `batching/`: bootstrap fields, reward backfills, and IMPALA/PPO learner
-  payload builders.
-- `opponents/`: fixed-opponent grouping, heuristic/model overwrites, and
-  episode-role accounting.
+- `actors/`: actor startup, state, routing, unroll execution, and actor-side
+  policy rows.
+- `central/`: centralized actor collection, policy phases, row partitioning,
+  unroll assembly, and finalization.
+- `collection/`: collector state, action execution, legal-action steps, unroll
+  storage, batch collection, and terminal resets.
+- `batching/`: bootstrap fields, counters, legal batching, metrics, reward
+  backfills, and IMPALA/PPO learner payload builders.
+- `actions/`: action catalog setup, dense/packed action surfaces, pass/mulligan
+  guards, legal metadata, and policy row/output records.
+- `rewards/`: reward flow maps and reward-shaping plans/counters.
+- `opponents/`: fixed-opponent grouping, heuristic/model overwrites, residency,
+  and episode-role accounting.
 - `policy_inference/`: actor model selection, central policy outputs,
   deterministic logits, heuristic outputs, and debug validation.
-- `ipc_shared/`: collector commands, state-dict IPC, process logging,
-  shared transport, and thread setup.
-- `shared_memory/`: low-level shared-memory slot configuration and IO.
+- `ipc_shared/` and `shared_memory/`: collector commands, state-dict IPC,
+  process logging, shared transport, thread setup, and low-level shared-memory
+  slot IO.
 
 ## Simulator Contract
 
@@ -76,6 +91,18 @@ Required simulator surfaces include:
 - `weiss_sim.make_pool(...)`, `weiss_sim.EnvPoolBuffers`
 - `weiss_sim.rl.reset_rl(...)`, `weiss_sim.rl.step_rl(...)`
 - fused logit sampling and packed legal-id buffer paths
+
+The code-level section map lives in
+`python/weiss_rl/core/simulator_contract.py`:
+
+| Section | Source | Why It Matters |
+| --- | --- | --- |
+| Runtime identity | `__version__`, module path, build info, db info | Proves which simulator build produced the run. |
+| Spec hash | `SPEC_HASH`, `export_spec_bundle()` | Guards startup, checkpoints, and readiness checks against layout drift. |
+| Observation layout | `spec_bundle.observation` | Keeps encoders, model trunks, and replay diagnostics on the same vector layout. |
+| Action catalog | `spec_bundle.action` | Keeps dense logits, legal masks, and packed candidate IDs aligned. |
+| Pass action | `spec_bundle.action.pass_action_id` | Gives env wrappers, samplers, and evaluation policies one fallback action ID. |
+| Thesis deck presets | `weiss_sim.cards` preset APIs | Confirms retained runs use the expected deck presets under the approx profile. |
 
 Published deck presets:
 

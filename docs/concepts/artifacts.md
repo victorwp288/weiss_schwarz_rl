@@ -9,10 +9,13 @@ Retained thesis evidence lives in these top-level directories:
 
 Treat retained outputs as read-only unless deliberately replacing a thesis
 artifact. Run-tree requirements are defined in
-[thesis_workflow.md](thesis_workflow.md).
+[thesis_workflow.md](../operations/thesis_workflow.md).
+Training `run_summary.json` files include `run_evidence_artifacts` from
+`python/weiss_rl/training/report_payloads.py`, which names the key retained
+files and what each one proves.
 
 This page records selected evidence retained in this checkout. Commands, layout
-rules, and validation commands live in [thesis_workflow.md](thesis_workflow.md).
+rules, and validation commands live in [thesis_workflow.md](../operations/thesis_workflow.md).
 
 ## Retained Runs
 
@@ -82,7 +85,7 @@ the thesis discussion and figure checks.
 
 Restored thesis figure bundles are not part of every checkout. When present,
 treat them as read-only evidence bundles and keep commands for regenerating
-figures in [thesis_workflow.md](thesis_workflow.md).
+figures in [thesis_workflow.md](../operations/thesis_workflow.md).
 
 ## Historical Smoke Evidence
 

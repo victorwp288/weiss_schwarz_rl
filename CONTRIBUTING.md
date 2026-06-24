@@ -4,7 +4,7 @@ This is a behavior-sensitive thesis research repository. Refactors are welcome, 
 
 ## Before Editing
 
-1. Read the active task instructions, [docs/README.md](docs/README.md), and [docs/architecture.md](docs/architecture.md).
+1. Read the active task instructions, [docs/README.md](docs/README.md), and [docs/concepts/architecture.md](docs/concepts/architecture.md).
 2. Identify the behavior-sensitive surface you are touching.
 3. Add or identify characterization tests.
 4. Avoid modifying historical run outputs, checkpoints, thesis figures, `run_logs/`, or `vast_artifacts/`.
@@ -19,7 +19,7 @@ uv run python -m weiss_rl.workflows.verify_repo_entrypoint
 ```
 
 Run focused tests for the area you changed. For simulator-boundary work, also run simulator-extra tests.
-See [docs/thesis_workflow.md](docs/thesis_workflow.md) for maintained validation commands.
+See [docs/operations/thesis_workflow.md](docs/operations/thesis_workflow.md) for maintained validation commands.
 
 ## Pull Request Expectations
 
