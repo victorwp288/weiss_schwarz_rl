@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from weiss_rl.eval.god_search import GodSearchConfig
+from weiss_rl.eval.search.god_search import GodSearchConfig
 from weiss_rl.human_play.catalog import default_repo_root, list_candidate_runs, list_policies_for_run
 from weiss_rl.human_play.decks import list_deck_presets
 from weiss_rl.human_play.session import HumanPlayConfig, HumanPlaySession, HumanPlaySessionError

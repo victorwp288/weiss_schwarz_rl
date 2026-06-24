@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from weiss_rl.diagnostics.training_logger import TrainingMetrics
+from weiss_rl.diagnostics.logging.training_logger import TrainingMetrics
 from weiss_rl.learners.vtrace import VtraceMetrics
 
 

@@ -18,7 +18,7 @@ from .training_checkpoint_test_support import (
 
 
 def test_write_scalars_record_appends_stable_json_line(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("weiss_rl.training.checkpointing.io.time.time", lambda: 105.25)
+    monkeypatch.setattr("weiss_rl.training.checkpointing.storage.io.time.time", lambda: 105.25)
     scalars_path = tmp_path / "scalars.jsonl"
 
     record = write_scalars_record(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from weiss_rl.training.checkpointing.periodic_dev_eval_guard import (
+from weiss_rl.training.checkpointing.guards.periodic_dev_eval_guard import (
     CheckpointGuardApplicationResult,
     apply_periodic_dev_eval_checkpoint_guard,
 )

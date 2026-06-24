@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from weiss_rl.runtime.components.metrics import runtime_counter_totals, runtime_outcome_metrics
+from weiss_rl.runtime.components.batching.metrics import runtime_counter_totals, runtime_outcome_metrics
 
 from .runtime_metrics_test_support import _runtime_unroll
 

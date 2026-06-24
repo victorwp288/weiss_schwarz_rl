@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.diagnostics import b2_disagreement_audit as audit_module
+from weiss_rl.diagnostics.b2_audit import b2_disagreement_audit as audit_module
 
 
 def test_annotate_step_diff_uses_action_catalog_decoder() -> None:

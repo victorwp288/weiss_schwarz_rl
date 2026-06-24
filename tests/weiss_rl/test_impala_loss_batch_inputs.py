@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import torch
-from weiss_rl.learners.impala.loss_batch_inputs import resolve_impala_loss_batch_inputs
+from weiss_rl.learners.impala.batching.loss_batch_inputs import resolve_impala_loss_batch_inputs
 
 
 def test_resolve_impala_loss_batch_inputs_prefers_compiled_forward_model_and_expected_shape() -> None:

@@ -18,7 +18,7 @@ def test_parallel_final_eval_worker_accepts_noncanonical_output_dir() -> None:
 
 
 def test_parallel_final_eval_entrypoint_exposes_only_cli_main() -> None:
-    from weiss_rl.eval import parallel_final_eval_core, parallel_final_eval_entrypoint
+    from weiss_rl.eval.parallel import parallel_final_eval_core, parallel_final_eval_entrypoint
 
     assert parallel_final_eval_entrypoint.main is parallel_final_eval_core.main
     retired_helper_exports = {
@@ -40,7 +40,7 @@ def test_parallel_final_eval_entrypoint_exposes_only_cli_main() -> None:
 
 
 def test_parallel_final_eval_core_does_not_reexport_worker_helpers() -> None:
-    from weiss_rl.eval import parallel_final_eval_core
+    from weiss_rl.eval.parallel import parallel_final_eval_core
 
     assert not hasattr(parallel_final_eval_core, "_load_json")
     assert not hasattr(parallel_final_eval_core, "_worker")
@@ -131,7 +131,7 @@ def test_final_eval_worker_policy_resolution_kwargs_preserve_registry_inputs(mon
 
 
 def test_parallel_final_eval_plan_builds_upper_triangular_jobs() -> None:
-    from weiss_rl.eval.parallel_final_eval_plan import build_parallel_final_eval_jobs
+    from weiss_rl.eval.parallel.parallel_final_eval_plan import build_parallel_final_eval_jobs
 
     args = SimpleNamespace(
         stack_config=Path("configs/thesis/final_eval.yaml"),

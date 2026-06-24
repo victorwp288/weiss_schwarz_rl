@@ -4,6 +4,13 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from weiss_rl.workflows.command_surface import TRAIN_B1_COMMAND, TRAIN_MAIN_COMMAND
+from weiss_rl.workflows.parser_argument_helpers import (
+    add_b1_anchor_argument,
+    add_public_workflow_parser,
+    add_run_label_argument,
+    add_training_profile_argument,
+)
 from weiss_rl.workflows.training_workflow.commands import TRAIN_PROFILES
 
 
@@ -11,10 +18,10 @@ def add_train_b1_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     add_common: Callable[[argparse.ArgumentParser], None],
 ) -> argparse.ArgumentParser:
-    parser = subparsers.add_parser("train-b1", help="Train the B1 NoLeague baseline")
+    parser = add_public_workflow_parser(subparsers, TRAIN_B1_COMMAND)
     add_common(parser)
-    parser.add_argument("--run-label", required=True)
-    parser.add_argument("--profile", choices=tuple(TRAIN_PROFILES), default="smoke")
+    add_run_label_argument(parser)
+    add_training_profile_argument(parser, choices=tuple(TRAIN_PROFILES))
     return parser
 
 
@@ -22,10 +29,10 @@ def add_train_main_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     add_common: Callable[[argparse.ArgumentParser], None],
 ) -> argparse.ArgumentParser:
-    parser = subparsers.add_parser("train-main", help="Train the main league thesis model")
+    parser = add_public_workflow_parser(subparsers, TRAIN_MAIN_COMMAND)
     add_common(parser)
-    parser.add_argument("--run-label", required=True)
-    parser.add_argument("--b1-run", "--b1-baseline-run-dir", dest="b1_baseline_run_dir", type=Path, required=True)
+    add_run_label_argument(parser)
+    add_b1_anchor_argument(parser, required=True)
     parser.add_argument("--seed-run", "--seed-snapshot-run-dir", dest="seed_snapshot_run_dir", type=Path)
     parser.add_argument(
         "--init-policy-id",
@@ -35,7 +42,7 @@ def add_train_main_parser(
             "Default auto tries selected_candidate, then canonical B1 aliases."
         ),
     )
-    parser.add_argument("--profile", choices=tuple(TRAIN_PROFILES), default="smoke")
+    add_training_profile_argument(parser, choices=tuple(TRAIN_PROFILES))
     return parser
 
 

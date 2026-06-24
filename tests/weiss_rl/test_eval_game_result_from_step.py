@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from weiss_rl.eval.harness import GameResult, game_result_from_step
+from weiss_rl.eval.simulator.harness import GameResult, game_result_from_step
 
 
 def test_game_result_from_step_uses_reward_perspective_seat() -> None:

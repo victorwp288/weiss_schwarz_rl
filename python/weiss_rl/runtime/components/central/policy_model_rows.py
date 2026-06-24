@@ -11,16 +11,16 @@ import torch
 
 from weiss_rl.core.legal_actions import LegalActionBatch
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.runtime.components.central.model_hooks import actor_inference_model
-from weiss_rl.runtime.components.legal_batching import (
+from weiss_rl.runtime.components.batching.legal_batching import (
     optional_legal_action_meta,
     require_ids_offsets,
     slice_packed_rows_with_meta,
 )
+from weiss_rl.runtime.components.central.model_hooks import actor_inference_model
 from weiss_rl.runtime.components.opponent_context import _call_accepts_keyword, opponent_context_indices_for_model
 
 if TYPE_CHECKING:
-    from weiss_rl.runtime.components.actor_state import _ActorState
+    from weiss_rl.runtime.components.actors.actor_state import _ActorState
 
 
 class QueueRuntimeCentralPolicyModelRowsMixin:

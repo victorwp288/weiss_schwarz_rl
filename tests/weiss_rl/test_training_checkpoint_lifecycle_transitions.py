@@ -4,8 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import weiss_rl.training.checkpointing.lifecycle_decisions as checkpoint_lifecycle_decisions
-import weiss_rl.training.checkpointing.lifecycle_transitions as checkpoint_lifecycle_transitions
+import weiss_rl.training.checkpointing.lifecycle.lifecycle_decisions as checkpoint_lifecycle_decisions
+import weiss_rl.training.checkpointing.lifecycle.lifecycle_transitions as checkpoint_lifecycle_transitions
 
 from .training_checkpoint_test_support import _Learner, _TrainingPaths
 

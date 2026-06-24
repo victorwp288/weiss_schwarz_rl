@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from weiss_rl.diagnostics import b2_disagreement_audit as audit_module
+from weiss_rl.diagnostics.b2_audit import b2_disagreement_audit as audit_module
 
 from .b2_disagreement_audit_test_support import REPO_ROOT, _make_record, _module_env
 
@@ -40,7 +40,7 @@ def test_b2_disagreement_audit_requires_fixed_pythonhashseed(tmp_path: Path, mon
         [
             sys.executable,
             "-m",
-            "weiss_rl.diagnostics.b2_disagreement_audit",
+            "weiss_rl.diagnostics.b2_audit.b2_disagreement_audit",
             "--stack-config",
             "missing.yaml",
             "--run-dir",

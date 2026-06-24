@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 from torch import nn
-from weiss_rl.models.candidate_projection import project_candidate_sections, score_candidate_group
+from weiss_rl.models.actions.candidate_projection import project_candidate_sections, score_candidate_group
 
 
 def _candidate_projection() -> nn.Sequential:

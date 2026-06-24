@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from weiss_rl.artifacts import ArtifactLayout
-from weiss_rl.eval.policies.set import RANDOM_LEGAL_POLICY_ID
+from weiss_rl.eval.policies.fixed_panel import RANDOM_LEGAL_POLICY_ID
 from weiss_rl.eval.readiness import contracts as _contracts
 from weiss_rl.eval.readiness.guardrails import (
     build_final_eval_guardrail_summary as _build_final_eval_guardrail_summary,
@@ -20,6 +21,37 @@ DEFAULT_BASELINE_WIN_RATE_THRESHOLD = 0.55
 DEFAULT_SEAT_BIAS_MAX_ABS_DELTA = 0.05
 DEFAULT_SEAT_BIAS_POSTERIOR_MIN = 0.95
 DEFAULT_TRUNCATION_MAX_RATE = 0.02
+
+
+@dataclass(frozen=True, slots=True)
+class ReadinessSummarySection:
+    section_id: str
+    title: str
+    purpose: str
+
+
+RUN_DIRECTORY_READINESS_SECTIONS = (
+    ReadinessSummarySection(
+        section_id="run_directory_audit",
+        title="Run-directory artifacts",
+        purpose="Confirms the expected files exist in the run tree.",
+    ),
+    ReadinessSummarySection(
+        section_id="manifest_contract",
+        title="Manifest contract",
+        purpose="Checks identity fields and companion files against the manifest.",
+    ),
+    ReadinessSummarySection(
+        section_id="final_eval_artifact_contract",
+        title="Final-eval artifacts",
+        purpose="Checks matchup coverage, policy-set consistency, references, and sensitivity outputs.",
+    ),
+    ReadinessSummarySection(
+        section_id="final_eval_guardrails",
+        title="Final-eval guardrails",
+        purpose="Checks truncation, seat bias, and baseline win-rate thresholds.",
+    ),
+)
 
 _REQUIRED_SENSITIVITY_CASE_IDS = _contracts.REQUIRED_SENSITIVITY_CASE_IDS
 RequiredArtifactSpec = _contracts.RequiredArtifactSpec
@@ -150,13 +182,14 @@ def _build_run_directory_readiness_summary(
     )
 
     alarms: list[str] = []
-    for section_name, section in (
-        ("run_directory_audit", run_directory_audit),
-        ("manifest_contract", manifest_contract),
-        ("final_eval_artifact_contract", final_eval_artifact_contract),
-    ):
-        if not bool(section["passed"]):
-            alarms.append(section_name)
+    section_results = {
+        "run_directory_audit": run_directory_audit,
+        "manifest_contract": manifest_contract,
+        "final_eval_artifact_contract": final_eval_artifact_contract,
+    }
+    for section in RUN_DIRECTORY_READINESS_SECTIONS[:3]:
+        if not bool(section_results[section.section_id]["passed"]):
+            alarms.append(section.section_id)
 
     if guardrails["loaded"]:
         alarms.extend(str(alarm) for alarm in cast(Sequence[str], guardrails["alarms"]))
@@ -168,6 +201,7 @@ def _build_run_directory_readiness_summary(
         "scope": "run_dir",
         "passed": not alarms,
         "alarms": alarms,
+        "section_plan": _readiness_section_plan_payload(RUN_DIRECTORY_READINESS_SECTIONS),
         "run_dir": {
             "dir": run_dir.as_posix(),
         },
@@ -182,6 +216,18 @@ def _build_run_directory_readiness_summary(
             "reason": guardrails.get("reason"),
             "message": guardrails.get("message"),
         },
+    }
+
+
+def _readiness_section_plan_payload(
+    sections: Sequence[ReadinessSummarySection],
+) -> dict[str, dict[str, str]]:
+    return {
+        section.section_id: {
+            "title": section.title,
+            "purpose": section.purpose,
+        }
+        for section in sections
     }
 
 

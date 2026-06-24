@@ -6,8 +6,8 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.loss_objective_stage import resolve_impala_value_loss_mask
-from weiss_rl.learners.impala.loss_vtrace_stage import (
+from weiss_rl.learners.impala.losses.loss_objective_stage import resolve_impala_value_loss_mask
+from weiss_rl.learners.impala.losses.loss_vtrace_stage import (
     attach_resolved_vtrace_context,
     resolve_impala_vtrace_clip_config,
 )

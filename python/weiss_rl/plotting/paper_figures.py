@@ -20,7 +20,7 @@ from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 
 from weiss_rl.artifacts import ArtifactLayout
-from weiss_rl.diagnostics.training_logger import TrainingLogger
+from weiss_rl.diagnostics.logging.training_logger import TrainingLogger
 
 __all__ = [
     "PAPER_FIGURE_IDS",

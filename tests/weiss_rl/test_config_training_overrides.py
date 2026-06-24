@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from weiss_rl.config.sections_training import parse_training_config
+from weiss_rl.config.sections.sections_training import parse_training_config
 
 from tests.weiss_rl.config_training_test_support import copy_section, training_body
 

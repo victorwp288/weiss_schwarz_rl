@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from weiss_rl.config.sections_model import parse_model_config
+from weiss_rl.config.sections.sections_model import parse_model_config
 
 
 def _model_body() -> dict[str, object]:

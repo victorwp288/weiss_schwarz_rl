@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from weiss_rl.diagnostics.training_logger import TrainingLogger, TrainingMetrics
+from weiss_rl.diagnostics.logging.training_logger import TrainingLogger, TrainingMetrics
 
 
 def test_training_metrics_dataclass_defaults() -> None:

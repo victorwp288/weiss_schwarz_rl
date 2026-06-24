@@ -37,6 +37,13 @@ def test_training_loop_progress_reexports_canonical_post_update_boundary() -> No
     )
 
 
+def test_post_update_stage_plan_names_checkpoint_before_dev_eval() -> None:
+    assert [(stage.name, stage.purpose) for stage in training_post_update.POST_UPDATE_CHECKPOINT_DEV_EVAL_PLAN] == [
+        ("checkpoint", "publish the current checkpoint and promotion aliases when scheduled"),
+        ("dev_eval", "run periodic dev eval and apply checkpoint guard decisions"),
+    ]
+
+
 def test_training_loop_progress_applies_dev_eval_result_and_stop_flag() -> None:
     progress = training_loop_progress.TrainingLoopProgress(latest_metrics={"loss": 1.0})
     summary = {"aggregate_score": 0.25}

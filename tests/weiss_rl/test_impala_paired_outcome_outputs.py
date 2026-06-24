@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 import torch
-from weiss_rl.learners.impala.paired_outcome_candidates import PairedOutcomeCandidateLogps
-from weiss_rl.learners.impala.paired_outcome_outputs import (
+from weiss_rl.learners.impala.auxiliary.paired_outcome_candidates import PairedOutcomeCandidateLogps
+from weiss_rl.learners.impala.auxiliary.paired_outcome_outputs import (
     build_paired_outcome_preference_context,
     build_paired_outcome_preference_metrics,
 )

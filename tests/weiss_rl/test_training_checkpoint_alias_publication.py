@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import weiss_rl.training.checkpointing.alias_publication as checkpoint_alias_publication
-import weiss_rl.training.checkpointing.aliases as checkpoint_aliases
-import weiss_rl.training.checkpointing.io as checkpoint_io
-from weiss_rl.training.checkpointing.alias_mutation import (
+import weiss_rl.training.checkpointing.aliases.alias_publication as checkpoint_alias_publication
+import weiss_rl.training.checkpointing.aliases.aliases as checkpoint_aliases
+import weiss_rl.training.checkpointing.storage.io as checkpoint_io
+from weiss_rl.training.checkpointing.aliases.alias_mutation import (
     CheckpointAliasMutation,
     alias_record_for_mutation,
     apply_checkpoint_alias_mutation,
@@ -31,7 +31,7 @@ def test_checkpoints_reexports_canonical_checkpoint_io_boundary() -> None:
     assert checkpoints.write_minimal_train_checkpoint is checkpoint_io.write_minimal_train_checkpoint
     assert checkpoints.restore_minimal_train_checkpoint is checkpoint_io.restore_minimal_train_checkpoint
     assert checkpoints.initialize_model_from_checkpoint is checkpoint_io.initialize_model_from_checkpoint
-    assert checkpoint_io.write_minimal_train_checkpoint.__module__ == "weiss_rl.training.checkpointing.io"
+    assert checkpoint_io.write_minimal_train_checkpoint.__module__ == "weiss_rl.training.checkpointing.storage.io"
 
 
 def test_checkpoint_alias_mutation_copies_checkpoint_and_updates_tracker(tmp_path: Path) -> None:

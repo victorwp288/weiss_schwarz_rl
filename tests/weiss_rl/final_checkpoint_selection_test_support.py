@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weiss_rl.training.checkpointing.finalization import TrainingFinalCheckpointHooks
+from weiss_rl.training.checkpointing.lifecycle.finalization import TrainingFinalCheckpointHooks
 
 
 class RecordingTensorBoardLogger:

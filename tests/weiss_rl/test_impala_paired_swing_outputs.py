@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 import torch
-from weiss_rl.learners.impala.paired_swing_outputs import build_paired_swing_auxiliary_metrics
+from weiss_rl.learners.impala.auxiliary.paired_swing_outputs import build_paired_swing_auxiliary_metrics
 
 
 def test_build_paired_swing_auxiliary_metrics_preserves_flags_and_metric_precedence() -> None:

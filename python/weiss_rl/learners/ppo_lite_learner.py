@@ -11,12 +11,12 @@ import torch
 from torch import Tensor
 from torch.nn.utils import clip_grad_norm_
 
-from weiss_rl.diagnostics.training_logger import TrainingMetrics
+from weiss_rl.diagnostics.logging.training_logger import TrainingMetrics
 from weiss_rl.learners.action_logp import (
     masked_action_logp_and_entropy,
     packed_action_logp_and_entropy,
 )
-from weiss_rl.learners.impala.batch_access import batch_value as _batch_value
+from weiss_rl.learners.impala.batching.batch_access import batch_value as _batch_value
 from weiss_rl.learners.impala.learner import ImpalaLearner
 
 

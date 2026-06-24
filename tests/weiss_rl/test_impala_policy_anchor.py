@@ -6,7 +6,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.loss_policy_anchor_stage import apply_impala_policy_anchor_stage
+from weiss_rl.learners.impala.losses.loss_policy_anchor_stage import apply_impala_policy_anchor_stage
 from weiss_rl.learners.vtrace import VTraceTargets
 
 from .impala_test_support import (

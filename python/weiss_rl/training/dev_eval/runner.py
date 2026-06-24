@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from weiss_rl.diagnostics.action_diagnostics import (
+from weiss_rl.diagnostics.probes.action_diagnostics import (
     ActionSummaryCounters,
     make_action_sequence_state,
     summarize_eval_action_counters,
@@ -18,15 +18,12 @@ from weiss_rl.diagnostics.action_diagnostics import (
 )
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
 from weiss_rl.eval import Pcg32XshRrV1, game_result_from_step, sample_action_pinned, select_action_argmax_pinned
-from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
-from weiss_rl.eval.model_action_surface import (
-    ModelActionSurfaceSettings,
-    model_action_surface_batch_and_ids,
-)
-from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
-from weiss_rl.eval.policies.alignment import PolicyAlignmentAccumulator
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.sampling.model_action_surface import ModelActionSurfaceSettings, model_action_surface_batch_and_ids
+from weiss_rl.eval.sampling.model_sampling import model_eval_logits_for_legal_ids
+from weiss_rl.eval.simulator.harness import ScheduledGame, abort_on_engine_fault_eval
 from weiss_rl.model import PolicyValueModel
+from weiss_rl.training.dev_eval.policy_alignment import PeriodicDevEvalPolicyAlignment
 from weiss_rl.training.dev_eval.runtime_contracts import legal_ids_for_env_row
 from weiss_rl.training.dev_eval.seed_schedule import periodic_dev_eval_rng_seed
 
@@ -62,16 +59,6 @@ class PeriodicDevEvalRunner:
         self.build_eval_env = build_eval_env
         self._baseline_logits = np.zeros((action_dim,), dtype=np.float32)
         self._device = torch.device("cpu")
-        action_catalog = getattr(model, "action_catalog", None)
-        self._policy_alignment_all = (
-            None if heuristic_policy is None else PolicyAlignmentAccumulator(action_catalog=action_catalog)
-        )
-        self._policy_alignment_focal_turns = (
-            None if heuristic_policy is None else PolicyAlignmentAccumulator(action_catalog=action_catalog)
-        )
-        self._policy_alignment_opponent_turns = (
-            None if heuristic_policy is None else PolicyAlignmentAccumulator(action_catalog=action_catalog)
-        )
         evaluation_config = getattr(getattr(self.stack, "config", None), "evaluation", None)
         self._eval_sampling_algorithm = str(
             getattr(evaluation_config, "eval_sampling_algorithm", "pinned_cdf_pcg_v1") or "pinned_cdf_pcg_v1"
@@ -81,6 +68,15 @@ class PeriodicDevEvalRunner:
         self._model_action_surface = ModelActionSurfaceSettings.from_training_config(
             training_config,
             pass_action_id=self.pass_action_id,
+        )
+        self._policy_alignment = PeriodicDevEvalPolicyAlignment(
+            model=self.model,
+            heuristic_policy=self.heuristic_policy,
+            focal_policy_id=self.focal_policy_id,
+            opponent_policy_id=self.opponent_policy_id,
+            action_dim=self.action_dim,
+            device=self._device,
+            model_action_surface=self._model_action_surface,
         )
 
     def run_game(self, scheduled_game: ScheduledGame):
@@ -93,9 +89,7 @@ class PeriodicDevEvalRunner:
         opponent_hidden = (
             None if self.opponent_model is None else self.opponent_model.initial_seat_hidden(1, device=self._device)
         )
-        alignment_hidden = (
-            None if self.heuristic_policy is None else self.model.initial_seat_hidden(1, device=self._device)
-        )
+        alignment_hidden = self._policy_alignment.initial_hidden()
         seat_rngs = {
             seat: Pcg32XshRrV1(periodic_dev_eval_rng_seed(scheduled_game=scheduled_game, seat=seat)) for seat in (0, 1)
         }
@@ -171,7 +165,7 @@ class PeriodicDevEvalRunner:
         action_sequence_state: Any | None = None,
     ) -> tuple[int, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
         current_policy_id = scheduled_game.seat0_policy_id if current_seat == 0 else scheduled_game.seat1_policy_id
-        alignment_hidden = self._record_policy_alignment(
+        alignment_hidden = self._policy_alignment.record(
             batch=batch,
             scheduled_game=scheduled_game,
             current_policy_id=current_policy_id,
@@ -217,85 +211,8 @@ class PeriodicDevEvalRunner:
         )
         return action, focal_hidden, opponent_hidden, alignment_hidden
 
-    def _record_policy_alignment(
-        self,
-        *,
-        batch: DecisionBoundaryBatch,
-        scheduled_game: ScheduledGame,
-        current_policy_id: str,
-        current_seat: int,
-        legal_ids: np.ndarray,
-        alignment_hidden: torch.Tensor | None,
-        action_sequence_state: Any | None = None,
-    ) -> torch.Tensor | None:
-        if (
-            self.heuristic_policy is None
-            or alignment_hidden is None
-            or self._policy_alignment_all is None
-            or self._policy_alignment_focal_turns is None
-            or self._policy_alignment_opponent_turns is None
-        ):
-            return alignment_hidden
-        with torch.inference_mode():
-            filtered_batch, filtered_legal_ids = model_action_surface_batch_and_ids(
-                model=self.model,
-                batch=batch,
-                legal_ids=legal_ids,
-                settings=self._model_action_surface,
-                action_sequence_state=action_sequence_state,
-            )
-            model_logits, next_alignment_hidden = model_eval_logits_for_legal_ids(
-                model=self.model,
-                batch=filtered_batch,
-                current_seat=int(current_seat),
-                seat_hidden=alignment_hidden,
-                legal_ids=filtered_legal_ids,
-                action_dim=int(self.action_dim),
-                device=self._device,
-            )
-        reference_action = int(
-            self.heuristic_policy.choose_action(
-                np.asarray(filtered_batch.obs[0], dtype=np.float32),
-                filtered_legal_ids,
-            )
-        )
-        self._policy_alignment_all.add(
-            model_logits=model_logits,
-            legal_ids=filtered_legal_ids,
-            reference_action_id=reference_action,
-        )
-        if current_policy_id == self.focal_policy_id:
-            self._policy_alignment_focal_turns.add(
-                model_logits=model_logits,
-                legal_ids=filtered_legal_ids,
-                reference_action_id=reference_action,
-            )
-        elif current_policy_id == scheduled_game.opponent_policy_id:
-            self._policy_alignment_opponent_turns.add(
-                model_logits=model_logits,
-                legal_ids=filtered_legal_ids,
-                reference_action_id=reference_action,
-            )
-        return next_alignment_hidden
-
     def policy_alignment_summary(self) -> dict[str, Any] | None:
-        if (
-            self.heuristic_policy is None
-            or self._policy_alignment_all is None
-            or self._policy_alignment_focal_turns is None
-            or self._policy_alignment_opponent_turns is None
-        ):
-            return None
-        return {
-            "schema": "policy_alignment_diagnostics_v1",
-            "model_policy_id": self.focal_policy_id,
-            "reference_policy_id": self.opponent_policy_id,
-            "reference_kind": "heuristic_public",
-            "legal_surface": "model_action_surface_filtered_legal_ids",
-            "all_decisions": self._policy_alignment_all.summary(),
-            "focal_policy_turns": self._policy_alignment_focal_turns.summary(),
-            "opponent_policy_turns": self._policy_alignment_opponent_turns.summary(),
-        }
+        return self._policy_alignment.summary()
 
     def _sample_model_action(
         self,

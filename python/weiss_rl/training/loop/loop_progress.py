@@ -7,8 +7,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger
-from weiss_rl.training.checkpointing.periodic_dev_eval import PeriodicDevEvalGuardResult
+from weiss_rl.diagnostics.logging.tensorboard_logger import TensorBoardLogger
+from weiss_rl.training.checkpointing.guards.periodic_dev_eval import PeriodicDevEvalGuardResult
 from weiss_rl.training.loop.post_update import (
     FinalTrainingCheckpointContext,
     FinalTrainingCheckpointHooks,

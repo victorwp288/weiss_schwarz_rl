@@ -6,12 +6,12 @@ from typing import Any, cast
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.loss_inputs import (
+from weiss_rl.learners.impala.losses.loss_inputs import (
     prepare_impala_loss_inputs,
     resolve_impala_loss_masks,
 )
-from weiss_rl.learners.impala.loss_legal_mask import resolve_impala_dense_legal_mask
-from weiss_rl.learners.impala.loss_masks import (
+from weiss_rl.learners.impala.losses.loss_legal_mask import resolve_impala_dense_legal_mask
+from weiss_rl.learners.impala.losses.loss_masks import (
     resolve_impala_loss_masks as resolve_impala_loss_masks_stage,
 )
 

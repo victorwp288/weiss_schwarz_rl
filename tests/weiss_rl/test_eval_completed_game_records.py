@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from weiss_rl.artifacts.reproducibility import key256_to_short64
-from weiss_rl.eval.harness import (
+from weiss_rl.eval.simulator.harness import (
     GameResult,
     ScheduledGame,
     record_completed_game,

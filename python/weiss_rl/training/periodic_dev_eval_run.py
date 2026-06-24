@@ -7,24 +7,15 @@ from typing import Any, Protocol, cast
 import torch
 
 from weiss_rl.core.simulator_contract import SimulatorContract
-from weiss_rl.eval import (
-    PayoffFoldScheme,
-    build_matchup_export,
-    build_seat_advantage_diagnostics,
-    run_seat_swapped_matchup,
-    write_matchup_diagnostics_json,
-    write_matchup_summary_csv,
-    write_matchup_summary_json,
-)
 from weiss_rl.model import PolicyValueModel
-from weiss_rl.training.dev_eval.common import json_relative_path, write_json
+from weiss_rl.training.dev_eval.common import write_json
+from weiss_rl.training.dev_eval.matchup_artifacts import build_and_write_periodic_matchup_artifacts
 from weiss_rl.training.dev_eval.model_clone import clone_cpu_eval_model
 from weiss_rl.training.dev_eval.opponents import periodic_dev_eval_opponents
+from weiss_rl.training.dev_eval.plan import periodic_dev_eval_plan_payload
 from weiss_rl.training.dev_eval.runtime_contracts import validate_periodic_dev_eval_contract
 from weiss_rl.training.dev_eval.seed_schedule import (
-    periodic_dev_eval_bootstrap_seed,
     periodic_dev_eval_schedule,
-    periodic_dev_eval_seed_usage_payload,
 )
 from weiss_rl.training.dev_eval.summary_state import (
     persist_periodic_dev_eval_summary,
@@ -143,62 +134,28 @@ def run_periodic_dev_eval(
             require_sorted_legal_ids=bool(evaluation.eval_assert_sorted_legal_ids),
         )
 
-        seed_usage_payload = periodic_dev_eval_seed_usage_payload(
-            seed_file=seed_file,
-            seed_file_root=stack.root,
-            seed_file_sha256=seed_file_sha256,
-            validated_sources=validated_sources,
-            artifact_scope=artifact_scope,
-            scheduled_paired_seeds=scheduled_paired_seeds,
-            paired_seeds=paired_seeds,
+        matchup_payload = build_and_write_periodic_matchup_artifacts(
+            stack=stack,
             evaluation=evaluation,
+            runner=runner,
+            matchup_dir=matchup_dir,
+            artifact_scope=artifact_scope,
             focal_policy_id=focal_policy_id,
-            update_count=update_count,
-            policy_version=policy_version,
-            checkpoint_path=checkpoint_path,
-            run_dir=artifacts.run_dir,
             opponent_policy_id=opponent_policy_id,
             opponent_display_name=display_name,
-        )
-        write_json_fn(matchup_dir / "seed_usage.json", seed_usage_payload)
-
-        matchup = run_seat_swapped_matchup(
-            focal_policy_id=focal_policy_id,
-            opponent_policy_id=opponent_policy_id,
             paired_seeds=paired_seeds,
-            runner=runner,
-            episodes_path=matchup_dir / "episodes.jsonl",
+            scheduled_paired_seeds=scheduled_paired_seeds,
+            seed_file=seed_file,
+            seed_file_sha256=seed_file_sha256,
+            validated_sources=validated_sources,
+            checkpoint_path=checkpoint_path,
+            run_dir=artifacts.run_dir,
+            update_count=update_count,
+            policy_version=policy_version,
             run_id256=run_id256,
             config_hash256=config_hash256,
             spec_hash256=spec_hash256,
-        )
-
-        matchup_payload = build_matchup_export(
-            matchup.records,
-            stop_rules=evaluation.stop_rules,
-            max_paired_seeds=len(paired_seeds),
-            scheme=cast(PayoffFoldScheme, evaluation.final_policy_set_selection.folding),
-            sample_count=1000,
-            seed=periodic_dev_eval_bootstrap_seed(update_count=update_count, policy_version=policy_version),
-        )
-        matchup_payload["evaluation_context"] = {
-            "artifact_scope": artifact_scope,
-            "update_count": update_count,
-            "policy_version": policy_version,
-            "checkpoint_path": json_relative_path(checkpoint_path, root=artifacts.run_dir),
-            "seed_usage_path": json_relative_path(matchup_dir / "seed_usage.json", root=artifacts.run_dir),
-            "anchor_display_name": display_name,
-        }
-        policy_alignment_summary = getattr(runner, "policy_alignment_summary", None)
-        if callable(policy_alignment_summary):
-            alignment_payload = policy_alignment_summary()
-            if alignment_payload is not None:
-                matchup_payload["policy_alignment_diagnostics"] = alignment_payload
-        write_matchup_summary_json(matchup_dir / "matchup_summary.json", matchup_payload)
-        write_matchup_summary_csv(matchup_dir / "matchup_summary.csv", matchup_payload)
-        write_matchup_diagnostics_json(
-            matchup_dir / "diagnostics.json",
-            build_seat_advantage_diagnostics(matchup.records),
+            write_json_fn=write_json_fn,
         )
         anchor_payloads[display_name] = matchup_payload
         anchor_scores[display_name] = float(matchup_payload["uncertainty"]["mean"])
@@ -218,6 +175,7 @@ def run_periodic_dev_eval(
             "aggregate_score": aggregate_score,
             "anchor_scores": anchor_scores,
             "anchors": anchor_payloads,
+            "periodic_dev_eval_plan": periodic_dev_eval_plan_payload(),
         }
     )
     if persist_summary:

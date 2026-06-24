@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import torch
-from weiss_rl.models.candidate_partitioning import partition_candidate_family_indices
+from weiss_rl.models.actions.candidate_partitioning import partition_candidate_family_indices
 
 
 def test_partition_candidate_family_indices_preserves_group_order_and_candidate_order() -> None:

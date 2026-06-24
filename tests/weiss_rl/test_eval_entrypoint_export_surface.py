@@ -10,7 +10,7 @@ def test_eval_entrypoint_reexports_workflow_and_report_owners() -> None:
     import weiss_rl.workflows.eval_entrypoint_support.report_exports as eval_entrypoint_report_exports
     import weiss_rl.workflows.eval_entrypoint_support.runtime as eval_entrypoint_runtime
     import weiss_rl.workflows.eval_entrypoint_support.workflow_exports as eval_entrypoint_workflow_exports
-    import weiss_rl.workflows.eval_support.eval_parser as eval_parser
+    import weiss_rl.workflows.eval_support.parser.eval_parser as eval_parser
     from weiss_rl.workflows import eval_entrypoint as eval_script
 
     assert eval_script is eval_entrypoint

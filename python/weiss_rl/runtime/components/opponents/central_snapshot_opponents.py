@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from weiss_rl.core.masking import select_argmax_from_legal_ids, select_argmax_from_mask
-from weiss_rl.runtime.components.legal_batching import (
+from weiss_rl.runtime.components.batching.legal_batching import (
     optional_legal_action_meta,
     require_ids_offsets,
     require_mask,

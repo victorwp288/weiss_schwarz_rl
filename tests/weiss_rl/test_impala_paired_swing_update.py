@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 import torch
-import weiss_rl.learners.impala.paired_swing_update as impala_paired_swing_update
+import weiss_rl.learners.impala.updates.paired_swing_update as impala_paired_swing_update
 
 
 def test_run_impala_paired_swing_optimizer_update_validates_full_surface_retention(

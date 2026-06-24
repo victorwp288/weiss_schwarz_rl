@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.testing as npt
 from weiss_rl.core.action_catalog import ActionCatalog as SharedActionCatalog
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
 
 from .heuristic_public_test_support import _empty_obs, _heuristic_spec_bundle, _packed_meta, _set_stage
 
@@ -133,7 +133,7 @@ def test_heuristic_public_batch_meta_fast_path_falls_back_on_invalid_meta() -> N
 
 
 def test_action_catalog_stays_in_core_module_not_heuristic_policy_exports() -> None:
-    from weiss_rl.eval import heuristic_public as heuristic_public_module
+    from weiss_rl.eval.heuristic_public import heuristic_public as heuristic_public_module
 
     assert "ActionCatalog" not in heuristic_public_module.__all__
     assert not hasattr(heuristic_public_module, "ActionCatalog")

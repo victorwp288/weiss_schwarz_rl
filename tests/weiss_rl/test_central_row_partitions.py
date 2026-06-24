@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from weiss_rl.runtime.components.central_row_partitions import partition_central_actor_rows
+from weiss_rl.runtime.components.central.central_row_partitions import partition_central_actor_rows
 from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
 
 

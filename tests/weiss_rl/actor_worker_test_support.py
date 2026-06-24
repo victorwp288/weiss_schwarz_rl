@@ -4,7 +4,7 @@ from typing import Literal
 
 import numpy as np
 import pytest
-from weiss_rl.diagnostics.action_diagnostics import MAIN_MOVE_BASE
+from weiss_rl.diagnostics.probes.action_diagnostics import MAIN_MOVE_BASE
 from weiss_rl.envs.decision_env import DecisionBoundaryEnv
 
 OBS_LEN = 6

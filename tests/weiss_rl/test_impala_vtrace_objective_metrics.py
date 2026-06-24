@@ -5,10 +5,10 @@ from typing import Any, cast
 
 import pytest
 import torch
-import weiss_rl.learners.impala.loss_metrics_stage as impala_loss_metrics_stage
-from weiss_rl.learners.impala.loss_metrics_stage import assemble_impala_loss_core_metrics
-from weiss_rl.learners.impala.metrics_assembly import ImpalaMetricAssemblyRequest
-from weiss_rl.learners.impala.objective_loss import compute_impala_objective_losses
+import weiss_rl.learners.impala.losses.loss_metrics_stage as impala_loss_metrics_stage
+from weiss_rl.learners.impala.losses.loss_metrics_stage import assemble_impala_loss_core_metrics
+from weiss_rl.learners.impala.losses.objective_loss import compute_impala_objective_losses
+from weiss_rl.learners.impala.support.metrics_assembly import ImpalaMetricAssemblyRequest
 
 
 def test_compute_impala_objective_losses_uses_current_logp_for_retention_and_policy_logp_for_pg() -> None:

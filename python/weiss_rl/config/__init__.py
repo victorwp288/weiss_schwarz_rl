@@ -1,12 +1,6 @@
 """Config loading utilities for the grouped RL presets."""
 
-from .hashing import (
-    canonical_config_bytes,
-    canonical_config_dict,
-    canonical_config_json,
-    compute_config_hash256,
-)
-from .models import (
+from weiss_rl.config.models import (
     CurriculumConfig,
     CurriculumStallMonitorConfig,
     DecisionKindTaggingConfig,
@@ -61,9 +55,16 @@ from .models import (
     TrainingTeacherAuxConfig,
     TrainingVTraceConfig,
 )
-from .overrides import apply_stack_overrides, parse_override_tokens
-from .parse import load_stack_config
-from .study import load_study_config
+
+from .loading.hashing import (
+    canonical_config_bytes,
+    canonical_config_dict,
+    canonical_config_json,
+    compute_config_hash256,
+)
+from .loading.overrides import apply_stack_overrides, parse_override_tokens
+from .loading.parse import load_stack_config
+from .loading.study import load_study_config
 
 __all__ = [
     "CurriculumConfig",

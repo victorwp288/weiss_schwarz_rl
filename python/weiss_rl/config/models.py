@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from weiss_rl.config.common_models import (
+from weiss_rl.config.schemas.common_models import (
     ExperimentConfig,
     ModelConfig,
     ModelDropoutConfig,
     SystemConfig,
     SystemProfileConfig,
 )
-from weiss_rl.config.curriculum_league_models import (
+from weiss_rl.config.schemas.curriculum_league_models import (
     CurriculumCheckpointGuardConfig,
     CurriculumConfig,
     CurriculumStallMonitorConfig,
@@ -22,7 +22,7 @@ from weiss_rl.config.curriculum_league_models import (
     PromotionGateConfig,
     PromotionGateGuardrailsConfig,
 )
-from weiss_rl.config.environment_models import (
+from weiss_rl.config.schemas.environment_models import (
     DeckSetSizeConfig,
     EnvironmentConfig,
     RewardDiscountConfig,
@@ -30,7 +30,7 @@ from weiss_rl.config.environment_models import (
     RewardShapingConfig,
     RewardTruncationConfig,
 )
-from weiss_rl.config.evaluation_models import (
+from weiss_rl.config.schemas.evaluation_models import (
     DecisionKindTaggingConfig,
     EvaluationConfig,
     FinalPolicySetSelectionConfig,
@@ -43,7 +43,7 @@ from weiss_rl.config.evaluation_models import (
     SpecBundlePolicyConfig,
     StopRulesConfig,
 )
-from weiss_rl.config.study_models import (
+from weiss_rl.config.schemas.study_models import (
     LockedConfig,
     MetagameAlphaRankConfig,
     MetagameConfig,
@@ -54,7 +54,7 @@ from weiss_rl.config.study_models import (
     StackConfig,
     StudyConfig,
 )
-from weiss_rl.config.training_models import (
+from weiss_rl.config.schemas.training_models import (
     TrainingActionSurfaceConfig,
     TrainingCheckpointingConfig,
     TrainingConfig,

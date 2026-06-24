@@ -30,6 +30,22 @@ def matchups(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return matchup_payloads
 
 
+def summary_section_keys(payload: Mapping[str, Any]) -> list[str]:
+    raw_sections = payload.get("summary_sections", [])
+    if raw_sections is None:
+        return []
+    if not isinstance(raw_sections, list):
+        raise ValueError("final_eval summary_sections must be a list when present")
+    keys: list[str] = []
+    for index, raw_section in enumerate(raw_sections):
+        section = mapping(raw_section, context=f"summary_sections[{index}]")
+        key = section.get("key")
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError(f"summary_sections[{index}].key must be a non-empty string")
+        keys.append(key.strip())
+    return keys
+
+
 def canonical_unordered_matchups(
     matchups: Sequence[Mapping[str, Any]],
     *,

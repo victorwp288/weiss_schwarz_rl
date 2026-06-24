@@ -4,7 +4,7 @@ import pytest
 import torch
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
 from weiss_rl.model import build_policy_value_model
-from weiss_rl.models.state_dict_compat import load_model_state_dict_with_context_compat
+from weiss_rl.models.policy.state_dict_compat import load_model_state_dict_with_context_compat
 
 
 def _config(

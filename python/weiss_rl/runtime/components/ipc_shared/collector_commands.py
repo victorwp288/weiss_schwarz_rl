@@ -11,8 +11,8 @@ import numpy as np
 from weiss_rl.eval.policies.set import HEURISTIC_PUBLIC_POLICY_ID
 from weiss_rl.experiments.baselines import NOLEAGUE_BASELINE_POLICY_ID
 from weiss_rl.model import build_policy_value_model
-from weiss_rl.models.loading import restore_model_guidance_from_payload
-from weiss_rl.models.state_dict_compat import load_model_state_dict_with_context_compat
+from weiss_rl.models.policy.loading import restore_model_guidance_from_payload
+from weiss_rl.models.policy.state_dict_compat import load_model_state_dict_with_context_compat
 from weiss_rl.runtime.components.ipc_shared.ipc import deserialize_state_dict_from_ipc
 from weiss_rl.runtime.components.ipc_shared.logging import process_debug_log
 

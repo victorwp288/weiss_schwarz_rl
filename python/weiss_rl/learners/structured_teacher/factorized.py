@@ -7,10 +7,10 @@ from torch import Tensor
 
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.learners.structured_auxiliary import (
-    PackedStructuredLegalView,
     resolve_public_heuristic_family_ids,
     structured_catalog_metadata,
 )
+from weiss_rl.learners.structured_legal_view import PackedStructuredLegalView
 from weiss_rl.learners.structured_teacher.common import (
     StructuredTeacherAuxiliaryCoefficients,
     StructuredTeacherAuxiliaryLossTerms,

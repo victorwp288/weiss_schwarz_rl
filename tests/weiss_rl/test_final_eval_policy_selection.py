@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 from weiss_rl.eval import resolve_final_policy_set
 from weiss_rl.eval.final.policy_selection import (
+    FINAL_EVAL_POLICY_SELECTION_PATHS,
     load_dev_eval_summaries,
     resolve_final_eval_policy_ids,
+    resolve_final_policy_set_with_trace,
     validate_final_eval_seed_budget,
 )
-from weiss_rl.eval.policies.set import DevEvalPolicySummary
+from weiss_rl.eval.policies.dev_eval_summaries import DevEvalPolicySummary
 
 from .final_eval_test_support import (
     _selection_config,
@@ -75,7 +77,54 @@ def test_final_eval_policy_selection_helpers_preserve_payload_shapes(tmp_path: P
     assert isinstance(summaries["policy_structured"], DevEvalPolicySummary)
     assert summaries["policy_structured"].anchor_scores == {"B0 RandomLegal": 0.9}
     assert resolved == ["B0 RandomLegal", "123"]
-    assert selection_payload == {"mode": "explicit", "policy_count": 2}
+    assert selection_payload == {
+        "mode": "explicit",
+        "policy_count": 2,
+        "selection_trace": [
+            {"policy_id": "B0 RandomLegal", "reason": "explicit_policy_id", "details": {"position": 0}},
+            {"policy_id": "123", "reason": "explicit_policy_id", "details": {"position": 1}},
+        ],
+    }
+
+
+def test_final_eval_policy_selection_trace_explains_deterministic_sources(tmp_path: Path) -> None:
+    snapshot_registry_path, dev_eval_summaries_path = _write_policy_set_inputs(tmp_path)
+    config = _selection_config(
+        include_random_legal_baseline_b0=True,
+        include_no_league_baseline_b1=False,
+        include_heuristic_public_b2_if_exists=False,
+        include_final_champion_snapshot=True,
+        include_spaced_snapshots_near_percent_updates=(50,),
+    )
+
+    selected, trace = resolve_final_policy_set_with_trace(
+        snapshot_registry_path=snapshot_registry_path,
+        dev_eval_summaries_path=dev_eval_summaries_path,
+        config=config,
+        final_policy_set_size=4,
+    )
+
+    assert selected == ["B0 RandomLegal", "policy_000300", "policy_000100", "policy_000150"]
+    assert [(entry["policy_id"], entry["reason"]) for entry in trace] == [
+        ("B0 RandomLegal", "random_legal_baseline_b0"),
+        ("policy_000300", "latest_champion_snapshot"),
+        ("policy_000100", "spaced_snapshot_near_percent_update"),
+        ("policy_000150", "top_dev_performer_vs_anchor_set"),
+    ]
+    assert trace[-1]["details"]["mean_anchor_score"] == pytest.approx(0.8)
+
+
+def test_final_eval_policy_selection_paths_document_inputs() -> None:
+    paths = {path.mode: path for path in FINAL_EVAL_POLICY_SELECTION_PATHS}
+
+    assert tuple(paths) == ("explicit", "deterministic_v1")
+    assert paths["explicit"].required_inputs == ("policy_ids",)
+    assert paths["deterministic_v1"].required_inputs == (
+        "snapshot_registry_path",
+        "dev_eval_summaries_path",
+        "selection_config",
+        "final_policy_set_size",
+    )
 
 
 def test_final_eval_policy_selection_helpers_preserve_errors() -> None:

@@ -5,7 +5,7 @@ from typing import Literal
 import pytest
 from weiss_rl.config.models import StopRulesConfig
 from weiss_rl.eval import EvalGameRecord, MatchupSummary, summarize_stage2_records
-from weiss_rl.eval.uncertainty import EvalUncertaintySummary
+from weiss_rl.eval.analysis.uncertainty import EvalUncertaintySummary
 
 _CONFIG_HASH256 = "ab" * 32
 _SPEC_HASH256 = "cd" * 32
@@ -118,7 +118,7 @@ def test_summarize_stage2_records_selects_stop_reason_by_priority(
     def _fake_uncertainty(*args, **kwargs):
         return uncertainty
 
-    monkeypatch.setattr("weiss_rl.eval.stage2.bayesian_bootstrap_summary", _fake_uncertainty)
+    monkeypatch.setattr("weiss_rl.eval.analysis.stage2.bayesian_bootstrap_summary", _fake_uncertainty)
 
     decision = summarize_stage2_records(
         [*_pair(0, "W", "L")],
@@ -146,7 +146,7 @@ def test_summarize_stage2_records_uses_stop_confidence_as_default_ci_level(monke
             sample_count=8,
         )
 
-    monkeypatch.setattr("weiss_rl.eval.stage2.bayesian_bootstrap_summary", _fake_uncertainty)
+    monkeypatch.setattr("weiss_rl.eval.analysis.stage2.bayesian_bootstrap_summary", _fake_uncertainty)
 
     summarize_stage2_records(
         [*_pair(0, "W", "L")],
@@ -205,7 +205,7 @@ def test_summarize_stage2_records_uses_observed_pairs_for_budget_under_s2(
             sample_count=32,
         )
 
-    monkeypatch.setattr("weiss_rl.eval.stage2.bayesian_bootstrap_summary", _fake_uncertainty)
+    monkeypatch.setattr("weiss_rl.eval.analysis.stage2.bayesian_bootstrap_summary", _fake_uncertainty)
 
     decision = summarize_stage2_records(
         [*_pair(0, "W", "L"), *_pair(1, "T", "T")],

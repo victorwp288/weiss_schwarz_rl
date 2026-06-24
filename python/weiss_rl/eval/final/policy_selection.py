@@ -3,13 +3,44 @@ from __future__ import annotations
 import json
 from collections import Counter
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from weiss_rl.config.models import FinalPolicySetSelectionConfig
+from weiss_rl.eval.policies.dev_eval_summaries import DevEvalPolicySummary
 from weiss_rl.eval.policies.set import (
-    DevEvalPolicySummary,
     select_final_policy_set_deterministic_v1,
+    select_final_policy_set_deterministic_v1_with_trace,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FinalEvalPolicySelectionPath:
+    mode: str
+    title: str
+    purpose: str
+    required_inputs: tuple[str, ...]
+
+
+FINAL_EVAL_POLICY_SELECTION_PATHS = (
+    FinalEvalPolicySelectionPath(
+        mode="explicit",
+        title="Explicit policy panel",
+        purpose="Use the caller-provided policy IDs exactly as the final-eval panel.",
+        required_inputs=("policy_ids",),
+    ),
+    FinalEvalPolicySelectionPath(
+        mode="deterministic_v1",
+        title="Deterministic artifact selection",
+        purpose="Resolve the final panel from the snapshot registry, dev-eval summaries, and selection config.",
+        required_inputs=(
+            "snapshot_registry_path",
+            "dev_eval_summaries_path",
+            "selection_config",
+            "final_policy_set_size",
+        ),
+    ),
 )
 
 
@@ -63,6 +94,26 @@ def resolve_final_policy_set(
     )
 
 
+def resolve_final_policy_set_with_trace(
+    *,
+    snapshot_registry_path: Path,
+    dev_eval_summaries_path: Path,
+    config: FinalPolicySetSelectionConfig,
+    final_policy_set_size: int,
+) -> tuple[list[str], list[dict[str, object]]]:
+    from weiss_rl.league.registry import SnapshotRegistry
+
+    registry = SnapshotRegistry.load(snapshot_registry_path)
+    summaries = load_dev_eval_summaries(dev_eval_summaries_path)
+    result = select_final_policy_set_deterministic_v1_with_trace(
+        snapshot_registry=registry,
+        dev_eval_summaries=summaries,
+        config=config,
+        final_policy_set_size=final_policy_set_size,
+    )
+    return result.policy_ids, result.trace_payload()
+
+
 def resolve_final_eval_policy_ids(
     *,
     policy_ids: Sequence[str] | None,
@@ -76,17 +127,26 @@ def resolve_final_eval_policy_ids(
         if not resolved:
             raise ValueError("policy_ids must contain at least one policy")
         validate_policy_ids(resolved, context="policy_ids")
-        return resolved, {"mode": "explicit", "policy_count": len(resolved)}
+        return resolved, {
+            "mode": "explicit",
+            "policy_count": len(resolved),
+            "selection_trace": [
+                {
+                    "policy_id": policy_id,
+                    "reason": "explicit_policy_id",
+                    "details": {"position": index},
+                }
+                for index, policy_id in enumerate(resolved)
+            ],
+        }
 
-    missing: list[str] = []
-    if snapshot_registry_path is None:
-        missing.append("snapshot_registry_path")
-    if dev_eval_summaries_path is None:
-        missing.append("dev_eval_summaries_path")
-    if selection_config is None:
-        missing.append("selection_config")
-    if final_policy_set_size is None:
-        missing.append("final_policy_set_size")
+    deterministic_inputs = {
+        "snapshot_registry_path": snapshot_registry_path,
+        "dev_eval_summaries_path": dev_eval_summaries_path,
+        "selection_config": selection_config,
+        "final_policy_set_size": final_policy_set_size,
+    }
+    missing = [name for name, value in deterministic_inputs.items() if value is None]
     if missing:
         raise ValueError(f"run_final_eval requires policy_ids or selection inputs, missing: {', '.join(missing)}")
 
@@ -94,7 +154,7 @@ def resolve_final_eval_policy_ids(
     assert dev_eval_summaries_path is not None
     assert selection_config is not None
     assert final_policy_set_size is not None
-    resolved = resolve_final_policy_set(
+    resolved, selection_trace = resolve_final_policy_set_with_trace(
         snapshot_registry_path=snapshot_registry_path,
         dev_eval_summaries_path=dev_eval_summaries_path,
         config=selection_config,
@@ -112,6 +172,7 @@ def resolve_final_eval_policy_ids(
         "snapshot_registry_path": snapshot_registry_path.as_posix(),
         "dev_eval_summaries_path": dev_eval_summaries_path.as_posix(),
         "final_policy_set_size": int(final_policy_set_size),
+        "selection_trace": selection_trace,
     }
 
 
@@ -137,9 +198,12 @@ def validate_final_eval_seed_budget(
 
 
 __all__ = [
+    "FINAL_EVAL_POLICY_SELECTION_PATHS",
+    "FinalEvalPolicySelectionPath",
     "load_dev_eval_summaries",
     "resolve_final_eval_policy_ids",
     "resolve_final_policy_set",
+    "resolve_final_policy_set_with_trace",
     "validate_final_eval_seed_budget",
     "validate_policy_ids",
 ]

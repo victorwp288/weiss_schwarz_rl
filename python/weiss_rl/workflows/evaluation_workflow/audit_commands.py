@@ -24,7 +24,7 @@ def _b2_audit_command(
     command = [
         python_exe,
         "-m",
-        "weiss_rl.diagnostics.b2_disagreement_audit",
+        "weiss_rl.diagnostics.b2_audit.b2_disagreement_audit",
         "--stack-config",
         EVAL_STACK_CONFIG.as_posix(),
         "--run-dir",

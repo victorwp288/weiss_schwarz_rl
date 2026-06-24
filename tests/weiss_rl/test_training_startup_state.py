@@ -4,6 +4,24 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from weiss_rl.training.train_entrypoint.cli import TrainCliState, prepare_train_startup_state
+from weiss_rl.training.train_entrypoint.startup_state import train_startup_route_payload
+
+
+def test_train_startup_route_payload_names_identity_handoff_steps() -> None:
+    route = train_startup_route_payload()
+    step_ids = {step["step_id"] for step in route}
+
+    assert {
+        "select_spec_source",
+        "verify_config_identity",
+        "capture_run_provenance",
+        "assign_run_identity",
+        "announce_startup",
+    } <= step_ids
+    for step in route:
+        assert step["title"]
+        assert step["route"]
+        assert step["output"]
 
 
 def test_train_startup_state_uses_public_demo_contract_without_runtime_load(tmp_path: Path) -> None:

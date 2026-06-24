@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
-from weiss_rl.eval.harness import GameResult, MatchupSummary, ScheduledGame
+from weiss_rl.eval.simulator.harness import GameResult, MatchupSummary, ScheduledGame
 from weiss_rl.league import PromotionGateAnchorResult, PromotionGatePosterior, PromotionGateRate
 
 RUN_ID256 = "ab" * 32

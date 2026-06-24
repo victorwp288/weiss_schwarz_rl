@@ -4,10 +4,8 @@ from dataclasses import replace
 
 import pytest
 from weiss_rl.config import load_stack_config
-from weiss_rl.eval.policies.set import (
-    DevEvalPolicySummary,
-    select_final_policy_set_deterministic_v1,
-)
+from weiss_rl.eval.policies.dev_eval_summaries import DevEvalPolicySummary
+from weiss_rl.eval.policies.set import select_final_policy_set_deterministic_v1
 from weiss_rl.league.registry import SnapshotRegistry
 
 from ._config_paths import repo_root

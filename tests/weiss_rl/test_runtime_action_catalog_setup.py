@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from weiss_rl.runtime.components.action_catalog_setup import resolve_runtime_action_catalog_setup
+from weiss_rl.runtime.components.actions.action_catalog_setup import resolve_runtime_action_catalog_setup
 
 
 def test_runtime_action_catalog_setup_defaults_without_spec_bundle() -> None:

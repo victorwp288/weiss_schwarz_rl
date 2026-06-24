@@ -11,11 +11,11 @@ from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import StackConfig, load_stack_config
 from weiss_rl.config.models import EvaluationConfig
 from weiss_rl.core.simulator_contract import SimulatorContract, load_verified_simulator_contract
+from weiss_rl.eval.analysis.payoff_folding import PayoffFoldScheme
 from weiss_rl.eval.final.matchups import run_final_eval_matchup
-from weiss_rl.eval.god_search import GodSearchConfig
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme
 from weiss_rl.eval.policies.types import ResolvedEvalPolicy
-from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
+from weiss_rl.eval.search.god_search import GodSearchConfig
+from weiss_rl.eval.simulator.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
 
 
 @dataclass(frozen=True, slots=True)

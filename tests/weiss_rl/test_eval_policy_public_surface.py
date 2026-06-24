@@ -6,7 +6,6 @@ from typing import cast
 
 import pytest
 from weiss_rl.config import StackConfig
-from weiss_rl.eval.b1_policy_resolution import resolve_b1_policy as b1_policy_resolution_resolve_b1_policy
 from weiss_rl.eval.policies import resolution_context as policy_resolution_context_module
 from weiss_rl.eval.policies.resolution import (
     _is_recursive_registry_search_root as policy_resolution_is_recursive_registry_search_root,
@@ -23,24 +22,25 @@ from weiss_rl.eval.policies.resolution import (
 )
 from weiss_rl.eval.policies.resolution import resolve_eval_policies as policy_resolution_resolve_eval_policies
 from weiss_rl.eval.policies.resolution_context import EvalPolicyResolutionContext
-from weiss_rl.eval.simulator_runner import SimulatorEvalRunner
-from weiss_rl.eval.snapshot_policy_resolution import (
+from weiss_rl.eval.simulator.simulator_runner import SimulatorEvalRunner
+from weiss_rl.eval.snapshots.b1_policy_resolution import resolve_b1_policy as b1_policy_resolution_resolve_b1_policy
+from weiss_rl.eval.snapshots.snapshot_policy_resolution import (
     resolve_snapshot_registry_policy as snapshot_policy_resolution_resolve_snapshot_registry_policy,
 )
-from weiss_rl.eval.snapshot_registry_resolution import (
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import (
     is_recursive_registry_search_root as snapshot_registry_is_recursive_registry_search_root,
 )
-from weiss_rl.eval.snapshot_registry_resolution import (
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import (
     should_include_common_search_root as snapshot_registry_should_include_common_search_root,
 )
-from weiss_rl.eval.static_policy_resolution import (
+from weiss_rl.eval.snapshots.static_policy_resolution import (
     resolve_static_eval_policy as static_policy_resolve_static_eval_policy,
 )
 from weiss_rl.league.registry import SnapshotRegistry
 
 
 def test_simulator_runner_exposes_only_runner_and_policy_resolver_boundary() -> None:
-    import weiss_rl.eval.simulator_runner as simulator_runner
+    import weiss_rl.eval.simulator.simulator_runner as simulator_runner
 
     retired_helper_exports = {
         "_candidate_b1_run_dirs",
@@ -77,11 +77,11 @@ def test_simulator_runner_exposes_only_runner_and_policy_resolver_boundary() -> 
     )
     assert policy_resolution_resolve_static_eval_policy is static_policy_resolve_static_eval_policy
     assert policy_resolution_resolve_eval_policies.__module__ == "weiss_rl.eval.policies.resolution"
-    assert policy_resolution_resolve_b1_policy.__module__ == "weiss_rl.eval.b1_policy_resolution"
-    assert policy_resolution_resolve_snapshot_registry_policy.__module__ == "weiss_rl.eval.snapshot_policy_resolution"
-    assert policy_resolution_resolve_static_eval_policy.__module__ == "weiss_rl.eval.static_policy_resolution"
+    assert policy_resolution_resolve_b1_policy.__module__ == "weiss_rl.eval.snapshots.b1_policy_resolution"
+    assert policy_resolution_resolve_snapshot_registry_policy.__module__ == "weiss_rl.eval.snapshots.snapshot_policy_resolution"
+    assert policy_resolution_resolve_static_eval_policy.__module__ == "weiss_rl.eval.snapshots.static_policy_resolution"
     assert (
-        policy_resolution_is_recursive_registry_search_root.__module__ == "weiss_rl.eval.snapshot_registry_resolution"
+        policy_resolution_is_recursive_registry_search_root.__module__ == "weiss_rl.eval.snapshots.snapshot_registry_resolution"
     )
 
 

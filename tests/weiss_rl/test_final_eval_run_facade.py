@@ -21,6 +21,7 @@ def test_final_eval_run_split_preserves_facade_and_upper_triangle_jobs(tmp_path:
     assert final_eval_module.run_final_eval is final_eval_run.run_final_eval
     assert final_eval_module._build_matchup_jobs is final_eval_run.build_final_eval_matchup_jobs
     assert final_eval_module._build_run_payload is final_eval_run.build_final_eval_run_payload
+    assert final_eval_module._build_run_plan is final_eval_run.build_final_eval_run_plan
     assert final_eval_module._resolve_run_policy_ids is final_eval_run.resolve_final_eval_run_policy_ids
     assert final_eval_module._run_matchup_jobs is final_eval_run.run_final_eval_matchup_jobs
     assert final_eval_module._validate_run_seed_budget is final_eval_run.validate_final_eval_run_seed_budget
@@ -33,6 +34,22 @@ def test_final_eval_run_split_preserves_facade_and_upper_triangle_jobs(tmp_path:
         (1, 2, "policy_b", "policy_c"),
         (2, 2, "policy_c", "policy_c"),
     ]
+
+    plan = final_eval_run.build_final_eval_run_plan(
+        policy_ids=["policy_a", "policy_b"],
+        snapshot_registry_path=None,
+        dev_eval_summaries_path=None,
+        selection_config=None,
+        final_policy_set_size=None,
+        paired_seeds=[11, 22, 33],
+        stage1_paired_seeds=2,
+        max_paired_seeds=3,
+    )
+    assert plan.policy_ids == ["policy_a", "policy_b"]
+    assert plan.selection_payload["mode"] == "explicit"
+    assert plan.selection_payload["policy_count"] == 2
+    assert plan.selection_payload["selection_trace"][0]["reason"] == "explicit_policy_id"
+    assert [(job.focal_index, job.opponent_index) for job in plan.matchup_jobs] == [(0, 0), (0, 1), (1, 1)]
 
     calls: list[dict[str, Any]] = []
 

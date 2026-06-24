@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import torch
-from weiss_rl.models.feature_gathering import (
+from weiss_rl.models.observations.feature_gathering import (
     gather_stage_features,
     gather_stage_features_for_rows,
     slot_component,

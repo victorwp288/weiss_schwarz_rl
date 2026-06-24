@@ -3,47 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from weiss_rl.config.models import FinalPolicySetSelectionConfig, StopRulesConfig
+from weiss_rl.eval.analysis.payoff_folding import PayoffFoldScheme
 from weiss_rl.eval.final.artifacts import write_final_eval_artifacts
-from weiss_rl.eval.final.matchups import run_final_eval_matchup
+from weiss_rl.eval.final.matchup_jobs import (
+    FinalEvalMatchupJob,
+    FinalEvalMatchupRunnerFn,
+    build_final_eval_matchup_jobs,
+    run_final_eval_matchup_jobs,
+)
 from weiss_rl.eval.final.payload import build_final_eval_payload
 from weiss_rl.eval.final.policy_selection import resolve_final_eval_policy_ids, validate_final_eval_seed_budget
-from weiss_rl.eval.harness import EvalGameRunner
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme
-
-
-@dataclass(frozen=True, slots=True)
-class FinalEvalMatchupJob:
-    focal_index: int
-    opponent_index: int
-    focal_policy_id: str
-    opponent_policy_id: str
-
-
-class FinalEvalMatchupRunnerFn(Protocol):
-    def __call__(
-        self,
-        *,
-        output_dir: Path,
-        focal_index: int,
-        opponent_index: int,
-        focal_policy_id: str,
-        opponent_policy_id: str,
-        paired_seeds: Sequence[int],
-        stage1_paired_seeds: int,
-        max_paired_seeds: int,
-        stop_rules: StopRulesConfig,
-        runner: EvalGameRunner,
-        run_id256: str | bytes,
-        config_hash256: str,
-        spec_hash256: str,
-        scheme: PayoffFoldScheme,
-        sample_count: int,
-    ) -> dict[str, Any]: ...
+from weiss_rl.eval.final.run_plan import FinalEvalRunPlan, build_final_eval_run_plan
+from weiss_rl.eval.simulator.harness import EvalGameRunner
 
 
 def resolve_final_eval_run_policy_ids(
@@ -74,60 +49,6 @@ def validate_final_eval_run_seed_budget(
         stage1_paired_seeds=stage1_paired_seeds,
         max_paired_seeds=max_paired_seeds,
     )
-
-
-def build_final_eval_matchup_jobs(policy_ids: Sequence[str]) -> tuple[FinalEvalMatchupJob, ...]:
-    jobs: list[FinalEvalMatchupJob] = []
-    for focal_index, focal_policy_id in enumerate(policy_ids):
-        for opponent_index, opponent_policy_id in enumerate(policy_ids[focal_index:], start=focal_index):
-            jobs.append(
-                FinalEvalMatchupJob(
-                    focal_index=focal_index,
-                    opponent_index=opponent_index,
-                    focal_policy_id=focal_policy_id,
-                    opponent_policy_id=opponent_policy_id,
-                )
-            )
-    return tuple(jobs)
-
-
-def run_final_eval_matchup_jobs(
-    *,
-    output_dir: Path,
-    jobs: Sequence[FinalEvalMatchupJob],
-    runner: EvalGameRunner,
-    paired_seeds: Sequence[int],
-    stage1_paired_seeds: int,
-    max_paired_seeds: int,
-    stop_rules: StopRulesConfig,
-    run_id256: str | bytes,
-    config_hash256: str,
-    spec_hash256: str,
-    scheme: PayoffFoldScheme,
-    sample_count: int,
-    run_matchup_fn: FinalEvalMatchupRunnerFn = run_final_eval_matchup,
-) -> list[dict[str, Any]]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return [
-        run_matchup_fn(
-            output_dir=output_dir,
-            focal_index=job.focal_index,
-            opponent_index=job.opponent_index,
-            focal_policy_id=job.focal_policy_id,
-            opponent_policy_id=job.opponent_policy_id,
-            paired_seeds=paired_seeds,
-            stage1_paired_seeds=stage1_paired_seeds,
-            max_paired_seeds=max_paired_seeds,
-            stop_rules=stop_rules,
-            runner=runner,
-            run_id256=run_id256,
-            config_hash256=config_hash256,
-            spec_hash256=spec_hash256,
-            scheme=scheme,
-            sample_count=sample_count,
-        )
-        for job in jobs
-    ]
 
 
 def build_final_eval_run_payload(
@@ -191,21 +112,19 @@ def run_final_eval(
     metadata: Mapping[str, Any] | None = None,
     seed_file_path: Path | None = None,
 ) -> dict[str, Any]:
-    resolved_policy_ids, selection_payload = resolve_final_eval_run_policy_ids(
+    plan = build_final_eval_run_plan(
         policy_ids=policy_ids,
         snapshot_registry_path=snapshot_registry_path,
         dev_eval_summaries_path=dev_eval_summaries_path,
         selection_config=selection_config,
         final_policy_set_size=final_policy_set_size,
-    )
-    validate_final_eval_run_seed_budget(
         paired_seeds=paired_seeds,
         stage1_paired_seeds=stage1_paired_seeds,
         max_paired_seeds=max_paired_seeds,
     )
     matchup_results = run_final_eval_matchup_jobs(
         output_dir=output_dir,
-        jobs=build_final_eval_matchup_jobs(resolved_policy_ids),
+        jobs=plan.matchup_jobs,
         runner=runner,
         paired_seeds=paired_seeds,
         stage1_paired_seeds=stage1_paired_seeds,
@@ -219,7 +138,7 @@ def run_final_eval(
     )
     payload = build_final_eval_run_payload(
         output_dir=output_dir,
-        policy_ids=resolved_policy_ids,
+        policy_ids=plan.policy_ids,
         matchup_results=matchup_results,
         stage1_paired_seeds=stage1_paired_seeds,
         max_paired_seeds=max_paired_seeds,
@@ -227,7 +146,7 @@ def run_final_eval(
         stop_rules=stop_rules,
         scheme=scheme,
         sample_count=sample_count,
-        selection_payload=selection_payload,
+        selection_payload=plan.selection_payload,
         metadata=metadata,
         seed_file_path=seed_file_path,
     )
@@ -236,10 +155,12 @@ def run_final_eval(
 
 
 __all__ = [
+    "FinalEvalRunPlan",
     "FinalEvalMatchupJob",
     "FinalEvalMatchupRunnerFn",
     "build_final_eval_matchup_jobs",
     "build_final_eval_run_payload",
+    "build_final_eval_run_plan",
     "resolve_final_eval_run_policy_ids",
     "run_final_eval",
     "run_final_eval_matchup_jobs",

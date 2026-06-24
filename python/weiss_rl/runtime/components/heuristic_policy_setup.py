@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_POLICY_ID,
     heuristic_public_policy_ids,

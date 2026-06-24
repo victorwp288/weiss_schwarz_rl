@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
 from weiss_rl.core.legal_actions import LegalActionBatch
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.model import StructuredLegalPolicyValueModel, build_policy_value_model
 
 from .heuristic_public_test_support import _empty_obs, _heuristic_spec_bundle, _packed_meta, _set_stage

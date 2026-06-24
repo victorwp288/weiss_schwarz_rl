@@ -5,18 +5,10 @@ from __future__ import annotations
 import sys
 from collections.abc import Sequence
 
+from weiss_rl.workflows.command_surface import PUBLIC_THESIS_COMMANDS
 from weiss_rl.workflows.parsers import _parse_args, build_parser
 from weiss_rl.workflows.planning import _repo_root
 from weiss_rl.workflows.workflow_dispatch import dispatch_workflow_command
-
-PUBLIC_THESIS_COMMANDS = (
-    "train-b1",
-    "train-main",
-    "smoke-eval",
-    "eval-final",
-    "figures",
-    "b2-audit",
-)
 
 __all__ = ["PUBLIC_THESIS_COMMANDS", "build_parser", "main"]
 

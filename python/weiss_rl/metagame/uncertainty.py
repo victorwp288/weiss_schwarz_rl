@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from weiss_rl.eval import EvalGameRecord
-from weiss_rl.eval.payoff_folding import (
+from weiss_rl.eval.analysis.payoff_folding import (
     PayoffFoldScheme,
     _normalize_scheme,
     paired_seed_scores,

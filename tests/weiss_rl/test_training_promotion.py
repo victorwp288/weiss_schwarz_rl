@@ -14,6 +14,7 @@ from weiss_rl.training.promotion import (
     resolve_symbolic_promotion_anchor_policy_id,
     slug_policy_id,
     snapshot_meta_by_policy_id,
+    trace_promotion_anchor_resolution,
 )
 
 
@@ -105,6 +106,40 @@ def test_resolve_promotion_anchor_policy_ids_returns_missing_required_only() -> 
         "Latest champion snapshot": "policy_000120",
     }
     assert missing == ("Missing Required",)
+
+
+def test_trace_promotion_anchor_resolution_explains_sources_and_missing_required() -> None:
+    registry = _registry_with_snapshots()
+    registry.add_snapshot(
+        policy_id="b1_noleague_baseline",
+        update=5,
+        weights_sha256="5" * 64,
+        path="training/snapshots/b1_noleague_baseline/weights.pt",
+    )
+    stack = SimpleNamespace(
+        config=SimpleNamespace(
+            league=SimpleNamespace(
+                promotion_anchor_set_v1=SimpleNamespace(
+                    required=("B0 RandomLegal", "B1 NoLeague baseline", "Missing Required"),
+                    optional_if_available=("B2 HeuristicPublic", "Latest champion snapshot", "Missing Optional"),
+                )
+            )
+        )
+    )
+
+    trace = trace_promotion_anchor_resolution(stack=stack, registry=registry)
+    payload = [row.as_payload() for row in trace]
+
+    assert [(row.anchor_name, row.policy_id, row.source) for row in trace] == [
+        ("B0 RandomLegal", "b0_randomlegal", "builtin_random_legal"),
+        ("B1 NoLeague baseline", "b1_noleague_baseline", "registry_candidate"),
+        ("Missing Required", None, "missing_required"),
+        ("B2 HeuristicPublic", "B2 HeuristicPublic", "builtin_heuristic_public"),
+        ("Latest champion snapshot", "policy_000120", "symbolic_registry"),
+        ("Missing Optional", None, "missing_optional"),
+    ]
+    assert payload[2]["missing_required"] is True
+    assert payload[5]["required"] is False
 
 
 def test_find_noleague_baseline_snapshot_prefers_canonical_and_legacy_ids(tmp_path) -> None:

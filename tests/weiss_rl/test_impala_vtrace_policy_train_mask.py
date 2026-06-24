@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 from weiss_rl.learners.action_logp import masked_action_logp_and_entropy
-from weiss_rl.learners.impala.vtrace_targets import resolve_impala_vtrace_targets
+from weiss_rl.learners.impala.losses.vtrace_targets import resolve_impala_vtrace_targets
 
 from .impala_test_support import ImpalaLearner, TinyPolicyValueModel, _simple_training_batch
 

@@ -8,10 +8,10 @@ from pathlib import Path
 
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import StackConfig
-from weiss_rl.eval.b1_policy_resolution import resolve_b1_policy
 from weiss_rl.eval.policies.types import ResolvedEvalPolicy
-from weiss_rl.eval.snapshot_policy_resolution import resolve_snapshot_registry_policy
-from weiss_rl.eval.snapshot_registry_resolution import SnapshotRegistrySource
+from weiss_rl.eval.snapshots.b1_policy_resolution import resolve_b1_policy
+from weiss_rl.eval.snapshots.snapshot_policy_resolution import resolve_snapshot_registry_policy
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import SnapshotRegistrySource
 from weiss_rl.league.registry import SnapshotMeta, SnapshotRegistry
 
 

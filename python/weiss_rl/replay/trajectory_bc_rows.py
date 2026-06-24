@@ -11,13 +11,13 @@ import numpy as np
 from weiss_rl.config import StackConfig
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.eval.model_action_surface import (
+from weiss_rl.eval.sampling.model_action_surface import (
     ModelActionSurfaceSettings,
     action_catalog_action_surface_batch_and_ids,
 )
 from weiss_rl.replay.bundles import ReplayStep
 from weiss_rl.replay.rerun_validation import load_observation_layout
-from weiss_rl.runtime.components.legal_meta import legal_action_meta_from_ids
+from weiss_rl.runtime.components.actions.legal_meta import legal_action_meta_from_ids
 from weiss_rl.runtime.components.teacher_labels import teacher_labels_from_actions
 
 

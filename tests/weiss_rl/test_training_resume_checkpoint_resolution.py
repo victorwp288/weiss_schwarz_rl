@@ -11,7 +11,7 @@ from .snapshot_registry_test_support import (
 
 def test_resolve_resume_checkpoint_path_defaults_to_latest_alias(tmp_path: Path) -> None:
     train_script = _load_train_script_module()
-    import weiss_rl.training.checkpointing.resolution as checkpoint_resolution
+    import weiss_rl.training.checkpointing.storage.resolution as checkpoint_resolution
     from weiss_rl.training.checkpoints import resolve_resume_checkpoint_path
 
     run_dir = tmp_path / "resume_run"

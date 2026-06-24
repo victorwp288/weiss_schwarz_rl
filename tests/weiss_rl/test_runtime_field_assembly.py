@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from weiss_rl.core.legal_actions import LegalActionBatch
-from weiss_rl.runtime.components.field_assembly import (
+from weiss_rl.runtime.components.collection.field_assembly import (
     OptionalTimeMajorFieldSpec,
     RequiredTimeMajorFieldSpec,
     base_runtime_learner_payload,

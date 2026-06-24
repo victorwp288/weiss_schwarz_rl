@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 import torch
-import weiss_rl.learners.impala.update_training_step as impala_update_training_step
-from weiss_rl.learners.impala.update_training_step import run_impala_training_optimizer_step
+import weiss_rl.learners.impala.updates.update_training_step as impala_update_training_step
+from weiss_rl.learners.impala.updates.update_training_step import run_impala_training_optimizer_step
 
 
 def test_run_impala_training_optimizer_step_validates_builds_loss_and_scales_nonfinite_gradients(

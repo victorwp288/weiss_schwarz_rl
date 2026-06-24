@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from weiss_rl.actors.actor_worker import ActorWorker
 from weiss_rl.core.masking import masked_logp_from_legal_ids, resolve_pass_action_id
-from weiss_rl.diagnostics.action_diagnostics import MAIN_MOVE_BASE
+from weiss_rl.diagnostics.probes.action_diagnostics import MAIN_MOVE_BASE
 
 from .actor_worker_test_support import (
     ACTION_SPACE,

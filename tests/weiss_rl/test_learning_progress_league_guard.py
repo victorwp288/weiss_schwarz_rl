@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from weiss_rl.diagnostics.learning_progress import build_learning_progress_summary, evaluate_league_guard
+from weiss_rl.diagnostics.progress.learning_progress import build_learning_progress_summary, evaluate_league_guard
 
 from .learning_progress_test_support import _write_json, _write_jsonl
 

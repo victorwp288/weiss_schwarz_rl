@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import torch
-from weiss_rl.models.public_heuristics import (
+from weiss_rl.models.public_heuristic.public_heuristics import (
     apply_public_heuristic_bias,
     combine_public_heuristic_scores,
 )

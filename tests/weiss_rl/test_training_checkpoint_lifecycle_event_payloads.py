@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-import weiss_rl.training.checkpointing.lifecycle_decisions as checkpoint_lifecycle_decisions
+import weiss_rl.training.checkpointing.lifecycle.lifecycle_decisions as checkpoint_lifecycle_decisions
 
 
 def test_checkpoint_lifecycle_decision_payloads_preserve_decision_diagnostics() -> None:

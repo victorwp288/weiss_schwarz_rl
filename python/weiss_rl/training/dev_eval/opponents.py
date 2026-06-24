@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Any, Protocol, TypeAlias, cast
 
 from weiss_rl.artifacts import ArtifactLayout
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policies.set import heuristic_public_profile_name_for_policy_id
 from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotRegistry
 from weiss_rl.model import PolicyValueModel
-from weiss_rl.models.loading import load_snapshot_eval_model
+from weiss_rl.models.policy.loading import load_snapshot_eval_model
 from weiss_rl.training.promotion import (
     PROMOTION_GATE_NOLEAGUE_BASELINE_NAME,
     PROMOTION_GATE_RANDOMLEGAL_NAME,

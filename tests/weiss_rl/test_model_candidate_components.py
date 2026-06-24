@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import torch
-from weiss_rl.models.candidate_components import (
+from weiss_rl.models.actions.candidate_components import (
     CandidateComponentFamilyIds,
     resolve_candidate_components,
 )

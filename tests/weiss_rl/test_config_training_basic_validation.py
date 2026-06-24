@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import pytest
-from weiss_rl.config.sections_training import parse_training_config
+from weiss_rl.config.sections.sections_training import parse_training_config
+from weiss_rl.config.sections.sections_training_sections import (
+    resolve_training_section_mappings,
+    training_config_section_map_payload,
+)
 
 from tests.weiss_rl.config_training_test_support import copy_section, training_body
 
@@ -64,3 +68,41 @@ def test_parse_training_config_preserves_nested_unknown_and_minimum_errors() -> 
     bad_unroll["rollout"] = rollout
     with pytest.raises(ValueError, match="training.rollout.unroll_length must be >= 1, got 0"):
         parse_training_config(bad_unroll)
+
+
+def test_training_section_mappings_own_nested_training_key_validation() -> None:
+    body = training_body()
+
+    sections = resolve_training_section_mappings(body)
+
+    assert sections.rollout == body["rollout"]
+    assert sections.optimizer == body["optimizer"]
+    assert sections.structured_aux == {}
+
+    bad_body = training_body()
+    precision = copy_section(bad_body, "precision")
+    precision["extra"] = True
+    bad_body["precision"] = precision
+    with pytest.raises(ValueError, match="training.precision has unsupported keys: extra"):
+        resolve_training_section_mappings(bad_body)
+
+
+def test_training_config_section_map_names_nested_sections() -> None:
+    payload = training_config_section_map_payload()
+
+    assert [section["section"] for section in payload] == [
+        "rollout",
+        "optimizer",
+        "exploration",
+        "precision",
+        "checkpointing",
+        "vtrace",
+        "ppo",
+        "structured_aux",
+        "structured_warmstart",
+        "structured_metrics",
+        "teacher_aux",
+        "action_surface",
+    ]
+    assert payload[5]["purpose"] == "IMPALA off-policy clipping constants"
+    assert payload[-1]["key_count"] > 0

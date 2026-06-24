@@ -72,7 +72,7 @@ def test_artifact_contract_plan_preserves_public_demo_and_readiness_contract_ste
     assert rendered[4]["command"] == [
         "python.exe",
         "-m",
-        "weiss_rl.diagnostics.artifact_scan_entrypoint",
+        "weiss_rl.diagnostics.hygiene.artifact_scan_entrypoint",
         "--artifact-root",
         "runs/toy_public_demo_ci",
     ]

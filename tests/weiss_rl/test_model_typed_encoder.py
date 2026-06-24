@@ -12,7 +12,7 @@ from weiss_rl.model import (
     _TypedPlayerBlockEncoder,
     _TypedSegmentEncoder,
 )
-from weiss_rl.models.typed_encoder import (
+from weiss_rl.models.observations.typed_encoder import (
     TypedObservationEncoder,
     TypedPlayerBlockEncoder,
     TypedSegmentEncoder,

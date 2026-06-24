@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from weiss_rl.runtime.components.action_surface import (
+from weiss_rl.runtime.components.actions.action_surface import (
     filter_main_move_only_rows_to_pass_from_ids,
     filter_mulligan_select_after_select_from_ids,
     filter_pass_when_attack_available_from_ids,

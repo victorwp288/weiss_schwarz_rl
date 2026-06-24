@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 import torch
-from weiss_rl.models import loading as model_loading
+from weiss_rl.models.policy import loading as model_loading
 
 
 class _FakeModel:

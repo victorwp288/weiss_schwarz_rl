@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 from weiss_rl.model import _masked_log_softmax, _sample_masked_log_probs, _sample_packed_action_scores
-from weiss_rl.models.sampling import sample_masked_log_probs, sample_packed_action_scores
+from weiss_rl.models.scoring.sampling import sample_masked_log_probs, sample_packed_action_scores
 
 
 def test_sample_masked_log_probs_is_seeded_and_preserves_empty_row_default() -> None:

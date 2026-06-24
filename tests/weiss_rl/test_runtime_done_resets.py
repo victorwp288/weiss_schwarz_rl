@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import torch
-from weiss_rl.runtime.components.done_resets import reset_actor_hidden_for_done
+from weiss_rl.runtime.components.collection.done_resets import reset_actor_hidden_for_done
 
 
 class _ContextModel:

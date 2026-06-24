@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 
-from weiss_rl.runtime.components.collector_state import CollectorUnrollState
+from weiss_rl.runtime.components.collection.collector_state import CollectorUnrollState
 from weiss_rl.runtime.components.opponent_context import opponent_context_indices_for_model
 
 if TYPE_CHECKING:
-    from weiss_rl.runtime.components.actor_state import _ActorState
+    from weiss_rl.runtime.components.actors.actor_state import _ActorState
 
 
 class CentralStepInputs(NamedTuple):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.model import PolicyValueModel
 
 

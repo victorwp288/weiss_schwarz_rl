@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import weiss_rl.training.checkpointing.finalization as checkpoint_finalization
+import weiss_rl.training.checkpointing.lifecycle.finalization as checkpoint_finalization
 
 from .final_checkpoint_selection_test_support import CheckpointHookRecorder, guard_event
 
@@ -46,6 +46,7 @@ def test_final_checkpoint_selection_helper_reloads_tracker_only_after_guard_even
     )
 
     assert selection == checkpoint_finalization.FinalCheckpointSelection(
+        source="best_guard_checkpoint",
         tracker_payload=reloaded_tracker,
         guard_event=guard,
     )

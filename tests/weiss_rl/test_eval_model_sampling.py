@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import torch
-from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
+from weiss_rl.eval.sampling.model_sampling import model_eval_logits_for_legal_ids
 
 
 class _PackedOnlyEvalModel:

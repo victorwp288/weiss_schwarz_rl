@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
-from weiss_rl.runtime.components.metrics import build_runtime_metrics
+from weiss_rl.runtime.components.batching.metrics import build_runtime_metrics
 
 
 def _runtime_unroll(

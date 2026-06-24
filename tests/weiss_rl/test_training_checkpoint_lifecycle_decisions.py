@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-import weiss_rl.training.checkpointing.lifecycle as checkpoint_lifecycle
+import weiss_rl.training.checkpointing.lifecycle.lifecycle as checkpoint_lifecycle
 
 
 def test_checkpoint_lifecycle_rollback_decision_collects_reason_and_diagnostics() -> None:

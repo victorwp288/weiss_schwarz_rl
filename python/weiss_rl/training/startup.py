@@ -6,7 +6,7 @@ from typing import Any
 
 import torch
 
-from weiss_rl.config.overrides import apply_stack_overrides
+from weiss_rl.config.loading.overrides import apply_stack_overrides
 from weiss_rl.core.simulator_contract import validate_imported_weiss_sim_runtime
 
 

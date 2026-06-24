@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from weiss_rl.core.legal_actions import LegalActionBatch
-from weiss_rl.runtime.components.legal_batching import (
+from weiss_rl.runtime.components.batching.legal_batching import (
     concatenate_batch_legal_actions,
     concatenate_legal_actions,
     require_ids_offsets,

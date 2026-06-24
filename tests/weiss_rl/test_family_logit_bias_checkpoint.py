@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 import torch
-import weiss_rl.diagnostics.checkpoint_family_bias_entrypoint as script
+import weiss_rl.diagnostics.probes.checkpoint_family_bias_entrypoint as script
 
 
 def test_parse_family_bias_offsets_merges_repeated_families() -> None:

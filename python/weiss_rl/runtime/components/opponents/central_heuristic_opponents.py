@@ -5,7 +5,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from weiss_rl.runtime.components.legal_batching import (
+from weiss_rl.runtime.components.batching.legal_batching import (
     optional_legal_action_meta,
     require_ids_offsets,
     slice_packed_rows_with_meta,

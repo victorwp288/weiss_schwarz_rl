@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import numpy as np
 import torch
-from weiss_rl.learners.impala.loss_inputs import (
+from weiss_rl.learners.impala.losses.loss_inputs import (
     prepare_impala_loss_inputs,
     resolve_impala_loss_forward_flags,
 )

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 import torch
-from weiss_rl.diagnostics.training_logger import TrainingLogger
+from weiss_rl.diagnostics.logging.training_logger import TrainingLogger
 from weiss_rl.learners.impala import ImpalaLearner
 from weiss_rl.learners.vtrace import compute_vtrace_targets
 from weiss_rl.model import PolicyValueModel

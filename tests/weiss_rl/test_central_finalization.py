@@ -6,14 +6,14 @@ from typing import Any
 
 import numpy as np
 import torch
-from weiss_rl.runtime.components.central_finalization import (
+from weiss_rl.runtime.components.central.central_finalization import (
     build_central_runtime_unrolls,
     compute_central_bootstrap_values,
 )
-from weiss_rl.runtime.components.central_unroll_assembly import (
+from weiss_rl.runtime.components.central.central_unroll_assembly import (
     build_central_runtime_unrolls as build_central_runtime_unrolls_canonical,
 )
-from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
+from weiss_rl.runtime.components.collection.collector_state import allocate_collector_unroll_state
 
 
 class _TimingEnv:
@@ -60,7 +60,7 @@ def _batch() -> SimpleNamespace:
 
 def test_central_finalization_reexports_canonical_unroll_assembly() -> None:
     assert build_central_runtime_unrolls is build_central_runtime_unrolls_canonical
-    assert build_central_runtime_unrolls.__module__ == "weiss_rl.runtime.components.central_unroll_assembly"
+    assert build_central_runtime_unrolls.__module__ == "weiss_rl.runtime.components.central.central_unroll_assembly"
 
 
 def test_compute_central_bootstrap_values_uses_structured_value_rows_without_overwrite() -> None:

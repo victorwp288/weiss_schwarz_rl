@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 import torch
-from weiss_rl.models.tensor_ops import (
+from weiss_rl.models.backbone.tensor_ops import (
     bucket_card_ids,
     derived_sample_seeds,
     factorized_local_row_indices,

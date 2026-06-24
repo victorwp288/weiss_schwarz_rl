@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from weiss_rl.training.checkpointing.finalization import TrainingFinalCheckpointHooks
-from weiss_rl.training.checkpointing.periodic_dev_eval import TrainingPeriodicDevEvalHooks
-from weiss_rl.training.checkpointing.snapshot_promotion import TrainingCheckpointPromotionHooks
+from weiss_rl.training.checkpointing.guards.periodic_dev_eval import TrainingPeriodicDevEvalHooks
+from weiss_rl.training.checkpointing.guards.snapshot_promotion import TrainingCheckpointPromotionHooks
+from weiss_rl.training.checkpointing.lifecycle.finalization import TrainingFinalCheckpointHooks
 from weiss_rl.training.loop.runner import MinimalTrainingRunHooks
 from weiss_rl.training.loop.setup import MinimalTrainingSetupHooks
 

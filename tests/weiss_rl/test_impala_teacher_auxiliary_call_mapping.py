@@ -6,8 +6,8 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
-import weiss_rl.learners.impala.teacher_auxiliary_call as impala_teacher_auxiliary_call
-from weiss_rl.learners.impala.teacher_auxiliary_request import resolve_impala_teacher_auxiliary_inputs
+import weiss_rl.learners.impala.auxiliary.teacher_auxiliary_call as impala_teacher_auxiliary_call
+from weiss_rl.learners.impala.auxiliary.teacher_auxiliary_request import resolve_impala_teacher_auxiliary_inputs
 
 from .impala_test_support import (
     ImpalaLearner,

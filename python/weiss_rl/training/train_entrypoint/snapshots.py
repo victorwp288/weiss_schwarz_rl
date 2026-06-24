@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
 from typing import Any
 
-from weiss_rl.training.train_entrypoint.checkpoints import (
+from weiss_rl.training.train_entrypoint.checkpoint_requests import (
     BuildHeuristicPublicPolicyRequest,
     EnsureNoLeagueBaselineAnchorRequest,
     ImportNoLeagueBaselineAnchorRequest,
@@ -14,6 +14,8 @@ from weiss_rl.training.train_entrypoint.checkpoints import (
     LoadSnapshotEvalModelRequest,
     SeedSnapshotPolicyIdRequest,
     ValidateSeedSnapshotImportContractRequest,
+)
+from weiss_rl.training.train_entrypoint.snapshot_hooks import (
     build_heuristic_public_policy_with_entrypoint_hooks,
     ensure_noleague_baseline_anchor_with_entrypoint_hooks,
     import_noleague_baseline_anchor_with_entrypoint_hooks,

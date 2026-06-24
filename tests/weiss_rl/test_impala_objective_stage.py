@@ -6,8 +6,8 @@ from typing import Any, cast
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.loss_objective_stage import compute_impala_objective_stage
-from weiss_rl.learners.impala.objective_loss import compute_impala_objective_losses
+from weiss_rl.learners.impala.losses.loss_objective_stage import compute_impala_objective_stage
+from weiss_rl.learners.impala.losses.objective_loss import compute_impala_objective_losses
 
 from .impala_test_support import ImpalaLearner, TinyPolicyValueModel
 

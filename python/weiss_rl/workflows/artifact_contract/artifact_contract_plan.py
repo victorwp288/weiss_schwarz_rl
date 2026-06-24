@@ -73,7 +73,7 @@ def build_artifact_contract_steps(
             "Scan toy public demo artifacts",
             _module_command(
                 python_exe,
-                "weiss_rl.diagnostics.artifact_scan_entrypoint",
+                "weiss_rl.diagnostics.hygiene.artifact_scan_entrypoint",
                 "--artifact-root",
                 toy_run_dir.as_posix(),
             ),

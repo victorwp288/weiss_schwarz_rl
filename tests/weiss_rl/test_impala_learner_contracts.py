@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import weiss_rl.learners.impala as impala_root
 from weiss_rl.learners.impala import ImpalaLearner
-from weiss_rl.learners.impala.batch_support import ImpalaBatchSupportMixin
-from weiss_rl.learners.impala.fault_support import ImpalaFaultSupportMixin
-from weiss_rl.learners.impala.forward_support import ImpalaForwardSupportMixin
-from weiss_rl.learners.impala.logging_support import ImpalaLoggingSupportMixin
-from weiss_rl.learners.impala.paired_outcome_auxiliary import ImpalaPairedOutcomeAuxiliaryMixin
-from weiss_rl.learners.impala.paired_swing_auxiliary import ImpalaPairedSwingAuxiliaryMixin
-from weiss_rl.learners.impala.policy_anchor_support import ImpalaPolicyAnchorSupportMixin
-from weiss_rl.learners.impala.public_heuristic_support import ImpalaPublicHeuristicSupportMixin
-from weiss_rl.learners.impala.structured_teacher_auxiliary import ImpalaStructuredTeacherAuxiliaryMixin
+from weiss_rl.learners.impala.auxiliary.paired_outcome_auxiliary import ImpalaPairedOutcomeAuxiliaryMixin
+from weiss_rl.learners.impala.auxiliary.paired_swing_auxiliary import ImpalaPairedSwingAuxiliaryMixin
+from weiss_rl.learners.impala.auxiliary.structured_teacher_auxiliary import ImpalaStructuredTeacherAuxiliaryMixin
+from weiss_rl.learners.impala.batching.batch_support import ImpalaBatchSupportMixin
+from weiss_rl.learners.impala.support.fault_support import ImpalaFaultSupportMixin
+from weiss_rl.learners.impala.support.forward_support import ImpalaForwardSupportMixin
+from weiss_rl.learners.impala.support.logging_support import ImpalaLoggingSupportMixin
+from weiss_rl.learners.impala.support.policy_anchor_support import ImpalaPolicyAnchorSupportMixin
+from weiss_rl.learners.impala.support.public_heuristic_support import ImpalaPublicHeuristicSupportMixin
 
 
 def test_impala_learner_root_star_export_is_learner_only() -> None:

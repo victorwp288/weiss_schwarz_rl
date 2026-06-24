@@ -7,9 +7,11 @@ from weiss_rl.config import compute_config_hash256, load_stack_config
 from weiss_rl.config import load_study_config as load_study_config
 from weiss_rl.core.simulator_contract import load_verified_simulator_contract
 from weiss_rl.core.spec import assert_spec_bundle_contract
-from weiss_rl.diagnostics.cli_banner import print_startup_banner
-from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger as TensorBoardLogger
-from weiss_rl.diagnostics.tensorboard_logger import tensorboard_unavailable_reason as tensorboard_unavailable_reason
+from weiss_rl.diagnostics.logging.cli_banner import print_startup_banner
+from weiss_rl.diagnostics.logging.tensorboard_logger import TensorBoardLogger as TensorBoardLogger
+from weiss_rl.diagnostics.logging.tensorboard_logger import (
+    tensorboard_unavailable_reason as tensorboard_unavailable_reason,
+)
 from weiss_rl.eval import (
     build_matchup_export,
     build_seat_advantage_diagnostics,
@@ -24,8 +26,8 @@ from weiss_rl.eval import load_dev_eval_summaries as load_dev_eval_summaries
 from weiss_rl.eval import run_final_eval as run_final_eval
 from weiss_rl.eval import write_paper_readiness_json as write_paper_readiness_json
 from weiss_rl.eval.policies.set import recommend_focal_policy_id as recommend_focal_policy_id
-from weiss_rl.eval.simulator_runner import SimulatorEvalRunner as SimulatorEvalRunner
-from weiss_rl.eval.simulator_runner import resolve_eval_policies as resolve_eval_policies
+from weiss_rl.eval.simulator.simulator_runner import SimulatorEvalRunner as SimulatorEvalRunner
+from weiss_rl.eval.simulator.simulator_runner import resolve_eval_policies as resolve_eval_policies
 from weiss_rl.experiments.toy_public_demo import (
     public_demo_spec_bundle,
     public_demo_spec_hash256,

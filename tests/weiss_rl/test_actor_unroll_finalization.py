@@ -6,12 +6,12 @@ from typing import Any
 
 import numpy as np
 import torch
-from weiss_rl.runtime.components.actor_unroll_finalization import (
+from weiss_rl.runtime.components.actors.actor_unroll_finalization import (
     ActorUnrollFinalizationCallbacks,
     ActorUnrollFinalizationInputs,
     finalize_generic_actor_unroll,
 )
-from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
+from weiss_rl.runtime.components.collection.collector_state import allocate_collector_unroll_state
 
 
 class _TimingEnv:

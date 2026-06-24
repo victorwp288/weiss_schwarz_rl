@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import torch
-from weiss_rl.training.checkpointing.restore import CheckpointPayloadContract
+from weiss_rl.training.checkpointing.storage.restore import CheckpointPayloadContract
 
 
 class RestoreModelDouble:

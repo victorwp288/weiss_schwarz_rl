@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from weiss_rl.runtime.components.central_actor_action import (
+from weiss_rl.runtime.components.central.central_actor_action import (
     execute_mask_central_actor_action,
     execute_packed_central_actor_action,
 )
@@ -15,7 +15,7 @@ from weiss_rl.runtime.components.collection.central_actor_action_context import 
     PackedCentralActorActionCallbacks,
     PackedCentralActorActionMode,
 )
-from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
+from weiss_rl.runtime.components.collection.collector_state import allocate_collector_unroll_state
 from weiss_rl.runtime.components.teacher_labels import teacher_label_arrays
 
 

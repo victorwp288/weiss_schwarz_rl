@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import torch
-from weiss_rl.learners.impala.teacher_target_inputs import (
+from weiss_rl.learners.impala.auxiliary.teacher_target_inputs import (
     prepare_impala_teacher_target_inputs,
     resolve_impala_teacher_target_plan,
 )

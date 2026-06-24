@@ -7,7 +7,7 @@ from .eval_dispatch_test_support import dispatch_dependencies, parser, runtime_s
 
 
 def test_eval_dispatch_routes_canonical_with_normalized_args(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_support.eval_dispatch import run_eval_dispatch
+    from weiss_rl.workflows.eval_support.dispatch.eval_dispatch import run_eval_dispatch
 
     observed: dict[str, object] = {}
     stack = seed_stack(tmp_path)

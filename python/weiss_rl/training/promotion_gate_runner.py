@@ -9,20 +9,20 @@ from typing import Any
 import numpy as np
 import torch
 
-from weiss_rl.diagnostics.action_diagnostics import (
+from weiss_rl.diagnostics.probes.action_diagnostics import (
     ActionSummaryCounters,
     make_action_sequence_state,
     update_eval_action_counters,
 )
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
 from weiss_rl.eval import Pcg32XshRrV1, game_result_from_step, sample_action_pinned, select_action_argmax_pinned
-from weiss_rl.eval.harness import ScheduledGame, abort_on_engine_fault_eval
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
-from weiss_rl.eval.model_action_surface import (
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.sampling.model_action_surface import (
     ModelActionSurfaceSettings,
     model_action_surface_batch_and_ids,
 )
-from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
+from weiss_rl.eval.sampling.model_sampling import model_eval_logits_for_legal_ids
+from weiss_rl.eval.simulator.harness import ScheduledGame, abort_on_engine_fault_eval
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.training.dev_eval.runtime_contracts import legal_ids_for_env_row
 from weiss_rl.training.dev_eval.seed_schedule import promotion_gate_rng_seed

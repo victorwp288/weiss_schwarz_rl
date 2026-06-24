@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from weiss_rl.training.checkpointing.snapshot_promotion import (
+from weiss_rl.training.checkpointing.guards.snapshot_promotion import (
     TrainingCheckpointPromotionHooks as TrainingCheckpointPromotionHooks,
 )
-from weiss_rl.training.checkpointing.snapshot_promotion import (
+from weiss_rl.training.checkpointing.guards.snapshot_promotion import (
     league_reference_update_from_metrics as _league_reference_update_from_metrics,
 )
-from weiss_rl.training.checkpointing.snapshot_promotion import (
+from weiss_rl.training.checkpointing.guards.snapshot_promotion import (
     maybe_checkpoint_and_promote_snapshot as _maybe_checkpoint_and_promote_snapshot,
 )
 

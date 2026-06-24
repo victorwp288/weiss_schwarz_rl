@@ -8,18 +8,10 @@ from typing import Any, cast
 
 from scipy.stats import beta as beta_dist
 
-from weiss_rl.eval.policies.set import (
-    HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
-    HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
-    HEURISTIC_PUBLIC_POLICY_ID,
-    LEGACY_NO_LEAGUE_POLICY_ID,
-    NO_LEAGUE_POLICY_ID,
-    RANDOM_LEGAL_POLICY_ID,
-)
 from weiss_rl.eval.readiness import final_eval_summary as _final_eval
+from weiss_rl.eval.readiness.baseline_guardrail import build_baseline_check, infer_focal_policy_id
 from weiss_rl.eval.readiness.fields import (
     as_int,
-    as_optional_float,
     load_json_object,
 )
 
@@ -27,9 +19,7 @@ canonical_unordered_matchups = _final_eval.canonical_unordered_matchups
 load_matchup_diagnostics = _final_eval.load_matchup_diagnostics
 matchup_policy_index = _final_eval.matchup_policy_index
 matchups = _final_eval.matchups
-matrix = _final_eval.matrix
 matrix_cell = _final_eval.matrix_cell
-metadata_focal_policy_id = _final_eval.metadata_focal_policy_id
 nested_optional_string = _final_eval.nested_optional_string
 policy_ids = _final_eval.policy_ids
 posterior_samples = _final_eval.posterior_samples
@@ -198,129 +188,12 @@ def build_seat_bias_check(
     return result
 
 
-def build_baseline_check(
-    payload: Mapping[str, Any],
-    *,
-    policy_ids: Sequence[str],
-    focal_policy_id: str | None,
-    baseline_policy_id: str,
-    win_rate_threshold: float,
-    posterior_min: float,
-) -> dict[str, Any]:
-    resolved_focal_policy_id = focal_policy_id
-    focal_policy_source = "explicit_arg" if focal_policy_id is not None else None
-    inferred_eligible_policy_ids: list[str] | None = None
-
-    if resolved_focal_policy_id is None:
-        inferred = infer_focal_policy_id(
-            payload,
-            policy_ids,
-            baseline_policy_id=baseline_policy_id,
-        )
-        resolved_focal_policy_id = cast(str | None, inferred["focal_policy_id"])
-        focal_policy_source = cast(str | None, inferred["source"])
-        inferred_eligible_policy_ids = cast(list[str] | None, inferred.get("eligible_non_baseline_policy_ids"))
-
-    result: dict[str, Any] = {
-        "passed": False,
-        "baseline_policy_id": baseline_policy_id,
-        "focal_policy_id": resolved_focal_policy_id,
-        "focal_policy_source": focal_policy_source,
-        "win_rate_threshold": win_rate_threshold,
-        "posterior_probability_threshold": posterior_min,
-    }
-    if inferred_eligible_policy_ids is not None:
-        result["eligible_non_baseline_policy_ids"] = inferred_eligible_policy_ids
-
-    if baseline_policy_id not in policy_ids:
-        result["reason"] = "baseline_policy_missing_from_final_eval"
-        return result
-    if resolved_focal_policy_id is None:
-        if inferred_eligible_policy_ids:
-            result["reason"] = "ambiguous_non_baseline_focal_policy"
-            result["message"] = (
-                "multiple eligible non-baseline policies found; "
-                "pass --focal-policy-id to choose the focal policy explicitly"
-            )
-        else:
-            result["reason"] = "could_not_infer_non_baseline_focal_policy"
-        return result
-    if resolved_focal_policy_id not in policy_ids:
-        result["reason"] = "focal_policy_missing_from_final_eval"
-        return result
-    if resolved_focal_policy_id == baseline_policy_id:
-        result["reason"] = "focal_policy_matches_baseline_policy"
-        return result
-
-    focal_index = policy_ids.index(resolved_focal_policy_id)
-    baseline_index = policy_ids.index(baseline_policy_id)
-    posterior_sample_values = posterior_samples(payload, focal_index=focal_index, opponent_index=baseline_index)
-    has_payoff_samples = bool(matrix_cell(payload, field="has_payoff_samples", row=focal_index, column=baseline_index))
-    mean = as_optional_float(matrix_cell(payload, field="mean", row=focal_index, column=baseline_index))
-    ci_low = as_optional_float(matrix_cell(payload, field="ci_low", row=focal_index, column=baseline_index))
-    ci_high = as_optional_float(matrix_cell(payload, field="ci_high", row=focal_index, column=baseline_index))
-    paired_seed_count = as_int(
-        matrix_cell(payload, field="paired_seed_count", row=focal_index, column=baseline_index),
-        context="paired_seed_count",
-    )
-    stop_reason = str(matrix_cell(payload, field="stop_reason", row=focal_index, column=baseline_index))
-    prob_gt_threshold = (
-        sum(1 for sample in posterior_sample_values if sample > win_rate_threshold) / len(posterior_sample_values)
-        if posterior_sample_values
-        else None
-    )
-
-    result.update(
-        {
-            "has_payoff_samples": has_payoff_samples,
-            "mean": mean,
-            "ci_low": ci_low,
-            "ci_high": ci_high,
-            "paired_seed_count": paired_seed_count,
-            "stop_reason": stop_reason,
-            "sample_count": len(posterior_sample_values),
-            "prob_gt_threshold": prob_gt_threshold,
-        }
-    )
-
-    if not has_payoff_samples or mean is None or prob_gt_threshold is None:
-        result["reason"] = "baseline_matchup_has_no_payoff_samples"
-        return result
-
-    result["passed"] = prob_gt_threshold >= posterior_min
-    return result
-
-
-def infer_focal_policy_id(
-    payload: Mapping[str, Any],
-    policy_ids: Sequence[str],
-    *,
-    baseline_policy_id: str,
-) -> dict[str, Any]:
-    metadata_policy_id = metadata_focal_policy_id(payload)
-    if metadata_policy_id is not None:
-        return {
-            "focal_policy_id": metadata_policy_id,
-            "source": "metadata",
-        }
-
-    baseline_ids = {
-        RANDOM_LEGAL_POLICY_ID,
-        NO_LEAGUE_POLICY_ID,
-        LEGACY_NO_LEAGUE_POLICY_ID,
-        HEURISTIC_PUBLIC_POLICY_ID,
-        HEURISTIC_PUBLIC_AGGRO_POLICY_ID,
-        HEURISTIC_PUBLIC_CONTROL_POLICY_ID,
-        baseline_policy_id,
-    }
-    eligible_policy_ids = [policy_id for policy_id in policy_ids if policy_id not in baseline_ids]
-    if len(eligible_policy_ids) == 1:
-        return {
-            "focal_policy_id": eligible_policy_ids[0],
-            "source": "sole_eligible_non_baseline",
-        }
-    return {
-        "focal_policy_id": None,
-        "source": None,
-        "eligible_non_baseline_policy_ids": eligible_policy_ids,
-    }
+__all__ = [
+    "build_baseline_check",
+    "build_final_eval_guardrail_summary",
+    "build_seat_bias_check",
+    "build_truncation_check",
+    "infer_focal_policy_id",
+    "matrix_cell",
+    "posterior_samples",
+]

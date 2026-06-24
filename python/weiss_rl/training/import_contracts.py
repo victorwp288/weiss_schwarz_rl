@@ -25,7 +25,7 @@ from weiss_rl.experiments.baselines import (
 from weiss_rl.experiments.baselines import (
     selected_candidate_is_locked_b1 as _selected_candidate_is_locked_b1,
 )
-from weiss_rl.models.state_dict_compat import state_dict_key_mismatch_for_context_compat
+from weiss_rl.models.policy.state_dict_compat import state_dict_key_mismatch_for_context_compat
 from weiss_rl.training.run_metadata import load_json_object
 
 MODEL_IMPORT_COMPATIBILITY_IGNORED_KEYS = frozenset(

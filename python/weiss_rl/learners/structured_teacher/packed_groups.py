@@ -8,7 +8,7 @@ import torch
 from torch import Tensor
 
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.learners.structured_auxiliary import PackedStructuredLegalView, packed_group_log_probs
+from weiss_rl.learners.structured_legal_view import PackedStructuredLegalView, packed_group_log_probs
 from weiss_rl.learners.structured_teacher.common import record_teacher_family_coverage
 from weiss_rl.learners.tensor_ops import weighted_mean
 

@@ -9,7 +9,7 @@ import torch
 
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotRegistry
-from weiss_rl.models.state_dict_compat import state_dict_key_mismatch_for_context_compat
+from weiss_rl.models.policy.state_dict_compat import state_dict_key_mismatch_for_context_compat
 from weiss_rl.training.import_contracts import (
     canonical_config_sections,
     config_sections_match_for_import_contract,

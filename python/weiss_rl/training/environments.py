@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from weiss_rl.envs.decision_env import DecisionBoundaryEnv
-from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
+from weiss_rl.envs.env_config import build_env_config_from_stack
+from weiss_rl.envs.pool_factory import make_env_pool_from_config
 
 
 def spec_dimensions(contract: Any) -> tuple[int, int]:

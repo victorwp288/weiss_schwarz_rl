@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import numpy as np
 from weiss_rl.runtime import QueueRuntime
-from weiss_rl.runtime.components.counters import collector_counter_template
+from weiss_rl.runtime.components.batching.counters import collector_counter_template
 from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
 
 from .runtime_opponent_role_assignment_test_support import role_actor, role_assignment_runtime

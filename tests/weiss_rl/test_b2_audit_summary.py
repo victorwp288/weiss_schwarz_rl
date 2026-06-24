@@ -4,7 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from weiss_rl.diagnostics import b2_audit_aggregation as aggregation
+from weiss_rl.diagnostics.b2_audit import b2_audit_aggregation as aggregation
+from weiss_rl.diagnostics.b2_audit.b2_audit_reports import b2_audit_plan_payload
 
 from .b2_disagreement_audit_test_support import _numeric_summary, weighted_audit_bundle_summaries
 
@@ -33,6 +34,14 @@ def test_aggregate_audit_summary_ranks_repeated_family_pairs_and_weighted_means(
     )
 
     assert summary["status"] == "ok"
+    assert summary["audit_plan"] == b2_audit_plan_payload()
+    assert [step["step_id"] for step in summary["audit_plan"]] == [
+        "reuse_source_seeds",
+        "resolve_policies",
+        "rerun_matchup",
+        "inspect_replays",
+        "aggregate_findings",
+    ]
     assert summary["opponent_policy_id"] == "B2 HeuristicPublic"
     assert summary["games"] == 4
     assert summary["bundle_count"] == 2

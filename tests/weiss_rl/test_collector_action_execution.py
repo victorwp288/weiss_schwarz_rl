@@ -3,8 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
-from weiss_rl.diagnostics.action_diagnostics import make_action_sequence_state
-from weiss_rl.runtime.components.collector_action_execution import (
+from weiss_rl.diagnostics.probes.action_diagnostics import make_action_sequence_state
+from weiss_rl.runtime.components.collection.collector_action_execution import (
     fused_step_mask_from_logits,
     fused_step_packed_from_logits_with_logp,
     record_mask_action_summary,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy.testing as npt
 import torch
-from weiss_rl.models.public_heuristics import (
+from weiss_rl.models.public_heuristic.public_heuristics import (
     PUBLIC_HEURISTIC_FRONT_ROW_SLOTS,
     public_attack_profile,
     public_heuristic_slot_preference_array,

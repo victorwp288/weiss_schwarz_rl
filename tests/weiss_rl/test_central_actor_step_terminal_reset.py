@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from weiss_rl.runtime.components.central_actor_step import execute_central_actor_step
+from weiss_rl.runtime.components.central.central_actor_step import execute_central_actor_step
 
 from .central_actor_step_test_support import (
     StepEnv,

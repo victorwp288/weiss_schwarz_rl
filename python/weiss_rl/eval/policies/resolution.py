@@ -6,54 +6,54 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from weiss_rl.config import StackConfig
-from weiss_rl.eval.b1_policy_resolution import (
-    candidate_b1_run_dirs as _candidate_b1_run_dirs,
-)
-from weiss_rl.eval.b1_policy_resolution import (
-    config_marks_noleague_baseline as _config_marks_noleague_baseline,
-)
-from weiss_rl.eval.b1_policy_resolution import (
-    find_b1_snapshot as _find_b1_snapshot,
-)
-from weiss_rl.eval.b1_policy_resolution import (
-    resolve_b1_policy as _resolve_b1_policy,
-)
-from weiss_rl.eval.policies.resolution_context import EvalPolicyResolutionContext
-from weiss_rl.eval.policies.set import (
+from weiss_rl.eval.policies.fixed_panel import (
     NO_LEAGUE_POLICY_ID,
 )
+from weiss_rl.eval.policies.resolution_context import EvalPolicyResolutionContext
 from weiss_rl.eval.policies.types import ResolvedEvalPolicy
-from weiss_rl.eval.snapshot_model_loading import (
+from weiss_rl.eval.snapshots.b1_policy_resolution import (
+    candidate_b1_run_dirs as _candidate_b1_run_dirs,
+)
+from weiss_rl.eval.snapshots.b1_policy_resolution import (
+    config_marks_noleague_baseline as _config_marks_noleague_baseline,
+)
+from weiss_rl.eval.snapshots.b1_policy_resolution import (
+    find_b1_snapshot as _find_b1_snapshot,
+)
+from weiss_rl.eval.snapshots.b1_policy_resolution import (
+    resolve_b1_policy as _resolve_b1_policy,
+)
+from weiss_rl.eval.snapshots.snapshot_model_loading import (
     load_snapshot_eval_model as _load_snapshot_eval_model,
 )
-from weiss_rl.eval.snapshot_model_loading import (
+from weiss_rl.eval.snapshots.snapshot_model_loading import (
     observation_spec_from_bundle as _observation_spec_from_bundle,
 )
-from weiss_rl.eval.snapshot_policy_resolution import (
+from weiss_rl.eval.snapshots.snapshot_policy_resolution import (
     resolve_snapshot_registry_policy as _resolve_snapshot_registry_policy,
 )
-from weiss_rl.eval.snapshot_registry_resolution import (
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import (
     common_search_root as _common_search_root,
 )
-from weiss_rl.eval.snapshot_registry_resolution import (
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import (
     is_recursive_registry_search_root as _is_recursive_registry_search_root,
 )
-from weiss_rl.eval.snapshot_registry_resolution import (
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import (
     resolve_snapshot_registry_run_dir as _resolve_snapshot_registry_run_dir_impl,
 )
-from weiss_rl.eval.snapshot_registry_resolution import (
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import (
     sha256_file as _sha256_file,
 )
-from weiss_rl.eval.snapshot_registry_resolution import (
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import (
     should_include_common_search_root as _should_include_common_search_root,
 )
-from weiss_rl.eval.snapshot_registry_resolution import (
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import (
     snapshot_by_policy_id_or_imported_seed_suffix as _snapshot_by_policy_id_or_imported_seed_suffix,
 )
-from weiss_rl.eval.snapshot_registry_resolution import (
+from weiss_rl.eval.snapshots.snapshot_registry_resolution import (
     unique_paths as _unique_paths,
 )
-from weiss_rl.eval.static_policy_resolution import (
+from weiss_rl.eval.snapshots.static_policy_resolution import (
     resolve_static_eval_policy as _resolve_static_eval_policy,
 )
 from weiss_rl.league.registry import SnapshotRegistry

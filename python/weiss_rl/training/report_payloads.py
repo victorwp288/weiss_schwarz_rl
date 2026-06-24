@@ -3,8 +3,108 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingRunEvidenceArtifact:
+    path: str
+    purpose: str
+    required_for: tuple[str, ...]
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "purpose": self.purpose,
+            "required_for": list(self.required_for),
+        }
+
+
+TRAINING_RUN_EVIDENCE_ARTIFACTS: tuple[TrainingRunEvidenceArtifact, ...] = (
+    TrainingRunEvidenceArtifact(
+        path="manifest.json",
+        purpose="run identity, config hash, spec hash, and simulator provenance",
+        required_for=("all retained runs", "paper readiness"),
+    ),
+    TrainingRunEvidenceArtifact(
+        path="run_summary.json",
+        purpose="reader-facing run status, policy selection, controls, and evidence pointers",
+        required_for=("all retained runs",),
+    ),
+    TrainingRunEvidenceArtifact(
+        path="determinism_report.json",
+        purpose="seed, runtime, and reproducibility context for the run",
+        required_for=("all retained runs", "paper readiness"),
+    ),
+    TrainingRunEvidenceArtifact(
+        path="training/logs/training_metrics.jsonl",
+        purpose="per-update learner, runtime, reward, checkpoint, and diagnostic metrics",
+        required_for=("training evidence", "learning diagnostics"),
+    ),
+    TrainingRunEvidenceArtifact(
+        path="training/checkpoints/checkpoint_tracker.json",
+        purpose="latest, best, selected, and finalized checkpoint aliases",
+        required_for=("checkpoint selection", "final evaluation"),
+    ),
+    TrainingRunEvidenceArtifact(
+        path="training/snapshots/registry.json",
+        purpose="policy snapshot registry used by promotion and final policy-set resolution",
+        required_for=("policy selection", "final evaluation"),
+    ),
+    TrainingRunEvidenceArtifact(
+        path="training/logs/periodic_dev_eval_summaries.json",
+        purpose="training-time anchor scores used as checkpoint and selection evidence",
+        required_for=("learning quality", "policy selection"),
+    ),
+    TrainingRunEvidenceArtifact(
+        path="eval/final_eval/summary.json",
+        purpose="retained fixed-panel evaluation summary and policy-selection metadata",
+        required_for=("thesis evidence", "paper readiness"),
+    ),
+    TrainingRunEvidenceArtifact(
+        path="paper_readiness_summary.json",
+        purpose="run-tree contract result for paper-grade retained evidence",
+        required_for=("paper readiness",),
+    ),
+)
+
+
+def training_run_evidence_artifact_payload() -> list[dict[str, object]]:
+    return [artifact.as_payload() for artifact in TRAINING_RUN_EVIDENCE_ARTIFACTS]
+
+
+def policy_selection_report_payload(policy_set_selection_details: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the compact policy-selection block used by top-level run reports."""
+
+    payload: dict[str, Any] = {
+        "mode": policy_set_selection_details.get("mode", "unresolved"),
+        "status": policy_set_selection_details.get("status", "unresolved"),
+    }
+    for key in ("version", "final_policy_set_size", "selected_policy_count", "missing_inputs", "source_paths"):
+        if key in policy_set_selection_details:
+            payload[key] = policy_set_selection_details[key]
+    if "reason" in policy_set_selection_details:
+        payload["reason"] = policy_set_selection_details["reason"]
+
+    selection_trace = policy_set_selection_details.get("selection_trace")
+    if isinstance(selection_trace, Sequence) and not isinstance(selection_trace, (str, bytes)):
+        payload["selection_reasons"] = _selection_reason_rows(selection_trace)
+    return payload
+
+
+def _selection_reason_rows(selection_trace: Sequence[object]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for raw_entry in selection_trace:
+        if not isinstance(raw_entry, Mapping):
+            continue
+        policy_id = raw_entry.get("policy_id")
+        reason = raw_entry.get("reason")
+        if not isinstance(policy_id, str) or not isinstance(reason, str):
+            continue
+        rows.append({"policy_id": policy_id, "reason": reason})
+    return rows
 
 
 def training_controls_payload(training_config: Any | None) -> dict[str, str | bool | float] | None:
@@ -59,7 +159,9 @@ def augment_run_summary_payload(
     """Apply train-entrypoint fields to the run summary payload."""
 
     payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(runtime_mode)
+    payload["run_evidence_artifacts"] = training_run_evidence_artifact_payload()
     payload["policy_set_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
+    payload["policy_set_selection"] = policy_selection_report_payload(policy_set_selection_details)
     training_controls = training_controls_payload(training_config)
     if training_controls is not None:
         payload["training_controls"] = training_controls
@@ -94,6 +196,7 @@ def augment_determinism_payload(
 
     payload["runtime_mode"] = "public_demo" if public_demo_enabled else str(runtime_mode)
     payload["policy_selection_mode"] = policy_set_selection_details.get("mode", "unresolved")
+    payload["policy_selection"] = policy_selection_report_payload(policy_set_selection_details)
     training_controls = training_controls_payload(training_config)
     if training_controls is not None:
         payload["training_controls"] = training_controls

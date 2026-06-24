@@ -5,8 +5,8 @@ from typing import Any, cast
 
 import pytest
 import torch
-import weiss_rl.learners.impala.loss_teacher_stage as impala_loss_teacher_stage
-from weiss_rl.learners.impala.loss_teacher_stage import apply_impala_teacher_auxiliary_stage
+import weiss_rl.learners.impala.losses.loss_teacher_stage as impala_loss_teacher_stage
+from weiss_rl.learners.impala.losses.loss_teacher_stage import apply_impala_teacher_auxiliary_stage
 
 
 def test_apply_impala_teacher_auxiliary_stage_maps_loss_inputs_and_resolver(

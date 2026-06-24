@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from weiss_rl.artifacts.reproducibility import key256_to_short64
-from weiss_rl.eval.harness import GameResult, run_seat_swapped_matchup
+from weiss_rl.eval.simulator.harness import GameResult, run_seat_swapped_matchup
 
 from tests.weiss_rl.eval_harness_test_support import _CONFIG_HASH256, _RUN_ID256, _SPEC_HASH256, _FakeRunner
 

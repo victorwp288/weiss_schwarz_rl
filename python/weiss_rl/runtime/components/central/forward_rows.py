@@ -9,11 +9,11 @@ import numpy as np
 import torch
 
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
+from weiss_rl.runtime.components.batching.legal_batching import concatenate_batch_legal_actions
 from weiss_rl.runtime.components.central.model_hooks import actor_inference_model, model_accepts_legal_actions_kwarg
-from weiss_rl.runtime.components.legal_batching import concatenate_batch_legal_actions
 
 if TYPE_CHECKING:
-    from weiss_rl.runtime.components.actor_state import _ActorState
+    from weiss_rl.runtime.components.actors.actor_state import _ActorState
 
 
 class QueueRuntimeCentralForwardRowsMixin:

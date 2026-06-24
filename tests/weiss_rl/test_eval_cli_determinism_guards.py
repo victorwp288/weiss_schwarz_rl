@@ -8,7 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 ENTRYPOINT_MODULES = {
-    "parallel_final_eval": "weiss_rl.eval.parallel_final_eval_entrypoint",
+    "parallel_final_eval": "weiss_rl.eval.parallel.parallel_final_eval_entrypoint",
     "targeted_confirm_eval": "weiss_rl.eval.targeted_confirm.entrypoint",
 }
 

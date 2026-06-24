@@ -123,3 +123,13 @@ def test_training_update_stage_pipeline_preserves_stage_order_and_payloads() -> 
         "profile_timers": True,
         "profile_block": hooks.profile_block,
     }
+
+
+def test_training_update_stage_plan_names_the_public_update_sequence() -> None:
+    assert [(stage.name, stage.purpose) for stage in training_update_stage_pipeline.TRAINING_UPDATE_STAGE_PLAN] == [
+        ("schedule", "apply guidance and entropy settings for the next learner update"),
+        ("collect", "collect one runtime learner batch and runtime metrics"),
+        ("learner", "apply the learner update to the collected batch"),
+        ("replay", "run optional post-update replay phases against the updated learner"),
+        ("complete", "merge runtime, schedule, replay, and snapshot metrics"),
+    ]

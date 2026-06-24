@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.eval.harness import game_result_from_step
+from weiss_rl.eval.simulator.harness import game_result_from_step
 from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
 
 OUTCOME_COUNTER_PREFIX = "outcome_v1|"

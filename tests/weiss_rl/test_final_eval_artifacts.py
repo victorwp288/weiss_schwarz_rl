@@ -7,9 +7,30 @@ from pathlib import Path
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.eval import final_eval as final_eval_module
 from weiss_rl.eval.final.artifacts import (
+    FINAL_EVAL_ARTIFACT_WRITE_PLAN,
+    final_eval_artifact_paths,
+    final_eval_artifact_write_plan_payload,
     final_eval_matchup_manifest_rows,
     write_final_eval_artifacts,
 )
+
+
+def test_final_eval_artifact_write_plan_documents_outputs(tmp_path: Path) -> None:
+    paths = final_eval_artifact_paths(output_dir=tmp_path / "final_eval", layout=None)
+
+    assert [step.step_id for step in FINAL_EVAL_ARTIFACT_WRITE_PLAN] == [
+        "core_json",
+        "posterior_npz",
+        "matrix_exports",
+        "matchup_manifest",
+        "aggregate_episodes",
+        "canonical_sidecars",
+    ]
+    payload = final_eval_artifact_write_plan_payload()
+    assert payload[0]["output_paths"] == ["metadata.json", "policy_set.json", "summary.json", "posterior_samples.json"]
+    assert "eval/final_eval/artifact_hashes.json" in payload[-1]["output_paths"]
+    assert paths.summary_json == tmp_path / "final_eval" / "summary.json"
+    assert paths.matchups_csv == tmp_path / "final_eval" / "matchups.csv"
 
 
 def test_final_eval_artifact_writer_preserves_direct_output_shape(tmp_path: Path) -> None:

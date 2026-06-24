@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.eval.model_action_surface import (
+from weiss_rl.eval.sampling.model_action_surface import (
     ModelActionSurfaceSettings,
     model_action_surface_batch_and_ids,
 )

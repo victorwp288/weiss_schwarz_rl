@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 import torch
-import weiss_rl.learners.impala.loss_teacher_targets_stage as impala_loss_teacher_targets_stage
-from weiss_rl.learners.impala.loss_teacher_targets_stage import prepare_impala_loss_teacher_target_inputs
+import weiss_rl.learners.impala.losses.loss_teacher_targets_stage as impala_loss_teacher_targets_stage
+from weiss_rl.learners.impala.losses.loss_teacher_targets_stage import prepare_impala_loss_teacher_target_inputs
 
 
 def test_prepare_impala_loss_teacher_target_inputs_maps_forward_state_and_flags(

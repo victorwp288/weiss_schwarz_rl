@@ -4,6 +4,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
+from weiss_rl.workflows.command_surface import public_workflow_command
 from weiss_rl.workflows.evaluation_workflow.dispatch import dispatch_evaluation_request
 from weiss_rl.workflows.evaluation_workflow.plan_state import EvaluationWorkflowRequest, evaluation_workflow_request
 from weiss_rl.workflows.training_workflow.dispatch import dispatch_training_request
@@ -41,11 +42,14 @@ def workflow_dispatch_request(
 
 
 def dispatch_workflow_request(request: WorkflowDispatchRequest) -> bool:
-    if dispatch_training_request(request.training_request()):
-        return True
-    if dispatch_evaluation_request(request.evaluation_request()):
-        return True
-    return False
+    command = public_workflow_command(request.command)
+    if command is None:
+        return False
+    if command.group == "training":
+        return dispatch_training_request(request.training_request())
+    if command.group == "evaluation":
+        return dispatch_evaluation_request(request.evaluation_request())
+    raise AssertionError(f"Unhandled workflow command group: {command.group}")
 
 
 def dispatch_workflow_command(*, args: argparse.Namespace, repo_root: Path, python_exe: str) -> bool:

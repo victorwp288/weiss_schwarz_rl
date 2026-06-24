@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
+from weiss_rl.runtime.components.collection.collector_state import allocate_collector_unroll_state
 
 
 def test_allocate_collector_unroll_state_sets_expected_dtypes_and_shapes() -> None:

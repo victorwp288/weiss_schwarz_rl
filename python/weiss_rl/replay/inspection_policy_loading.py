@@ -13,11 +13,11 @@ import torch
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.config import StackConfig, compute_config_hash256
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
 from weiss_rl.eval.policies.set import heuristic_public_profile_name_for_policy_id
 from weiss_rl.league.registry import REGISTRY_FILENAME, SnapshotMeta, SnapshotRegistry
 from weiss_rl.model import PolicyValueModel, build_policy_value_model
-from weiss_rl.models.state_dict_compat import load_model_state_dict_with_context_compat
+from weiss_rl.models.policy.state_dict_compat import load_model_state_dict_with_context_compat
 
 
 @dataclass(frozen=True, slots=True)

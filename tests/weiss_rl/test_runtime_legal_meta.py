@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.runtime.components.legal_meta import (
+from weiss_rl.runtime.components.actions.legal_meta import (
     action_catalog_indices,
     ensure_legal_action_meta,
     legal_action_meta_from_ids,

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import torch
-from weiss_rl.learners.impala.loss_forward_context import build_impala_forward_context
+from weiss_rl.learners.impala.losses.loss_forward_context import build_impala_forward_context
 
 
 def test_build_impala_forward_context_detaches_outputs_and_checks_finiteness() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from weiss_rl.training.checkpointing.periodic_dev_eval_confirmatory import (
+from weiss_rl.training.checkpointing.guards.periodic_dev_eval_confirmatory import (
     PeriodicDevEvalEffectiveSummary,
     checkpoint_tracker_best_record,
     maybe_run_confirmatory_dev_eval,

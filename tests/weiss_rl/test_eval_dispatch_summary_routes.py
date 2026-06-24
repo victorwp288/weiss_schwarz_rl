@@ -7,7 +7,7 @@ from .eval_dispatch_test_support import dispatch_dependencies, parser, runtime_s
 
 
 def test_eval_dispatch_routes_summary_only_with_dependency_bundle(tmp_path: Path, capsys) -> None:
-    from weiss_rl.workflows.eval_support.eval_dispatch import run_eval_dispatch
+    from weiss_rl.workflows.eval_support.dispatch.eval_dispatch import run_eval_dispatch
 
     observed: dict[str, object] = {}
     stack = seed_stack(tmp_path)
@@ -59,7 +59,7 @@ def test_eval_dispatch_routes_summary_only_with_dependency_bundle(tmp_path: Path
 
 
 def test_eval_dispatch_contract_check_only_skips_route_adapters(tmp_path: Path, capsys) -> None:
-    from weiss_rl.workflows.eval_support.eval_dispatch import run_eval_dispatch
+    from weiss_rl.workflows.eval_support.dispatch.eval_dispatch import run_eval_dispatch
 
     stack = seed_stack(tmp_path, report_eval=tmp_path / "report_eval.txt", dev_eval=tmp_path / "dev.txt")
     args = SimpleNamespace(

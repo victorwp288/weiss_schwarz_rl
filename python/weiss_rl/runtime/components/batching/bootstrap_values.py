@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.runtime.components.field_assembly import concat_batch_major_field
+from weiss_rl.runtime.components.collection.field_assembly import concat_batch_major_field
 
 
 @dataclass(frozen=True, slots=True)

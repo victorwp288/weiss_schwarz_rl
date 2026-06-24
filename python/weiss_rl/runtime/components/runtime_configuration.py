@@ -11,8 +11,8 @@ import torch
 
 from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.league.registry import REGISTRY_FILENAME
-from weiss_rl.runtime.components.action_catalog_setup import resolve_runtime_action_catalog_setup
-from weiss_rl.runtime.components.collection_backend import select_runtime_collection_backend
+from weiss_rl.runtime.components.actions.action_catalog_setup import resolve_runtime_action_catalog_setup
+from weiss_rl.runtime.components.collection.collection_backend import select_runtime_collection_backend
 from weiss_rl.runtime.components.config import QueueRuntimeConfig
 from weiss_rl.runtime.components.devices import (
     configured_learner_device_name,

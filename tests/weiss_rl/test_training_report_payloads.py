@@ -7,8 +7,10 @@ from weiss_rl.training.report_payloads import (
     augment_determinism_payload,
     augment_environment_payload,
     augment_run_summary_payload,
+    policy_selection_report_payload,
     profiling_enabled_message,
     training_controls_payload,
+    training_run_evidence_artifact_payload,
 )
 
 
@@ -46,6 +48,24 @@ def test_training_controls_payload_preserves_report_field_names_and_string_modes
     }
 
 
+def test_training_run_evidence_artifact_payload_names_required_run_files() -> None:
+    payload = training_run_evidence_artifact_payload()
+
+    assert [artifact["path"] for artifact in payload] == [
+        "manifest.json",
+        "run_summary.json",
+        "determinism_report.json",
+        "training/logs/training_metrics.jsonl",
+        "training/checkpoints/checkpoint_tracker.json",
+        "training/snapshots/registry.json",
+        "training/logs/periodic_dev_eval_summaries.json",
+        "eval/final_eval/summary.json",
+        "paper_readiness_summary.json",
+    ]
+    assert payload[4]["purpose"] == "latest, best, selected, and finalized checkpoint aliases"
+    assert "paper readiness" in payload[-1]["required_for"]
+
+
 def test_profiling_enabled_message_matches_train_entrypoint_text() -> None:
     assert (
         profiling_enabled_message(
@@ -75,6 +95,44 @@ def test_profiling_enabled_message_matches_train_entrypoint_text() -> None:
     )
 
 
+def test_policy_selection_report_payload_summarizes_trace_without_manifest_bulk() -> None:
+    payload = policy_selection_report_payload(
+        {
+            "mode": "deterministic_v1",
+            "status": "resolved",
+            "version": "deterministic_v1",
+            "final_policy_set_size": 10,
+            "selected_policy_count": 2,
+            "source_paths": {"snapshot_registry_json": "runs/registry.json"},
+            "selection_trace": [
+                {
+                    "policy_id": "B0_RandomLegal",
+                    "reason": "random_legal_baseline_b0",
+                    "details": {"source": "fixed_baseline"},
+                },
+                {
+                    "policy_id": "train_update_0100_v1",
+                    "reason": "top_dev_performer_vs_anchor_set",
+                    "details": {"mean_anchor_score": 0.1},
+                },
+            ],
+        }
+    )
+
+    assert payload == {
+        "mode": "deterministic_v1",
+        "status": "resolved",
+        "version": "deterministic_v1",
+        "final_policy_set_size": 10,
+        "selected_policy_count": 2,
+        "source_paths": {"snapshot_registry_json": "runs/registry.json"},
+        "selection_reasons": [
+            {"policy_id": "B0_RandomLegal", "reason": "random_legal_baseline_b0"},
+            {"policy_id": "train_update_0100_v1", "reason": "top_dev_performer_vs_anchor_set"},
+        ],
+    }
+
+
 def test_augment_run_summary_payload_records_runtime_policy_inputs_and_resume_paths(tmp_path: Path) -> None:
     b1_dir = tmp_path / "b1"
     seed_dir = tmp_path / "seed"
@@ -86,7 +144,11 @@ def test_augment_run_summary_payload_records_runtime_policy_inputs_and_resume_pa
         {"existing": True},
         public_demo_enabled=False,
         runtime_mode="train_ordered",
-        policy_set_selection_details={"mode": "deterministic_v1"},
+        policy_set_selection_details={
+            "mode": "deterministic_v1",
+            "status": "resolved",
+            "selected_policy_count": 10,
+        },
         training_config=_training_config(),
         b1_baseline_run_dir=b1_dir,
         seed_snapshot_run_dir=seed_dir,
@@ -97,7 +159,13 @@ def test_augment_run_summary_payload_records_runtime_policy_inputs_and_resume_pa
 
     assert payload["existing"] is True
     assert payload["runtime_mode"] == "train_ordered"
+    assert payload["run_evidence_artifacts"] == training_run_evidence_artifact_payload()
     assert payload["policy_set_selection_mode"] == "deterministic_v1"
+    assert payload["policy_set_selection"] == {
+        "mode": "deterministic_v1",
+        "status": "resolved",
+        "selected_policy_count": 10,
+    }
     assert payload["training_controls"] == training_controls_payload(_training_config())
     assert payload["b1_baseline_run_dir"] == b1_dir.resolve().as_posix()
     assert payload["seed_snapshot_run_dir"] == seed_dir.resolve().as_posix()
@@ -125,7 +193,9 @@ def test_augment_run_summary_payload_uses_public_demo_runtime_and_default_select
 
     assert payload == {
         "runtime_mode": "public_demo",
+        "run_evidence_artifacts": training_run_evidence_artifact_payload(),
         "policy_set_selection_mode": "unresolved",
+        "policy_set_selection": {"mode": "unresolved", "status": "unresolved"},
     }
 
 
@@ -149,6 +219,7 @@ def test_augment_determinism_payload_uses_historical_policy_selection_key(tmp_pa
 
     assert payload["runtime_mode"] == "train_ordered"
     assert payload["policy_selection_mode"] == "registry"
+    assert payload["policy_selection"] == {"mode": "registry", "status": "unresolved"}
     assert payload["training_controls"] == training_controls_payload(_training_config())
     assert payload["b1_baseline_run_dir"] == b1_dir.resolve().as_posix()
     assert payload["seed_snapshot_run_dir"] == seed_dir.resolve().as_posix()

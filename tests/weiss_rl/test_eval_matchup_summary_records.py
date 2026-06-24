@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weiss_rl.eval.harness import (
+from weiss_rl.eval.simulator.harness import (
     GameResult,
     MatchupSummary,
     ScheduledGame,

@@ -7,11 +7,8 @@ preserving the private method names historically available on ``QueueRuntime``.
 
 from __future__ import annotations
 
-import json
-import os
 import threading
 from collections.abc import Sequence
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +22,7 @@ from weiss_rl.league.opponent_pool import (
     select_runtime_opponent_snapshots,
 )
 from weiss_rl.league.registry import SnapshotRegistry
+from weiss_rl.runtime.components.opponent_pool_refresh_log import write_opponent_pool_refresh_record
 from weiss_rl.runtime.components.opponents import (
     active_actor_heuristic_fraction,
     active_assigned_opponent_policy_ids,
@@ -35,13 +33,13 @@ from weiss_rl.runtime.components.opponents import (
     active_warmup_snapshot_mix_fraction,
     apply_opponent_pool_diversity_floor,
     configured_fixed_opponent_policy_ids,
-    configured_hard_negative_focus_policy_ids,
     configured_resident_opponent_policy_ids,
-    configured_row_deficit_policy_weights,
     filter_timeout_heavy_opponents,
     fixed_opponent_policy_is_active,
     fixed_opponent_policy_slots,
+    load_resident_opponent_models,
     promotion_gated_recent_reservoir_size,
+    resident_opponent_policy_ids,
     sample_runtime_opponent_policy_ids,
     sample_warmup_snapshot_policy_ids,
     select_hard_negative_ids,
@@ -384,22 +382,16 @@ class QueueRuntimeOpponentMixin:
         self._pfsp_champion_pool_size = len(champion_ids)
         self._pfsp_recent_pool_size = len(recent_ids)
         self._pfsp_hard_negative_pool_size = len(hard_negative_ids)
-        models: dict[str, Any] = {}
-        snapshots_by_id = {snapshot.policy_id: snapshot for snapshot in registry.snapshots}
-        resident_policy_ids = tuple(
-            dict.fromkeys(
-                [
-                    *candidate_ids,
-                    *self._active_assigned_opponent_policy_ids(),
-                    *self._configured_resident_opponent_policy_ids(),
-                ]
-            )
+        resident_policy_ids = resident_opponent_policy_ids(
+            candidate_ids=candidate_ids,
+            active_assigned_policy_ids=self._active_assigned_opponent_policy_ids(),
+            configured_resident_policy_ids=self._configured_resident_opponent_policy_ids(),
         )
-        for policy_id in resident_policy_ids:
-            snapshot = snapshots_by_id.get(policy_id)
-            if snapshot is None:
-                continue
-            models[policy_id] = self._load_snapshot_model(snapshot.path)
+        models = load_resident_opponent_models(
+            registry=registry,
+            resident_policy_ids=resident_policy_ids,
+            load_snapshot_model=self._load_snapshot_model,
+        )
         self._opponent_models = models
         self._opponent_model_locks = {policy_id: threading.Lock() for policy_id in models}
         if stale_demoted:
@@ -436,66 +428,18 @@ class QueueRuntimeOpponentMixin:
         quarantined_count: int,
         reason: str,
     ) -> None:
-        run_dir = getattr(self, "_run_dir", None)
-        if run_dir is None:
-            return
-        logs_dir = Path(run_dir) / "training" / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        record = {
-            "kind": "opponent_pool_refresh_v1",
-            "schema_version": 1,
-            "created_utc": datetime.now(timezone.utc).isoformat(),
-            "process_id": int(os.getpid()),
-            "reason": str(reason),
-            "update": int(current_update),
-            "registry_path": self._pool_log_path_text(registry_path),
-            "candidate_ids": list(candidate_ids),
-            "champion_ids": list(champion_ids),
-            "recent_ids": list(recent_ids),
-            "hard_negative_ids": list(hard_negative_ids),
-            "hard_negative_focus_policy_ids": list(
-                configured_hard_negative_focus_policy_ids(league_config=getattr(self, "_league_config", None))
-            ),
-            "hard_negative_focus_weight_multiplier": float(
-                getattr(
-                    getattr(getattr(self, "_league_config", None), "sampling", getattr(self, "_league_config", None)),
-                    "hard_negative_focus_weight_multiplier",
-                    1.0,
-                )
-            ),
-            "row_deficit_policy_weights": [
-                [str(policy_id), float(weight)]
-                for policy_id, weight in configured_row_deficit_policy_weights(
-                    league_config=getattr(self, "_league_config", None)
-                )
-            ],
-            "hard_negative_overlaps_champions": bool(
-                getattr(
-                    getattr(getattr(self, "_league_config", None), "sampling", getattr(self, "_league_config", None)),
-                    "hard_negative_overlaps_champions",
-                    False,
-                )
-            ),
-            "resident_policy_ids": list(resident_policy_ids),
-            "loaded_model_ids": list(loaded_model_ids),
-            "stale_demoted": list(stale_demoted),
-            "quarantined_count": int(quarantined_count),
-            "pool_size": int(len(candidate_ids)),
-            "champion_pool_size": int(len(champion_ids)),
-            "recent_pool_size": int(len(recent_ids)),
-            "hard_negative_pool_size": int(len(hard_negative_ids)),
-        }
-        with (logs_dir / "opponent_pool.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
-
-    def _pool_log_path_text(self, path: Path | None) -> str | None:
-        if path is None:
-            return None
-        candidate = Path(path)
-        run_dir = getattr(self, "_run_dir", None)
-        if run_dir is not None:
-            try:
-                return candidate.resolve().relative_to(Path(run_dir).resolve()).as_posix()
-            except ValueError:
-                pass
-        return candidate.as_posix()
+        write_opponent_pool_refresh_record(
+            run_dir=getattr(self, "_run_dir", None),
+            league_config=getattr(self, "_league_config", None),
+            current_update=current_update,
+            registry_path=registry_path,
+            candidate_ids=candidate_ids,
+            champion_ids=champion_ids,
+            recent_ids=recent_ids,
+            hard_negative_ids=hard_negative_ids,
+            resident_policy_ids=resident_policy_ids,
+            loaded_model_ids=loaded_model_ids,
+            stale_demoted=stale_demoted,
+            quarantined_count=quarantined_count,
+            reason=reason,
+        )

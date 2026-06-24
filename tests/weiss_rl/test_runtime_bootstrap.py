@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 import torch
-from weiss_rl.runtime.components import bootstrap as bootstrap_module
-from weiss_rl.runtime.components.bootstrap import (
+from weiss_rl.runtime.components.batching import bootstrap as bootstrap_module
+from weiss_rl.runtime.components.batching.bootstrap import (
     add_shared_elapsed_ms,
     bootstrap_fields_from_batch,
     bootstrap_fields_from_batches,

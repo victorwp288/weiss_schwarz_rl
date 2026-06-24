@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from weiss_rl.training.checkpointing.restore_state import (
+from weiss_rl.training.checkpointing.storage.restore_state import (
     apply_checkpoint_resume_counters,
     checkpoint_counter_state_from_payload,
 )
@@ -13,7 +13,7 @@ def test_apply_checkpoint_resume_counters_restores_counters_and_start_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     learner = ResumeLearnerDouble()
-    monkeypatch.setattr("weiss_rl.training.checkpointing.restore_state.time.time", lambda: 123.5)
+    monkeypatch.setattr("weiss_rl.training.checkpointing.storage.restore_state.time.time", lambda: 123.5)
 
     counters = apply_checkpoint_resume_counters(
         learner=learner,

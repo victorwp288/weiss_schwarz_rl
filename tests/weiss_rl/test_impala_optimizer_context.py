@@ -5,8 +5,8 @@ import torch
 from torch import nn
 from weiss_rl.config.models import ModelConfig, ModelDropoutConfig
 from weiss_rl.learners.impala import ImpalaLearner
-from weiss_rl.learners.impala.optimizer_step import optimizer_has_gradients
-from weiss_rl.learners.impala.optimizer_support import ImpalaOptimizerSupportMixin
+from weiss_rl.learners.impala.support.optimizer_support import ImpalaOptimizerSupportMixin
+from weiss_rl.learners.impala.updates.optimizer_step import optimizer_has_gradients
 from weiss_rl.model import build_policy_value_model
 
 
@@ -15,7 +15,7 @@ def test_impala_learner_uses_canonical_optimizer_support_mixin() -> None:
 
 
 def test_impala_update_loop_does_not_reexport_optimizer_gradient_check() -> None:
-    import weiss_rl.learners.impala.update_loop as update_loop
+    import weiss_rl.learners.impala.updates.update_loop as update_loop
 
     assert not hasattr(update_loop, "_optimizer_has_gradients")
     assert not hasattr(update_loop, "optimizer_has_gradients")

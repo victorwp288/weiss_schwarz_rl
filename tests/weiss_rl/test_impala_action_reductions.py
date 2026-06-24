@@ -10,9 +10,9 @@ from weiss_rl.learners.action_logp import (
     packed_scores_action_logp_and_entropy,
     packed_scores_family_entropy,
 )
-from weiss_rl.learners.impala.action_reductions import resolve_impala_action_reductions
-from weiss_rl.learners.impala.loss_inputs import prepare_impala_loss_inputs
-from weiss_rl.learners.impala.loss_pipeline import resolve_impala_loss_action_reductions
+from weiss_rl.learners.impala.losses.action_reductions import resolve_impala_action_reductions
+from weiss_rl.learners.impala.losses.loss_inputs import prepare_impala_loss_inputs
+from weiss_rl.learners.impala.losses.loss_pipeline import resolve_impala_loss_action_reductions
 
 from .impala_test_support import (
     ImpalaLearner,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from weiss_rl.learners.structured_auxiliary import PackedStructuredLegalView
+from weiss_rl.learners.structured_legal_view import PackedStructuredLegalView
 from weiss_rl.learners.tensor_ops import segment_max, weighted_mean
 
 

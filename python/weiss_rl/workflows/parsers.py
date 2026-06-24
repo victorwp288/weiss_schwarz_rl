@@ -1,3 +1,5 @@
+"""Parser assembly for the six public thesis workflow commands."""
+
 from __future__ import annotations
 
 import argparse

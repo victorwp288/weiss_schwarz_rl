@@ -8,13 +8,13 @@ from typing import Literal
 import numpy as np
 
 from weiss_rl.actors.action_selection import ActorActionSelection
-from weiss_rl.diagnostics.action_diagnostics import (
+from weiss_rl.diagnostics.probes.action_diagnostics import (
     ActionSequenceState,
     make_action_sequence_state,
     update_action_summary_from_ids,
     update_action_summary_from_mask,
 )
-from weiss_rl.runtime.components.reward_shaping import apply_pass_with_nonpass_penalty
+from weiss_rl.runtime.components.rewards.reward_shaping import apply_pass_with_nonpass_penalty
 
 ActorLegalityLayout = Literal["i16_legal_ids", "mask"]
 

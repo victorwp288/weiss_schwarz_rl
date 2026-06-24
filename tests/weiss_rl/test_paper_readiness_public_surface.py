@@ -5,6 +5,7 @@ import weiss_rl.eval.readiness.check_entrypoint as paper_readiness_check_entrypo
 import weiss_rl.eval.readiness.contracts as paper_readiness_contracts
 import weiss_rl.eval.readiness.final_eval_summary as paper_readiness_final_eval_summary
 import weiss_rl.eval.readiness.guardrails as paper_readiness_guardrails
+import weiss_rl.eval.readiness.sensitivity_contract as paper_readiness_sensitivity_contract
 
 
 def test_eval_package_root_does_not_export_paper_readiness_module_aliases() -> None:
@@ -33,6 +34,12 @@ def test_paper_readiness_facade_keeps_contract_helpers_aliased() -> None:
     assert paper_readiness._build_manifest_contract is paper_readiness_contracts.build_manifest_contract
     assert paper_readiness._build_final_eval_artifact_contract is (
         paper_readiness_contracts.build_final_eval_artifact_contract
+    )
+    assert paper_readiness._validate_sensitivity_summary is (
+        paper_readiness_sensitivity_contract.validate_sensitivity_summary
+    )
+    assert paper_readiness_contracts.resolve_sensitivity_summary_path is (
+        paper_readiness_sensitivity_contract.resolve_sensitivity_summary_path
     )
 
 

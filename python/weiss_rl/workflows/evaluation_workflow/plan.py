@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from pathlib import Path
 
+from weiss_rl.workflows.command_surface import B2_AUDIT_COMMAND, EVAL_FINAL_COMMAND, FIGURES_COMMAND, SMOKE_EVAL_COMMAND
 from weiss_rl.workflows.evaluation_workflow.audit_plan import (
     build_b2_audit_workflow_plan,
     build_b2_audit_workflow_plan_for_request,
@@ -35,6 +37,15 @@ __all__ = [
     "evaluation_workflow_request",
 ]
 
+EvaluationPlanBuilder = Callable[[EvaluationWorkflowRequest], EvaluationWorkflowPlan]
+
+EVALUATION_PLAN_BUILDERS: dict[str, EvaluationPlanBuilder] = {
+    SMOKE_EVAL_COMMAND.name: build_eval_workflow_plan_for_request,
+    EVAL_FINAL_COMMAND.name: build_eval_workflow_plan_for_request,
+    FIGURES_COMMAND.name: build_figures_workflow_plan_for_request,
+    B2_AUDIT_COMMAND.name: build_b2_audit_workflow_plan_for_request,
+}
+
 
 def build_evaluation_workflow_plan(
     *,
@@ -49,13 +60,5 @@ def build_evaluation_workflow_plan(
 def build_evaluation_workflow_plan_for_request(
     request: EvaluationWorkflowRequest,
 ) -> EvaluationWorkflowPlan | None:
-    if request.command in {"smoke-eval", "eval-final"}:
-        return build_eval_workflow_plan_for_request(request)
-
-    if request.command == "figures":
-        return build_figures_workflow_plan_for_request(request)
-
-    if request.command == "b2-audit":
-        return build_b2_audit_workflow_plan_for_request(request)
-
-    return None
+    builder = EVALUATION_PLAN_BUILDERS.get(request.command)
+    return None if builder is None else builder(request)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from weiss_rl.diagnostics.job_telemetry import summarize_job_telemetry, summarize_training_metrics
+from weiss_rl.diagnostics.logging.job_telemetry import summarize_job_telemetry, summarize_training_metrics
 
 
 def test_summarize_job_telemetry_computes_means_and_peaks() -> None:

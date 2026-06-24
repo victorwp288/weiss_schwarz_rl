@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import cast
 
 import pytest
-from weiss_rl.config.sections_league import parse_league_config
+from weiss_rl.config.sections.sections_league import parse_league_config
 
 
 def _copy_section(body: dict[str, object], key: str) -> dict[str, object]:

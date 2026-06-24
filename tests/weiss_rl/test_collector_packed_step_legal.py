@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
-from weiss_rl.runtime.components.collector_step_legal import (
+from weiss_rl.runtime.components.collection.collector_step_legal import (
     PackedLegalStorage,
     PackedLegalSurface,
     StepLegalCaptureInputs,

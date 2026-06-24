@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from weiss_rl.runtime.components.collector_unroll_storage import (
+from weiss_rl.runtime.components.collection.collector_unroll_storage import (
     legal_actions_from_collector_steps,
     normalize_collector_bootstrap_arrays,
 )

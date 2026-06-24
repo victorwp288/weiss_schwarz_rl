@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from weiss_rl.diagnostics import b2_disagreement_audit as audit_module
+from weiss_rl.diagnostics.b2_audit import b2_disagreement_audit as audit_module
 
 
 def test_resolve_requested_policy_id_accepts_registry_alias_for_train_policy_id() -> None:

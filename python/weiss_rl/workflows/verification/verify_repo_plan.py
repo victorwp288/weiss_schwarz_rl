@@ -38,11 +38,11 @@ def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationSt
     return (
         VerificationStep(
             "Repo hygiene gate",
-            _module_command(python_exe, "weiss_rl.diagnostics.repo_hygiene_check_entrypoint"),
+            _module_command(python_exe, "weiss_rl.diagnostics.hygiene.repo_hygiene_check_entrypoint"),
         ),
         VerificationStep(
             "Core placeholder gate",
-            _module_command(python_exe, "weiss_rl.diagnostics.core_placeholder_check_entrypoint"),
+            _module_command(python_exe, "weiss_rl.diagnostics.hygiene.core_placeholder_check_entrypoint"),
         ),
         VerificationStep(
             "Ruff check",

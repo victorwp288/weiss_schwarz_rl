@@ -5,10 +5,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import weiss_rl.training.checkpointing.alias_candidates as checkpoint_alias_candidates
-import weiss_rl.training.checkpointing.alias_publication as checkpoint_alias_publication
-import weiss_rl.training.checkpointing.aliases as checkpoint_aliases
-import weiss_rl.training.checkpointing.tracker as checkpoint_tracker
+import weiss_rl.training.checkpointing.aliases.alias_candidates as checkpoint_alias_candidates
+import weiss_rl.training.checkpointing.aliases.alias_publication as checkpoint_alias_publication
+import weiss_rl.training.checkpointing.aliases.aliases as checkpoint_aliases
+import weiss_rl.training.checkpointing.lifecycle.tracker as checkpoint_tracker
 
 
 def test_checkpoints_reexports_canonical_checkpoint_alias_boundary() -> None:
@@ -20,7 +20,7 @@ def test_checkpoints_reexports_canonical_checkpoint_alias_boundary() -> None:
     assert checkpoints.publish_checkpoint_aliases is checkpoint_aliases.publish_checkpoint_aliases
     assert checkpoints.observed_best_checkpoint_path is checkpoint_aliases.observed_best_checkpoint_path
     assert checkpoints.CHECKPOINT_TRACKER_FILENAME == checkpoint_aliases.CHECKPOINT_TRACKER_FILENAME
-    assert checkpoint_aliases.publish_checkpoint_aliases.__module__ == "weiss_rl.training.checkpointing.aliases"
+    assert checkpoint_aliases.publish_checkpoint_aliases.__module__ == "weiss_rl.training.checkpointing.aliases.aliases"
 
 
 def test_checkpoint_aliases_reexport_canonical_candidate_boundary() -> None:
@@ -31,7 +31,7 @@ def test_checkpoint_aliases_reexport_canonical_candidate_boundary() -> None:
     )
     assert checkpoint_aliases.should_update_observed_best is checkpoint_alias_candidates.should_update_observed_best
     assert checkpoint_alias_candidates.checkpoint_alias_candidate.__module__ == (
-        "weiss_rl.training.checkpointing.alias_candidates"
+        "weiss_rl.training.checkpointing.aliases.alias_candidates"
     )
 
 
@@ -65,7 +65,7 @@ def test_checkpoint_aliases_reexport_canonical_publication_boundary() -> None:
         checkpoint_aliases.observed_best_checkpoint_path is checkpoint_alias_publication.observed_best_checkpoint_path
     )
     assert checkpoint_alias_publication.apply_checkpoint_alias_publication.__module__ == (
-        "weiss_rl.training.checkpointing.alias_publication"
+        "weiss_rl.training.checkpointing.aliases.alias_publication"
     )
 
 
@@ -79,7 +79,7 @@ def test_checkpoint_aliases_reexport_canonical_tracker_boundary() -> None:
     assert checkpoint_aliases.CheckpointTrainingPaths is checkpoint_tracker.CheckpointTrainingPaths
     assert checkpoint_aliases.CHECKPOINT_TRACKER_FILENAME == checkpoint_tracker.CHECKPOINT_TRACKER_FILENAME
     assert checkpoint_aliases.CHECKPOINT_TRACKER_FORMAT == checkpoint_tracker.CHECKPOINT_TRACKER_FORMAT
-    assert checkpoint_tracker.load_checkpoint_tracker.__module__ == "weiss_rl.training.checkpointing.tracker"
+    assert checkpoint_tracker.load_checkpoint_tracker.__module__ == "weiss_rl.training.checkpointing.lifecycle.tracker"
 
 
 def test_checkpoint_tracker_loads_defaults_and_rejects_non_object(tmp_path: Path) -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from weiss_rl.config.sections_core import parse_experiment_config, parse_system_config
+from weiss_rl.config.sections.sections_core import parse_experiment_config, parse_system_config
 
 
 def _system_body() -> dict[str, object]:

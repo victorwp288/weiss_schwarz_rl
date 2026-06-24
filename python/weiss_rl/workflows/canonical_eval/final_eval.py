@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme
+from weiss_rl.eval.analysis.payoff_folding import PayoffFoldScheme
 from weiss_rl.workflows.canonical_eval.state import CanonicalEvalRunState, CanonicalEvalRuntimeState
 
 

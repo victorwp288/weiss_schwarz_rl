@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import weiss_rl.eval.harness as eval_harness
+import weiss_rl.eval.simulator.harness as eval_harness
 from weiss_rl.eval import EvalSamplerAnomalies, sample_action_pinned
-from weiss_rl.eval.harness import _normalize_cdf_probs
+from weiss_rl.eval.simulator.harness import _normalize_cdf_probs
 
 from .eval_sampler_test_support import StubFloatRng, expected_single_row_logp
 

@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch import nn
 from weiss_rl.model import _build_mlp_stack
-from weiss_rl.models.layers import build_mlp_stack
+from weiss_rl.models.backbone.layers import build_mlp_stack
 
 
 def test_build_mlp_stack_preserves_layer_order_and_output_shape() -> None:

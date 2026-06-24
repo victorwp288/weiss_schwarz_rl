@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from weiss_rl.eval.harness import EvalGameRecord
+from weiss_rl.eval.simulator.harness import EvalGameRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

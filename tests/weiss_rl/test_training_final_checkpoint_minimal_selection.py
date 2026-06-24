@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import weiss_rl.training.checkpointing.lifecycle.finalization as checkpoint_finalization
 from weiss_rl.training.minimal.finalization import _finalize_training_checkpoint_selection
 
 from .final_checkpoint_selection_test_support import (
@@ -55,6 +56,25 @@ def test_finalize_training_checkpoint_selection_publishes_current_checkpoint_wit
     assert events[1][1]["dev_eval_summary"] is dev_eval_summary
     assert events[2][1]["dev_eval_summary"] is dev_eval_summary
     assert events[3][1] == {"payload": tracker_payload, "step": 9}
+
+    selection = checkpoint_finalization.select_final_checkpoint_tracker_payload(
+        hooks=recorder.hooks(),
+        learner=learner,
+        stack=object(),
+        artifacts=artifacts,
+        training_paths=training_paths,
+        runtime=object(),
+        device=object(),
+        spec_hash256="spec-hash",
+        algorithm=object(),
+        latest_metrics=latest_metrics,
+        publication=checkpoint_finalization.FinalCheckpointPublication(
+            checkpoint_path=checkpoint_path,
+            dev_eval_summary=dev_eval_summary,
+            tracker_payload=tracker_payload,
+        ),
+    )
+    assert selection.source == "current_checkpoint_aliases"
 
 
 def test_finalize_training_checkpoint_selection_reloads_tracker_after_best_finalization(

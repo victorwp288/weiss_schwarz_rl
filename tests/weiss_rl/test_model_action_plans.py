@@ -9,7 +9,7 @@ from weiss_rl.model import (
     _FactorizedLegalityPlan,
     _PackedScoringPlan,
 )
-from weiss_rl.models.action_plans import (
+from weiss_rl.models.actions.action_plans import (
     FactorizedConditionalLogProbs,
     FactorizedEvaluationResult,
     FactorizedFamilyPlan,

@@ -13,22 +13,22 @@ from torch import Tensor as _Tensor
 from torch import nn as _nn
 from torch.optim import Optimizer as _Optimizer
 
-from weiss_rl.diagnostics.training_logger import TrainingLogger as _TrainingLogger
+from weiss_rl.diagnostics.logging.training_logger import TrainingLogger as _TrainingLogger
 from weiss_rl.learners.factorized_evaluation import ImpalaFactorizedEvaluationMixin as _ImpalaFactorizedEvaluationMixin
-from weiss_rl.learners.impala.auxiliary_loss import ImpalaAuxiliaryLossMixin as _ImpalaAuxiliaryLossMixin
-from weiss_rl.learners.impala.batch_access import batch_value as _batch_value
-from weiss_rl.learners.impala.loss_pipeline import (
+from weiss_rl.learners.impala.auxiliary.auxiliary_loss import ImpalaAuxiliaryLossMixin as _ImpalaAuxiliaryLossMixin
+from weiss_rl.learners.impala.batching.batch_access import batch_value as _batch_value
+from weiss_rl.learners.impala.losses.loss_pipeline import (
     compute_impala_loss_and_metrics_with_context as _compute_impala_loss_and_metrics_with_context,
 )
-from weiss_rl.learners.impala.policy_anchor_support import (
+from weiss_rl.learners.impala.support.policy_anchor_support import (
     ImpalaPolicyAnchorSupportMixin as _ImpalaPolicyAnchorSupportMixin,
 )
-from weiss_rl.learners.impala.support import ImpalaSupportMixin as _ImpalaSupportMixin
-from weiss_rl.learners.impala.update_loop import ImpalaUpdateLoopMixin as _ImpalaUpdateLoopMixin
-from weiss_rl.learners.structured_auxiliary import (
+from weiss_rl.learners.impala.support.support import ImpalaSupportMixin as _ImpalaSupportMixin
+from weiss_rl.learners.impala.updates.update_loop import ImpalaUpdateLoopMixin as _ImpalaUpdateLoopMixin
+from weiss_rl.learners.public_heuristic_profiles import (
     normalize_public_heuristic_profile_mode as _normalize_teacher_profile_mode,
 )
-from weiss_rl.learners.structured_auxiliary import (
+from weiss_rl.learners.public_heuristic_profiles import (
     normalize_public_heuristic_profiles as _normalize_teacher_profiles,
 )
 from weiss_rl.learners.update_bookkeeping import (

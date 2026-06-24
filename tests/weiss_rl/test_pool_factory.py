@@ -6,7 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from weiss_rl.config import load_stack_config
-from weiss_rl.envs.pool_factory import build_env_config_from_stack, make_env_pool_from_config
+from weiss_rl.envs.env_config import build_env_config_from_stack
+from weiss_rl.envs.pool_factory import make_env_pool_from_config
+from weiss_rl.envs.simulator_reward_contract import reward_payload_json_from_stack
 
 
 def _repo_root() -> Path:
@@ -32,6 +34,17 @@ def test_build_env_config_from_stack_emits_reward_json() -> None:
         "terminal_win": 1.0,
     }
     assert "curriculum_json" not in env_config
+
+
+def test_reward_payload_json_from_stack_names_simulator_reward_contract() -> None:
+    stack = load_stack_config(_repo_root() / "configs" / "presets" / "typed_local.yaml")
+
+    reward_payload = json.loads(reward_payload_json_from_stack(stack) or "{}")
+
+    assert reward_payload["terminal_win"] == 1.0
+    assert reward_payload["terminal_loss"] == -1.0
+    assert reward_payload["terminal_timeout"] == -0.1
+    assert reward_payload["enable_shaping"] is True
 
 
 def test_build_env_config_from_stack_emits_curriculum_json_when_present(tmp_path: Path) -> None:

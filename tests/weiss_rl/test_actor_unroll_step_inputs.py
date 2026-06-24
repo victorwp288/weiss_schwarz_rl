@@ -5,8 +5,8 @@ from typing import Any
 
 import numpy as np
 import pytest
-from weiss_rl.diagnostics.action_diagnostics import make_action_sequence_state
-from weiss_rl.runtime.components.actor_unroll_step_inputs import prepare_actor_unroll_step_inputs
+from weiss_rl.diagnostics.probes.action_diagnostics import make_action_sequence_state
+from weiss_rl.runtime.components.actors.actor_unroll_step_inputs import prepare_actor_unroll_step_inputs
 
 
 class _ContextModel:

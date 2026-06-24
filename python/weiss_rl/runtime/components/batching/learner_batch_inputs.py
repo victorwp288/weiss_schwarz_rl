@@ -19,7 +19,7 @@ from weiss_rl.runtime.components.batching.bootstrap_values import (
     runtime_done_flags,
 )
 from weiss_rl.runtime.components.batching.reward_backfill import TerminalBackfillMetrics, apply_runtime_reward_backfills
-from weiss_rl.runtime.components.field_assembly import RuntimeBatchFields, concat_runtime_batch_fields
+from weiss_rl.runtime.components.collection.field_assembly import RuntimeBatchFields, concat_runtime_batch_fields
 
 BootstrapFields = RuntimeBootstrapFields | ImpalaBootstrapFields
 

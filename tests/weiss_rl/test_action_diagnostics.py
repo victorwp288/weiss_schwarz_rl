@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from weiss_rl.diagnostics.action_diagnostics import (
+from weiss_rl.diagnostics.probes.action_diagnostics import (
     make_action_sequence_state,
     update_action_summary_from_ids,
 )

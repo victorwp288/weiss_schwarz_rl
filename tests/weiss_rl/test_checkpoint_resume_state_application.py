@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from weiss_rl.training.checkpointing.restore import apply_minimal_checkpoint_resume_state
+from weiss_rl.training.checkpointing.storage.restore import apply_minimal_checkpoint_resume_state
 
 from .checkpoint_restore_test_support import (
     OrderedResumeLearnerDouble,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from inspect import signature
 from typing import Any, Literal
 
-from weiss_rl.config import StackConfig
+from weiss_rl.envs.env_config import build_env_config_from_stack as build_env_config_from_stack
 
 Profile = Literal["debug", "balanced", "fast"]
 LayoutName = Literal["mask", "i16_legal_ids"]
@@ -77,88 +77,6 @@ def _validate_env_config(kwargs: Mapping[str, Any]) -> None:
     missing = [key for key in REQUIRED_ENV_CONFIG_KEYS if key not in kwargs]
     if missing:
         raise ValueError(f"env_config missing required keys: {missing}")
-
-
-def _reward_payload_from_stack(stack: StackConfig) -> str | None:
-    rewards = stack.config.rewards
-    if rewards is None:
-        return None
-    objective = str(rewards.objective).strip().lower()
-    if objective not in {"terminal_pm1", "terminal_only_pm1"}:
-        raise ValueError(f"Unsupported rewards.objective {rewards.objective!r}")
-    shaping_enabled = bool(rewards.shaping.enable_damage_shaping)
-    damage_reward = float(rewards.shaping.damage_reward)
-    level_reward = float(rewards.shaping.level_reward)
-    board_reward = float(rewards.shaping.board_reward)
-    no_progress_penalty = float(rewards.shaping.no_progress_penalty)
-    if objective == "terminal_only_pm1":
-        shaping_enabled = False
-        damage_reward = 0.0
-        level_reward = 0.0
-        board_reward = 0.0
-        no_progress_penalty = 0.0
-    payload = {
-        "terminal_win": 1.0,
-        "terminal_loss": -1.0,
-        "terminal_draw": 0.0,
-        "terminal_timeout": float(rewards.truncation.reward),
-        "enable_shaping": shaping_enabled,
-        "damage_reward": damage_reward,
-        "level_reward": level_reward,
-        "board_reward": board_reward,
-        "no_progress_penalty": no_progress_penalty,
-    }
-    return json.dumps(payload, sort_keys=True)
-
-
-def _curriculum_payload_from_stack(stack: StackConfig) -> str | None:
-    curriculum = stack.config.curriculum
-    if curriculum is None or not curriculum.simulator:
-        return None
-    return json.dumps(curriculum.simulator, sort_keys=True)
-
-
-def _cycle_deck_choice(deck_pool: tuple[str, ...], *, actor_id: int | None) -> str | None:
-    if not deck_pool:
-        return None
-    if actor_id is None:
-        return str(deck_pool[0])
-    return str(deck_pool[int(actor_id) % len(deck_pool)])
-
-
-def build_env_config_from_stack(
-    stack: StackConfig,
-    *,
-    seed: int,
-    actor_id: int | None = None,
-    deck: str | None = None,
-    opponent_deck: str | None = None,
-) -> dict[str, Any]:
-    environment_config = stack.config.environment
-    if environment_config is None:
-        raise RuntimeError("stack config is missing environment")
-    env_config: dict[str, Any] = {
-        "max_decisions": int(environment_config.max_decisions),
-        "max_ticks": int(environment_config.max_ticks),
-        "observation_visibility": environment_config.observation_visibility,
-        "seed": int(seed),
-    }
-    reward_json = _reward_payload_from_stack(stack)
-    curriculum_json = _curriculum_payload_from_stack(stack)
-    if reward_json is not None:
-        env_config["reward_json"] = reward_json
-    if curriculum_json is not None:
-        env_config["curriculum_json"] = curriculum_json
-    resolved_deck = deck or _cycle_deck_choice(environment_config.deck_pool, actor_id=actor_id)
-    resolved_opponent_deck = opponent_deck or _cycle_deck_choice(
-        environment_config.opponent_deck_pool,
-        actor_id=actor_id,
-    )
-    if resolved_deck is not None:
-        env_config["deck"] = str(resolved_deck)
-    if resolved_opponent_deck is not None:
-        env_config["opponent_deck"] = str(resolved_opponent_deck)
-    return env_config
 
 
 def make_env_pool_from_config(

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 from weiss_rl.eval.policies.set import HEURISTIC_PUBLIC_POLICY_ID
 from weiss_rl.experiments.baselines import NOLEAGUE_BASELINE_POLICY_ID
-from weiss_rl.runtime.components.counters import collector_counter_template
+from weiss_rl.runtime.components.batching.counters import collector_counter_template
 from weiss_rl.runtime.components.opponents.episode_roles import (
     accumulate_last_pfsp_exposure_counters,
     nondiverse_opponent_role_assignment,

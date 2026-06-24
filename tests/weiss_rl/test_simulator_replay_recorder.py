@@ -5,8 +5,8 @@ from typing import Any, cast
 
 import numpy as np
 from weiss_rl.artifacts import ArtifactLayout
-from weiss_rl.eval.harness import ScheduledGame
-from weiss_rl.eval.simulator_replay import SimulatorReplayRecorder
+from weiss_rl.eval.replay.simulator_replay import SimulatorReplayRecorder
+from weiss_rl.eval.simulator.harness import ScheduledGame
 
 from .eval_runner_test_support import make_decision_batch, make_scheduled_game
 

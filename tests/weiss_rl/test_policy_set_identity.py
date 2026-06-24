@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from importlib.util import find_spec
 
-from weiss_rl.eval.policies.set import deck_id_for_policy_id, parse_training_policy_id
+from weiss_rl.eval.policies.fixed_panel import deck_id_for_policy_id, fixed_policy_panel_role_payload
+from weiss_rl.eval.policies.training_policy_ids import parse_training_policy_id
 
 
 def test_deck_id_for_policy_id_locks_primary_and_heuristic_decks() -> None:
@@ -12,6 +13,23 @@ def test_deck_id_for_policy_id_locks_primary_and_heuristic_decks() -> None:
     assert deck_id_for_policy_id("B2 HeuristicPublic") == "preset:main_deck_5hy_yotsuba_v1"
     assert deck_id_for_policy_id("B3 HeuristicPublicAggro") == "preset:aggro_deck_5hy_nino_v1"
     assert deck_id_for_policy_id("B4 HeuristicPublicControl") == "preset:control_deck_jj_s66_v1"
+
+
+def test_fixed_policy_panel_role_payload_names_guardrail_questions() -> None:
+    payload = fixed_policy_panel_role_payload()
+
+    assert [row["policy_id"] for row in payload] == [
+        "B0 RandomLegal",
+        "B1 NoLeague baseline",
+        "B2 HeuristicPublic",
+        "B3 HeuristicPublicAggro",
+        "B4 HeuristicPublicControl",
+    ]
+    assert payload[1]["policy_source"] == "selected retained B1 checkpoint"
+    assert payload[2]["evidence_question"] == (
+        "Does the policy transfer to a stronger public heuristic opponent?"
+    )
+    assert payload[4]["deck_id"] == "preset:control_deck_jj_s66_v1"
 
 
 def test_eval_selection_compat_module_is_removed() -> None:

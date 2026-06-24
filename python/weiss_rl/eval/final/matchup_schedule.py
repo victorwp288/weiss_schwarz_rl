@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from weiss_rl.artifacts.reproducibility import canonical_json_bytes, stable_hash64
-from weiss_rl.eval.harness import ScheduledGame
-from weiss_rl.eval.policies.set import deck_id_for_policy_id
+from weiss_rl.eval.policies.fixed_panel import deck_id_for_policy_id
+from weiss_rl.eval.simulator.harness import ScheduledGame
 
 
 def scheduled_game(

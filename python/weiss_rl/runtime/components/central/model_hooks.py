@@ -10,7 +10,7 @@ from weiss_rl.runtime.components.policy_inference.actor_models import (
 )
 
 if TYPE_CHECKING:
-    from weiss_rl.runtime.components.actor_state import _ActorState
+    from weiss_rl.runtime.components.actors.actor_state import _ActorState
 
 
 def actor_inference_model(actor: _ActorState) -> Any:

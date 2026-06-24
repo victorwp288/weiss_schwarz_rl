@@ -3,11 +3,13 @@ from __future__ import annotations
 from typing import Any, cast
 
 import torch
-from weiss_rl.learners.impala.loss_assembly import assemble_impala_loss_inputs
-from weiss_rl.learners.impala.loss_batch_inputs import ImpalaLossBatchInputs
-from weiss_rl.learners.impala.loss_masks import ImpalaLossForwardFlags, ImpalaLossMasks
-from weiss_rl.learners.impala.loss_policy_forward import ImpalaPolicyForwardResult
-from weiss_rl.learners.impala.teacher_target_inputs import ImpalaTeacherTargetInputs
+import weiss_rl.learners.impala.losses.loss_assembly as loss_assembly
+import weiss_rl.learners.impala.losses.loss_plan as loss_plan
+from weiss_rl.learners.impala.auxiliary.teacher_target_inputs import ImpalaTeacherTargetInputs
+from weiss_rl.learners.impala.batching.loss_batch_inputs import ImpalaLossBatchInputs
+from weiss_rl.learners.impala.losses.loss_assembly import assemble_impala_loss_inputs
+from weiss_rl.learners.impala.losses.loss_masks import ImpalaLossForwardFlags, ImpalaLossMasks
+from weiss_rl.learners.impala.losses.loss_policy_forward import ImpalaPolicyForwardResult
 
 
 def test_assemble_impala_loss_inputs_preserves_stage_outputs_by_identity() -> None:
@@ -87,3 +89,21 @@ def test_assemble_impala_loss_inputs_preserves_stage_outputs_by_identity() -> No
     assert assembled.teacher_aux_packed_view is teacher_aux_packed_view
     assert assembled.public_heuristic_target_logits is public_target_logits
     assert assembled.context is context
+
+
+def test_impala_loss_component_plan_names_objective_and_auxiliary_terms() -> None:
+    payload = loss_assembly.impala_loss_component_plan_payload()
+
+    assert loss_assembly.IMPALA_LOSS_COMPONENT_PLAN is loss_plan.IMPALA_LOSS_COMPONENT_PLAN
+    assert [component["name"] for component in payload] == [
+        "vtrace_targets",
+        "policy_gradient",
+        "value_regression",
+        "entropy_bonus",
+        "trajectory_retention",
+        "policy_anchor",
+        "teacher_auxiliary",
+        "structured_metrics",
+    ]
+    assert "V-trace advantages" in payload[1]["evidence"]
+    assert payload[-1]["purpose"] == "Emit structured policy diagnostics without changing the objective."

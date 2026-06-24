@@ -7,8 +7,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch as _DecisionBoundaryBatch
-from weiss_rl.eval.harness import ScheduledGame as _ScheduledGame
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.simulator.harness import ScheduledGame as _ScheduledGame
 from weiss_rl.training.dev_eval.common import (
     json_relative_path,
     periodic_dev_eval_summaries_path,

@@ -9,7 +9,7 @@ from torch import Tensor
 
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.learners.action_logp import packed_selected_action_logp, packed_subset_action_logp_and_top_action
-from weiss_rl.learners.structured_auxiliary import PackedStructuredLegalView
+from weiss_rl.learners.structured_legal_view import PackedStructuredLegalView
 from weiss_rl.learners.tensor_ops import segment_max, weighted_mean
 
 

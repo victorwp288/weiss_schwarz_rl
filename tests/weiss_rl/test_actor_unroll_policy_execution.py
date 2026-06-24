@@ -4,8 +4,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
-from weiss_rl.diagnostics.action_diagnostics import make_action_sequence_state
-from weiss_rl.runtime.components.actor_unroll_policy_execution import (
+from weiss_rl.diagnostics.probes.action_diagnostics import make_action_sequence_state
+from weiss_rl.runtime.components.actors.actor_unroll_policy_execution import (
     ActorPolicyExecutionInputs,
     MaskActorPolicyCallbacks,
     MaskActorPolicyStorage,
@@ -14,7 +14,7 @@ from weiss_rl.runtime.components.actor_unroll_policy_execution import (
     execute_generic_mask_actor_policy,
     execute_generic_packed_actor_policy,
 )
-from weiss_rl.runtime.components.counters import collector_counter_template
+from weiss_rl.runtime.components.batching.counters import collector_counter_template
 from weiss_rl.runtime.components.teacher_labels import teacher_label_arrays
 
 

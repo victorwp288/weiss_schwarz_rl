@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from weiss_rl.eval.harness import build_seat_swapped_schedule
+from weiss_rl.eval.simulator.harness import build_seat_swapped_schedule
 
 
 def test_build_seat_swapped_schedule_uses_fixed_seed_pair_order() -> None:

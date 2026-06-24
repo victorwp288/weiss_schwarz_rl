@@ -5,8 +5,8 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.loss_metrics import build_impala_loss_metrics
-from weiss_rl.learners.impala.metrics_assembly import ImpalaMetricAssemblyRequest, assemble_impala_loss_metrics
+from weiss_rl.learners.impala.losses.loss_metrics import build_impala_loss_metrics
+from weiss_rl.learners.impala.support.metrics_assembly import ImpalaMetricAssemblyRequest, assemble_impala_loss_metrics
 from weiss_rl.learners.structured_policy_metrics import summarize_structured_policy_metrics
 
 from .impala_test_support import _packed_ids_from_mask, _structured_metric_catalog

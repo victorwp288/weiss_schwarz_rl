@@ -7,8 +7,8 @@ from .entrypoints_test_support import (
 
 
 def test_eval_startup_validation_preserves_mode_errors() -> None:
-    from weiss_rl.workflows.eval_support.eval_parser import build_eval_parser
-    from weiss_rl.workflows.eval_support.eval_startup import validate_eval_args
+    from weiss_rl.workflows.eval_support.parser.eval_parser import build_eval_parser
+    from weiss_rl.workflows.eval_support.startup.eval_startup import validate_eval_args
 
     parser = build_eval_parser()
     args = parser.parse_args(
@@ -26,10 +26,23 @@ def test_eval_startup_validation_preserves_mode_errors() -> None:
         validate_eval_args(parser=parser, args=args)
 
 
+def test_eval_startup_route_payload_names_identity_handoff_steps() -> None:
+    from weiss_rl.workflows.eval_support.startup.eval_startup import eval_startup_route_payload
+
+    route = eval_startup_route_payload()
+    step_ids = {step["step_id"] for step in route}
+
+    assert {"load_stack", "verify_config_identity", "select_spec_source", "announce_startup"} <= step_ids
+    for step in route:
+        assert step["title"]
+        assert step["route"]
+        assert step["output"]
+
+
 def test_eval_startup_preparation_uses_public_demo_contract_and_banner() -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_support.eval_startup import EvalStartupDependencies, prepare_eval_startup
+    from weiss_rl.workflows.eval_support.startup.eval_startup import EvalStartupDependencies, prepare_eval_startup
 
     observed: dict[str, object] = {}
     stack = SimpleNamespace(root=Path("repo"))
@@ -79,7 +92,7 @@ def test_eval_startup_preparation_uses_public_demo_contract_and_banner() -> None
 def test_eval_startup_preparation_uses_verified_simulator_contract() -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_support.eval_startup import EvalStartupDependencies, prepare_eval_startup
+    from weiss_rl.workflows.eval_support.startup.eval_startup import EvalStartupDependencies, prepare_eval_startup
 
     observed: dict[str, object] = {}
     stack = SimpleNamespace(root=Path("repo"))

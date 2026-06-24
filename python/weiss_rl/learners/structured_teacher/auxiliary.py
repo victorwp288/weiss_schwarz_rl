@@ -5,7 +5,7 @@ from __future__ import annotations
 from torch import Tensor
 
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.learners.structured_auxiliary import PackedStructuredLegalView
+from weiss_rl.learners.structured_legal_view import PackedStructuredLegalView
 from weiss_rl.learners.structured_teacher.dense import (
     compute_dense_structured_teacher_auxiliary_metrics,
 )

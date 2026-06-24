@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from weiss_rl.artifacts import ArtifactLayout
-from weiss_rl.eval.harness import ScheduledGame
-from weiss_rl.eval.simulator_runner import ResolvedEvalPolicy, SimulatorEvalRunner
+from weiss_rl.eval.simulator.harness import ScheduledGame
+from weiss_rl.eval.simulator.simulator_runner import ResolvedEvalPolicy, SimulatorEvalRunner
 
 from .eval_runner_test_support import (
     FakeEvalEnv,

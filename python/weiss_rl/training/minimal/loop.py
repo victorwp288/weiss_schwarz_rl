@@ -11,7 +11,7 @@ import torch
 
 from weiss_rl.config import StackConfig
 from weiss_rl.core.simulator_contract import SimulatorContract
-from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger
+from weiss_rl.diagnostics.logging.tensorboard_logger import TensorBoardLogger
 from weiss_rl.runtime import QueueRuntimeMode
 from weiss_rl.training.loop.runner import run_minimal_training_updates
 from weiss_rl.training.loop.setup import build_minimal_training_setup

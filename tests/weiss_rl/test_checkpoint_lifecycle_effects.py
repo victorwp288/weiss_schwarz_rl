@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from weiss_rl.training.checkpointing.lifecycle_effects import (
+from weiss_rl.training.checkpointing.lifecycle.lifecycle_effects import (
     apply_finalize_to_best_effects,
     apply_rollback_to_best_effects,
 )
@@ -47,7 +47,7 @@ def test_rollback_to_best_effects_restore_demote_publish_then_refresh(
         return ["policy_000220"]
 
     monkeypatch.setattr(
-        "weiss_rl.training.checkpointing.lifecycle_effects.demote_registry_champions_newer_than", demote
+        "weiss_rl.training.checkpointing.lifecycle.lifecycle_effects.demote_registry_champions_newer_than", demote
     )
 
     effects = apply_rollback_to_best_effects(
@@ -90,7 +90,7 @@ def test_finalize_to_best_effects_restore_demote_then_refresh_without_publish(
         return []
 
     monkeypatch.setattr(
-        "weiss_rl.training.checkpointing.lifecycle_effects.demote_registry_champions_newer_than", demote
+        "weiss_rl.training.checkpointing.lifecycle.lifecycle_effects.demote_registry_champions_newer_than", demote
     )
 
     effects = apply_finalize_to_best_effects(

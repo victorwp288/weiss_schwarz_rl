@@ -1,3 +1,5 @@
+"""Training workflow facade for the public thesis command surface."""
+
 from __future__ import annotations
 
 from weiss_rl.workflows.training_workflow.dispatch import dispatch_training_command, dispatch_training_request

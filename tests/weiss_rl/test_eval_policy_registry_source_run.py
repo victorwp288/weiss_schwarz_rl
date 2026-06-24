@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 from weiss_rl.config import load_stack_config
-from weiss_rl.eval.simulator_runner import resolve_eval_policies
+from weiss_rl.eval.simulator.simulator_runner import resolve_eval_policies
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.model import PolicyValueModel
 

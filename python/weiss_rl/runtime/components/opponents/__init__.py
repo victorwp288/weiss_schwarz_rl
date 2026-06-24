@@ -19,6 +19,10 @@ from weiss_rl.runtime.components.opponent_policies.sampling import (
     count_items,
     empty_opponent_sampling_result,
 )
+from weiss_rl.runtime.components.opponents.residency import (
+    load_resident_opponent_models as load_resident_opponent_models,
+)
+from weiss_rl.runtime.components.opponents.residency import resident_opponent_policy_ids as resident_opponent_policy_ids
 
 active_actor_heuristic_fraction = _opponent_mix.active_actor_heuristic_fraction
 active_annealed_mix_fraction = _opponent_mix.active_annealed_mix_fraction

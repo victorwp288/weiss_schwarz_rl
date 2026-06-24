@@ -5,9 +5,9 @@ from typing import Any, cast
 
 import pytest
 import torch
-import weiss_rl.learners.impala.loss_context_stage as impala_loss_context_stage
-from weiss_rl.learners.impala.loss_context_stage import finalize_impala_loss_context_stage
-from weiss_rl.learners.impala.loss_finalization import finalize_impala_loss_context
+import weiss_rl.learners.impala.losses.loss_context_stage as impala_loss_context_stage
+from weiss_rl.learners.impala.losses.loss_context_stage import finalize_impala_loss_context_stage
+from weiss_rl.learners.impala.losses.loss_finalization import finalize_impala_loss_context
 
 from .impala_test_support import _FiniteRecorder
 

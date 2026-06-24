@@ -18,7 +18,7 @@ from weiss_rl.runtime.components.opponents.central_snapshot_opponents import (
 )
 
 if TYPE_CHECKING:
-    from weiss_rl.runtime.components.actor_state import _ActorState
+    from weiss_rl.runtime.components.actors.actor_state import _ActorState
 
 
 class QueueRuntimeCentralOpponentMixin:

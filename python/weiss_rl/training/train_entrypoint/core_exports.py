@@ -26,8 +26,8 @@ from weiss_rl.config import (
 )
 from weiss_rl.core.simulator_contract import SimulatorContract, load_verified_simulator_contract
 from weiss_rl.core.spec import assert_spec_bundle_contract
-from weiss_rl.diagnostics.cli_banner import print_startup_banner
-from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger, tensorboard_unavailable_reason
+from weiss_rl.diagnostics.logging.cli_banner import print_startup_banner
+from weiss_rl.diagnostics.logging.tensorboard_logger import TensorBoardLogger, tensorboard_unavailable_reason
 from weiss_rl.experiments.toy_public_demo import (
     PUBLIC_DEMO_MODE,
     public_demo_simulator_info,
@@ -40,7 +40,7 @@ from weiss_rl.learners.impala.learner import ImpalaLearner
 from weiss_rl.learners.ppo_lite_learner import PpoLiteLearner
 from weiss_rl.model import PolicyValueModel
 from weiss_rl.model import build_policy_value_model as build_policy_value_model
-from weiss_rl.models.loading import load_snapshot_eval_model
+from weiss_rl.models.policy.loading import load_snapshot_eval_model
 from weiss_rl.runtime import QueueRuntime, QueueRuntimeMode
 from weiss_rl.runtime import build_runtime_config as build_runtime_config
 from weiss_rl.training.cli import build_train_parser

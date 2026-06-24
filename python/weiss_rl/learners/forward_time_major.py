@@ -13,6 +13,7 @@ import torch
 from torch import Tensor
 
 from weiss_rl.core.legal_actions import LegalActionBatch
+from weiss_rl.learners.packed_forward_metrics import build_packed_candidate_metrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,11 +210,8 @@ def forward_time_major(
         record_timing_ms("learner_forward_time_major", time.perf_counter() - sequence_started)
         packed_rows = int(legal_action_offsets.shape[0] - 1)
         packed_candidates = int(legal_action_ids.shape[0])
-        metrics = {
-            "packed_candidate_count": float(packed_candidates),
-            "packed_candidate_rows": float(packed_rows),
-            "avg_legal_actions_per_row": float(packed_candidates / max(packed_rows, 1)),
-        }
+        active_candidates: int | None = None
+        active_rows_count: int | None = None
         if active_rows is not None:
             active_rows_count = int(active_rows.shape[0])
             if active_rows_count == packed_rows:
@@ -221,12 +219,12 @@ def forward_time_major(
             else:
                 subset_offsets = subset_packed_legal[1]
                 active_candidates = int(subset_offsets[-1].item()) if subset_offsets.numel() > 0 else 0
-            metrics.update(
-                {
-                    "packed_candidate_train_count": float(active_candidates),
-                    "packed_candidate_train_rows": float(active_rows_count),
-                }
-            )
+        metrics = build_packed_candidate_metrics(
+            candidate_count=packed_candidates,
+            row_count=packed_rows,
+            active_candidate_count=active_candidates,
+            active_row_count=active_rows_count,
+        )
         if active_timing_metrics is not None:
             active_timing_metrics.update(metrics)
         return ForwardTimeMajorResult(
@@ -253,11 +251,7 @@ def forward_time_major(
         if structured_legal_actions and legal_actions is not None and legal_actions.offsets is not None:
             packed_rows = int(legal_actions.offsets.shape[0] - 1)
             packed_candidates = int(legal_actions.ids.shape[0]) if legal_actions.ids is not None else 0
-            metrics = {
-                "packed_candidate_count": float(packed_candidates),
-                "packed_candidate_rows": float(packed_rows),
-                "avg_legal_actions_per_row": float(packed_candidates / max(packed_rows, 1)),
-            }
+            metrics = build_packed_candidate_metrics(candidate_count=packed_candidates, row_count=packed_rows)
         if active_timing_metrics is not None:
             active_timing_metrics.update(metrics)
         return ForwardTimeMajorResult(

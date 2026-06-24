@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 import pytest
-from weiss_rl.diagnostics.training_logger import TrainingLogger, TrainingMetrics
+from weiss_rl.diagnostics.logging.training_logger import TrainingLogger, TrainingMetrics
 
 
 def test_training_logger_sanitizes_nonfinite_values_to_null(tmp_path: Path) -> None:

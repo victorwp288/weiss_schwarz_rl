@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from weiss_rl.diagnostics.reward_component_probe_entrypoint import summarize_reward_samples
+from weiss_rl.diagnostics.probes.reward_component_probe_entrypoint import (
+    COMPONENT_NAMES,
+    reward_component_probe_plan_payload,
+    summarize_reward_samples,
+)
 
 
 def test_summarize_reward_samples_checks_component_sum_and_scale() -> None:
@@ -25,12 +29,35 @@ def test_summarize_reward_samples_checks_component_sum_and_scale() -> None:
     )
 
     assert summary["transition_count"] == 3
+    assert summary["component_order"] == list(COMPONENT_NAMES)
+    assert [stage["name"] for stage in summary["reward_flow"]] == [
+        "simulator_reward_payload",
+        "learner_perspective_rows",
+        "collector_reward_shaping",
+        "terminal_backfill",
+        "reward_component_probe",
+        "evaluation_outcome",
+    ]
+    assert summary["probe_plan"][0] == {
+        "component": "terminal",
+        "question": "Are terminal outcomes present and signed from the learner perspective?",
+        "expected_signal": "nonzero only on terminal win, loss, or draw transitions",
+    }
+    assert summary["collector_reward_shaping_plan"][1]["rule_id"] == "mulligan_select_with_confirm_penalty"
     assert summary["component_sum_error_max_abs"] == pytest.approx(0.0)
     assert summary["reward"]["positive_fraction"] == pytest.approx(2 / 3)
     assert summary["components"]["terminal"]["nonzero_fraction"] == pytest.approx(1 / 3)
     assert summary["components"]["damage"]["sum"] == pytest.approx(0.10)
     assert summary["components"]["level"]["sum"] == pytest.approx(-0.05)
     assert summary["terminated_fraction"] == pytest.approx(1 / 3)
+
+
+def test_reward_component_probe_plan_names_component_questions() -> None:
+    payload = reward_component_probe_plan_payload()
+
+    assert [row["component"] for row in payload] == list(COMPONENT_NAMES)
+    assert all(row["question"] for row in payload)
+    assert all(row["expected_signal"] for row in payload)
 
 
 def test_summarize_reward_samples_rejects_wrong_component_width() -> None:

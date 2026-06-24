@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from weiss_rl.core.action_catalog import ActionCatalog
-from weiss_rl.models.action_tables import (
+from weiss_rl.models.actions.action_tables import (
     build_factorized_action_lookup_tables,
     build_structured_action_component_tables,
 )

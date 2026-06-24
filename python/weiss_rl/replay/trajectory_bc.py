@@ -22,14 +22,13 @@ from weiss_rl.replay.rerun_validation import (
     require_single_env_batch,
 )
 from weiss_rl.replay.runner import ReplayEnvFactory, build_replay_env, require_supported_rerun_contract
-from weiss_rl.replay.trajectory_bc_dataset import (
+from weiss_rl.replay.trajectory_bc_batching import replay_trajectory_bc_batch, subset_replay_trajectory_bc_dataset
+from weiss_rl.replay.trajectory_bc_dataset import merge_replay_trajectory_bc_datasets
+from weiss_rl.replay.trajectory_bc_dataset_schema import (
     BC_DATASET_FORMAT,
     ReplayTrajectoryDataset,
     load_replay_trajectory_bc_dataset,
-    merge_replay_trajectory_bc_datasets,
-    replay_trajectory_bc_batch,
     save_replay_trajectory_bc_dataset,
-    subset_replay_trajectory_bc_dataset,
 )
 from weiss_rl.replay.trajectory_bc_rows import (
     TrajectoryBcStepRow,
@@ -46,7 +45,7 @@ from weiss_rl.replay.trajectory_bc_selection import (
     select_bundles,
     teacher_action_override_for,
 )
-from weiss_rl.runtime.components.legal_meta import action_catalog_indices
+from weiss_rl.runtime.components.actions.legal_meta import action_catalog_indices
 
 
 def build_replay_trajectory_bc_dataset(

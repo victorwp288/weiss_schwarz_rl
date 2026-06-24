@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from weiss_rl.config.sections_curriculum import normalize_curriculum_payload, parse_curriculum_config
+from weiss_rl.config.sections.sections_curriculum import normalize_curriculum_payload, parse_curriculum_config
 
 
 def test_normalize_curriculum_payload_preserves_supported_nested_values() -> None:

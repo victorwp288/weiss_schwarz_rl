@@ -6,7 +6,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.teacher_auxiliary_request import (
+from weiss_rl.learners.impala.auxiliary.teacher_auxiliary_request import (
     compute_impala_teacher_auxiliary,
     resolve_impala_teacher_auxiliary_coefficients,
     resolve_impala_teacher_auxiliary_factorized_inputs,

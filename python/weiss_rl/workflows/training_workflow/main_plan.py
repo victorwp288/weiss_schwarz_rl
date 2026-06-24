@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from weiss_rl.workflows.command_surface import TRAIN_MAIN_COMMAND, public_workflow_command_payload
 from weiss_rl.workflows.training_workflow.command_builders import _train_command
+from weiss_rl.workflows.training_workflow.payloads import training_evidence_targets
 from weiss_rl.workflows.training_workflow.plan_state import (
     TrainingWorkflowPlan,
     TrainingWorkflowRequest,
@@ -12,6 +14,7 @@ from weiss_rl.workflows.training_workflow.plan_state import (
 from weiss_rl.workflows.training_workflow.profiles import (
     MAIN_STACK_CONFIG,
     TRAIN_PROFILES,
+    training_profile_payload,
 )
 from weiss_rl.workflows.training_workflow.snapshot_resolution import (
     _resolve_b1_seed_checkpoint_path,
@@ -49,9 +52,10 @@ def build_main_training_workflow_plan_for_request(request: TrainingWorkflowReque
             init_from_checkpoint=init_from_checkpoint,
         ),
         payload={
-            "workflow": "train-main",
-            "profile": str(args.profile),
+            **public_workflow_command_payload(TRAIN_MAIN_COMMAND),
+            **training_profile_payload(profile_name=str(args.profile), profile=profile),
             "init_policy_id": resolved_init_policy_id,
+            "evidence_targets": training_evidence_targets(TRAIN_MAIN_COMMAND),
         },
     )
 

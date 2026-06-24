@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weiss_rl.diagnostics.heuristic_sanity_scan_entrypoint import build_heuristic_sanity_command
-from weiss_rl.diagnostics.profile_train_job_entrypoint import build_profile_train_command
+from weiss_rl.diagnostics.probes.heuristic_sanity_scan_entrypoint import build_heuristic_sanity_command
+from weiss_rl.diagnostics.profiling.profile_train_job_entrypoint import build_profile_train_command
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

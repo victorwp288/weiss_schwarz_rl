@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from weiss_rl.learners.impala.update_bookkeeping import begin_impala_update_scope
+from weiss_rl.learners.impala.updates.update_bookkeeping import begin_impala_update_scope
 
 from .impala_test_support import (
     FakeGradScaler,

@@ -11,7 +11,12 @@ from pathlib import Path
 import numpy as np
 
 from weiss_rl.eval import EvalGameRecord
-from weiss_rl.eval.payoff_folding import PairedSeedGroupKey, PayoffFoldScheme, paired_seed_group_key, paired_seed_score
+from weiss_rl.eval.analysis.payoff_folding import (
+    PairedSeedGroupKey,
+    PayoffFoldScheme,
+    paired_seed_group_key,
+    paired_seed_score,
+)
 
 __all__ = [
     "build_p_mean_and_counts",

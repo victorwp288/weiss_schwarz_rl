@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from weiss_rl.eval.harness import abort_on_engine_fault_eval
+from weiss_rl.eval.simulator.harness import abort_on_engine_fault_eval
 
 
 def test_abort_on_engine_fault_eval_writes_artifact_and_raises(tmp_path: Path) -> None:

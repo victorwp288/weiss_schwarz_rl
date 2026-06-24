@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from weiss_rl.training.checkpointing.guards.snapshot_promotion import CHECKPOINT_PROMOTION_PLAN
+
 from .training_checkpoint_promotion_test_support import (
     RecordingRuntime,
     RecordingTensorBoardLogger,
@@ -9,6 +11,14 @@ from .training_checkpoint_promotion_test_support import (
     recording_hooks,
     run_checkpoint_promotion,
 )
+
+
+def test_checkpoint_promotion_plan_names_checkpoint_registry_and_gate_sequence() -> None:
+    assert [(phase.name, phase.purpose) for phase in CHECKPOINT_PROMOTION_PLAN] == [
+        ("write", "write the checkpoint and publish latest/best aliases"),
+        ("persist", "persist a registry candidate for the checkpoint snapshot"),
+        ("gate", "refresh opponents and run the snapshot promotion gate"),
+    ]
 
 
 def test_checkpoint_promotion_writes_aliases_registry_and_refreshes_on_promotion(tmp_path: Path) -> None:

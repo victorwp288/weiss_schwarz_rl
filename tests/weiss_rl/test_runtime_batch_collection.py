@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from weiss_rl.runtime import QueueRuntime
 from weiss_rl.runtime import queue_runtime as queue_runtime_module
-from weiss_rl.runtime.components.batch_collection import (
+from weiss_rl.runtime.components.collection.batch_collection import (
     collect_pending_runtime_batch,
     pending_unroll_key,
     pending_unroll_selection,

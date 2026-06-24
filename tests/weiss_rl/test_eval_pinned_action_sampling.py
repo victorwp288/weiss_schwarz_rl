@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from weiss_rl.eval import sample_action_pinned, select_action_argmax_pinned
-from weiss_rl.eval.rng_pcg32 import Pcg32XshRrV1
+from weiss_rl.eval.sampling.rng_pcg32 import Pcg32XshRrV1
 
 from .eval_sampler_test_support import PINNED_SAMPLER_ACTIONS, StubFloatRng, expected_single_row_logp
 

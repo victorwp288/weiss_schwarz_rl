@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from weiss_rl.runtime.components.collector_unroll_storage import (
+from weiss_rl.runtime.components.collection.collector_unroll_storage import (
     build_collector_runtime_unroll,
     estimate_collector_copied_bytes,
 )

@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from weiss_rl.runtime.components.collector_state import CollectorUnrollState
+from weiss_rl.runtime.components.collection.collector_state import CollectorUnrollState
 from weiss_rl.runtime.components.teacher_labels import TeacherLabelArrays
 
 

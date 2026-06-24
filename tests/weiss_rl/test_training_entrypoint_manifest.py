@@ -88,7 +88,8 @@ def test_train_entrypoint_resolves_policy_set_selection_when_inputs_are_supplied
         "policy_000250",
         "policy_000350",
     ]
-    assert manifest["policy_set_selection_details"] == {
+    details = manifest["policy_set_selection_details"]
+    assert details == {
         "mode": "deterministic_v1",
         "status": "resolved",
         "version": "deterministic_v1",
@@ -99,7 +100,11 @@ def test_train_entrypoint_resolves_policy_set_selection_when_inputs_are_supplied
         },
         "missing_inputs": [],
         "selected_policy_count": 10,
+        "selection_trace": details["selection_trace"],
     }
+    assert len(details["selection_trace"]) == 10
+    assert details["selection_trace"][0]["reason"] == "random_legal_baseline_b0"
+    assert details["selection_trace"][-1]["reason"] == "top_dev_performer_vs_anchor_set"
 
 
 def test_train_entrypoint_uses_default_run_dir_when_no_label_override(tmp_path: Path) -> None:

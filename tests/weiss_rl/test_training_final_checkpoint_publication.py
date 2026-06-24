@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import weiss_rl.training.checkpointing.finalization as checkpoint_finalization
+import weiss_rl.training.checkpointing.lifecycle.finalization as checkpoint_finalization
 
 from .final_checkpoint_selection_test_support import CheckpointHookRecorder
 

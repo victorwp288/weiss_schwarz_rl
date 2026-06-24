@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-import weiss_rl.training.checkpointing.guard as checkpoint_guard
+import weiss_rl.training.checkpointing.guards.guard as checkpoint_guard
 from weiss_rl.config import apply_stack_overrides, load_stack_config
 from weiss_rl.training.train_entrypoint import (
     _dev_eval_ineligibility_reasons,

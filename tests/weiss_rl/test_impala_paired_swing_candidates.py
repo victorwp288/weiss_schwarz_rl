@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 import torch
-from weiss_rl.learners.impala.paired_auxiliary_batch import resolve_paired_auxiliary_batch_inputs
-from weiss_rl.learners.impala.paired_swing_candidates import compute_paired_swing_candidate_view
+from weiss_rl.learners.impala.auxiliary.paired_swing_candidates import compute_paired_swing_candidate_view
+from weiss_rl.learners.impala.batching.paired_auxiliary_batch import resolve_paired_auxiliary_batch_inputs
 
 from tests.weiss_rl.impala_paired_auxiliary_test_support import make_paired_swing_dense_case
 

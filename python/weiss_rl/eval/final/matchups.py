@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from weiss_rl.config.models import StopRulesConfig
+from weiss_rl.eval.analysis.payoff_folding import PayoffFoldScheme
+from weiss_rl.eval.analysis.stage2 import summarize_stage2_records
 from weiss_rl.eval.final.matchup_outputs import (
     FinalEvalMatchupArtifactPaths,
     build_matchup_diagnostics,
@@ -17,15 +19,13 @@ from weiss_rl.eval.final.matchup_outputs import (
     write_matchup_artifacts,
 )
 from weiss_rl.eval.final.matchup_schedule import bootstrap_seed, matchup_dir_name, scheduled_game, slug
-from weiss_rl.eval.harness import (
+from weiss_rl.eval.simulator.harness import (
     EvalGameRecord,
     EvalGameRunner,
     ReplaySampleResult,
     record_completed_game,
     write_episodes_jsonl,
 )
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme
-from weiss_rl.eval.stage2 import summarize_stage2_records
 
 
 def run_final_eval_matchup(

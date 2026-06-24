@@ -7,8 +7,8 @@ import torch
 
 from weiss_rl.config import StackConfig
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.eval.model_action_surface import ModelActionSurfaceSettings, model_action_surface_batch_and_ids
-from weiss_rl.eval.model_sampling import model_eval_logits_for_legal_ids
+from weiss_rl.eval.sampling.model_action_surface import ModelActionSurfaceSettings, model_action_surface_batch_and_ids
+from weiss_rl.eval.sampling.model_sampling import model_eval_logits_for_legal_ids
 from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE
 from weiss_rl.replay.inspection_policy_loading import LoadedReplayPolicy
 

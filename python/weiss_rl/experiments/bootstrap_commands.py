@@ -191,7 +191,7 @@ def build_b2_disagreement_audit_entrypoint_command(
     return [
         python_executable or sys.executable,
         "-m",
-        "weiss_rl.diagnostics.b2_disagreement_audit",
+        "weiss_rl.diagnostics.b2_audit.b2_disagreement_audit",
         "--stack-config",
         repo_relative(stack_config, repo_root=repo_root).as_posix(),
         "--run-dir",

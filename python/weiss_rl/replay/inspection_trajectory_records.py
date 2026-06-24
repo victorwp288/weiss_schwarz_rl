@@ -11,7 +11,7 @@ import numpy as np
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.core.observation_layout import ObservationPlayerBlock, ObservationSlice
 from weiss_rl.envs.decision_env import DecisionBoundaryBatch
-from weiss_rl.models.observation_contract import header_field_index
+from weiss_rl.models.observations.observation_contract import header_field_index
 from weiss_rl.replay.bundles import ReplayStep
 from weiss_rl.replay.inspection_step_diffs import action_descriptor
 from weiss_rl.replay.inspection_summaries import TRACKED_LEGAL_FAMILIES, counter_items

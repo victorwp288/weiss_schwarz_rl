@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 
 import pytest
-import weiss_rl.training.checkpointing.lifecycle as checkpoint_lifecycle
-import weiss_rl.training.checkpointing.structured_guard as checkpoint_structured_guard
+import weiss_rl.training.checkpointing.guards.structured_guard as checkpoint_structured_guard
+import weiss_rl.training.checkpointing.lifecycle.lifecycle as checkpoint_lifecycle
 from weiss_rl.training.checkpoints import (
     append_checkpoint_guard_event,
     extract_structured_guard_b2_anchor_score,
@@ -61,7 +61,7 @@ def test_structured_mainmove_guard_reexports_canonical_payload_boundary() -> Non
         checkpoint_structured_guard.extract_structured_guard_b2_anchor_score
     )
     assert checkpoint_structured_guard.structured_mainmove_guard_warning_payload.__module__ == (
-        "weiss_rl.training.checkpointing.structured_guard"
+        "weiss_rl.training.checkpointing.guards.structured_guard"
     )
 
 

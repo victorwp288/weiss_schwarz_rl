@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.loss_finalization import apply_impala_teacher_auxiliary
+from weiss_rl.learners.impala.losses.loss_finalization import apply_impala_teacher_auxiliary
 
 from .impala_test_support import (
     ImpalaLearner,

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from weiss_rl.core.schedules import linear_anneal_value
-from weiss_rl.models.loading import restore_model_guidance_from_payload as _restore_model_guidance_from_payload
+from weiss_rl.models.policy.loading import restore_model_guidance_from_payload as _restore_model_guidance_from_payload
 from weiss_rl.runtime.components.teacher_labels import selected_teacher_label_profile
 
 _TEACHER_LABEL_PROFILE_IDS = {"base": 0.0, "aggressive": 1.0, "control": 2.0}

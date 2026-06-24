@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.core.observation_layout import parse_observation_layout
-from weiss_rl.models.observation_contract import (
+from weiss_rl.models.observations.observation_contract import (
     build_structured_observation_contract,
     header_field_index,
     slice_by_name,

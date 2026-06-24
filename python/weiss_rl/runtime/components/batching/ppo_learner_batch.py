@@ -7,7 +7,7 @@ from weiss_rl.runtime.components.batching.learner_batch_inputs import (
     PpoLearnerBatchInputs,
     prepare_ppo_learner_batch_inputs,
 )
-from weiss_rl.runtime.components.field_assembly import base_runtime_learner_payload
+from weiss_rl.runtime.components.collection.field_assembly import base_runtime_learner_payload
 
 
 def ppo_algorithm_payload(prepared: PpoLearnerBatchInputs) -> dict[str, Any]:

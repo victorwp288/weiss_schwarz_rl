@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from weiss_rl.diagnostics.learning_progress import build_learning_progress_summary
+from weiss_rl.diagnostics.progress.learning_progress import build_learning_progress_summary
 
 
 def _write_jsonl(path: Path, records: list[dict[str, object]]) -> None:

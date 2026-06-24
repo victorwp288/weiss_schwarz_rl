@@ -5,7 +5,7 @@ from pathlib import Path
 
 from weiss_rl.artifacts.reproducibility import hash_seed_file
 from weiss_rl.config import load_stack_config
-from weiss_rl.eval.harness import ScheduledGame
+from weiss_rl.eval.simulator.harness import ScheduledGame
 from weiss_rl.league import run_promotion_gate
 
 from ._config_paths import canonical_stack_config_path

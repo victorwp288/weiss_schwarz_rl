@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from weiss_rl.actors.actor_worker import actor_behavior_logp_from_legal_ids
 from weiss_rl.core.masking import masked_logp_from_legal_ids, masked_logp_from_mask
-from weiss_rl.eval.harness import eval_sampler_logp_from_mask
+from weiss_rl.eval.simulator.harness import eval_sampler_logp_from_mask
 from weiss_rl.learners.action_logp import learner_logp_from_mask
 
 TOY_PASS_ACTION_ID = 4

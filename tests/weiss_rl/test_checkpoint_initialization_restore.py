@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weiss_rl.training.checkpointing.restore import apply_minimal_checkpoint_initialization
+from weiss_rl.training.checkpointing.storage.restore import apply_minimal_checkpoint_initialization
 
 from .checkpoint_restore_test_support import InitLearnerWithoutResetDouble, minimal_checkpoint_contract
 

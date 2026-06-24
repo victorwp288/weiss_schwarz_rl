@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from weiss_rl.artifacts.reproducibility import key256_to_hex, resolve_episode_key256, stable_hash64
-from weiss_rl.eval.harness import GameResult, ScheduledGame, resolve_eval_episode_key
+from weiss_rl.eval.simulator.harness import GameResult, ScheduledGame, resolve_eval_episode_key
 
 from tests.weiss_rl.eval_harness_test_support import _RUN_ID256
 

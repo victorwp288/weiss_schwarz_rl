@@ -4,9 +4,9 @@ import argparse
 from pathlib import Path
 
 import pytest
-import weiss_rl.workflows.eval_support.eval_parser as eval_parser
-import weiss_rl.workflows.eval_support.eval_parser_arguments as eval_parser_arguments
-import weiss_rl.workflows.eval_support.eval_parser_validation as eval_parser_validation
+import weiss_rl.workflows.eval_support.parser.eval_parser as eval_parser
+import weiss_rl.workflows.eval_support.parser.eval_parser_arguments as eval_parser_arguments
+import weiss_rl.workflows.eval_support.parser.eval_parser_validation as eval_parser_validation
 from weiss_rl.experiments.toy_public_demo import (
     PUBLIC_DEMO_DEFAULT_BOOTSTRAP_SAMPLES,
     PUBLIC_DEMO_DEFAULT_PAIRED_SEEDS,

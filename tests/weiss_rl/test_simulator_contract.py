@@ -7,7 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 from weiss_rl.artifacts.reproducibility import canonical_json_bytes, sha256_hex
-from weiss_rl.core.simulator_contract import _ProbeTarget, _run_probe, load_simulator_contract
+from weiss_rl.core.simulator_contract import (
+    _ProbeTarget,
+    _run_probe,
+    load_simulator_contract,
+    simulator_contract_section_payload,
+)
 
 
 def _nested_spec_bundle(*, spec_hash: int = 123) -> dict[str, object]:
@@ -48,6 +53,25 @@ def _simulator_payload(*, version: str = "1.2.0", spec_hash: int = 123) -> dict[
         },
         "spec_bundle": _nested_spec_bundle(spec_hash=spec_hash),
     }
+
+
+def test_simulator_contract_section_payload_names_downstream_contract_surfaces() -> None:
+    sections = simulator_contract_section_payload()
+    section_ids = {section["section_id"] for section in sections}
+
+    assert {
+        "runtime_identity",
+        "spec_hash",
+        "observation_layout",
+        "action_catalog",
+        "pass_action",
+        "thesis_decks",
+    } <= section_ids
+    for section in sections:
+        assert section["title"]
+        assert section["source"]
+        assert section["guarantee"]
+        assert section["used_by"]
 
 
 def test_load_simulator_contract_uses_installed_package_first(monkeypatch: pytest.MonkeyPatch) -> None:

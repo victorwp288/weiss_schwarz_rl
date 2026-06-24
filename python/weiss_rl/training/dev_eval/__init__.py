@@ -17,6 +17,11 @@ from weiss_rl.training.dev_eval.common import (
     write_json,
 )
 from weiss_rl.training.dev_eval.model_clone import clone_cpu_eval_model
+from weiss_rl.training.dev_eval.plan import (
+    PERIODIC_DEV_EVAL_PLAN,
+    PeriodicDevEvalPlanStep,
+    periodic_dev_eval_plan_payload,
+)
 from weiss_rl.training.dev_eval.runtime_contracts import (
     evaluation_config_or_raise,
     legal_ids_for_env_row,
@@ -40,12 +45,15 @@ from weiss_rl.training.dev_eval.summary_state import (
 
 __all__ = [
     "DevEvalTrainingPaths",
+    "PERIODIC_DEV_EVAL_PLAN",
+    "PeriodicDevEvalPlanStep",
     "clone_cpu_eval_model",
     "evaluation_config_or_raise",
     "json_relative_path",
     "legal_ids_for_env_row",
     "load_json_object",
     "periodic_dev_eval_bootstrap_seed",
+    "periodic_dev_eval_plan_payload",
     "periodic_dev_eval_rng_seed",
     "periodic_dev_eval_schedule",
     "periodic_dev_eval_seed_usage_payload",

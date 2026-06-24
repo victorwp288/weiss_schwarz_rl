@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from weiss_rl.eval.policies.set import heuristic_public_profile_name_for_policy_id
-from weiss_rl.runtime.components.legal_batching import (
+from weiss_rl.runtime.components.batching.legal_batching import (
     optional_legal_action_meta,
     require_ids_offsets,
     require_mask,

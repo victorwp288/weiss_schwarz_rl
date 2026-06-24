@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 import torch
-from weiss_rl.learners.impala.loss_policy_forward import evaluate_impala_policy_forward
+from weiss_rl.learners.impala.losses.loss_policy_forward import evaluate_impala_policy_forward
 
 
 def test_evaluate_impala_policy_forward_uses_factorized_path_without_dense_forward() -> None:

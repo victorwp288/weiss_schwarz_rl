@@ -14,7 +14,7 @@ import numpy as np
 from weiss_rl.artifacts.reproducibility import hash_seed_file, parse_seed_file
 from weiss_rl.config import LeagueConfig, StackConfig
 from weiss_rl.eval import bayesian_bootstrap_summary, paired_seed_scores, run_seat_swapped_matchup
-from weiss_rl.eval.harness import EvalGameRunner, EvalRunResult, MatchupSummary
+from weiss_rl.eval.simulator.harness import EvalGameRunner, EvalRunResult, MatchupSummary
 
 _PROMOTION_MEAN_THRESHOLD = 0.55
 _PROMOTION_LOSS_THRESHOLD = 0.45

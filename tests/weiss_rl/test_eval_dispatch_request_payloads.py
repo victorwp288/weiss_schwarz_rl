@@ -7,7 +7,7 @@ from .eval_dispatch_test_support import dispatch_dependencies, parser, runtime_s
 
 
 def test_eval_dispatch_request_preserves_route_payloads(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_support.eval_dispatch_request import eval_dispatch_request
+    from weiss_rl.workflows.eval_support.dispatch.eval_dispatch_request import eval_dispatch_request
 
     stack = seed_stack(tmp_path)
     args = SimpleNamespace(

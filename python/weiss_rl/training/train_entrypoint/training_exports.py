@@ -23,8 +23,8 @@ from weiss_rl.training.batches import (
 from weiss_rl.training.batches import (
     collect_training_batch as collect_training_batch,
 )
-from weiss_rl.training.checkpointing import guard as _checkpoint_guard_helpers
-from weiss_rl.training.checkpointing.resolution import (
+from weiss_rl.training.checkpointing.guards import guard as _checkpoint_guard_helpers
+from weiss_rl.training.checkpointing.storage.resolution import (
     BEST_CHECKPOINT_FILENAME,
     LATEST_CHECKPOINT_FILENAME,
     resolve_resume_checkpoint_path,

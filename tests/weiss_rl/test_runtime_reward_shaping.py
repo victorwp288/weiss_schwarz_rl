@@ -2,15 +2,27 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from weiss_rl.runtime.components.reward_shaping import (
+from weiss_rl.runtime.components.rewards.reward_shaping import (
+    COLLECTOR_REWARD_SHAPING_PLAN,
     apply_collector_reward_shaping,
     apply_mulligan_select_with_confirm_penalty,
     apply_pass_with_nonpass_penalty,
+    collector_reward_shaping_plan_payload,
     mulligan_select_with_confirm_penalty_mask_from_ids,
     pass_penalty_ignored_alternative_family_ids,
     pass_with_nonpass_penalty_mask_from_ids,
     pass_with_nonpass_penalty_mask_from_mask,
 )
+
+
+def test_collector_reward_shaping_plan_names_rule_order_and_inputs() -> None:
+    assert [rule.rule_id for rule in COLLECTOR_REWARD_SHAPING_PLAN] == [
+        "pass_with_nonpass_penalty",
+        "mulligan_select_with_confirm_penalty",
+    ]
+    assert COLLECTOR_REWARD_SHAPING_PLAN[0].supports_legal_mask is True
+    assert COLLECTOR_REWARD_SHAPING_PLAN[1].requires_legal_ids is True
+    assert collector_reward_shaping_plan_payload()[0]["title"] == "Pass with productive alternative"
 
 
 def test_pass_with_nonpass_penalty_mask_from_ids_only_flags_pass_rows_with_real_alternatives() -> None:

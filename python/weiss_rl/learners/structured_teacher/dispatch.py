@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from weiss_rl.learners.structured_auxiliary import PackedStructuredLegalView, packed_structured_legal_view
+from weiss_rl.learners.structured_legal_view import PackedStructuredLegalView, packed_structured_legal_view
 from weiss_rl.learners.structured_teacher.common import empty_structured_teacher_metrics
 
 

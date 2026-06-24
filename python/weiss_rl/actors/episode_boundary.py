@@ -9,7 +9,7 @@ import numpy as np
 
 from weiss_rl.actors.actor_worker_helpers import update_outcomes
 from weiss_rl.core.termination_reason import classify_episode_end_reason
-from weiss_rl.diagnostics.action_diagnostics import reset_action_sequence_state
+from weiss_rl.diagnostics.probes.action_diagnostics import reset_action_sequence_state
 
 
 @dataclass(slots=True)

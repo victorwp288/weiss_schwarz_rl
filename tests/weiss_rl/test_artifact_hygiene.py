@@ -7,7 +7,11 @@ import sys
 import zipfile
 from pathlib import Path
 
-from weiss_rl.diagnostics.artifact_hygiene import run_artifact_hygiene_scan, scan_artifact_roots, scan_tracked_repo_tree
+from weiss_rl.diagnostics.hygiene.artifact_hygiene import (
+    run_artifact_hygiene_scan,
+    scan_artifact_roots,
+    scan_tracked_repo_tree,
+)
 from weiss_rl.experiments.toy_public_demo import stage_public_demo_run
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -140,7 +144,7 @@ def test_artifact_scan_entrypoint_returns_nonzero_on_findings(tmp_path: Path) ->
         [
             sys.executable,
             "-m",
-            "weiss_rl.diagnostics.artifact_scan_entrypoint",
+            "weiss_rl.diagnostics.hygiene.artifact_scan_entrypoint",
             "--repo-root",
             str(tmp_path),
             "--artifact-root",

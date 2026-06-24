@@ -17,7 +17,9 @@ def test_build_paper_readiness_summary_audits_run_directory_artifacts(tmp_path: 
     assert payload["scope"] == "run_dir"
     assert payload["passed"] is True
     assert payload["alarms"] == []
+    assert payload["section_plan"]["final_eval_guardrails"]["title"] == "Final-eval guardrails"
     assert payload["run_directory_audit"]["passed"] is True
+    assert payload["run_directory_audit"]["artifact_groups"]["diagnostics"]["title"] == "Diagnostics"
     assert payload["manifest_contract"]["passed"] is True
     assert payload["final_eval_artifact_contract"]["passed"] is True
     assert payload["final_eval_guardrails"]["passed"] is True

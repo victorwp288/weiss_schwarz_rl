@@ -7,29 +7,29 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from weiss_rl.diagnostics.action_diagnostics import (
+from weiss_rl.diagnostics.probes.action_diagnostics import (
     make_action_sequence_state,
     reset_action_sequence_state,
     update_action_summary_from_ids,
 )
-from weiss_rl.runtime.components.bootstrap import bootstrap_fields_from_batch
-from weiss_rl.runtime.components.collector_step_legal import capture_packed_array_step_legal
-from weiss_rl.runtime.components.collector_unroll_storage import build_collector_runtime_unroll
-from weiss_rl.runtime.components.counters import (
+from weiss_rl.runtime.components.batching.bootstrap import bootstrap_fields_from_batch
+from weiss_rl.runtime.components.batching.counters import (
     accumulate_actor_role_row_counters as _accumulate_actor_role_row_counters,
 )
-from weiss_rl.runtime.components.counters import (
+from weiss_rl.runtime.components.batching.counters import (
     collector_counter_template as _collector_counter_template,
 )
-from weiss_rl.runtime.components.counters import (
+from weiss_rl.runtime.components.batching.counters import (
     merge_simulator_timing_counters as _merge_simulator_timing_counters,
 )
+from weiss_rl.runtime.components.collection.collector_step_legal import capture_packed_array_step_legal
+from weiss_rl.runtime.components.collection.collector_unroll_storage import build_collector_runtime_unroll
 from weiss_rl.runtime.components.opponent_context import opponent_context_indices_for_model
-from weiss_rl.runtime.components.reward_shaping import apply_collector_reward_shaping as _apply_reward_shaping
+from weiss_rl.runtime.components.rewards.reward_shaping import apply_collector_reward_shaping as _apply_reward_shaping
 from weiss_rl.runtime.components.types import RuntimeUnroll
 
 if TYPE_CHECKING:
-    from weiss_rl.runtime.components.actor_state import _ActorState
+    from weiss_rl.runtime.components.actors.actor_state import _ActorState
 
 
 class QueueRuntimeHeuristicNativeRolloutMixin:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from weiss_rl.eval.harness import GameResult, ScheduledGame
+from weiss_rl.eval.simulator.harness import GameResult, ScheduledGame
 
 _RUN_ID256 = "ab" * 32
 _CONFIG_HASH256 = "cd" * 32

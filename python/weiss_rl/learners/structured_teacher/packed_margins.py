@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from weiss_rl.learners.structured_auxiliary import PackedStructuredLegalView
+from weiss_rl.learners.structured_legal_view import PackedStructuredLegalView
 from weiss_rl.learners.structured_teacher.margin import (
     packed_teacher_action_margin_loss,
     packed_teacher_same_family_action_margin_loss,

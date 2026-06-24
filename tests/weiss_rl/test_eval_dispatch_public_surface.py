@@ -2,20 +2,20 @@ from __future__ import annotations
 
 
 def test_eval_dispatch_startup_and_mode_reexports_split_module_owners() -> None:
-    import weiss_rl.workflows.eval_support.eval_dispatch as eval_dispatch
-    import weiss_rl.workflows.eval_support.eval_dispatch_dependencies as eval_dispatch_dependencies
-    import weiss_rl.workflows.eval_support.eval_dispatch_request as eval_dispatch_request
-    import weiss_rl.workflows.eval_support.eval_dispatch_route_adapters as eval_dispatch_route_adapters
-    import weiss_rl.workflows.eval_support.eval_dispatch_routes as eval_dispatch_routes
-    import weiss_rl.workflows.eval_support.eval_modes as eval_modes
-    import weiss_rl.workflows.eval_support.eval_public_demo_mode as eval_public_demo_mode
-    import weiss_rl.workflows.eval_support.eval_reports as eval_reports
-    import weiss_rl.workflows.eval_support.eval_startup as eval_startup
-    import weiss_rl.workflows.eval_support.eval_startup_dependencies as eval_startup_dependencies
-    import weiss_rl.workflows.eval_support.eval_startup_prepare as eval_startup_prepare
-    import weiss_rl.workflows.eval_support.eval_startup_state as eval_startup_state
-    import weiss_rl.workflows.eval_support.eval_startup_validation as eval_startup_validation
-    import weiss_rl.workflows.eval_support.eval_summary_mode as eval_summary_mode
+    import weiss_rl.workflows.eval_support.dispatch.eval_dispatch as eval_dispatch
+    import weiss_rl.workflows.eval_support.dispatch.eval_dispatch_dependencies as eval_dispatch_dependencies
+    import weiss_rl.workflows.eval_support.dispatch.eval_dispatch_request as eval_dispatch_request
+    import weiss_rl.workflows.eval_support.dispatch.eval_dispatch_route_adapters as eval_dispatch_route_adapters
+    import weiss_rl.workflows.eval_support.dispatch.eval_dispatch_routes as eval_dispatch_routes
+    import weiss_rl.workflows.eval_support.modes.eval_modes as eval_modes
+    import weiss_rl.workflows.eval_support.modes.eval_public_demo_mode as eval_public_demo_mode
+    import weiss_rl.workflows.eval_support.modes.eval_summary_mode as eval_summary_mode
+    import weiss_rl.workflows.eval_support.reports.eval_reports as eval_reports
+    import weiss_rl.workflows.eval_support.startup.eval_startup as eval_startup
+    import weiss_rl.workflows.eval_support.startup.eval_startup_dependencies as eval_startup_dependencies
+    import weiss_rl.workflows.eval_support.startup.eval_startup_prepare as eval_startup_prepare
+    import weiss_rl.workflows.eval_support.startup.eval_startup_state as eval_startup_state
+    import weiss_rl.workflows.eval_support.startup.eval_startup_validation as eval_startup_validation
     from weiss_rl.workflows import eval_entrypoint as eval_script
 
     assert eval_script.run_eval_dispatch is eval_dispatch_routes.run_eval_dispatch

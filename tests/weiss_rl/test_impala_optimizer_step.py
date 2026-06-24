@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 from torch import nn
-from weiss_rl.learners.impala.optimizer_step import run_impala_optimizer_step
+from weiss_rl.learners.impala.updates.optimizer_step import run_impala_optimizer_step
 
 from .impala_test_support import FakeGradScaler, ImpalaLearner, TinyPolicyValueModel
 

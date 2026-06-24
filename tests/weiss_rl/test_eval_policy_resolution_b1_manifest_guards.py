@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from weiss_rl.config import load_stack_config
 from weiss_rl.eval.policies.set import NO_LEAGUE_POLICY_ID
-from weiss_rl.eval.simulator_runner import resolve_eval_policies
+from weiss_rl.eval.simulator.simulator_runner import resolve_eval_policies
 
 from ._config_paths import canonical_stack_config_path
 from .eval_policy_resolution_test_support import (

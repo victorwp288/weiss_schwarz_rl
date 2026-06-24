@@ -90,6 +90,74 @@ class SimulatorContract:
 
 
 @dataclass(frozen=True, slots=True)
+class SimulatorContractSection:
+    section_id: str
+    title: str
+    source: str
+    guarantee: str
+    used_by: tuple[str, ...]
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "section_id": self.section_id,
+            "title": self.title,
+            "source": self.source,
+            "guarantee": self.guarantee,
+            "used_by": list(self.used_by),
+        }
+
+
+SIMULATOR_CONTRACT_SECTIONS: tuple[SimulatorContractSection, ...] = (
+    SimulatorContractSection(
+        section_id="runtime_identity",
+        title="Runtime identity",
+        source="weiss_sim.__version__, module path, build_info, db_info",
+        guarantee="Training and evaluation run against a supported simulator build.",
+        used_by=("startup checks", "run manifests", "reproducibility reports"),
+    ),
+    SimulatorContractSection(
+        section_id="spec_hash",
+        title="Spec hash",
+        source="weiss_sim.SPEC_HASH and weiss_sim.export_spec_bundle()",
+        guarantee="The active simulator layout matches the configured compatibility hash.",
+        used_by=("startup checks", "checkpoint guards", "artifact readiness"),
+    ),
+    SimulatorContractSection(
+        section_id="observation_layout",
+        title="Observation layout",
+        source="spec_bundle.observation",
+        guarantee="Models, replay tools, and encoders read the same typed observation vector.",
+        used_by=("typed encoder", "policy trunk", "replay diagnostics"),
+    ),
+    SimulatorContractSection(
+        section_id="action_catalog",
+        title="Action catalog",
+        source="spec_bundle.action",
+        guarantee="Dense logits, legal masks, and packed candidate IDs refer to the same action IDs.",
+        used_by=("policy heads", "masking", "packed rollout buffers"),
+    ),
+    SimulatorContractSection(
+        section_id="pass_action",
+        title="Pass action",
+        source="spec_bundle.action.pass_action_id",
+        guarantee="Fallback actions and no-legal-action branches use the simulator's canonical pass ID.",
+        used_by=("env wrappers", "samplers", "evaluation policies"),
+    ),
+    SimulatorContractSection(
+        section_id="thesis_decks",
+        title="Thesis deck presets",
+        source="weiss_sim.cards.presets() and preset_min_rules_profile()",
+        guarantee="Retained thesis runs use the expected deck presets under the approx rules profile.",
+        used_by=("training profiles", "final evaluation", "public workflow"),
+    ),
+)
+
+
+def simulator_contract_section_payload() -> list[dict[str, object]]:
+    return [section.as_payload() for section in SIMULATOR_CONTRACT_SECTIONS]
+
+
+@dataclass(frozen=True, slots=True)
 class _ProbeTarget:
     python: str
     pythonpath: Path | None = None

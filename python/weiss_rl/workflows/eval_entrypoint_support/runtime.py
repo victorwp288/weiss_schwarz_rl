@@ -10,9 +10,9 @@ from weiss_rl.workflows.canonical_eval.entrypoint_request import (
     run_canonical_entrypoint_request_adapter,
 )
 from weiss_rl.workflows.eval_entrypoint_support.main import run_eval_entrypoint_main
-from weiss_rl.workflows.eval_support.eval_dependencies import build_canonical_eval_dependencies
-from weiss_rl.workflows.eval_support.eval_dispatch_dependencies import build_eval_dispatch_dependencies
-from weiss_rl.workflows.eval_support.eval_startup_dependencies import build_eval_startup_dependencies
+from weiss_rl.workflows.eval_support.dispatch.eval_dependencies import build_canonical_eval_dependencies
+from weiss_rl.workflows.eval_support.dispatch.eval_dispatch_dependencies import build_eval_dispatch_dependencies
+from weiss_rl.workflows.eval_support.startup.eval_startup_dependencies import build_eval_startup_dependencies
 
 
 def build_eval_entrypoint_canonical_dependencies(entrypoint_globals: Mapping[str, Any]) -> Any:

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from weiss_rl.learners.impala.update_training_inputs import (
+from weiss_rl.learners.impala.updates.update_training_inputs import (
     has_impala_training_inputs,
     missing_impala_training_input_fields,
     resolve_impala_update_vtrace_result,

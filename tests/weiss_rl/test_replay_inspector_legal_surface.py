@@ -13,7 +13,7 @@ from weiss_rl.replay.inspection_policy_execution import (
 from weiss_rl.replay.inspection_policy_loading import LoadedReplayPolicy
 from weiss_rl.replay.inspection_step_diffs import build_step_diff
 from weiss_rl.replay.inspection_summaries import summarize_step_diffs
-from weiss_rl.runtime.components.legal_meta import action_catalog_indices
+from weiss_rl.runtime.components.actions.legal_meta import action_catalog_indices
 
 from .replay_inspector_test_support import REPO_ROOT, _heuristic_spec_bundle, _ids_batch
 

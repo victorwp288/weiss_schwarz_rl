@@ -1,3 +1,5 @@
+"""Evaluation workflow facade for the public thesis command surface."""
+
 from __future__ import annotations
 
 from weiss_rl.workflows.evaluation_workflow.dispatch import dispatch_evaluation_command, dispatch_evaluation_request

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 import torch
-import weiss_rl.learners.impala.paired_outcome_update as impala_paired_outcome_update
+import weiss_rl.learners.impala.updates.paired_outcome_update as impala_paired_outcome_update
 
 
 def test_run_impala_paired_outcome_preference_optimizer_update_forwards_casted_replay_args(

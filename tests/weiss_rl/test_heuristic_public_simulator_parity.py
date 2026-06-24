@@ -4,7 +4,7 @@ import numpy as np
 import numpy.testing as npt
 import pytest
 from weiss_rl.envs.decision_env import DecisionBoundaryEnv
-from weiss_rl.eval.heuristic_public import HeuristicPublicPolicy
+from weiss_rl.eval.heuristic_public.heuristic_public import HeuristicPublicPolicy
 
 from .heuristic_public_test_support import _LEGAL_DECK
 

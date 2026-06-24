@@ -9,7 +9,7 @@ from weiss_rl.eval.policies.set import (
     HEURISTIC_PUBLIC_POLICY_ID,
     RANDOM_LEGAL_POLICY_ID,
 )
-from weiss_rl.eval.simulator_runner import resolve_eval_policies
+from weiss_rl.eval.simulator.simulator_runner import resolve_eval_policies
 
 from ._config_paths import canonical_stack_config_path
 from .heuristic_public_test_support import _heuristic_spec_bundle

@@ -2,15 +2,15 @@ from __future__ import annotations
 
 
 def test_eval_report_facade_reexports_split_module_owners() -> None:
-    import weiss_rl.workflows.eval_support.eval_policy_final_set_resolution as eval_policy_final_set_resolution
-    import weiss_rl.workflows.eval_support.eval_policy_manifest_selection as eval_policy_manifest_selection
-    import weiss_rl.workflows.eval_support.eval_policy_selection as eval_policy_selection
-    import weiss_rl.workflows.eval_support.eval_policy_selection_results as eval_policy_selection_results
-    import weiss_rl.workflows.eval_support.eval_report_io as eval_report_io
-    import weiss_rl.workflows.eval_support.eval_report_scaffolding as eval_report_scaffolding
-    import weiss_rl.workflows.eval_support.eval_report_update_payloads as eval_report_update_payloads
-    import weiss_rl.workflows.eval_support.eval_report_updates as eval_report_updates
-    import weiss_rl.workflows.eval_support.eval_reports as eval_reports
+    import weiss_rl.workflows.eval_support.policy_selection.eval_policy_final_set_resolution as eval_policy_final_set_resolution
+    import weiss_rl.workflows.eval_support.policy_selection.eval_policy_manifest_selection as eval_policy_manifest_selection
+    import weiss_rl.workflows.eval_support.policy_selection.eval_policy_selection as eval_policy_selection
+    import weiss_rl.workflows.eval_support.policy_selection.eval_policy_selection_results as eval_policy_selection_results
+    import weiss_rl.workflows.eval_support.reports.eval_report_io as eval_report_io
+    import weiss_rl.workflows.eval_support.reports.eval_report_scaffolding as eval_report_scaffolding
+    import weiss_rl.workflows.eval_support.reports.eval_report_update_payloads as eval_report_update_payloads
+    import weiss_rl.workflows.eval_support.reports.eval_report_updates as eval_report_updates
+    import weiss_rl.workflows.eval_support.reports.eval_reports as eval_reports
 
     assert (
         eval_reports._authoritative_manifest_policy_selection
@@ -39,6 +39,10 @@ def test_eval_report_facade_reexports_split_module_owners() -> None:
         is eval_policy_selection_results._manifest_policy_selection_fallback
     )
     assert eval_reports.RunLevelReportUpdateInputs is eval_report_update_payloads.RunLevelReportUpdateInputs
+    assert (
+        eval_reports.build_canonical_eval_evidence_summary
+        is eval_report_update_payloads.build_canonical_eval_evidence_summary
+    )
     assert eval_reports.build_run_summary_update_fields is eval_report_update_payloads.build_run_summary_update_fields
     assert (
         eval_reports.build_determinism_report_update_fields

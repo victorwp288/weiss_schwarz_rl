@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.structured_summary import (
+from weiss_rl.learners.impala.support.structured_summary import (
     ImpalaStructuredSummaryRequest,
     compute_impala_structured_policy_summary,
 )

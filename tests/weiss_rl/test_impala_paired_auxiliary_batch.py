@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.paired_auxiliary_batch import resolve_paired_auxiliary_batch_inputs
+from weiss_rl.learners.impala.batching.paired_auxiliary_batch import resolve_paired_auxiliary_batch_inputs
 
 from .impala_test_support import (
     ImpalaLearner,

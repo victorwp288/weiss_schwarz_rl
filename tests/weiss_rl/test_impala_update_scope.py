@@ -6,13 +6,13 @@ from typing import Any, cast
 import pytest
 import torch
 from torch import nn
-from weiss_rl.learners.impala.update_bookkeeping import (
+from weiss_rl.learners.impala.updates.update_bookkeeping import (
     begin_impala_update_scope,
     finalize_impala_update_scope,
     set_impala_model_train_mode,
 )
-from weiss_rl.learners.impala.update_loop import ScopedOptimizerUpdateSpec, run_scoped_impala_optimizer_update
-from weiss_rl.learners.impala.update_loss_stage import build_scoped_impala_loss
+from weiss_rl.learners.impala.updates.update_loop import ScopedOptimizerUpdateSpec, run_scoped_impala_optimizer_update
+from weiss_rl.learners.impala.updates.update_loss_stage import build_scoped_impala_loss
 
 from .impala_test_support import ForwardProxyModel, ImpalaLearner, TinyPolicyValueModel, _simple_training_batch
 

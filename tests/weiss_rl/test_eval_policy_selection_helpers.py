@@ -9,7 +9,9 @@ from .entrypoints_test_support import (
 
 
 def test_eval_policy_selection_results_build_explicit_cli_details() -> None:
-    from weiss_rl.workflows.eval_support.eval_policy_selection_results import _explicit_policy_selection
+    from weiss_rl.workflows.eval_support.policy_selection.eval_policy_selection_results import (
+        _explicit_policy_selection,
+    )
 
     assert _explicit_policy_selection([" B0 RandomLegal ", "", "policy_000100"]) == (
         ["B0 RandomLegal", "policy_000100"],
@@ -19,7 +21,9 @@ def test_eval_policy_selection_results_build_explicit_cli_details() -> None:
 
 
 def test_eval_policy_selection_results_build_manifest_fallback_details() -> None:
-    from weiss_rl.workflows.eval_support.eval_policy_selection_results import _manifest_policy_selection_fallback
+    from weiss_rl.workflows.eval_support.policy_selection.eval_policy_selection_results import (
+        _manifest_policy_selection_fallback,
+    )
 
     assert _manifest_policy_selection_fallback({"policy_set_selection": [" B0 RandomLegal ", "", 123]}) == (
         ["B0 RandomLegal", "123"],
@@ -30,7 +34,9 @@ def test_eval_policy_selection_results_build_manifest_fallback_details() -> None
 
 
 def test_eval_policy_final_set_resolution_uses_available_source_paths(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_support.eval_policy_final_set_resolution import _resolve_available_policy_source_paths
+    from weiss_rl.workflows.eval_support.policy_selection.eval_policy_final_set_resolution import (
+        _resolve_available_policy_source_paths,
+    )
 
     layout = ArtifactLayout.from_run_dir(tmp_path / "run")
     layout.training_snapshots_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +78,9 @@ def test_eval_policy_final_set_resolution_uses_available_source_paths(tmp_path: 
 def test_eval_policy_final_set_resolution_builds_deterministic_selection_details(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from weiss_rl.workflows.eval_support.eval_policy_final_set_resolution import _resolve_deterministic_final_policy_set
+    from weiss_rl.workflows.eval_support.policy_selection.eval_policy_final_set_resolution import (
+        _resolve_deterministic_final_policy_set,
+    )
 
     observed: dict[str, object] = {}
     registry_path = tmp_path / "registry.json"
@@ -116,7 +124,9 @@ def test_eval_policy_final_set_resolution_builds_deterministic_selection_details
 
 
 def test_eval_policy_final_set_resolution_reports_missing_inputs(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_support.eval_policy_final_set_resolution import _raise_missing_final_policy_inputs
+    from weiss_rl.workflows.eval_support.policy_selection.eval_policy_final_set_resolution import (
+        _raise_missing_final_policy_inputs,
+    )
 
     layout = ArtifactLayout.from_run_dir(tmp_path / "run")
 
@@ -150,7 +160,9 @@ def test_eval_policy_final_set_resolution_reports_missing_inputs(tmp_path: Path)
 
 
 def test_eval_policy_manifest_selection_resolves_source_paths_from_manifest(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_support.eval_policy_manifest_selection import _resolve_selection_inputs_from_manifest
+    from weiss_rl.workflows.eval_support.policy_selection.eval_policy_manifest_selection import (
+        _resolve_selection_inputs_from_manifest,
+    )
 
     absolute_dev_eval = tmp_path / "external" / "dev_eval.json"
     snapshot_registry, dev_eval = _resolve_selection_inputs_from_manifest(
@@ -170,7 +182,9 @@ def test_eval_policy_manifest_selection_resolves_source_paths_from_manifest(tmp_
 
 
 def test_eval_policy_manifest_selection_requires_completed_artifacts(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_support.eval_policy_manifest_selection import _authoritative_manifest_policy_selection
+    from weiss_rl.workflows.eval_support.policy_selection.eval_policy_manifest_selection import (
+        _authoritative_manifest_policy_selection,
+    )
 
     layout = ArtifactLayout.from_run_dir(tmp_path / "run")
     layout.run_dir.mkdir(parents=True, exist_ok=True)

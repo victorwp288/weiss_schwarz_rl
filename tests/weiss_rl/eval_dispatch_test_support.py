@@ -5,8 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from weiss_rl.workflows.eval_support.eval_dispatch_dependencies import EvalDispatchDependencies
-from weiss_rl.workflows.eval_support.eval_startup import EvalStartup, EvalValidatedArgs
+from weiss_rl.workflows.eval_support.dispatch.eval_dispatch_dependencies import EvalDispatchDependencies
+from weiss_rl.workflows.eval_support.startup.eval_startup import EvalStartup, EvalValidatedArgs
 
 
 def seed_stack(tmp_path: Path, **seed_sets: Path) -> SimpleNamespace:

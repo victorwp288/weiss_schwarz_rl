@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 
-from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger
+from weiss_rl.diagnostics.logging.tensorboard_logger import TensorBoardLogger
 from weiss_rl.runtime.components.topology import QueueRuntimeMode
 
 

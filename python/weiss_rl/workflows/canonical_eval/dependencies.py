@@ -7,7 +7,7 @@ from weiss_rl.artifacts import ArtifactLayout
 from weiss_rl.artifacts.reproducibility import parse_seed_file
 from weiss_rl.config import load_study_config
 from weiss_rl.core.simulator_contract import load_verified_simulator_contract
-from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger, tensorboard_unavailable_reason
+from weiss_rl.diagnostics.logging.tensorboard_logger import TensorBoardLogger, tensorboard_unavailable_reason
 from weiss_rl.eval import (
     build_paper_readiness_summary,
     load_dev_eval_summaries,
@@ -15,10 +15,10 @@ from weiss_rl.eval import (
     write_paper_readiness_json,
 )
 from weiss_rl.eval.policies.set import recommend_focal_policy_id
-from weiss_rl.eval.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
+from weiss_rl.eval.simulator.simulator_runner import SimulatorEvalRunner, resolve_eval_policies
 from weiss_rl.metagame import build_sensitivity_report
 from weiss_rl.plotting.paper_figures import render_paper_figures
-from weiss_rl.workflows.eval_support.eval_reports import (
+from weiss_rl.workflows.eval_support.reports.eval_reports import (
     _effective_manifest_git_commit,
     _ensure_run_level_report_scaffolding,
     _load_json_object,

@@ -30,6 +30,7 @@ _validate_seed_budget = _selection.validate_final_eval_seed_budget
 _write_final_eval_artifacts = _artifacts.write_final_eval_artifacts
 _build_matchup_jobs = _run.build_final_eval_matchup_jobs
 _build_run_payload = _run.build_final_eval_run_payload
+_build_run_plan = _run.build_final_eval_run_plan
 _resolve_run_policy_ids = _run.resolve_final_eval_run_policy_ids
 _run_matchup_jobs = _run.run_final_eval_matchup_jobs
 _validate_run_seed_budget = _run.validate_final_eval_run_seed_budget

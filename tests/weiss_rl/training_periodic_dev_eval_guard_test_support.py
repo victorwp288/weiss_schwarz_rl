@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from weiss_rl.training.checkpointing.periodic_dev_eval import TrainingPeriodicDevEvalHooks
+from weiss_rl.training.checkpointing.guards.periodic_dev_eval import TrainingPeriodicDevEvalHooks
 
 
 def unexpected_hook(*_args: object, **_kwargs: object) -> object:

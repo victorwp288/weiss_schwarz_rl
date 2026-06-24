@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from weiss_rl.eval.policies.set import DevEvalPolicySummary, recommend_focal_policy_id
+from weiss_rl.eval.policies.dev_eval_summaries import DevEvalPolicySummary
+from weiss_rl.eval.policies.set import recommend_focal_policy_id
 from weiss_rl.league.registry import SnapshotRegistry
 
 from .policy_set_test_support import build_registry

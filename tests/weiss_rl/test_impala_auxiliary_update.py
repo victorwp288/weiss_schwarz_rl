@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 import torch
-import weiss_rl.learners.impala.auxiliary_update as impala_auxiliary_update
+import weiss_rl.learners.impala.updates.auxiliary_update as impala_auxiliary_update
 
 from .impala_test_support import _simple_training_batch
 

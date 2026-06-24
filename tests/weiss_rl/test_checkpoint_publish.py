@@ -7,16 +7,16 @@ from types import SimpleNamespace
 import pytest
 import torch
 from weiss_rl.league.registry import SNAPSHOT_METADATA_FILENAME, SnapshotRegistry, snapshot_weights_relpath
-from weiss_rl.training.checkpointing.publish import (
+from weiss_rl.training.checkpointing.publishing.publish import (
     CHECKPOINT_SNAPSHOT_METADATA_FORMAT,
     publish_checkpoint_snapshot,
 )
-from weiss_rl.training.checkpointing.publish_reporting import checkpoint_publish_output_text
-from weiss_rl.training.checkpointing.publish_runtime import run_checkpoint_publish
+from weiss_rl.training.checkpointing.publishing.publish_reporting import checkpoint_publish_output_text
+from weiss_rl.training.checkpointing.publishing.publish_runtime import run_checkpoint_publish
 
 
 def test_checkpoint_publish_entrypoint_exposes_only_cli_boundary() -> None:
-    import weiss_rl.training.checkpointing.publish_entrypoint as checkpoint_publish_entrypoint
+    import weiss_rl.training.checkpointing.publishing.publish_entrypoint as checkpoint_publish_entrypoint
 
     assert hasattr(checkpoint_publish_entrypoint, "parse_args")
     assert hasattr(checkpoint_publish_entrypoint, "main")
@@ -35,7 +35,7 @@ def test_checkpoint_publish_is_not_a_training_root_alias() -> None:
 
 
 def test_checkpoint_publish_parser_preserves_defaults(tmp_path: Path) -> None:
-    from weiss_rl.training.checkpointing.publish_cli import build_checkpoint_publish_parser
+    from weiss_rl.training.checkpointing.publishing.publish_cli import build_checkpoint_publish_parser
 
     args = build_checkpoint_publish_parser().parse_args(
         [
@@ -54,7 +54,7 @@ def test_checkpoint_publish_parser_preserves_defaults(tmp_path: Path) -> None:
 
 
 def test_checkpoint_publish_runtime_maps_args(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import weiss_rl.training.checkpointing.publish_runtime as checkpoint_publish_runtime
+    import weiss_rl.training.checkpointing.publishing.publish_runtime as checkpoint_publish_runtime
 
     observed: dict[str, object] = {}
 

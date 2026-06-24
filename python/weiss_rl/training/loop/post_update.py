@@ -6,8 +6,20 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger
-from weiss_rl.training.checkpointing.periodic_dev_eval import PeriodicDevEvalGuardResult
+from weiss_rl.diagnostics.logging.tensorboard_logger import TensorBoardLogger
+from weiss_rl.training.checkpointing.guards.periodic_dev_eval import PeriodicDevEvalGuardResult
+
+
+@dataclass(frozen=True, slots=True)
+class PostUpdateStagePlanItem:
+    name: str
+    purpose: str
+
+
+POST_UPDATE_CHECKPOINT_DEV_EVAL_PLAN: tuple[PostUpdateStagePlanItem, ...] = (
+    PostUpdateStagePlanItem("checkpoint", "publish the current checkpoint and promotion aliases when scheduled"),
+    PostUpdateStagePlanItem("dev_eval", "run periodic dev eval and apply checkpoint guard decisions"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,13 +52,13 @@ class PostUpdateCheckpointDevEvalHooks:
     dev_eval_fn: Callable[..., PeriodicDevEvalGuardResult]
 
 
-def run_post_update_checkpoint_and_dev_eval_from_context(
+def run_post_update_checkpoint_stage(
     *,
     progress: Any,
     context: PostUpdateCheckpointDevEvalContext,
     schedule: PostUpdateCheckpointDevEvalSchedule,
     hooks: PostUpdateCheckpointDevEvalHooks,
-) -> bool:
+) -> None:
     hooks.checkpoint_fn(
         learner=context.learner,
         stack=context.stack,
@@ -66,6 +78,13 @@ def run_post_update_checkpoint_and_dev_eval_from_context(
         hooks=hooks.checkpoint_hooks,
     )
 
+
+def run_post_update_dev_eval_stage(
+    *,
+    progress: Any,
+    context: PostUpdateCheckpointDevEvalContext,
+    hooks: PostUpdateCheckpointDevEvalHooks,
+) -> bool:
     dev_eval_result = hooks.dev_eval_fn(
         learner=context.learner,
         model=context.model,
@@ -87,6 +106,48 @@ def run_post_update_checkpoint_and_dev_eval_from_context(
         hooks=hooks.periodic_dev_eval_hooks,
     )
     return progress.apply_dev_eval_result(dev_eval_result)
+
+
+def run_post_update_stage(
+    *,
+    stage_name: str,
+    progress: Any,
+    context: PostUpdateCheckpointDevEvalContext,
+    schedule: PostUpdateCheckpointDevEvalSchedule,
+    hooks: PostUpdateCheckpointDevEvalHooks,
+) -> bool:
+    if stage_name == "checkpoint":
+        run_post_update_checkpoint_stage(
+            progress=progress,
+            context=context,
+            schedule=schedule,
+            hooks=hooks,
+        )
+        return False
+    if stage_name == "dev_eval":
+        return run_post_update_dev_eval_stage(progress=progress, context=context, hooks=hooks)
+    raise ValueError(f"unknown post-update stage: {stage_name}")
+
+
+def run_post_update_checkpoint_and_dev_eval_from_context(
+    *,
+    progress: Any,
+    context: PostUpdateCheckpointDevEvalContext,
+    schedule: PostUpdateCheckpointDevEvalSchedule,
+    hooks: PostUpdateCheckpointDevEvalHooks,
+) -> bool:
+    stop_requested = False
+    for stage in POST_UPDATE_CHECKPOINT_DEV_EVAL_PLAN:
+        stop_requested = run_post_update_stage(
+            stage_name=stage.name,
+            progress=progress,
+            context=context,
+            schedule=schedule,
+            hooks=hooks,
+        )
+        if stop_requested:
+            break
+    return stop_requested
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,11 +193,16 @@ def finalize_training_loop_progress_from_context(
 
 
 __all__ = [
+    "POST_UPDATE_CHECKPOINT_DEV_EVAL_PLAN",
     "FinalTrainingCheckpointContext",
     "FinalTrainingCheckpointHooks",
+    "PostUpdateStagePlanItem",
     "PostUpdateCheckpointDevEvalContext",
     "PostUpdateCheckpointDevEvalHooks",
     "PostUpdateCheckpointDevEvalSchedule",
     "finalize_training_loop_progress_from_context",
+    "run_post_update_checkpoint_stage",
     "run_post_update_checkpoint_and_dev_eval_from_context",
+    "run_post_update_dev_eval_stage",
+    "run_post_update_stage",
 ]

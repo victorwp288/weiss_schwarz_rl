@@ -11,7 +11,7 @@ from weiss_rl.runtime.components.collection.central_actor_step_context import (
     CentralActorStepPolicyInputs,
     CentralActorStepRuntimeContext,
 )
-from weiss_rl.runtime.components.collector_state import allocate_collector_unroll_state
+from weiss_rl.runtime.components.collection.collector_state import allocate_collector_unroll_state
 from weiss_rl.runtime.components.teacher_labels import teacher_label_arrays
 
 

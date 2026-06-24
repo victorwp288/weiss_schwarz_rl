@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from weiss_rl.eval import DevEvalPolicySummary
-from weiss_rl.eval.policies.set import select_final_policy_set_deterministic_v1
+from weiss_rl.eval.policies.set import (
+    select_final_policy_set_deterministic_v1,
+    select_final_policy_set_deterministic_v1_with_trace,
+)
 from weiss_rl.league.registry import SnapshotRegistry
 from weiss_rl.training.run_metadata import load_json_object, manifest_source_path
 
@@ -85,6 +88,27 @@ def policy_set_selection(
     )
 
 
+def traced_policy_set_selection(
+    stack: Any,
+    *,
+    snapshot_registry: SnapshotRegistry | None = None,
+    dev_eval_summaries: Mapping[str, float | DevEvalPolicySummary] | None = None,
+) -> tuple[list[str], list[dict[str, object]]]:
+    evaluation = stack.config.evaluation
+    if evaluation is None:
+        return [], []
+    selection = evaluation.final_policy_set_selection
+    if selection.version != "deterministic_v1":
+        raise ValueError(f"unsupported final_policy_set_selection.version: {selection.version!r}")
+    result = select_final_policy_set_deterministic_v1_with_trace(
+        snapshot_registry=snapshot_registry or SnapshotRegistry(),
+        dev_eval_summaries=dev_eval_summaries or {},
+        config=selection,
+        final_policy_set_size=evaluation.final_policy_set_size,
+    )
+    return result.policy_ids, result.trace_payload()
+
+
 def resolve_policy_set_selection(
     stack: Any,
     *,
@@ -126,10 +150,11 @@ def resolve_policy_set_selection(
         details["reason"] = "deterministic final policy set inputs were not provided"
         return [], details
 
-    policy_ids = policy_set_selection(
+    policy_ids, selection_trace = traced_policy_set_selection(
         stack,
         snapshot_registry=snapshot_registry,
         dev_eval_summaries=dev_eval_summaries,
     )
     details["selected_policy_count"] = len(policy_ids)
+    details["selection_trace"] = selection_trace
     return policy_ids, details

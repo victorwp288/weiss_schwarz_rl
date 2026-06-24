@@ -11,7 +11,7 @@ from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
 from weiss_rl.runtime.components.policy_inference.actor_models import actor_inference_model
 
 if TYPE_CHECKING:
-    from weiss_rl.runtime.components.actor_state import _ActorState
+    from weiss_rl.runtime.components.actors.actor_state import _ActorState
 
 
 class QueueRuntimeOpponentRowsMixin:

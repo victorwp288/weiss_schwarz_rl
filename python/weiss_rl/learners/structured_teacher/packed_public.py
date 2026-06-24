@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from weiss_rl.learners.structured_auxiliary import PackedStructuredLegalView, packed_soft_target_cross_entropy
+from weiss_rl.learners.structured_legal_view import PackedStructuredLegalView, packed_soft_target_cross_entropy
 from weiss_rl.learners.structured_teacher.margin import packed_public_nonpass_over_pass_loss
 from weiss_rl.learners.tensor_ops import weighted_mean
 

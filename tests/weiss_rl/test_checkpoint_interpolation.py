@@ -7,16 +7,16 @@ from types import SimpleNamespace
 import pytest
 import torch
 from weiss_rl.league.registry import SNAPSHOT_METADATA_FILENAME, SnapshotRegistry
-from weiss_rl.training.checkpointing.interpolation import interpolate_model_state_dicts
-from weiss_rl.training.checkpointing.interpolation_reporting import checkpoint_interpolation_output_line
-from weiss_rl.training.checkpointing.interpolation_runtime import (
+from weiss_rl.training.checkpointing.interpolation.interpolation import interpolate_model_state_dicts
+from weiss_rl.training.checkpointing.interpolation.interpolation_reporting import checkpoint_interpolation_output_line
+from weiss_rl.training.checkpointing.interpolation.interpolation_runtime import (
     CheckpointInterpolationRunResult,
     run_checkpoint_interpolation,
 )
 
 
 def test_checkpoint_interpolation_entrypoint_exposes_only_cli_boundary() -> None:
-    import weiss_rl.training.checkpointing.interpolation_entrypoint as checkpoint_interpolation_entrypoint
+    import weiss_rl.training.checkpointing.interpolation.interpolation_entrypoint as checkpoint_interpolation_entrypoint
 
     assert hasattr(checkpoint_interpolation_entrypoint, "parse_args")
     assert hasattr(checkpoint_interpolation_entrypoint, "main")
@@ -37,7 +37,7 @@ def test_checkpoint_interpolation_is_not_a_training_root_alias() -> None:
 
 
 def test_checkpoint_interpolation_parser_preserves_defaults(tmp_path: Path) -> None:
-    from weiss_rl.training.checkpointing.interpolation_cli import build_checkpoint_interpolation_parser
+    from weiss_rl.training.checkpointing.interpolation.interpolation_cli import build_checkpoint_interpolation_parser
 
     args = build_checkpoint_interpolation_parser().parse_args(
         [

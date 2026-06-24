@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-import weiss_rl.learners.impala.normal_update as impala_normal_update
+import weiss_rl.learners.impala.updates.normal_update as impala_normal_update
 
 
 def test_run_impala_normal_update_runs_training_step_diagnostics_logging_and_finalization(

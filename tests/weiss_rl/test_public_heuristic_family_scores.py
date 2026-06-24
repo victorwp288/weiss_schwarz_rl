@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import torch
-from weiss_rl.models.public_heuristics import (
+from weiss_rl.models.public_heuristic.public_heuristics import (
     default_public_heuristic_raw,
     hand_public_heuristic_raw,
     index_public_heuristic_raw,

@@ -4,7 +4,7 @@ import subprocess
 from importlib.util import find_spec
 from pathlib import Path
 
-from weiss_rl.diagnostics.repo_hygiene import RepoHygieneFinding, run_repo_hygiene_check, summary_payload
+from weiss_rl.diagnostics.hygiene.repo_hygiene import RepoHygieneFinding, run_repo_hygiene_check, summary_payload
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

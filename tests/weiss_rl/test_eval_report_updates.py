@@ -8,8 +8,9 @@ from .entrypoints_test_support import (
 
 
 def test_eval_report_update_payloads_preserve_summary_and_determinism_fields(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_support.eval_report_update_payloads import (
+    from weiss_rl.workflows.eval_support.reports.eval_report_update_payloads import (
         RunLevelReportUpdateInputs,
+        build_canonical_eval_evidence_summary,
         build_determinism_report_update_fields,
         build_run_summary_update_fields,
     )
@@ -21,11 +22,15 @@ def test_eval_report_update_payloads_preserve_summary_and_determinism_fields(tmp
         run_dir=layout.run_dir,
         policy_ids=["B0 RandomLegal", "policy_000100"],
         selection_details=selection_details,
-        final_eval_payload={"matchups": [{"a": 1}, {"a": 2}]},
+        final_eval_payload={
+            "summary_sections": [{"key": "metadata.selection"}, {"key": "matrices"}],
+            "matchups": [{"a": 1}, {"a": 2}],
+        },
         metagame_payload={"kind": "metagame"},
         figure_paths=(layout.figures_paper_dir / "seat_bias.pdf", tmp_path / "external.pdf"),
         readiness_payload={"passed": True},
     )
+    evidence = build_canonical_eval_evidence_summary(inputs)
 
     assert build_run_summary_update_fields(inputs) == {
         "final_eval_dir": "eval/final_eval",
@@ -36,6 +41,20 @@ def test_eval_report_update_payloads_preserve_summary_and_determinism_fields(tmp
         "paper_readiness_summary_path": "paper_readiness_summary.json",
         "paper_grade": True,
         "canonical_eval_completed": True,
+        "canonical_eval_evidence": evidence,
+    }
+    assert evidence == {
+        "final_eval_summary_path": "eval/final_eval/summary.json",
+        "policy_set_path": "eval/final_eval/policy_set.json",
+        "matchups_path": "eval/final_eval/matchups.csv",
+        "mean_matrix_path": "eval/final_eval/matrices/mean.csv",
+        "paper_readiness_summary_path": "paper_readiness_summary.json",
+        "policy_count": 2,
+        "matchup_count": 2,
+        "policy_selection_mode": "deterministic_v1",
+        "selection_status": "resolved",
+        "summary_section_keys": ["metadata.selection", "matrices"],
+        "paper_grade": True,
     }
 
     determinism_fields = build_determinism_report_update_fields(
@@ -60,6 +79,7 @@ def test_eval_report_update_payloads_preserve_summary_and_determinism_fields(tmp
             "failed_episode_count": 1,
         },
         "canonical_artifact_hashes": {"summary.json": "ab" * 32},
+        "canonical_eval_evidence": evidence,
         "final_eval": {
             "path": "eval/final_eval/summary.json",
             "policy_ids": ["B0 RandomLegal", "policy_000100"],
@@ -70,7 +90,7 @@ def test_eval_report_update_payloads_preserve_summary_and_determinism_fields(tmp
 
 
 def test_eval_report_update_writes_summary_and_determinism_artifacts(tmp_path: Path) -> None:
-    from weiss_rl.workflows.eval_support.eval_report_updates import _update_run_level_reports
+    from weiss_rl.workflows.eval_support.reports.eval_report_updates import _update_run_level_reports
 
     layout = ArtifactLayout.from_run_dir(tmp_path / "run")
     layout.ensure_directories()
@@ -106,7 +126,7 @@ def test_eval_report_update_writes_summary_and_determinism_artifacts(tmp_path: P
         run_dir=layout.run_dir,
         policy_ids=["B0 RandomLegal", "policy_000100"],
         selection_details={"mode": "deterministic_v1", "status": "resolved"},
-        final_eval_payload={"matchups": [{"winner": "a"}]},
+        final_eval_payload={"summary_sections": [{"key": "matrices"}], "matchups": [{"winner": "a"}]},
         metagame_payload=None,
         figure_paths=(),
         readiness_payload={"passed": False},
@@ -121,6 +141,8 @@ def test_eval_report_update_writes_summary_and_determinism_artifacts(tmp_path: P
     assert run_summary["figure_outputs"] == []
     assert run_summary["paper_grade"] is False
     assert run_summary["canonical_eval_completed"] is True
+    assert run_summary["canonical_eval_evidence"]["summary_section_keys"] == ["matrices"]
+    assert run_summary["canonical_eval_evidence"]["paper_grade"] is False
 
     determinism = json.loads(layout.determinism_report_path.read_text(encoding="utf-8"))
     assert determinism["preexisting"] == "determinism"
@@ -133,6 +155,7 @@ def test_eval_report_update_writes_summary_and_determinism_artifacts(tmp_path: P
         "failed_episode_count": 0,
     }
     assert determinism["canonical_artifact_hashes"] == {"summary.json": "cd" * 32}
+    assert determinism["canonical_eval_evidence"]["final_eval_summary_path"] == "eval/final_eval/summary.json"
     assert determinism["final_eval"]["matchup_count"] == 1
 
 

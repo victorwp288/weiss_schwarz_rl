@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import weiss_rl.training.checkpointing.finalization as checkpoint_finalization
-import weiss_rl.training.checkpointing.periodic_dev_eval as checkpoint_periodic_dev_eval
-import weiss_rl.training.checkpointing.snapshot_promotion as checkpoint_snapshot_promotion
+import weiss_rl.training.checkpointing.guards.periodic_dev_eval as checkpoint_periodic_dev_eval
+import weiss_rl.training.checkpointing.guards.snapshot_promotion as checkpoint_snapshot_promotion
+import weiss_rl.training.checkpointing.lifecycle.finalization as checkpoint_finalization
 import weiss_rl.training.loop.runner as training_runner
 import weiss_rl.training.loop.setup as training_setup
 import weiss_rl.training.loop.update as training_update
@@ -24,7 +24,7 @@ def test_minimal_promotion_reexports_checkpoint_snapshot_promotion_boundary() ->
         is checkpoint_snapshot_promotion.maybe_checkpoint_and_promote_snapshot
     )
     assert checkpoint_snapshot_promotion.maybe_checkpoint_and_promote_snapshot.__module__ == (
-        "weiss_rl.training.checkpointing.snapshot_promotion"
+        "weiss_rl.training.checkpointing.guards.snapshot_promotion"
     )
 
 
@@ -38,7 +38,7 @@ def test_minimal_dev_eval_reexports_checkpoint_periodic_dev_eval_boundary() -> N
         is checkpoint_periodic_dev_eval.maybe_run_periodic_dev_eval_and_checkpoint_guard
     )
     assert checkpoint_periodic_dev_eval.maybe_run_periodic_dev_eval_and_checkpoint_guard.__module__ == (
-        "weiss_rl.training.checkpointing.periodic_dev_eval"
+        "weiss_rl.training.checkpointing.guards.periodic_dev_eval"
     )
 
 
@@ -55,7 +55,7 @@ def test_minimal_finalization_reexports_checkpoint_finalization_boundary() -> No
         is checkpoint_finalization.finalize_training_checkpoint_selection
     )
     assert checkpoint_finalization.finalize_training_checkpoint_selection.__module__ == (
-        "weiss_rl.training.checkpointing.finalization"
+        "weiss_rl.training.checkpointing.lifecycle.finalization"
     )
 
 

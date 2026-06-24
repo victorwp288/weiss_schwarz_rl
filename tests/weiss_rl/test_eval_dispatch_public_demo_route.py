@@ -7,7 +7,7 @@ from .eval_dispatch_test_support import dispatch_dependencies, parser, public_de
 
 
 def test_eval_dispatch_routes_public_demo_with_resolved_paths(tmp_path: Path, capsys) -> None:
-    from weiss_rl.workflows.eval_support.eval_dispatch import run_eval_dispatch
+    from weiss_rl.workflows.eval_support.dispatch.eval_dispatch import run_eval_dispatch
 
     observed: dict[str, object] = {}
     stack = seed_stack(tmp_path)

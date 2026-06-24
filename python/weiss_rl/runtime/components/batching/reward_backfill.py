@@ -1,3 +1,5 @@
+"""Terminal reward backfill rules for time-major learner batches."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,6 +9,8 @@ import numpy as np
 
 @dataclass(frozen=True, slots=True)
 class TerminalBackfillMetrics:
+    """Counters emitted when terminal outcome credit is copied onto train rows."""
+
     outcome_count: int
     outcome_total_micros: int
     trace_count: int
@@ -114,6 +118,8 @@ def apply_runtime_reward_backfills(
     terminal_outcome_backfill_reward: float,
     terminal_outcome_trace_backfill_reward: float,
 ) -> tuple[np.ndarray, TerminalBackfillMetrics]:
+    """Apply configured terminal outcome backfills and return metrics."""
+
     (
         rewards,
         terminal_outcome_backfill_count,
@@ -144,3 +150,11 @@ def apply_runtime_reward_backfills(
         trace_count=int(terminal_outcome_trace_backfill_count),
         trace_total_micros=int(terminal_outcome_trace_backfill_total_micros),
     )
+
+
+__all__ = [
+    "TerminalBackfillMetrics",
+    "apply_runtime_reward_backfills",
+    "apply_terminal_outcome_backfill",
+    "apply_terminal_outcome_trace_backfill",
+]

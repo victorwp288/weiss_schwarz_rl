@@ -3,7 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
-from weiss_rl.learners.impala.loss_metrics import chosen_action_outcome_metrics as chosen_action_outcome_metrics_impl
+from weiss_rl.learners.impala.losses.loss_metrics import (
+    chosen_action_outcome_metrics as chosen_action_outcome_metrics_impl,
+)
 from weiss_rl.learners.vtrace import VTraceTargets
 
 from .impala_test_support import ImpalaLearner, TinyPolicyValueModel, _mulligan_metric_catalog

@@ -3,13 +3,19 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from weiss_rl.workflows.command_surface import TRAIN_B1_COMMAND, public_workflow_command_payload
 from weiss_rl.workflows.training_workflow.command_builders import _train_command
+from weiss_rl.workflows.training_workflow.payloads import training_evidence_targets
 from weiss_rl.workflows.training_workflow.plan_state import (
     TrainingWorkflowPlan,
     TrainingWorkflowRequest,
     training_workflow_request,
 )
-from weiss_rl.workflows.training_workflow.profiles import B1_STACK_CONFIG, TRAIN_PROFILES
+from weiss_rl.workflows.training_workflow.profiles import (
+    B1_STACK_CONFIG,
+    TRAIN_PROFILES,
+    training_profile_payload,
+)
 
 
 def build_b1_training_workflow_plan_for_request(request: TrainingWorkflowRequest) -> TrainingWorkflowPlan:
@@ -23,7 +29,11 @@ def build_b1_training_workflow_plan_for_request(request: TrainingWorkflowRequest
             run_label=str(args.run_label),
             profile=profile,
         ),
-        payload={"workflow": "train-b1", "profile": str(args.profile)},
+        payload={
+            **public_workflow_command_payload(TRAIN_B1_COMMAND),
+            **training_profile_payload(profile_name=str(args.profile), profile=profile),
+            "evidence_targets": training_evidence_targets(TRAIN_B1_COMMAND),
+        },
     )
 
 

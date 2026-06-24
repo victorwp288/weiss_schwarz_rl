@@ -5,7 +5,6 @@ from __future__ import annotations
 import multiprocessing as mp
 import queue
 import traceback
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,6 +26,11 @@ from weiss_rl.runtime.components.ipc_shared.shared_transport import (
     write_unroll_to_shared_slot,
 )
 from weiss_rl.runtime.components.ipc_shared.threads import configure_runtime_actor_torch_threads
+from weiss_rl.runtime.components.process_child_config import (
+    child_queue_runtime_config,
+    restore_parent_actor_lane_counts,
+    stack_for_child_device_config,
+)
 
 
 def start_process_collectors(
@@ -183,7 +187,7 @@ def _collector_process_main_impl(
     result_queue: Any,
     shared_slot_configs: list[dict[str, Any]] | None,
 ) -> None:
-    stack_for_child = _stack_for_child_device_config(
+    stack_for_child = stack_for_child_device_config(
         stack=stack,
         actor_device_name=actor_device_name,
         learner_device_name=learner_device_name,
@@ -205,29 +209,7 @@ def _collector_process_main_impl(
     model.load_state_dict(deserialize_state_dict_from_ipc(model_state_dict))
     model.eval()
 
-    local_config = QueueRuntimeConfig(
-        mode="train_async_fast",
-        actor_count=1,
-        envs_per_actor=int(config.envs_per_actor),
-        unroll_length=int(config.unroll_length),
-        batch_unrolls_per_update=1,
-        queue_capacity_unrolls=1,
-        profile=str(config.profile),
-        base_seed=int(config.base_seed),
-        pass_action_id=int(config.pass_action_id),
-        actor_reload_interval_updates=int(config.actor_reload_interval_updates),
-        pass_with_nonpass_penalty=float(getattr(config, "pass_with_nonpass_penalty", 0.0)),
-        mulligan_select_with_confirm_penalty=float(getattr(config, "mulligan_select_with_confirm_penalty", 0.0)),
-        terminal_outcome_backfill_reward=float(getattr(config, "terminal_outcome_backfill_reward", 0.0)),
-        terminal_outcome_trace_backfill_reward=float(getattr(config, "terminal_outcome_trace_backfill_reward", 0.0)),
-        actor_sampling_temperature=float(getattr(config, "actor_sampling_temperature", 1.0)),
-        mulligan_force_confirm_after_select=bool(getattr(config, "mulligan_force_confirm_after_select", False)),
-        force_pass_over_main_move_only=bool(getattr(config, "force_pass_over_main_move_only", False)),
-        main_move_only_max_consecutive=int(getattr(config, "main_move_only_max_consecutive", 0)),
-        force_attack_over_pass_when_attack_legal=bool(
-            getattr(config, "force_attack_over_pass_when_attack_legal", False)
-        ),
-    )
+    local_config = child_queue_runtime_config(config)
     shared_slots = (
         None
         if shared_slot_configs is None
@@ -246,7 +228,7 @@ def _collector_process_main_impl(
         defer_initial_opponent_pool_refresh=True,
         learner_device=(None if learner_device_name is None else learner_device_name),
     )
-    _restore_parent_actor_lane_counts(
+    restore_parent_actor_lane_counts(
         runtime=runtime, stack=stack_for_child, parent_actor_count=int(config.actor_count)
     )
     process_debug_log(
@@ -319,64 +301,6 @@ def _report_collector_process_error(
             result_queue.put(payload, timeout=1.0)
         except Exception:
             return
-
-
-def _stack_for_child_device_config(
-    *,
-    stack: StackConfig,
-    actor_device_name: str | None,
-    learner_device_name: str | None,
-) -> StackConfig:
-    system_config = stack.config.system
-    stack_for_child = stack
-    if system_config is not None:
-        child_system = system_config
-        if actor_device_name is not None:
-            child_system = replace(child_system, actor_device=str(actor_device_name))
-        if learner_device_name is not None:
-            child_system = replace(child_system, learner_device=str(learner_device_name))
-        if child_system is not system_config:
-            stack_for_child = replace(
-                stack,
-                config=replace(
-                    stack.config,
-                    system=child_system,
-                ),
-            )
-            system_config = stack_for_child.config.system
-    if (
-        system_config is not None
-        and str(getattr(system_config, "collection_backend", "auto")).strip().lower() == "process"
-    ):
-        stack_for_child = replace(
-            stack_for_child,
-            config=replace(
-                stack_for_child.config,
-                system=replace(system_config, collection_backend="auto"),
-            ),
-        )
-    return stack_for_child
-
-
-def _restore_parent_actor_lane_counts(
-    *,
-    runtime: Any,
-    stack: StackConfig,
-    parent_actor_count: int,
-) -> None:
-    """Preserve parent global actor-lane limits inside a single-actor child runtime."""
-
-    training_config = getattr(getattr(stack, "config", None), "training", None)
-    requested_diverse_actor_count = (
-        0 if training_config is None else int(getattr(training_config, "diverse_opponent_actor_count", 0))
-    )
-    requested_diverse_model_actor_count = (
-        0 if training_config is None else int(getattr(training_config, "diverse_model_actor_count", 0))
-    )
-    global_actor_count = max(0, int(parent_actor_count))
-    diverse_actor_count = min(global_actor_count, max(0, requested_diverse_actor_count))
-    runtime._diverse_opponent_actor_count = diverse_actor_count
-    runtime._diverse_model_actor_count = min(diverse_actor_count, max(0, requested_diverse_model_actor_count))
 
 
 def _collector_loop(

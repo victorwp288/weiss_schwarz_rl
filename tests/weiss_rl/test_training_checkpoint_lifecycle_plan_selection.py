@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-import weiss_rl.training.checkpointing.lifecycle_plans as checkpoint_lifecycle_plans
+import weiss_rl.training.checkpointing.lifecycle.lifecycle_plans as checkpoint_lifecycle_plans
 
 
 def _checkpoint_guard_stack() -> SimpleNamespace:

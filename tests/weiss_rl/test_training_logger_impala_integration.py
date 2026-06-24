@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from weiss_rl.diagnostics.training_logger import TrainingLogger
+from weiss_rl.diagnostics.logging.training_logger import TrainingLogger
 from weiss_rl.learners.impala import ImpalaLearner
 
 

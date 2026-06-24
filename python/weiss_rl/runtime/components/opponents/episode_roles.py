@@ -11,7 +11,7 @@ import numpy as np
 
 from weiss_rl.eval.policies.set import HEURISTIC_PUBLIC_POLICY_ID
 from weiss_rl.experiments.baselines import NOLEAGUE_BASELINE_POLICY_ID
-from weiss_rl.runtime.components.actor_state import _ActorState
+from weiss_rl.runtime.components.actors.actor_state import _ActorState
 from weiss_rl.runtime.components.policy_ids import MIRROR_OPPONENT_POLICY_ID
 
 _NOLEAGUE_BASELINE_POLICY_ID = NOLEAGUE_BASELINE_POLICY_ID

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import torch
-from weiss_rl.learners.impala.paired_auxiliary_batch import resolve_paired_auxiliary_batch_inputs
-from weiss_rl.learners.impala.paired_outcome_candidates import compute_paired_outcome_candidate_logps
+from weiss_rl.learners.impala.auxiliary.paired_outcome_candidates import compute_paired_outcome_candidate_logps
+from weiss_rl.learners.impala.batching.paired_auxiliary_batch import resolve_paired_auxiliary_batch_inputs
 
 from tests.weiss_rl.impala_paired_auxiliary_test_support import make_factorized_paired_outcome_case
 

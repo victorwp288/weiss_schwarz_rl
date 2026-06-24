@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from weiss_rl.config.models import StopRulesConfig
-from weiss_rl.eval.diagnostics import build_seat_advantage_diagnostics, write_matchup_diagnostics_json
-from weiss_rl.eval.export import build_matchup_export, write_matchup_summary_csv, write_matchup_summary_json
-from weiss_rl.eval.harness import EvalGameRecord, EvalGameRunner
-from weiss_rl.eval.payoff_folding import PayoffFoldScheme, paired_seed_scores
-from weiss_rl.eval.uncertainty import bayesian_bootstrap_posterior_samples
+from weiss_rl.eval.analysis.diagnostics import build_seat_advantage_diagnostics, write_matchup_diagnostics_json
+from weiss_rl.eval.analysis.export import build_matchup_export, write_matchup_summary_csv, write_matchup_summary_json
+from weiss_rl.eval.analysis.payoff_folding import PayoffFoldScheme, paired_seed_scores
+from weiss_rl.eval.analysis.uncertainty import bayesian_bootstrap_posterior_samples
+from weiss_rl.eval.simulator.harness import EvalGameRecord, EvalGameRunner
 
 
 @dataclass(frozen=True, slots=True)

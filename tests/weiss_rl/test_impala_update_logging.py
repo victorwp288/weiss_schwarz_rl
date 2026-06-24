@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from weiss_rl.learners.impala.update_logging import log_impala_update_metrics_if_due
+from weiss_rl.learners.impala.updates.update_logging import log_impala_update_metrics_if_due
 
 
 def test_log_impala_update_metrics_if_due_preserves_interval_and_timestamp_contract() -> None:

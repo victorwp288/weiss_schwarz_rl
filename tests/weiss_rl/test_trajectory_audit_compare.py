@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from weiss_rl.diagnostics import trajectory_audit_compare_entrypoint as audit_compare_module
+from weiss_rl.diagnostics.trajectory import trajectory_audit_compare_entrypoint as audit_compare_module
 
 
 def test_compare_audit_summaries_reports_outcome_role_and_numeric_deltas(tmp_path: Path) -> None:

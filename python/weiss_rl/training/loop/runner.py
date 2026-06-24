@@ -10,18 +10,18 @@ import torch
 
 from weiss_rl.config import StackConfig
 from weiss_rl.core.simulator_contract import SimulatorContract
-from weiss_rl.diagnostics.tensorboard_logger import TensorBoardLogger
-from weiss_rl.training.checkpointing.finalization import (
-    TrainingFinalCheckpointHooks,
-    finalize_training_checkpoint_selection,
-)
-from weiss_rl.training.checkpointing.periodic_dev_eval import (
+from weiss_rl.diagnostics.logging.tensorboard_logger import TensorBoardLogger
+from weiss_rl.training.checkpointing.guards.periodic_dev_eval import (
     TrainingPeriodicDevEvalHooks,
     maybe_run_periodic_dev_eval_and_checkpoint_guard,
 )
-from weiss_rl.training.checkpointing.snapshot_promotion import (
+from weiss_rl.training.checkpointing.guards.snapshot_promotion import (
     TrainingCheckpointPromotionHooks,
     maybe_checkpoint_and_promote_snapshot,
+)
+from weiss_rl.training.checkpointing.lifecycle.finalization import (
+    TrainingFinalCheckpointHooks,
+    finalize_training_checkpoint_selection,
 )
 from weiss_rl.training.loop.loop_progress import (
     write_training_update_outputs,

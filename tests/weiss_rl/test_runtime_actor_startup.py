@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import torch
-from weiss_rl.runtime.components.actor_startup import build_runtime_actor_startup_state
+from weiss_rl.runtime.components.actors.actor_startup import build_runtime_actor_startup_state
 from weiss_rl.runtime.components.config import QueueRuntimeConfig
 
 

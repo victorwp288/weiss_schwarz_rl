@@ -2,14 +2,137 @@ from __future__ import annotations
 
 import pytest
 import torch
+import weiss_rl.model as model_facade
+from weiss_rl.core.action_catalog import ActionCatalog
 from weiss_rl.model import GLOBAL_ACTION_SPACE_SIZE, SEAT_COUNT, PolicyValueModel
+from weiss_rl.models.architecture_map import (
+    MODEL_ARCHITECTURE_COMPONENTS,
+    model_architecture_component_payload,
+)
+from weiss_rl.models.backbone.trunk_contract import structured_trunk_output_contract_payload
+from weiss_rl.models.heads.structured_head import _StructuredLegalActionHead
+from weiss_rl.models.heads.structured_head_blueprint import build_structured_head_blueprint
+from weiss_rl.models.heads.structured_head_scoring_surfaces import structured_head_scoring_surface_payload
+from weiss_rl.models.policy.policy_value_factory import (
+    build_policy_value_model as owner_build_policy_value_model,
+)
+from weiss_rl.models.policy.policy_value_factory import (
+    policy_value_factory_route_payload,
+)
+from weiss_rl.models.policy.policy_value_model import PolicyValueModel as OwnerPolicyValueModel
+from weiss_rl.models.policy.structured_policy_value_model import (
+    StructuredLegalPolicyValueModel as OwnerStructuredLegalPolicyValueModel,
+)
 
 from tests.weiss_rl.contracts_test_support import (
     _feedforward_model_config,
     _model_config,
+    _structured_spec_bundle,
     _typed_model_config,
     _typed_observation_spec,
 )
+
+
+def test_model_facade_preserves_public_imports() -> None:
+    assert model_facade.PolicyValueModel is OwnerPolicyValueModel
+    assert model_facade.StructuredLegalPolicyValueModel is OwnerStructuredLegalPolicyValueModel
+    assert model_facade.build_policy_value_model is owner_build_policy_value_model
+    assert model_facade.PolicyValueModel.__module__ == "weiss_rl.model"
+    assert model_facade.StructuredLegalPolicyValueModel.__module__ == "weiss_rl.model"
+
+
+def test_model_architecture_map_names_component_owners_and_evidence() -> None:
+    assert [component.key for component in MODEL_ARCHITECTURE_COMPONENTS] == [
+        "factory",
+        "dense_trunk",
+        "opponent_context",
+        "structured_head",
+        "public_heuristic_bias",
+        "diagnostics",
+    ]
+    payload = model_architecture_component_payload()
+    assert payload[0] == {
+        "key": "factory",
+        "role": "Chooses dense fallback versus structured legal-action model construction.",
+        "owner_modules": ["weiss_rl.models.policy.policy_value_factory"],
+        "evidence": ["model config", "simulator spec bundle", "action catalog"],
+    }
+    assert "weiss_rl.models.heads.structured_head_build_plan" in payload[3]["owner_modules"]
+
+
+def test_policy_value_factory_routes_name_model_selection_inputs() -> None:
+    payload = policy_value_factory_route_payload()
+
+    assert [route["route_id"] for route in payload] == ["structured_v2", "dense_fallback"]
+    assert payload[0]["model_class"] == "StructuredLegalPolicyValueModel"
+    assert "spec_bundle" in payload[0]["required_inputs"]
+    assert payload[1]["model_class"] == "PolicyValueModel"
+    assert payload[1]["condition"] == "all other encoder kinds"
+
+
+def test_structured_head_blueprint_resolves_catalog_tables_and_dimensions() -> None:
+    action_catalog = ActionCatalog.from_spec_bundle(_structured_spec_bundle())
+
+    blueprint = build_structured_head_blueprint(
+        action_catalog=action_catalog,
+        action_dim=action_catalog.action_space_size,
+        action_feature_width=64,
+        public_heuristic_logit_bias_families=("pass",),
+    )
+
+    assert blueprint.family_count == 4
+    assert blueprint.catalog_view.family_index["pass"] == 3
+    assert blueprint.action_tables.family_ids.tolist() == [0, 0, 0, 0, 1, 1, 2, 2, 3]
+    assert blueprint.factorized_tables.family_noarg_action_ids[3] == action_catalog.pass_action_id
+    assert blueprint.offsets.numeric < blueprint.dimensions.candidate_input_dim
+
+
+def test_structured_head_build_plan_names_install_order() -> None:
+    assert [step.step_id for step in _StructuredLegalActionHead.build_plan] == [
+        "validate_inputs",
+        "resolve_blueprint",
+        "install_catalog_view",
+        "install_representation_modules",
+        "install_action_tables",
+        "install_factorized_modules",
+        "install_public_heuristic_buffers",
+        "set_runtime_chunking",
+    ]
+    assert _StructuredLegalActionHead.build_plan[1].title == "Resolve catalog blueprint"
+
+
+def test_structured_head_scoring_surfaces_name_runtime_and_diagnostic_paths() -> None:
+    payload = structured_head_scoring_surface_payload()
+
+    assert [surface["name"] for surface in payload] == [
+        "dense_legal_logits",
+        "packed_candidate_logits",
+        "factorized_policy",
+        "public_heuristic_bias",
+    ]
+    assert _StructuredLegalActionHead.scoring_surfaces[1].entrypoints == (
+        "score_packed_candidates",
+        "forward_packed_seat_aware",
+        "sample_packed_seat_aware",
+    )
+    assert "weiss_rl.models.heads.structured_head_scoring_surfaces" in (
+        MODEL_ARCHITECTURE_COMPONENTS[3].owner_modules
+    )
+
+
+def test_structured_trunk_output_contract_names_tuple_positions() -> None:
+    payload = structured_trunk_output_contract_payload()
+
+    assert [field["name"] for field in payload] == [
+        "recurrent_output",
+        "state_repr",
+        "observation_context",
+        "value",
+        "next_seat_hidden",
+    ]
+    assert OwnerStructuredLegalPolicyValueModel.trunk_output_contract[2].consumer == (
+        "candidate features and public-heuristic bias"
+    )
 
 
 def test_policy_value_model_forward_shapes() -> None:

@@ -4,7 +4,9 @@ import json
 from types import SimpleNamespace
 
 import torch
-from weiss_rl.eval.harness import GameResult
+import weiss_rl.training.dev_eval as periodic_dev_eval
+import weiss_rl.training.dev_eval.plan as periodic_dev_eval_plan
+from weiss_rl.eval.simulator.harness import GameResult
 from weiss_rl.training.periodic_dev_eval_run import run_periodic_dev_eval
 
 from .training_dev_eval_test_support import make_dev_eval_stack
@@ -74,7 +76,27 @@ def test_run_periodic_dev_eval_writes_heuristic_policy_alignment_diagnostics(tmp
     random_payload = json.loads(random_summary_path.read_text(encoding="utf-8"))
 
     assert heuristic_payload["policy_alignment_diagnostics"]["all_decisions"]["compared_steps"] == 7
+    assert result["periodic_dev_eval_plan"][0] == {
+        "step_id": "validate_contract",
+        "purpose": "Validate that dev-eval settings, seed sources, and runtime assumptions are usable.",
+        "evidence": ["evaluation contract", "seed file", "validated seed sources"],
+    }
     assert result["anchors"]["B2 HeuristicPublic"]["policy_alignment_diagnostics"]["schema"] == (
         "policy_alignment_diagnostics_v1"
     )
     assert "policy_alignment_diagnostics" not in random_payload
+
+
+def test_periodic_dev_eval_plan_names_artifact_flow() -> None:
+    payload = periodic_dev_eval.periodic_dev_eval_plan_payload()
+
+    assert periodic_dev_eval.PERIODIC_DEV_EVAL_PLAN is periodic_dev_eval_plan.PERIODIC_DEV_EVAL_PLAN
+    assert [step["step_id"] for step in payload] == [
+        "validate_contract",
+        "snapshot_eval_model",
+        "resolve_anchor_panel",
+        "run_matchups",
+        "summarize_quality",
+        "attach_diagnostics",
+    ]
+    assert "aggregate score" in payload[4]["evidence"]

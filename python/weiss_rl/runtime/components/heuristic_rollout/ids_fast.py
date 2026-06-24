@@ -7,40 +7,50 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from weiss_rl.diagnostics.action_diagnostics import (
+from weiss_rl.diagnostics.probes.action_diagnostics import (
     make_action_sequence_state,
     reset_action_sequence_state,
     update_action_summary_from_ids,
 )
-from weiss_rl.runtime.components.bootstrap import bootstrap_fields_from_batch, collector_bootstrap_fields_for_actor
-from weiss_rl.runtime.components.collector_step_legal import capture_packed_array_step_legal
-from weiss_rl.runtime.components.collector_unroll_storage import build_collector_runtime_unroll, store_collector_step
-from weiss_rl.runtime.components.counters import (
+from weiss_rl.runtime.components.batching.bootstrap import (
+    bootstrap_fields_from_batch,
+    collector_bootstrap_fields_for_actor,
+)
+from weiss_rl.runtime.components.batching.counters import (
     accumulate_actor_role_row_counters as _accumulate_actor_role_row_counters,
 )
-from weiss_rl.runtime.components.counters import (
+from weiss_rl.runtime.components.batching.counters import (
     accumulate_timeout_counters as _accumulate_timeout_counters,
 )
-from weiss_rl.runtime.components.counters import (
+from weiss_rl.runtime.components.batching.counters import (
     collector_counter_template as _collector_counter_template,
 )
-from weiss_rl.runtime.components.counters import (
+from weiss_rl.runtime.components.batching.counters import (
     merge_simulator_timing_counters as _merge_simulator_timing_counters,
 )
-from weiss_rl.runtime.components.counters import (
+from weiss_rl.runtime.components.batching.counters import (
     timeout_limits_for_env as _timeout_limits_for_env,
 )
-from weiss_rl.runtime.components.done_resets import reset_actor_hidden_for_done as _reset_actor_hidden_for_done
+from weiss_rl.runtime.components.batching.legal_batching import (
+    optional_legal_action_meta as _optional_legal_action_meta,
+)
+from weiss_rl.runtime.components.batching.legal_batching import require_ids_offsets as _require_ids_offsets
+from weiss_rl.runtime.components.collection.collector_step_legal import capture_packed_array_step_legal
+from weiss_rl.runtime.components.collection.collector_unroll_storage import (
+    build_collector_runtime_unroll,
+    store_collector_step,
+)
+from weiss_rl.runtime.components.collection.done_resets import (
+    reset_actor_hidden_for_done as _reset_actor_hidden_for_done,
+)
 from weiss_rl.runtime.components.heuristic_rollout.ids_fast_simulator import HeuristicIdsFastSimulator
-from weiss_rl.runtime.components.legal_batching import optional_legal_action_meta as _optional_legal_action_meta
-from weiss_rl.runtime.components.legal_batching import require_ids_offsets as _require_ids_offsets
 from weiss_rl.runtime.components.opponent_context import opponent_context_indices_for_model
 from weiss_rl.runtime.components.policy_inference.actor_models import actor_inference_model
-from weiss_rl.runtime.components.reward_shaping import apply_collector_reward_shaping as _apply_reward_shaping
+from weiss_rl.runtime.components.rewards.reward_shaping import apply_collector_reward_shaping as _apply_reward_shaping
 from weiss_rl.runtime.components.types import RuntimeUnroll
 
 if TYPE_CHECKING:
-    from weiss_rl.runtime.components.actor_state import _ActorState
+    from weiss_rl.runtime.components.actors.actor_state import _ActorState
 
 
 class QueueRuntimeHeuristicIdsFastRolloutMixin:

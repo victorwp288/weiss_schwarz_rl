@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from weiss_rl.config import load_stack_config
 from weiss_rl.config.models import StopRulesConfig
-from weiss_rl.eval.harness import GameResult, ReplaySampleResult, ScheduledGame
+from weiss_rl.eval.simulator.harness import GameResult, ReplaySampleResult, ScheduledGame
 
 from ._config_paths import canonical_stack_config_path
 

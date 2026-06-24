@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 from weiss_rl.config import load_stack_config
-from weiss_rl.config.seed_sets import parse_seed_sets_override, resolve_seed_sets
+from weiss_rl.config.loading.seed_sets import parse_seed_sets_override, resolve_seed_sets
 
 
 def _repo_root() -> Path:

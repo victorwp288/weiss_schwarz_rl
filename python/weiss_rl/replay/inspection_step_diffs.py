@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np
 
 from weiss_rl.core.action_catalog import ActionCatalog
+from weiss_rl.core.action_distribution_metrics import (
+    family_probability_masses,
+    gap_from_top_to_action,
+    rank_of_action,
+    same_family_margin_to_action,
+    top_action_payload,
+    top_margin,
+)
 from weiss_rl.core.masking import masked_log_softmax
 from weiss_rl.replay.bundles import ReplayStep
 
@@ -42,40 +49,44 @@ def build_step_diff(
     legal_action_indices_b = np.flatnonzero(legal_mask_b)
     union_action_indices = np.flatnonzero(union_mask)
     ranked_action_indices = union_action_indices[np.argsort(abs_probability_delta[union_action_indices])[::-1]]
-    policy_a_top_action = _top_action_payload(
+    policy_a_top_action = top_action_payload(
         probabilities=probs[0],
         legal_indices=legal_action_indices_a,
         action_catalog=action_catalog,
+        descriptor_fn=action_descriptor,
+        empty_error="Replay inspection requires at least one legal action per compared step",
     )
-    policy_b_top_action = _top_action_payload(
+    policy_b_top_action = top_action_payload(
         probabilities=probs[1],
         legal_indices=legal_action_indices_b,
         action_catalog=action_catalog,
+        descriptor_fn=action_descriptor,
+        empty_error="Replay inspection requires at least one legal action per compared step",
     )
     policy_a_top_action_id = int(policy_a_top_action["action"])
     policy_b_top_action_id = int(policy_b_top_action["action"])
     raw_legal_action_count = int(np.asarray(raw_legal_ids).shape[0])
     policy_a_legal_action_count = int(legal_action_indices_a.shape[0])
     policy_b_legal_action_count = int(legal_action_indices_b.shape[0])
-    policy_a_top_logit_margin = _top_margin(values=logits_a, legal_indices=legal_action_indices_a)
-    policy_a_top_probability_margin = _top_margin(values=probs[0], legal_indices=legal_action_indices_a)
-    policy_a_b_top_action_logit_gap = _gap_from_top_to_action(
+    policy_a_top_logit_margin = top_margin(values=logits_a, legal_indices=legal_action_indices_a)
+    policy_a_top_probability_margin = top_margin(values=probs[0], legal_indices=legal_action_indices_a)
+    policy_a_b_top_action_logit_gap = gap_from_top_to_action(
         values=logits_a,
         legal_indices=legal_action_indices_a,
         action_id=policy_b_top_action_id,
     )
-    policy_a_b_top_action_same_family_logit_margin = _same_family_margin_to_action(
+    policy_a_b_top_action_same_family_logit_margin = same_family_margin_to_action(
         values=logits_a,
         legal_indices=legal_action_indices_a,
         action_id=policy_b_top_action_id,
         action_catalog=action_catalog,
     )
-    policy_a_family_masses = _family_probability_masses(
+    policy_a_family_masses = family_probability_masses(
         probabilities=probs[0],
         legal_indices=legal_action_indices_a,
         action_catalog=action_catalog,
     )
-    policy_b_family_masses = _family_probability_masses(
+    policy_b_family_masses = family_probability_masses(
         probabilities=probs[1],
         legal_indices=legal_action_indices_b,
         action_catalog=action_catalog,
@@ -114,7 +125,7 @@ def build_step_diff(
         "policy_a_policy_b_top_action_same_family_logit_margin": policy_a_b_top_action_same_family_logit_margin,
         "policy_a_top_action_family_probability": float(policy_a_family_masses.get(policy_a_top_family, 0.0)),
         "policy_b_top_action_family_probability": float(policy_b_family_masses.get(policy_b_top_family, 0.0)),
-        "policy_a_rank_of_policy_b_top_action": _rank_of_action(
+        "policy_a_rank_of_policy_b_top_action": rank_of_action(
             probabilities=probs[0],
             legal_indices=legal_action_indices_a,
             action_id=policy_b_top_action_id,
@@ -180,94 +191,6 @@ def _kl_divergence(probs_p: np.ndarray, probs_q: np.ndarray) -> float:
     q = np.maximum(probs_q[support], np.finfo(np.float64).tiny)
     p = probs_p[support]
     return float(np.sum(p * (np.log(p) - np.log(q)), dtype=np.float64))
-
-
-def _family_probability_masses(
-    *,
-    probabilities: np.ndarray,
-    legal_indices: np.ndarray,
-    action_catalog: ActionCatalog | None,
-) -> dict[str, float]:
-    if action_catalog is None:
-        return {}
-    masses: dict[str, float] = {}
-    for action_index in legal_indices.tolist():
-        family = action_catalog.decode(int(action_index)).family
-        masses[family] = masses.get(family, 0.0) + float(probabilities[int(action_index)])
-    return dict(sorted(masses.items(), key=lambda item: (-item[1], item[0])))
-
-
-def _top_action_payload(
-    *,
-    probabilities: np.ndarray,
-    legal_indices: np.ndarray,
-    action_catalog: ActionCatalog | None,
-) -> dict[str, Any]:
-    if legal_indices.size == 0:
-        raise RuntimeError("Replay inspection requires at least one legal action per compared step")
-    top_action = int(legal_indices[np.argmax(probabilities[legal_indices])])
-    return {
-        **action_descriptor(top_action, action_catalog=action_catalog),
-        "probability": float(probabilities[top_action]),
-    }
-
-
-def _rank_of_action(*, probabilities: np.ndarray, legal_indices: np.ndarray, action_id: int) -> int:
-    legal_probabilities = probabilities[legal_indices]
-    sorted_indices = legal_indices[np.argsort(legal_probabilities)[::-1]]
-    positions = np.flatnonzero(sorted_indices == int(action_id))
-    if positions.size == 0:
-        return int(legal_indices.shape[0]) + 1
-    return int(positions[0]) + 1
-
-
-def _top_margin(*, values: np.ndarray, legal_indices: np.ndarray) -> float | None:
-    if legal_indices.size < 2:
-        return None
-    legal_values = np.asarray(values[legal_indices], dtype=np.float64)
-    if not np.all(np.isfinite(legal_values)):
-        return None
-    top_two = np.sort(legal_values)[-2:]
-    return float(top_two[-1] - top_two[-2])
-
-
-def _gap_from_top_to_action(*, values: np.ndarray, legal_indices: np.ndarray, action_id: int) -> float | None:
-    if legal_indices.size == 0 or not bool(np.any(legal_indices == int(action_id))):
-        return None
-    legal_values = np.asarray(values[legal_indices], dtype=np.float64)
-    action_value = float(values[int(action_id)])
-    if not np.all(np.isfinite(legal_values)) or not math.isfinite(action_value):
-        return None
-    return float(np.max(legal_values) - action_value)
-
-
-def _same_family_margin_to_action(
-    *,
-    values: np.ndarray,
-    legal_indices: np.ndarray,
-    action_id: int,
-    action_catalog: ActionCatalog | None,
-) -> float | None:
-    if action_catalog is None or legal_indices.size == 0 or not bool(np.any(legal_indices == int(action_id))):
-        return None
-    action_value = float(values[int(action_id)])
-    if not math.isfinite(action_value):
-        return None
-    target_family = action_catalog.decode(int(action_id)).family
-    same_family_legal_indices = np.asarray(
-        [
-            int(legal_id)
-            for legal_id in legal_indices.tolist()
-            if int(legal_id) != int(action_id) and action_catalog.decode(int(legal_id)).family == target_family
-        ],
-        dtype=np.int64,
-    )
-    if same_family_legal_indices.size == 0:
-        return None
-    competitor_values = np.asarray(values[same_family_legal_indices], dtype=np.float64)
-    if not np.all(np.isfinite(competitor_values)):
-        return None
-    return float(action_value - np.max(competitor_values))
 
 
 __all__ = [

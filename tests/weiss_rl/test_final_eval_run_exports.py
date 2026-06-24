@@ -57,6 +57,11 @@ def test_run_final_eval_writes_matrix_exports_and_posterior_samples(tmp_path: Pa
     )
 
     assert payload["policy_ids"] == policies
+    assert payload["summary_sections"][0] == {
+        "key": "metadata.selection",
+        "question": "Which policies were evaluated, and why were they selected?",
+        "evidence": ["policy_ids", "metadata.selection", "policy_set.json"],
+    }
     assert payload["metadata"]["paper_tag"] == "final_results_v1"
     assert payload["metadata"]["seed_file"]["path"] == seed_file.as_posix()
     assert payload["matrices"]["stop_reason"]["values"] == [
@@ -94,8 +99,15 @@ def test_run_final_eval_writes_matrix_exports_and_posterior_samples(tmp_path: Pa
     policy_set = json.loads((output_dir / "policy_set.json").read_text(encoding="utf-8"))
 
     assert summary["policy_ids"] == policies
+    assert summary["summary_sections"] == payload["summary_sections"]
     assert posterior_payload["policy_ids"] == policies
-    assert metadata["selection"] == {"mode": "explicit", "policy_count": 2}
+    assert metadata["selection"]["mode"] == "explicit"
+    assert metadata["selection"]["policy_count"] == 2
+    assert metadata["selection"]["selection_trace"][0] == {
+        "policy_id": "policy_beta",
+        "reason": "explicit_policy_id",
+        "details": {"position": 0},
+    }
     assert metadata["matchup_artifacts"]["kind"] == "canonical_unordered_pairs_v1"
     assert policy_set == {"policy_ids": policies}
     assert len(summary["matchups"]) == 3

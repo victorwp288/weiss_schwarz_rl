@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 from weiss_rl.core.legal_actions import LegalActionBatch
-from weiss_rl.runtime.components.legal_batching import concatenate_legal_actions
+from weiss_rl.runtime.components.batching.legal_batching import concatenate_legal_actions
 
 
 def test_concatenate_legal_actions_fills_missing_ordered_packed_meta_with_sentinel() -> None:

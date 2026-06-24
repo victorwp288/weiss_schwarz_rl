@@ -5,8 +5,8 @@ from typing import Any, cast
 
 import pytest
 import torch
-import weiss_rl.learners.impala.loss_vtrace_stage as impala_loss_vtrace_stage
-from weiss_rl.learners.impala.loss_vtrace_stage import compute_impala_vtrace_stage
+import weiss_rl.learners.impala.losses.loss_vtrace_stage as impala_loss_vtrace_stage
+from weiss_rl.learners.impala.losses.loss_vtrace_stage import compute_impala_vtrace_stage
 
 
 def test_compute_impala_vtrace_stage_resolves_targets_and_attaches_context(
