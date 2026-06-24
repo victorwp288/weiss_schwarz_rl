@@ -34,9 +34,7 @@ def forward_sequence_seat_aware_dense(
 
     logits_steps: list[Tensor] = []
     value_steps: list[Tensor] = []
-    for step_index, (step_obs, step_seat) in enumerate(
-        zip(obs.unbind(dim=0), acting_seat.unbind(dim=0), strict=True)
-    ):
+    for step_index, (step_obs, step_seat) in enumerate(zip(obs.unbind(dim=0), acting_seat.unbind(dim=0), strict=True)):
         if reset_mask is not None:
             seat_hidden = _reset_finished_rows(
                 model,

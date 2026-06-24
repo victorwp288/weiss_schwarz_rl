@@ -115,9 +115,7 @@ def test_structured_head_scoring_surfaces_name_runtime_and_diagnostic_paths() ->
         "forward_packed_seat_aware",
         "sample_packed_seat_aware",
     )
-    assert "weiss_rl.models.heads.structured_head_scoring_surfaces" in (
-        MODEL_ARCHITECTURE_COMPONENTS[3].owner_modules
-    )
+    assert "weiss_rl.models.heads.structured_head_scoring_surfaces" in (MODEL_ARCHITECTURE_COMPONENTS[3].owner_modules)
 
 
 def test_structured_trunk_output_contract_names_tuple_positions() -> None:

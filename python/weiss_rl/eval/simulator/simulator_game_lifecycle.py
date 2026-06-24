@@ -50,7 +50,9 @@ class SimulatorGameLifecycleMixin:
             replay_sample=replay_sample,
         )
 
-    def _build_ids_eval_env(self: Any, *, seed: int, scheduled_game: ScheduledGame | None = None) -> DecisionBoundaryEnv:
+    def _build_ids_eval_env(
+        self: Any, *, seed: int, scheduled_game: ScheduledGame | None = None
+    ) -> DecisionBoundaryEnv:
         env_config = build_env_config_from_stack(
             self.stack,
             seed=int(seed),

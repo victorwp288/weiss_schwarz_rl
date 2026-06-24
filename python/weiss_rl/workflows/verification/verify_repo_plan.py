@@ -21,6 +21,12 @@ def _module_command(python_exe: str, module: str, *args: str) -> tuple[str, ...]
     return (python_exe, "-m", module, *args)
 
 
+def _existing_tool_paths(repo_root: Path | None, *paths: str) -> tuple[str, ...]:
+    if repo_root is None:
+        return tuple(paths)
+    return tuple(path for path in paths if (repo_root / path).exists())
+
+
 def _wrapper_dry_run_command(*, python_exe: str, preset: str, run_label: str) -> tuple[str, ...]:
     return _module_command(
         python_exe,
@@ -34,7 +40,18 @@ def _wrapper_dry_run_command(*, python_exe: str, preset: str, run_label: str) ->
     )
 
 
-def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationStep, ...]:
+def build_release_verification_steps(
+    *,
+    python_exe: str,
+    repo_root: Path | None = None,
+) -> tuple[VerificationStep, ...]:
+    lint_paths = _existing_tool_paths(repo_root, "python", "tests", "examples")
+    deadcode_paths = _existing_tool_paths(
+        repo_root,
+        "python/weiss_rl",
+        "examples",
+        "python/weiss_rl/workflows/verification/vulture_whitelist.py",
+    )
     return (
         VerificationStep(
             "Repo hygiene gate",
@@ -46,7 +63,7 @@ def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationSt
         ),
         VerificationStep(
             "Ruff check",
-            _module_command(python_exe, "ruff", "check", "python", "tests", "examples"),
+            _module_command(python_exe, "ruff", "check", *lint_paths),
         ),
         VerificationStep(
             "Ruff format check",
@@ -55,9 +72,7 @@ def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationSt
                 "ruff",
                 "format",
                 "--check",
-                "python",
-                "tests",
-                "examples",
+                *lint_paths,
             ),
         ),
         VerificationStep(
@@ -75,8 +90,7 @@ def build_release_verification_steps(*, python_exe: str) -> tuple[VerificationSt
             _module_command(
                 python_exe,
                 "vulture",
-                "python/weiss_rl",
-                "examples",
+                *deadcode_paths,
                 "--min-confidence",
                 "80",
             ),
@@ -114,7 +128,7 @@ def verification_request(*, repo_root: Path, python_exe: str) -> VerificationReq
 
 
 def build_release_verification_steps_for_request(request: VerificationRequest) -> tuple[VerificationStep, ...]:
-    return build_release_verification_steps(python_exe=request.python_exe)
+    return build_release_verification_steps(python_exe=request.python_exe, repo_root=request.repo_root)
 
 
 def render_verification_plan(steps: Sequence[VerificationStep]) -> list[tuple[str, list[str]]]:

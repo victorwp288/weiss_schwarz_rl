@@ -33,18 +33,27 @@ def _scheduled_game() -> ScheduledGame:
 
 
 def test_god_search_rollout_sampling_algorithm_maps_policy_names() -> None:
-    assert god_search_rollout_sampling_algorithm(
-        rollout_policy="argmax",
-        eval_sampling_algorithm="pinned_cdf_pcg_v1",
-    ) == "model_argmax_pinned_v1"
-    assert god_search_rollout_sampling_algorithm(
-        rollout_policy="sample",
-        eval_sampling_algorithm="model_argmax_pinned_v1",
-    ) == "pinned_cdf_pcg_v1"
-    assert god_search_rollout_sampling_algorithm(
-        rollout_policy="eval",
-        eval_sampling_algorithm="model_argmax_pinned_v1",
-    ) == "model_argmax_pinned_v1"
+    assert (
+        god_search_rollout_sampling_algorithm(
+            rollout_policy="argmax",
+            eval_sampling_algorithm="pinned_cdf_pcg_v1",
+        )
+        == "model_argmax_pinned_v1"
+    )
+    assert (
+        god_search_rollout_sampling_algorithm(
+            rollout_policy="sample",
+            eval_sampling_algorithm="model_argmax_pinned_v1",
+        )
+        == "pinned_cdf_pcg_v1"
+    )
+    assert (
+        god_search_rollout_sampling_algorithm(
+            rollout_policy="eval",
+            eval_sampling_algorithm="model_argmax_pinned_v1",
+        )
+        == "model_argmax_pinned_v1"
+    )
 
 
 def test_god_search_rollout_rng_seed_is_stable_and_decision_sensitive() -> None:

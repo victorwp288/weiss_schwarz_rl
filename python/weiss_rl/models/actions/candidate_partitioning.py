@@ -33,7 +33,11 @@ def partition_candidate_family_masks(
 ) -> CandidateFamilyMasks:
     """Partition candidate rows into structured scoring groups."""
 
-    play_mask = family_ids == play_character_family_id if play_character_family_id >= 0 else torch.zeros_like(family_ids, dtype=torch.bool)
+    play_mask = (
+        family_ids == play_character_family_id
+        if play_character_family_id >= 0
+        else torch.zeros_like(family_ids, dtype=torch.bool)
+    )
     hand_mask = torch.zeros_like(play_mask)
     for family_id in hand_family_ids:
         if family_id < 0:

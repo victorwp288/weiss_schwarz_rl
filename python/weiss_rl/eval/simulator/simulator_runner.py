@@ -205,4 +205,3 @@ class SimulatorEvalRunner(
                 batch = next_batch
         finally:
             env.close()
-

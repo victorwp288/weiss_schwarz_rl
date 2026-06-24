@@ -14,10 +14,7 @@ from weiss_rl.eval.readiness.specs import (
 
 def build_run_directory_audit(run_dir: Path) -> dict[str, Any]:
     specs = required_run_artifact_specs()
-    artifact_results = {
-        spec.artifact_id: evaluate_required_artifact(run_dir=run_dir, spec=spec)
-        for spec in specs
-    }
+    artifact_results = {spec.artifact_id: evaluate_required_artifact(run_dir=run_dir, spec=spec) for spec in specs}
     missing_artifacts = [artifact_id for artifact_id, result in artifact_results.items() if not bool(result["passed"])]
     return {
         "passed": not missing_artifacts,

@@ -55,10 +55,10 @@ else
 endif
 
 check-placeholders:
-	@$(PYRUN) -m weiss_rl.diagnostics.core_placeholder_check_entrypoint
+	@$(PYRUN) -m weiss_rl.diagnostics.hygiene.core_placeholder_check_entrypoint
 
 repo-hygiene:
-	@$(PYRUN) -m weiss_rl.diagnostics.repo_hygiene_check_entrypoint
+	@$(PYRUN) -m weiss_rl.diagnostics.hygiene.repo_hygiene_check_entrypoint
 
 lint:
 	@$(PYRUN) -m ruff check python tests
@@ -73,7 +73,7 @@ type:
 	@$(PYRUN) -m mypy python/weiss_rl/workflows/thesis_wrapper.py python/weiss_rl/workflows/eval_entrypoint.py python/weiss_rl/human_play/play_vs_model_entrypoint.py
 
 deadcode:
-	@$(PYRUN) -m vulture python/weiss_rl --min-confidence 80
+	@$(PYRUN) -m vulture python/weiss_rl python/weiss_rl/workflows/verification/vulture_whitelist.py --min-confidence 80
 
 test:
 	@$(PYRUN) -m pytest -q tests/weiss_rl
@@ -136,7 +136,7 @@ toy-public-e2e:
 
 artifact-hygiene:
 	@$(MAKE) toy-public-e2e
-	@$(PYRUN) -m weiss_rl.diagnostics.artifact_scan_entrypoint --artifact-root runs/toy_public_demo_ci
+	@$(PYRUN) -m weiss_rl.diagnostics.hygiene.artifact_scan_entrypoint --artifact-root runs/toy_public_demo_ci
 
 eval-dev:
 	@$(PYRUN) -m weiss_rl.workflows.eval_entrypoint --stack-config configs/presets/structured_acceptance_standard_thesis_eval.yaml

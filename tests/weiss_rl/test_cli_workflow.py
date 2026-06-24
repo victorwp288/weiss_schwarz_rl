@@ -142,7 +142,10 @@ def test_train_main_workflow_uses_report_retained_main_config(tmp_path: Path) ->
     assert plan.payload["workflow"] == "train-main"
     assert plan.payload["evidence_role"] == "produces candidate main checkpoints for final evaluation"
     assert plan.payload["next_step"] == "run eval-final on the retained main run with the selected B1 anchor"
-    assert plan.payload["profile_purpose"] == "fast wiring check for commands, configs, simulator import, and artifact paths"
+    assert (
+        plan.payload["profile_purpose"]
+        == "fast wiring check for commands, configs, simulator import, and artifact paths"
+    )
     assert plan.payload["profile_evidence_level"] == "plumbing_only"
     assert plan.payload["num_envs"] == 2
     assert plan.payload["max_updates"] == 1

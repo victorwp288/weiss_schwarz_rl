@@ -158,9 +158,7 @@ def write_delta_artifacts(
                 "s0_mean_mixture": float(baseline_nash_mean[index]),
                 "case_mean_mixture": float(nash_mean[index]),
                 "delta_mean_mixture": stable_delta(float(nash_mean[index]), float(baseline_nash_mean[index])),
-                "abs_delta_mean_mixture": abs(
-                    stable_delta(float(nash_mean[index]), float(baseline_nash_mean[index]))
-                ),
+                "abs_delta_mean_mixture": abs(stable_delta(float(nash_mean[index]), float(baseline_nash_mean[index]))),
             }
             for index, policy_id in enumerate(artifacts.policy_ids)
         ]

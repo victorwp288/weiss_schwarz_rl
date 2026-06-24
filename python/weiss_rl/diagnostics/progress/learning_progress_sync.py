@@ -60,7 +60,9 @@ def build_actor_sync_series(
     learner_actor_update_lag_p50_values = _numeric_values(route_records, "learner_actor_update_lag_p50")
     learner_actor_update_lag_p90_values = _numeric_values(route_records, "learner_actor_update_lag_p90")
     league_update_lag_values = _numeric_values(route_records, "league_update_lag")
-    lag_warning_values = learner_actor_update_lag_p90_values or league_update_lag_values or policy_version_lag_p90_values
+    lag_warning_values = (
+        learner_actor_update_lag_p90_values or league_update_lag_values or policy_version_lag_p90_values
+    )
     if learner_actor_update_lag_p90_values:
         lag_warning_source = "learner_actor_update_lag_p90"
     elif league_update_lag_values:
@@ -114,9 +116,7 @@ def build_actor_model_sync_section(series: ActorSyncSeries) -> dict[str, Any]:
         else max(series.learner_actor_update_lag_p90_values),
         "lag_warning_source": series.lag_warning_source,
         "learner_to_actor_update_lag": _window_summary(series.lag_warning_values, window=20),
-        "max_learner_to_actor_update_lag": None
-        if not series.lag_warning_values
-        else max(series.lag_warning_values),
+        "max_learner_to_actor_update_lag": None if not series.lag_warning_values else max(series.lag_warning_values),
     }
 
 

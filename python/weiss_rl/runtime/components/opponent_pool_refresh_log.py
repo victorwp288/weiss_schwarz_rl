@@ -85,9 +85,7 @@ def build_opponent_pool_refresh_record(
         "champion_ids": list(champion_ids),
         "recent_ids": list(recent_ids),
         "hard_negative_ids": list(hard_negative_ids),
-        "hard_negative_focus_policy_ids": list(
-            configured_hard_negative_focus_policy_ids(league_config=league_config)
-        ),
+        "hard_negative_focus_policy_ids": list(configured_hard_negative_focus_policy_ids(league_config=league_config)),
         "hard_negative_focus_weight_multiplier": float(
             getattr(sampling_config, "hard_negative_focus_weight_multiplier", 1.0)
         ),
@@ -95,9 +93,7 @@ def build_opponent_pool_refresh_record(
             [str(policy_id), float(weight)]
             for policy_id, weight in configured_row_deficit_policy_weights(league_config=league_config)
         ],
-        "hard_negative_overlaps_champions": bool(
-            getattr(sampling_config, "hard_negative_overlaps_champions", False)
-        ),
+        "hard_negative_overlaps_champions": bool(getattr(sampling_config, "hard_negative_overlaps_champions", False)),
         "resident_policy_ids": list(resident_policy_ids),
         "loaded_model_ids": list(loaded_model_ids),
         "stale_demoted": list(stale_demoted),

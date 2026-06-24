@@ -26,9 +26,7 @@ def test_fixed_policy_panel_role_payload_names_guardrail_questions() -> None:
         "B4 HeuristicPublicControl",
     ]
     assert payload[1]["policy_source"] == "selected retained B1 checkpoint"
-    assert payload[2]["evidence_question"] == (
-        "Does the policy transfer to a stronger public heuristic opponent?"
-    )
+    assert payload[2]["evidence_question"] == ("Does the policy transfer to a stronger public heuristic opponent?")
     assert payload[4]["deck_id"] == "preset:control_deck_jj_s66_v1"
 
 

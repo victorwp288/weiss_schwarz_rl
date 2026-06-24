@@ -37,7 +37,10 @@ IMPALA_LOSS_COMPONENT_PLAN: tuple[ImpalaLossComponentPlan, ...] = (
     ImpalaLossComponentPlan(
         name="value_regression",
         purpose="Fit the value head to V-trace targets on configured value-train rows.",
-        owner_modules=("weiss_rl.learners.impala.losses.objective_loss", "weiss_rl.learners.impala.losses.loss_objective_stage"),
+        owner_modules=(
+            "weiss_rl.learners.impala.losses.objective_loss",
+            "weiss_rl.learners.impala.losses.loss_objective_stage",
+        ),
         evidence=("values", "V-trace targets", "value train mask", "value loss coefficient"),
     ),
     ImpalaLossComponentPlan(
@@ -67,7 +70,10 @@ IMPALA_LOSS_COMPONENT_PLAN: tuple[ImpalaLossComponentPlan, ...] = (
     ImpalaLossComponentPlan(
         name="structured_metrics",
         purpose="Emit structured policy diagnostics without changing the objective.",
-        owner_modules=("weiss_rl.learners.impala.support.metrics_assembly", "weiss_rl.learners.impala.support.structured_summary"),
+        owner_modules=(
+            "weiss_rl.learners.impala.support.metrics_assembly",
+            "weiss_rl.learners.impala.support.structured_summary",
+        ),
         evidence=("structured metrics mode", "action catalog", "packed legal view", "factorized result"),
     ),
 )

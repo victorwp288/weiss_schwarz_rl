@@ -128,9 +128,7 @@ class TeacherGuidanceSeries:
                 self.policy_anchor_top_action_agreement_values,
                 window=20,
             ),
-            "max_teacher_public_heuristic_coef_active": _max_or_none(
-                self.teacher_public_heuristic_coef_active_values
-            ),
+            "max_teacher_public_heuristic_coef_active": _max_or_none(self.teacher_public_heuristic_coef_active_values),
             "max_teacher_hand_coef_active": _max_or_none(self.teacher_hand_coef_active_values),
             "max_teacher_public_heuristic_supported_fraction": _max_or_none(
                 self.teacher_public_heuristic_supported_values

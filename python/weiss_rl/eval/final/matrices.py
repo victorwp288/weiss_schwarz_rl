@@ -51,7 +51,9 @@ def build_matrix(
     }
 
 
-def canonical_matchup_results_by_key(matchup_results: Sequence[dict[str, Any]]) -> dict[tuple[int, int], dict[str, Any]]:
+def canonical_matchup_results_by_key(
+    matchup_results: Sequence[dict[str, Any]],
+) -> dict[tuple[int, int], dict[str, Any]]:
     """Index canonical matchup artifacts by their policy-index pair."""
     return {(int(result["focal_index"]), int(result["opponent_index"])): result for result in matchup_results}
 

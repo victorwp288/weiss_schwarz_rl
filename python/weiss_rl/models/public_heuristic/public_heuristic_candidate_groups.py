@@ -186,8 +186,7 @@ class StructuredPublicHeuristicCandidateGroupMixin(StructuredPublicHeuristicHand
                     0,
                     next_indices,
                     torch.clamp(
-                        choice_total.index_select(0, next_rows)
-                        - (choice_page_start.index_select(0, next_rows) + 16.0),
+                        choice_total.index_select(0, next_rows) - (choice_page_start.index_select(0, next_rows) + 16.0),
                         min=0.0,
                     ),
                 )
@@ -244,9 +243,7 @@ class StructuredPublicHeuristicCandidateGroupMixin(StructuredPublicHeuristicHand
             )
             * float(scoring_profile.move_center_bonus)
         )
-        legal = (move_source_numeric[:, 0].to(dtype=dtype) > 0.5) & (
-            move_target_numeric[:, 0].to(dtype=dtype) <= 0.5
-        )
+        legal = (move_source_numeric[:, 0].to(dtype=dtype) > 0.5) & (move_target_numeric[:, 0].to(dtype=dtype) <= 0.5)
         move_score = torch.where(
             legal,
             (target_pref - source_pref) + bonus,

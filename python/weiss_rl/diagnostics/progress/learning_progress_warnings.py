@@ -48,10 +48,7 @@ def build_training_log_warnings(inputs: TrainingLogWarningInputs) -> list[str]:
         warnings.append("actor_heuristic_fraction_active was nonzero; focal actions were not pure model-policy rows")
     if inputs.heuristic_mix_values and max(inputs.heuristic_mix_values) > 0.0:
         warnings.append("heuristic_public_mix_fraction_active was nonzero; eval/train pressure includes B2 heuristic")
-    if (
-        inputs.actor_lag_warning_values
-        and max(inputs.actor_lag_warning_values) > _LEARNER_ACTOR_LAG_WARN_THRESHOLD
-    ):
+    if inputs.actor_lag_warning_values and max(inputs.actor_lag_warning_values) > _LEARNER_ACTOR_LAG_WARN_THRESHOLD:
         warnings.append(
             f"{inputs.actor_lag_warning_source} exceeded "
             f"{_LEARNER_ACTOR_LAG_WARN_THRESHOLD:g}; actor policy may be stale"

@@ -76,8 +76,7 @@ def validate_structured_head_inputs(
         raise ValueError(f"candidate_scoring_chunk_size must be >= 1, got {candidate_scoring_chunk_size}")
     if cuda_learner_candidate_scoring_chunk_size <= 0:
         raise ValueError(
-            "cuda_learner_candidate_scoring_chunk_size must be >= 1, "
-            f"got {cuda_learner_candidate_scoring_chunk_size}"
+            f"cuda_learner_candidate_scoring_chunk_size must be >= 1, got {cuda_learner_candidate_scoring_chunk_size}"
         )
     if public_heuristic_logit_bias_scale < 0.0:
         raise ValueError(f"public_heuristic_logit_bias_scale must be >= 0.0, got {public_heuristic_logit_bias_scale}")

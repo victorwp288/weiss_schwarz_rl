@@ -4,10 +4,8 @@ from types import SimpleNamespace
 
 import torch
 from torch import nn
-from weiss_rl.learners.factorized_evaluation import (
-    ImpalaFactorizedEvaluationMixin,
-    _attach_initial_hidden_context_gradient,
-)
+from weiss_rl.learners.factorized_evaluation import ImpalaFactorizedEvaluationMixin
+from weiss_rl.learners.factorized_public_teacher import _attach_initial_hidden_context_gradient
 
 
 def test_factorized_candidate_helper_uses_contextual_packed_scorer_for_gradients() -> None:

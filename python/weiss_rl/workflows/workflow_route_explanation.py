@@ -44,7 +44,11 @@ PUBLIC_WORKFLOW_LIFECYCLE: tuple[PublicWorkflowLifecycleStep, ...] = (
     PublicWorkflowLifecycleStep(
         step_id="parse_arguments",
         purpose="Expose only the lean thesis command set through the CLI parser.",
-        owner_modules=("weiss_rl.workflows.parsers", "weiss_rl.workflows.training_workflow.parser", "weiss_rl.workflows.evaluation_workflow.parser"),
+        owner_modules=(
+            "weiss_rl.workflows.parsers",
+            "weiss_rl.workflows.training_workflow.parser",
+            "weiss_rl.workflows.evaluation_workflow.parser",
+        ),
     ),
     PublicWorkflowLifecycleStep(
         step_id="build_plan",
@@ -59,7 +63,10 @@ PUBLIC_WORKFLOW_LIFECYCLE: tuple[PublicWorkflowLifecycleStep, ...] = (
     PublicWorkflowLifecycleStep(
         step_id="retain_outputs",
         purpose="Write the run, evaluation, figure, or diagnostic artifacts named by the command payload.",
-        owner_modules=("weiss_rl.workflows.training_workflow.dispatch", "weiss_rl.workflows.evaluation_workflow.dispatch"),
+        owner_modules=(
+            "weiss_rl.workflows.training_workflow.dispatch",
+            "weiss_rl.workflows.evaluation_workflow.dispatch",
+        ),
     ),
 )
 

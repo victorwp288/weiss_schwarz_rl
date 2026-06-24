@@ -35,11 +35,7 @@ def require_packed_legal_tensors(
         raise ValueError(missing_message)
     ids = torch.as_tensor(legal_actions.ids, device=device, dtype=torch.long)
     offsets = torch.as_tensor(legal_actions.offsets, device=device, dtype=torch.long)
-    meta = (
-        None
-        if legal_actions.meta is None
-        else torch.as_tensor(legal_actions.meta, device=device, dtype=torch.long)
-    )
+    meta = None if legal_actions.meta is None else torch.as_tensor(legal_actions.meta, device=device, dtype=torch.long)
     validate_packed_offsets(ids=ids, offsets=offsets, row_count=row_count)
     return PackedLegalTensors(ids=ids, offsets=offsets, meta=meta)
 

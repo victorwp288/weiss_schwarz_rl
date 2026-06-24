@@ -248,9 +248,7 @@ class PolicyAlignmentAccumulator:
                     "model_matches_reference_top_action_family_rate": float(np.mean(family_matches)),
                     "model_mean_probability_on_reference_top_action": float(np.mean(probabilities)),
                     "model_mean_probability_on_reference_top_action_family": float(np.mean(family_probabilities)),
-                    "model_probability_on_reference_top_action_percentiles": percentile_summary(
-                        probabilities.tolist()
-                    ),
+                    "model_probability_on_reference_top_action_percentiles": percentile_summary(probabilities.tolist()),
                     "model_reference_top_action_same_family_logit_margin_percentiles": percentile_summary(
                         same_family_margins
                     ),

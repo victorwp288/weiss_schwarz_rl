@@ -19,9 +19,7 @@ def packed_log_prob_policy_stats(
     offsets = legal_action_offsets.to(device=packed_log_probs.device, dtype=torch.long)
     row_count = int(offsets.numel() - 1)
     lengths = offsets[1:] - offsets[:-1]
-    if int(ids.numel()) != int(packed_log_probs.numel()) or int(lengths.sum().item()) != int(
-        packed_log_probs.numel()
-    ):
+    if int(ids.numel()) != int(packed_log_probs.numel()) or int(lengths.sum().item()) != int(packed_log_probs.numel()):
         raise ValueError("packed legal ids/offsets must align with packed log-probs")
 
     row_indices = torch.repeat_interleave(torch.arange(row_count, device=packed_log_probs.device), lengths)

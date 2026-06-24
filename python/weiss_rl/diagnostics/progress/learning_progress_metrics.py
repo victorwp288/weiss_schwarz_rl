@@ -32,6 +32,7 @@ _ratio_values = _progress_math._ratio_values
 _sum_fraction_values = _progress_math._sum_fraction_values
 _window_summary = _progress_math._window_summary
 
+
 @dataclass(frozen=True)
 class TrainingLogSummarySections:
     sections: dict[str, Any]
@@ -192,12 +193,8 @@ def build_training_log_summary_sections(
             chosen_pass_train_fraction_values=chosen_pass_train_fraction_values,
             chosen_mulligan_select_share_values=chosen_mulligan_select_share_values,
             pass_with_nonpass_total_fraction_values=pass_with_nonpass_total_fraction_values,
-            teacher_public_heuristic_coef_active_values=(
-                teacher_guidance.teacher_public_heuristic_coef_active_values
-            ),
-            teacher_public_heuristic_supported_values=(
-                teacher_guidance.teacher_public_heuristic_supported_values
-            ),
+            teacher_public_heuristic_coef_active_values=(teacher_guidance.teacher_public_heuristic_coef_active_values),
+            teacher_public_heuristic_supported_values=(teacher_guidance.teacher_public_heuristic_supported_values),
             teacher_hand_coef_active_values=teacher_guidance.teacher_hand_coef_active_values,
             teacher_hand_supported_values=teacher_guidance.teacher_hand_supported_values,
         )

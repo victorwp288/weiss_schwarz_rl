@@ -1,0 +1,26 @@
+"""Vulture whitelist for public compatibility exports.
+
+These names are imported into facade dictionaries and then served through
+dynamic compatibility namespaces, so static dead-code detection cannot see the
+runtime access pattern directly.
+"""
+
+# ruff: noqa: B018, F821
+
+apply_training_flag_overrides
+build_ids_eval_env
+build_learner_batch
+build_training_env
+manifest_actor_device_layout
+noleague_training_prerequisite_failure
+print_manifest_only_message
+raise_noleague_training_prerequisite_failure
+raise_runtime_prerequisite_failure
+require_matching_hash
+resolve_device
+resolve_run_label
+resolve_runtime_profile
+resolve_seed
+run_artifacts_from_existing_run_dir
+runtime_training_prerequisite_failure
+validate_imported_snapshot_contract

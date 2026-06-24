@@ -33,9 +33,7 @@ def build_eval_workflow_plan_for_request(request: EvaluationWorkflowRequest) -> 
             command=command,
             run_dir=run_dir,
             smoke=is_smoke_eval,
-            b1_baseline_run_dir=None
-            if args.b1_baseline_run_dir is None
-            else Path(args.b1_baseline_run_dir).as_posix(),
+            b1_baseline_run_dir=None if args.b1_baseline_run_dir is None else Path(args.b1_baseline_run_dir).as_posix(),
         ),
     )
 

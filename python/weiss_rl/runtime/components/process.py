@@ -228,9 +228,7 @@ def _collector_process_main_impl(
         defer_initial_opponent_pool_refresh=True,
         learner_device=(None if learner_device_name is None else learner_device_name),
     )
-    restore_parent_actor_lane_counts(
-        runtime=runtime, stack=stack_for_child, parent_actor_count=int(config.actor_count)
-    )
+    restore_parent_actor_lane_counts(runtime=runtime, stack=stack_for_child, parent_actor_count=int(config.actor_count))
     process_debug_log(
         run_dir=(None if run_dir is None else Path(run_dir)),
         actor_id=int(actor_id),

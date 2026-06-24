@@ -49,7 +49,10 @@ def test_learning_progress_guard_helpers_are_package_owned() -> None:
 def test_learning_progress_metric_sections_are_package_owned() -> None:
     assert learning_progress_module._window_summary is metric_window_summary
     assert learning_progress_module.build_training_log_summary_sections is metric_build_training_log_summary_sections
-    assert metric_build_training_log_summary_sections.__module__ == "weiss_rl.diagnostics.progress.learning_progress_metrics"
+    assert (
+        metric_build_training_log_summary_sections.__module__
+        == "weiss_rl.diagnostics.progress.learning_progress_metrics"
+    )
 
 
 def test_learning_progress_diagnostic_plan_is_package_owned() -> None:

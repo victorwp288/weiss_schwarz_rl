@@ -78,10 +78,14 @@ def test_simulator_runner_exposes_only_runner_and_policy_resolver_boundary() -> 
     assert policy_resolution_resolve_static_eval_policy is static_policy_resolve_static_eval_policy
     assert policy_resolution_resolve_eval_policies.__module__ == "weiss_rl.eval.policies.resolution"
     assert policy_resolution_resolve_b1_policy.__module__ == "weiss_rl.eval.snapshots.b1_policy_resolution"
-    assert policy_resolution_resolve_snapshot_registry_policy.__module__ == "weiss_rl.eval.snapshots.snapshot_policy_resolution"
+    assert (
+        policy_resolution_resolve_snapshot_registry_policy.__module__
+        == "weiss_rl.eval.snapshots.snapshot_policy_resolution"
+    )
     assert policy_resolution_resolve_static_eval_policy.__module__ == "weiss_rl.eval.snapshots.static_policy_resolution"
     assert (
-        policy_resolution_is_recursive_registry_search_root.__module__ == "weiss_rl.eval.snapshots.snapshot_registry_resolution"
+        policy_resolution_is_recursive_registry_search_root.__module__
+        == "weiss_rl.eval.snapshots.snapshot_registry_resolution"
     )
 
 

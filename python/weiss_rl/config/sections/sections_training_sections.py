@@ -54,18 +54,38 @@ class TrainingConfigSectionMapItem:
 
 
 TRAINING_CONFIG_SECTION_MAP: tuple[TrainingConfigSectionMapItem, ...] = (
-    TrainingConfigSectionMapItem("rollout", "runtime batch shape and actor collection cadence", len(TRAINING_ROLLOUT_KEYS)),
-    TrainingConfigSectionMapItem("optimizer", "learner step size, coefficients, and gradient clipping", len(TRAINING_OPTIMIZER_KEYS)),
-    TrainingConfigSectionMapItem("exploration", "actor sampling temperature and heuristic schedule", len(TRAINING_EXPLORATION_KEYS)),
-    TrainingConfigSectionMapItem("precision", "mixed precision and runtime profiling toggles", len(TRAINING_PRECISION_KEYS)),
-    TrainingConfigSectionMapItem("checkpointing", "checkpoint cadence and logging intervals", len(TRAINING_CHECKPOINTING_KEYS)),
+    TrainingConfigSectionMapItem(
+        "rollout", "runtime batch shape and actor collection cadence", len(TRAINING_ROLLOUT_KEYS)
+    ),
+    TrainingConfigSectionMapItem(
+        "optimizer", "learner step size, coefficients, and gradient clipping", len(TRAINING_OPTIMIZER_KEYS)
+    ),
+    TrainingConfigSectionMapItem(
+        "exploration", "actor sampling temperature and heuristic schedule", len(TRAINING_EXPLORATION_KEYS)
+    ),
+    TrainingConfigSectionMapItem(
+        "precision", "mixed precision and runtime profiling toggles", len(TRAINING_PRECISION_KEYS)
+    ),
+    TrainingConfigSectionMapItem(
+        "checkpointing", "checkpoint cadence and logging intervals", len(TRAINING_CHECKPOINTING_KEYS)
+    ),
     TrainingConfigSectionMapItem("vtrace", "IMPALA off-policy clipping constants", len(TRAINING_VTRACE_KEYS)),
     TrainingConfigSectionMapItem("ppo", "PPO-lite ablation settings", len(TRAINING_PPO_KEYS)),
-    TrainingConfigSectionMapItem("structured_aux", "structured auxiliary and replay-retention settings", len(TRAINING_STRUCTURED_AUX_KEYS)),
-    TrainingConfigSectionMapItem("structured_warmstart", "structured-head warmstart controls", len(TRAINING_STRUCTURED_WARMSTART_KEYS)),
-    TrainingConfigSectionMapItem("structured_metrics", "structured diagnostics emission controls", len(TRAINING_STRUCTURED_METRICS_KEYS)),
-    TrainingConfigSectionMapItem("teacher_aux", "teacher-label and public-heuristic auxiliary loss controls", len(TRAINING_TEACHER_AUX_KEYS)),
-    TrainingConfigSectionMapItem("action_surface", "actor/learner legal-action scoring surfaces", len(TRAINING_ACTION_SURFACE_KEYS)),
+    TrainingConfigSectionMapItem(
+        "structured_aux", "structured auxiliary and replay-retention settings", len(TRAINING_STRUCTURED_AUX_KEYS)
+    ),
+    TrainingConfigSectionMapItem(
+        "structured_warmstart", "structured-head warmstart controls", len(TRAINING_STRUCTURED_WARMSTART_KEYS)
+    ),
+    TrainingConfigSectionMapItem(
+        "structured_metrics", "structured diagnostics emission controls", len(TRAINING_STRUCTURED_METRICS_KEYS)
+    ),
+    TrainingConfigSectionMapItem(
+        "teacher_aux", "teacher-label and public-heuristic auxiliary loss controls", len(TRAINING_TEACHER_AUX_KEYS)
+    ),
+    TrainingConfigSectionMapItem(
+        "action_surface", "actor/learner legal-action scoring surfaces", len(TRAINING_ACTION_SURFACE_KEYS)
+    ),
 )
 
 

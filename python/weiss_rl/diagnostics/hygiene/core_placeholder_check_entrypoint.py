@@ -12,8 +12,8 @@ CORE_MODULES = (
     Path("python/weiss_rl/core/spec.py"),
     Path("python/weiss_rl/config/__init__.py"),
     Path("python/weiss_rl/config/models.py"),
-    Path("python/weiss_rl/config/parse.py"),
-    Path("python/weiss_rl/config/hashing.py"),
+    Path("python/weiss_rl/config/loading/parse.py"),
+    Path("python/weiss_rl/config/loading/hashing.py"),
     Path("python/weiss_rl/artifacts/reproducibility.py"),
     Path("python/weiss_rl/artifacts/manifest.py"),
 )
